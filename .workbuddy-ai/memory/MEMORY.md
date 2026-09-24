@@ -58,6 +58,12 @@
 - 符号放水通道**已落地窄闸**（「删符号后两侧相同 + 负号数量不同 + 含非零数字 → 判错」）。⛔ 两个解析函数都不能单独改；改判分器纪律：先复制打补丁 → 全库新旧对跑量影响面 → 只翻转可逐条解释的 N 条 → 再改生产。
 - ⚠️ 人工真值集有噪声（`answer` 会被后续批处理改写、学生答案可能为空），引用「假错/假对」必须说明是含噪上限。
 
+## 6d. 参考答案抽取与显示（2026-09-24「看得到判不出」事故）
+- 教师复核页「参考答案」位**只能显示 `q.answer`**；⛔ 禁再用 `q.analysis` 兜底（旧 `QuestionDetailPanel.vue` 用 `correct-val` 绿字渲染 analysis → 老师以为有答案，判分侧却因 `q.answer` 空报「缺少参考答案」）。
+- 答案抽取器 `aiParseSelfCheck.js#extractFinalAnswerFromAnalysis` 除「答案为/答案是」显式标签外，**必须有填空题末句兜底** `因此/所以/故/解得/求得 … 数值`（含 `3/2`、`-√2`、`±√2`）。⛔ 模型常写「因此减去的数是 55」这种无标签收尾 → 旧正则全 miss → `answer` 落空。
+- ⛔ 抽取结果必过占位串过滤（`待人工补充`/`此为主观题`/`见解析`…）：实测 dry-run 多道「答案为 待人工补充」被误抽，入库会污染判分。
+- 存量回填 `scripts/backfill-extract-answer-from-analysis.mjs`（只从现存 analysis 抽，零引擎调用；默认 dry-run，`--apply` 落库）。回归 `test/aiParseSelfCheck.test.mjs`。prompt（`config/ai.js`）已强制解析结尾带显式标签。
+
 ## 7. 其他硬约定
 - 错题「同一题」判定走 `src/domain/questionIdentity.js`，**禁相似度阈值合并**。
 - 产品口径「只练错题」：变式题不进重练卷与组卷，仅作讲义素材。
