@@ -30,6 +30,9 @@
  *   node server/scripts/rerun-blank-answer-with-figure.mjs --timeout 150000 --conc 4
  *   node server/scripts/rerun-blank-answer-with-figure.mjs --apply             # 落库
  *   node server/scripts/rerun-blank-answer-with-figure.mjs --out /d/tmp/x.json # 明细落盘
+ *   # 测限流敏感的通道（SenseNova:kimi-k3 等）必须 --conc 1 + --gap 6000，否则全是 429 假失败
+ *   node server/scripts/rerun-blank-answer-with-figure.mjs --vendor SenseNova --model kimi-k3 \
+ *     --conc 1 --gap 6000 --timeout 90000 --ids <id,id> --out /d/tmp/x.json
  */
 import '../loadEnv.js'
 import pg from 'pg'
@@ -63,6 +66,10 @@ const ANY_Q = process.argv.includes('--any')
 const EXCLUDE = argOf('--exclude') || null
 // --ids <id,id,...>  只跑指定题目（用于精确重跑某类子集，如「静默空」那批）
 const IDS = argOf('--ids') || null
+// --gap <ms>  每题之间的间隔（默认 300ms）。测**免费/限流敏感**的通道（如 SenseNova:kimi-k3）
+//   时必须 ≥6000ms 且 `--conc 1`：并发 + 密集请求会打爆 tpm/rpm，产生大量「假失败」，
+//   现象是 `engine-empty:*`（429），**不能归因到模型能力**（2026-09-24 实测踩过）。
+const GAP = Number(argOf('--gap') || 300)
 // --commit <plan.json>   从 dry-run 产出的明细文件落库，**不再调用任何 AI**
 //   （两阶段：先 --out 出清单 → 人工过一遍 → --commit 落库，避免重复烧额度）
 const COMMIT = argOf('--commit') || null
@@ -237,7 +244,7 @@ await Promise.all(Array.from({ length: CONC }, async () => {
     results.push(r)
     const tag = r.status === 'ok' ? 'OK  ' : 'SKIP'
     console.log(`[${String(results.length).padStart(2)}/${rows.length}] ${tag} ${String(r.ms ?? 0).padStart(6)}ms q#${r.qno ?? '?'} ${r.status === 'ok' ? JSON.stringify(r.answer.slice(0, 60)) : '<' + r.why + '>'}`)
-    await new Promise(res => setTimeout(res, 300))
+    await new Promise(res => setTimeout(res, GAP))
   }
 }))
 
