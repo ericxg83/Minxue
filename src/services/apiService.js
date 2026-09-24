@@ -477,10 +477,10 @@ export const recomputeQuestionAnswer = async (questionId, { force = false } = {}
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ force }),
-    // ⚠️ 必须严格大于后端 `DEADLINE_MS`（2026-09-24 起为 180s），否则前端先断开、
+    // ⚠️ 必须严格大于后端 `DEADLINE_MS`（2026-09-24 接入带图题视觉求解后为 210s），否则前端先断开、
     //    老师看到「请求超时」，而后端还在跑并可能已写库 —— 又变成「点了不知道发生了啥」。
     //    改后端 DEADLINE_MS 时必须同步改这里。
-    timeout: 210_000
+    timeout: 240_000
   }, 1)
 }
 

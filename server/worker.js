@@ -15,7 +15,7 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -206,7 +206,8 @@ import { computeTaskStats } from './utils/taskStats.js'
 import { deriveTaskTitle, isAutoTaskName } from './utils/taskTitle.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
 import { resolveEffectiveQuestionType, hasFigureReference, checkQuestionCompleteness } from './utils/questionCompleteness.js'
-import { shouldSkipForMissingFigure, isFigurePreflightSkipEnabled } from './utils/figureRequirementGuard.js'
+import { shouldSkipForMissingFigure } from './utils/figureRequirementGuard.js'
+import { isConstructionQuestion, CONSTRUCTION_MANUAL_REASON } from './utils/constructionQuestionGuard.js'
 // 配图裁剪编排 + 配图框归属判据（2026-09-21 从本文件抽出，与练习册管线共用同一份实现）。
 // 详见 utils/geometryCrop.js / utils/figureBoxTrust.js 头部注释。
 import { cropGeometryFigures } from './utils/geometryCrop.js'
@@ -1772,33 +1773,72 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
 
   const prompt = buildAnswerGenerationPrompt()
 
-  // 一次独立求解：调答案引擎 → 解析 JSON。
+  // ── 带配图题：把配图 URL 下载并转 dataURL（本次求解只下一次，供多路采样复用）───────
+  // 2026-09-24 接入视觉读图：答案画在图上/条件需读图的题，纯文字链路必然拒答。
+  // 传了 opts.imageUrl（或调用方已备好 opts.imageDataURL）时，改走多模态强模型看图求解。
+  // 下载失败 ⇒ imageDataURL 置空 ⇒ 自动回退纯文字链路（不因取图失败而整题失败）。
+  let imageDataURL = opts.imageDataURL || null
+  if (!imageDataURL && opts.imageUrl) {
+    try {
+      const buf = await downloadImage(opts.imageUrl)
+      imageDataURL = bufferToBase64(buf)
+    } catch (e) {
+      console.warn(`   [视觉求解] 配图下载失败，本题回退纯文字求解：${e.message}`)
+      imageDataURL = null
+    }
+  }
+
+  // 一次独立求解：调答案引擎（文字）或视觉引擎（带图）→ 解析 JSON。
   // 多路采样复用同一份实现，保证「首路」与「补采路」走完全相同的 prompt 与解析口径。
   const solveOnce = async () => {
-    const { content, provider, expectedProvider } = await callAnswerEngineCompletion({
-      systemContent: prompt,
-      userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
-      temperature: 0.2,
-      // 显式点名供应商/模型（2026-09-24 重解析换强模型引入）。批改链路不传 ⇒ 零变化。
-      // ⚠️ 参数名是 `model`，不是 `modelOverride` —— 后者只是函数内部解构出来的变量名。
-      //    写成 modelOverride 会被**静默忽略**（opts 里没有这个键），实际打的是全局主模型，
-      //    再配上点名的供应商域名就是 404。2026-09-24 实测踩到：
-      //    「Bailian:deepseek-flash 失败: 404 Model not exist.」—— 以为是模型没权限，
-      //    其实是参数名写错，白跑了 10 道题。
-      // ⚠️ 现役主模型 deepseek-flash 实测可判正确率仅 33%，**禁止用于解析答案**（见铁律 40）。
-      vendorOverride: opts.vendorOverride,
-      model: opts.modelOverride,
-      // 2026-09-21 由 2048 提到 4096：横评（_bench_answer_models_0921）实测
-      // deepseek-v4-flash-0731 在「|a|=3,b²=16,ab<0 求 a+b」上思考吃满 2048 上限、
-      // 答案被截断成空（out=2048/reasoning=2048）。max_tokens 只是上限，按实际输出计费，
-      // 调高不增加成本，但能防住「思考没收敛 → 答案丢失」。
-      maxTokens: 4096,
-      // 由调用方按需下调单次 HTTP 超时（教师工作台同步重算答案的场景）；
-      // 不传 → 沿用 ANSWER_ENGINE.TIMEOUT_MS，异步批改链路行为零变化。
-      timeoutMs: opts.timeoutMs,
-      // 严格模式：只用主模型，拿不到就失败，不降级弱模型（参考答案准确性要求）。
-      strictPrimary: opts.strictPrimary
-    })
+    let content, provider, expectedProvider
+    if (imageDataURL) {
+      // ── 视觉求解分支：只点名实测合格的强模型链（默认两级，调用方可收窄为单级），
+      //    绝不降级到链外弱模型；产出与文字链路同构（{answer, analysis, subject} JSON）。
+      const chain = (Array.isArray(opts.visionVendorChain) && opts.visionVendorChain.length)
+        ? opts.visionVendorChain
+        : ANSWER_SOLVE_VISION_VENDOR_CHAIN
+      const v = await callVisionCompletion({
+        imageDataURL,
+        systemPrompt: prompt,
+        userText: `请结合配图计算以下题目的标准答案（答案可能画在图上，或需从图中读取条件）：\n\n${questionContent}`,
+        temperature: 0.2,
+        maxTokens: 4096,
+        vendorChain: chain,
+        timeout: opts.timeoutMs || null,
+      })
+      content = v.content
+      provider = v.model ? `${v.vendorName}:${v.model}` : (v.vendorName || 'vision')
+      expectedProvider = `${chain[0].vendor}:${chain[0].model}`
+    } else {
+      const r = await callAnswerEngineCompletion({
+        systemContent: prompt,
+        userContent: `请计算以下题目的标准答案：\n\n${questionContent}`,
+        temperature: 0.2,
+        // 显式点名供应商/模型（2026-09-24 重解析换强模型引入）。批改链路不传 ⇒ 零变化。
+        // ⚠️ 参数名是 `model`，不是 `modelOverride` —— 后者只是函数内部解构出来的变量名。
+        //    写成 modelOverride 会被**静默忽略**（opts 里没有这个键），实际打的是全局主模型，
+        //    再配上点名的供应商域名就是 404。2026-09-24 实测踩到：
+        //    「Bailian:deepseek-flash 失败: 404 Model not exist.」—— 以为是模型没权限，
+        //    其实是参数名写错，白跑了 10 道题。
+        // ⚠️ 现役主模型 deepseek-flash 实测可判正确率仅 33%，**禁止用于解析答案**（见铁律 40）。
+        vendorOverride: opts.vendorOverride,
+        model: opts.modelOverride,
+        // 2026-09-21 由 2048 提到 4096：横评（_bench_answer_models_0921）实测
+        // deepseek-v4-flash-0731 在「|a|=3,b²=16,ab<0 求 a+b」上思考吃满 2048 上限、
+        // 答案被截断成空（out=2048/reasoning=2048）。max_tokens 只是上限，按实际输出计费，
+        // 调高不增加成本，但能防住「思考没收敛 → 答案丢失」。
+        maxTokens: 4096,
+        // 由调用方按需下调单次 HTTP 超时（教师工作台同步重算答案的场景）；
+        // 不传 → 沿用 ANSWER_ENGINE.TIMEOUT_MS，异步批改链路行为零变化。
+        timeoutMs: opts.timeoutMs,
+        // 严格模式：只用主模型，拿不到就失败，不降级弱模型（参考答案准确性要求）。
+        strictPrimary: opts.strictPrimary
+      })
+      content = r.content
+      provider = r.provider
+      expectedProvider = r.expectedProvider
+    }
 
     const jsonStr = stripCodeFence(content)
 
@@ -1877,6 +1917,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
     // 同步场景（教师工作台重解析）要控制等待，走的是 opts.strictPrimary（只打主模型、
     // 拿不到就失败），不是靠关投票来给降级答案放行。
     if (ANSWER_QUALITY.CONSENSUS_ENABLED
+        && !imageDataURL
         && isDegradedAnswerEngine(engine, expectedProvider)
         && isVotableAnswer(answer)) {
       const extraCount = Math.max(0, ANSWER_QUALITY.SAMPLES_ON_DEGRADED - 1)
@@ -2221,22 +2262,46 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   // ⚠️ 配图 URL 一律**回查 DB**，不信内存 q 对象：本函数在 Step 7 运行（题目已落库），
   //    而 q 来自 OCR 阶段，不保证带 geometry_image_url 字段。一次 ANY($1) 批量查，非 N+1。
   // ⚠️ 查不到就**不拦**（fail-open）：宁可多花一次引擎调用，也不误拦本可解出的题。
+  // 2026-09-24：本 map 现在同时服务「缺图预判闸」与「带图题视觉求解」，故**无条件构建**
+  // （一次批量查询成本极低）；预判闸本身仍由 shouldSkipForMissingFigure 内部开关控制，
+  // 关掉闸时只是不拦、照常走视觉，不影响读图能力。
   const figureUrlMap = new Map()
-  if (isFigurePreflightSkipEnabled()) {
-    try {
-      const figIds = needAnswer.map(q => q.id).filter(Boolean)
-      if (figIds.length) {
-        const { rows: figRows } = await query(
-          `SELECT id, geometry_image_url FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
-          [figIds]
-        )
-        for (const r of figRows) figureUrlMap.set(r.id, r.geometry_image_url)
-      }
-    } catch (e) {
-      console.warn(`   ⚠️ [缺图预判] 读取配图字段失败，本批不启用预判（不影响正常解析）：${e.message}`)
+  try {
+    const figIds = needAnswer.map(q => q.id).filter(Boolean)
+    if (figIds.length) {
+      const { rows: figRows } = await query(
+        `SELECT id, geometry_image_url FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
+        [figIds]
+      )
+      for (const r of figRows) figureUrlMap.set(r.id, r.geometry_image_url)
     }
+  } catch (e) {
+    console.warn(`   ⚠️ [配图回查] 读取配图字段失败，本批不启用预判/视觉求解（不影响正常解析）：${e.message}`)
   }
   let figureSkipCount = 0
+  let figureVisionCount = 0
+  let constructionSkipCount = 0
+
+  // ── 配图 dataURL 缓存（2026-09-24 视觉读图求解）──────────────────────────────
+  // 按 URL 去重下载：同一张配图被多个小问共享时只下载一次（见 _audit_shared_stem_figures）。
+  // 存 Promise 而非结果，天然合并并发同 URL 的重复下载。下载失败 ⇒ 返回 null ⇒
+  // 该题回退纯文字求解（generateAnswerForQuestion 内部也会兜底回退，双保险）。
+  const figureDataURLCache = new Map() // url -> Promise<string|null>
+  const resolveFigureDataURL = (url) => {
+    if (!url || !String(url).trim()) return Promise.resolve(null)
+    if (figureDataURLCache.has(url)) return figureDataURLCache.get(url)
+    const p = (async () => {
+      try {
+        const buf = await downloadImage(url)
+        return bufferToBase64(buf)
+      } catch (e) {
+        console.warn(`     配图下载失败（本题回退纯文字求解）：${e.message}`)
+        return null
+      }
+    })()
+    figureDataURLCache.set(url, p)
+    return p
+  }
 
   for (let i = 0; i < needAnswer.length; i += batchSize) {
     const batch = needAnswer.slice(i, i + batchSize)
@@ -2331,16 +2396,37 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
       // ⚡ 同指纹共享求解（2026-09-22 并发击穿修复）：同一道题（同指纹）在进程内
       //   只有一次真正的答案引擎调用；并发等待者复用同一个 result（consensus/engine 等只读）。
       //   cacheMissCount / recordEngine 只记真正发起调用的那次 —— 等待者既没耗额度也没新产出。
-      const solveRun = solveAnswerShared(fingerprint, () => generateAnswerForQuestion(fullContent))
-      const result = await solveRun.promise
-      if (!solveRun.shared) {
+      //   ⚠️ 带配图题例外（2026-09-24 视觉读图）：配图按题而定，不进文字指纹共享，
+      //   避免「同文字不同图」被错误复用同一结果；视觉求解直接单发。
+      const figUrl = figureUrlMap.get(q.id)
+      // ── 作图题预判闸（2026-09-25）：答案是一张画在图上的图形、AI 给不出可核对文字参考 ──
+      // 只在「带配图（会走视觉）」时拦。证明/作文/解答类不拦（能产出可参考的解答文本，
+      // 且判分链路对主观参考本就自动转人工）。作图题视觉实测也是长时间推理后回
+      // 「待人工补充」（单题 ~147s），白烧预算与额度 ⇒ 直接跳过、转人工。纯文字题零变化。
+      if (figUrl && String(figUrl).trim() && isConstructionQuestion(q)) {
+        constructionSkipCount++
+        console.log(`     题目 ${q.id.substring(0, 8)}: ⛔ 作图题（答案需画在图上），跳过视觉求解，转人工`)
+        exceptionCount++
+        await markAnswerException(q.id, CONSTRUCTION_MANUAL_REASON)
+        return
+      }
+      const figDataURL = (figUrl && String(figUrl).trim()) ? await resolveFigureDataURL(figUrl) : null
+      let result, isShared = false
+      if (figDataURL) {
+        figureVisionCount++
+        console.log(`     题目 ${q.id.substring(0, 8)}: 👁 带配图，走视觉求解`)
+        result = await generateAnswerForQuestion(fullContent, 0, { imageDataURL: figDataURL })
+      } else {
+        const solveRun = solveAnswerShared(fingerprint, () => generateAnswerForQuestion(fullContent))
+        result = await solveRun.promise
+        isShared = solveRun.shared
+      }
+      if (!isShared) {
         cacheMissCount++
         recordEngine(result.engine)
       } else {
         console.log(`     题目 ${q.id.substring(0, 8)}: ⚡ 同指纹求解进行中（另一任务发起），复用其结果`)
       }
-      const validation = validateAIAnswer(result.answer, result.analysis)
-
       // 【2026-09-23 L1-c 定案：从"抄学生检测"改为"答案引擎空手而归时的二次定向重解"】
       //
       // ── 一个必须记住的测量教训 ──
@@ -2385,6 +2471,16 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           console.warn(`     [L1-c] q=${q.id.substring(0, 8)} 定向重解未获可信答案（${retry.why}），保持转人工`)
         }
       }
+
+      // ⚠️ 有效性校验必须在 L1-c 之后做（2026-09-24「有解析没答案」事故，022f4f59）：
+      // 重解采纳（retry.adopted）后 result.answer/analysis 已被替换，若沿用空答案时
+      // 算出的旧校验结论，重解救回的答案会被卡进下面的 !validation.isValid 分支 ——
+      // 又因 extractAnswerFromAnalysis 从解析提出的值恰与 result.answer 相等
+      // （`extracted !== result.answer` 不成立）而永不落库，只剩解析孤本照常入库。
+      // 表现就是：批改页显示「AI 没算出答案」，解析弹窗里却明明写着最终答案。
+      // 对「当前结果」重新校验后，重解答案走与普通引擎答案完全相同的成功闸门
+      // （叙述残句闸 / 算术验算 / 比较验算 / 缓存占坑），不是绕过任何一道闸。
+      const validation = validateAIAnswer(result.answer, result.analysis)
 
       if (!validation.isValid) {
         if (result.analysis && result.analysis.trim()) {
@@ -2559,10 +2655,16 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   if (figureSkipCount > 0) {
     console.log(`   [缺图预判] ⏭ 跳过 ${figureSkipCount} 道「引图但无配图」的题（未消耗答案引擎额度，补图后可重算）`)
   }
+  if (figureVisionCount > 0) {
+    console.log(`   [视觉求解] 👁 ${figureVisionCount} 道带配图题走多模态看图求解（非纯文字链路）`)
+  }
+  if (constructionSkipCount > 0) {
+    console.log(`   [作图闸] ⛔ 跳过 ${constructionSkipCount} 道作图题（不走视觉求解，转人工）`)
+  }
   const engineSummary = Object.entries(engineUsage).map(([name, n]) => `${name}=${n}`).join(', ')
   console.log(`   [答案引擎] ${engineSummary || '本次全部走缓存或未调用'}`)
 
-  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount, figureSkipped: figureSkipCount, engineUsage }
+  return { updated: updatedCount, total: needAnswer.length, empty: emptyCount, placeholder: placeholderCount, exceptions: exceptionCount, cacheHits: cacheHitCount, cacheMisses: cacheMissCount, figureSkipped: figureSkipCount, figureVision: figureVisionCount, constructionSkipped: constructionSkipCount, engineUsage }
 }
 
 /**

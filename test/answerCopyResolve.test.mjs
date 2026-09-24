@@ -190,3 +190,43 @@ test('判据性质：8 字符门槛下短答案不触发、长答案触发', () 
   assert.equal(detectAnswerCopiedFromStudent('', ''), false)
   assert.equal(detectAnswerCopiedFromStudent(null, 'x'), false)
 })
+
+// ── ⑥ 重解采纳后的校验时序（2026-09-24「有解析没答案」事故）────
+//
+// 事故（实题 022f4f59）：主链路的 `const validation = validateAIAnswer(...)` 原先
+// 写在 L1-c 重解**之前**。引擎首路空手而归 → 重解采纳了新答案（result.answer 已被
+// 替换成 "C"）→ 但进入 `if (!validation.isValid)` 时用的还是**空答案时代的旧结论**
+// ⇒ 重解答案被卡进无效分支；又因 extractAnswerFromAnalysis 从解析提出的值恰与
+// result.answer 相等（`extracted !== result.answer` 不成立）而**永不落库**，
+// 只剩解析孤本照常入库：批改页显示「AI 没算出答案」，解析弹窗里却写着最终答案。
+
+test('★ 红线：主链路 validateAIAnswer 必须在 L1-c 采纳点之后计算', () => {
+  const idxAdopted = WORKER_CODE.indexOf('resolvedAtL1c = true')
+  const idxValidation = WORKER_CODE.indexOf('const validation = validateAIAnswer(result.answer')
+  assert.ok(idxAdopted > -1, '找不到 L1-c 采纳点')
+  assert.ok(idxValidation > -1, '主链路必须显式调 validateAIAnswer')
+  assert.ok(
+    idxValidation > idxAdopted,
+    'validation 必须在重解采纳之后对「当前结果」计算；沿用空答案时代的旧结论会把重解救回的答案永久拦在无效分支'
+  )
+})
+
+test('★ 红线：validation 消费点（无效分支）必须在计算点之后', () => {
+  const idxValidation = WORKER_CODE.indexOf('const validation = validateAIAnswer(result.answer')
+  const idxConsume = WORKER_CODE.indexOf('if (!validation.isValid) {')
+  assert.ok(idxConsume > -1, '找不到无效分支消费点')
+  assert.ok(idxConsume > idxValidation, '消费点必须在计算点之后（先算后用）')
+})
+
+test('★ 重解答案必须走与普通引擎答案相同的成功闸门（不得绕闸直写）', () => {
+  // 成功路径上叙述残句闸 / 算术验算 / 比较验算必须在 updateQuestionAnswer 之前，
+  // 保证「校验时序修复」只是让重解答案重新排队过闸，而不是给它们开直通车。
+  const idxSuccessWrite = WORKER_CODE.indexOf('await updateQuestionAnswer(q.id, finalAnswer, answerAnalysis, true)')
+  const idxNarrative = WORKER_CODE.indexOf('isNarrativeAnswer(finalAnswer)')
+  const idxArithmetic = WORKER_CODE.indexOf('validateArithmeticAnswer(content, finalAnswer)')
+  const idxComparison = WORKER_CODE.indexOf('verifyComparisonAnswer(content, finalAnswer)')
+  for (const [name, idx] of [['叙述残句闸', idxNarrative], ['算术验算', idxArithmetic], ['比较验算', idxComparison]]) {
+    assert.ok(idx > -1, `成功路径必须有${name}`)
+    assert.ok(idx < idxSuccessWrite, `${name}必须在写库之前`)
+  }
+})

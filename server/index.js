@@ -75,6 +75,7 @@ import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestio
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness, hasFigureReference } from './utils/questionCompleteness.js'
 import { isFigurePreflightSkipEnabled, MISSING_FIGURE_SKIP_REASON } from './utils/figureRequirementGuard.js'
+import { isConstructionQuestion } from './utils/constructionQuestionGuard.js'
 import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAutoName, buildAutoTaskName, describeRouteRisk, isRouteConvertEnabled, ROUTE_CONVERT_DISABLED_MESSAGE } from './utils/taskRoute.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
@@ -2345,7 +2346,9 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   // pg 的 query 会在已建连接上无限等待（connectionTimeoutMillis 只管建连，管不到
   // 已建连接上的查询），实测同一条请求出现过 60s 无任何响应。这里给整条链路
   // 兜一个上限，到点返回明确文案，老师不用对着转圈猜。
-  const DEADLINE_MS = 180_000
+  // 2026-09-24 接入带图题视觉求解后上调 180s → 210s：视觉单级 150s + 读题/写库/结算
+  // 往返需更多余量（前端 apiService timeout 必须严格大于本值，见 src/services/apiService.js）。
+  const DEADLINE_MS = 210_000
   // 单次答案引擎 HTTP 调用的超时上限（仅本接口，批改链路不受影响）：
   // 默认 60s 是为「后台慢慢跑」设计的，对点了按钮在等结果的老师太长。
   // 严格模式下每一级只打一个通道（1 个模型 × Key 池）：
@@ -2358,9 +2361,14 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   //       等于主备互换白做。故主通道提到 120s，覆盖实测最长成功耗时。
   //   · 备用通道 55s —— kimi-k3 慢是**固有特性**（拒绝约 25–30s，出答案 22–74s），
   //     给太短等于没备用。
-  // 两级串行最坏 120s + 55s = 175s，仍在 180s 总兜底内（留 5s 余量）。
+  // 两级串行最坏 120s + 55s = 175s，仍在 210s 总兜底内（留 35s 余量给读题/写库/结算）。
   const ENGINE_TIMEOUT_MS = 120_000
   const SLOW_ENGINE_TIMEOUT_MS = 55_000
+  // 带配图题的视觉求解单次超时（2026-09-24 接入读图）：视觉推理比纯文字慢
+  // （实测整页 OCR p50≈72s、p90≈145s，单题裁剪图更快）。同步接口对带图题
+  // **只跑付费强通道一级**（不串行等备用、不触发多路投票），故单级预算取 150s，
+  // 加上取图下载 + 读题/写库/结算 DB 往返仍在 DEADLINE_MS=210s 内（不变量：视觉单级 < 总兜底）。
+  const VISION_ENGINE_TIMEOUT_MS = Number(process.env.ANSWER_ENGINE_RECOMPUTE_VISION_TIMEOUT_MS) || 150_000
   // ── 重解析的通道链（2026-09-24 换模型；同日二次调整：主备互换）──────────────
   // ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
   //    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
@@ -2378,7 +2386,7 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   //      但慢（22–74s）且易 429 ⇒ 退为备份，只在主链没给出答案时才用。
   // 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
   // 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
-  // ⚠️ 超时预算：120s + 55s = 175s，留在 180s 总兜底内（主通道预算依据见上方 ENGINE_TIMEOUT_MS 注释）。
+  // ⚠️ 超时预算：纯文字两级 120s + 55s = 175s；带图题视觉单级 150s；两者均留在 210s 总兜底内（主通道预算依据见上方 ENGINE_TIMEOUT_MS 注释）。
   // 提成 env 便于换通道/回滚，不必改代码。
   const RECOMPUTE_CHAIN = [
     {
@@ -2416,9 +2424,8 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
 
     // is_correct 一并读出（2026-09-23）：原先在写库后又单独 SELECT 一次拿旧值，
     // 在 Neon 慢连接下等于多付一次 20s 超时风险。读题时一次拿全。
-    // geometry_image_url 一并读出（2026-09-24）：本接口只喂文字、不喂图，题目若有配图
-    // （图表/几何图）答案往往就画在图上 ⇒ 引擎必然回「待人工补充」。要能对老师
-    // 说清「不是 AI 笨，是这条链路不读图」，得先知道这题到底有没有图。
+    // geometry_image_url 一并读出（2026-09-24）：带配图题现在会走视觉读图求解（见下方
+    // 缺图闸后的 hasFigure 分支），无图题仍走纯文字链。先读出配图才能分流。
     const { rows } = await query(
       `SELECT id, task_id, student_id, student_answer, answer, question_type,
               content, parent_stem, options, answer_source, ai_answer, is_correct,
@@ -2479,10 +2486,10 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     let rejectReason = null
 
     // ── 缺配图预判闸（2026-09-24，用户要求：缺图就别解析，别浪费 token 和时间）──────
-    // 本接口是**纯文字链路**（只喂 parent_stem + content + options，从不送图）。
-    // 题干明示引图（如图①②③ / 数轴 / 统计图 / 函数图象）而本题无配图时，
-    // 引擎实测 100% 回「待人工补充」——老师白等 37~150s，还烧掉一次额度。
-    // 拦在调引擎之前，文案直接给可执行动作（补图 / 手填），比"AI 说不会"更早、更省。
+    // 题干明示引图（如图①②③ / 数轴 / 统计图 / 函数图象）而本题**无配图**时：
+    // 无论纯文字还是视觉链路都无图可读，引擎实测 100% 回「待人工补充」——
+    // 老师白等 37~150s，还烧掉一次额度。拦在调引擎之前，文案直接给可执行动作
+    //（补图 / 手填），比"AI 说不会"更早、更省。（注：有配图时不再走此闸，改走下方视觉求解）
     if (isFigurePreflightSkipEnabled() && hasFigureReference(q) &&
         !(q.geometry_image_url && String(q.geometry_image_url).trim())) {
       console.log(`[AI 重解析] 题目 ${String(q.id).slice(0, 8)} 缺配图，跳过引擎调用（省额度与等待）`)
@@ -2494,10 +2501,37 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
       }))
     }
 
-    for (const ch of RECOMPUTE_CHAIN) {
+    // ── 带配图题：走视觉读图求解（2026-09-24）──────────────────────────────
+    // 本接口原先是纯文字链路，带图题必然回「待人工补充」。现在把 geometry_image_url
+    // 交给多模态强模型看图求解。视觉更慢，且同步接口对带图题**只跑付费强通道一级**
+    // （不串行等备用、不触发多路投票），用独立超时预算，避免撞穿 DEADLINE。
+    const hasFigure = !!(q.geometry_image_url && String(q.geometry_image_url).trim())
+    const solveChain = hasFigure ? RECOMPUTE_CHAIN.slice(0, 1) : RECOMPUTE_CHAIN
+
+    // ── 作图题预判闸（2026-09-25）：答案是一张画在图上的图形、AI 给不出可核对文字参考 ──
+    // 带配图且为题干明写「保留作图痕迹/不写作法/尺规作图」的作图题 → 跳过视觉、转人工。
+    // 证明/作文/解答类不拦（模型能写出可参考的解答文本，且判分链路对主观参考本就自动转人工）。
+    // 复用 ai-declined 错误码：前端已按「终态 / warning」处理，避免误导老师反复重试。
+    if (hasFigure && isConstructionQuestion(q)) {
+      console.log(`[AI 重解析] 题目 ${String(id).slice(0, 8)} 为作图题，跳过视觉求解，转人工`)
+      return done(() => res.status(400).json({
+        error: 'ai-declined',
+        message: '这道题是作图题，答案是画在图中的图形、没有可核对的文字解答，因此不走视觉重算。请人工判定（重复重算不会有结果）',
+        reason: 'construction-manual',
+        has_figure: true
+      }))
+    }
+
+    for (const ch of solveChain) {
       if (finished) break // 已经超时了，别再烧额度（也别让老师等更久）
       usedChannel = `${ch.vendor}:${ch.model}`
-      const r = await generateAnswerForQuestion(fullContent, 0, {
+      const r = await generateAnswerForQuestion(fullContent, 0, hasFigure ? {
+        // 带图：把配图 URL 交给 generateAnswerForQuestion 内部下载并走视觉链（单级、不降级）
+        imageUrl: q.geometry_image_url,
+        visionVendorChain: [{ vendor: ch.vendor, model: ch.model }],
+        timeoutMs: VISION_ENGINE_TIMEOUT_MS,
+        maxRetries: 0
+      } : {
         vendorOverride: ch.vendor,
         modelOverride: ch.model,
         strictPrimary: true,
@@ -2538,16 +2572,12 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
       // 这与「引擎忙/不可用」是两回事：它是**终态**，再点多少次、换哪个模型都一样。
       // 必须说清楚，否则老师会一直重试，而重试只会重复烧额度。
       if (rejectReason === 'AI标记需要人工补充') {
-        // 有配图时把话说透（2026-09-24）：本接口只喂 parent_stem+content+options，
-        // **从不送图**；而图表题/几何题的答案往往就画在图上（实测「统计图 70~89 分
-        // 占几分之几」这题，配图在库里、页面上也渲染着，引擎照样只能回「待人工补充」）。
-        // 老师看到「无法给出确定答案」会以为 AI 笨或系统坏了，其实这条链路就是纯文字的
-        // —— 说清楚才能让他直接手填，而不是反复点。
-        const hasFigure = !!(q.geometry_image_url && String(q.geometry_image_url).trim())
+        // 带图题现在已走视觉读图求解（2026-09-24）：若仍回「待人工补充」，说明图不清晰、
+        // 条件不足或需人工判读 —— 这是终态，再点多少次都一样，说清楚让老师直接手填。
         return done(() => res.status(400).json({
           error: 'ai-declined',
           message: hasFigure
-            ? '这道题带配图，而「AI 重解析」目前只读文字题干、不读图（配图见图区），所以给不出标准答案。这是终态，重复重算不会有结果，请人工填写'
+            ? '这道题带配图，已走视觉读图求解仍拿不到可信答案（可能图不清晰、条件不足或需人工判读）。这是终态，重复重算不会有结果，请人工填写'
             : 'AI 判断这道题无法给出确定的标准答案（可能缺少配图或条件不足）。这是终态，重复重算不会有结果，请人工填写答案',
           engine: result?.engine,
           reason: rejectReason,

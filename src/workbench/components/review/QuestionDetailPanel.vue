@@ -1160,10 +1160,11 @@ const handleRecomputeAnswer = async () => {
     // payload.message 里（httpCore 的 err.message 优先取 error 字段=错误码，
     // 直接展示会变成 "AI 重解析失败：db-unavailable" 这种看不懂的字符串）。
     const readable = err?.payload?.message || err?.message || err
-    // ai-declined = AI 明确说「这题我给不了确定答案」（缺配图/条件不足），是**终态**：
-    // 再点多少次都一样。用 warning 而不是 error 呈现 —— 这不是系统故障，别让老师
-    // 以为是坏了、反复重试烧额度。其余错误码（timeout / primary-model-unavailable /
-    // db-unavailable）都是「这次没成」，用 error，老师可以稍后重试。
+    // ai-declined = AI 明确说「这题我给不了确定答案」（无图题缺条件 / 带图题读完图仍判不了 /
+    // 作图题（答案需画在图上）直接预判跳过视觉求解），是**终态**：
+    // 再点多少次都一样（带图题已走视觉读图求解，见后端 recompute-answer）。用 warning 而不是
+    // error 呈现 —— 这不是系统故障，别让老师以为是坏了、反复重试烧额度。其余错误码
+    // （timeout / primary-model-unavailable / db-unavailable）都是「这次没成」，用 error，可稍后重试。
     const declined = err?.payload?.error === 'ai-declined'
     recomputeAnswerNotice.value = { type: declined ? 'warning' : 'error', text: readable }
     ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `AI 重解析：${readable}` })

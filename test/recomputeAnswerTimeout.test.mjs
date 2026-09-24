@@ -127,11 +127,18 @@ assert.equal(
 // ── ③ 批改链路主调用点：不得传 opts（保持原口径）────────────────────────────
 {
   const batchCalls = workerSrc.match(/generateAnswerForQuestion\([^)]*\)/g) || []
-  const withOpts = batchCalls.filter((c) => /,\s*0\s*,\s*\{|strictPrimary\s*:|consensus\s*:/.test(c))
+  // 批改主流程调用绝不能带 strictPrimary/consensus —— 那会把「后台可降级可投票」的
+  // 批改口径改成同步口径，属于改动外溢。带图题新增的 { imageDataURL } 视觉入参是允许的（2026-09-24）。
+  const badOpts = batchCalls.filter((c) => /strictPrimary\s*:|consensus\s*:/.test(c))
   assert.equal(
-    withOpts.length,
+    badOpts.length,
     0,
-    `批改链路调用 generateAnswerForQuestion 不得带 opts，否则改动外溢到批改主流程：${withOpts.join(' | ')}`
+    `批改链路调用 generateAnswerForQuestion 不得带 strictPrimary/consensus，否则改动外溢到批改主流程：${badOpts.join(' | ')}`
+  )
+  // 带图题必须真的走视觉：批内调用点须出现 imageDataURL 入参
+  assert.ok(
+    /generateAnswerForQuestion\([^)]*imageDataURL/.test(workerSrc),
+    '批改链路带配图题必须把 imageDataURL 传给 generateAnswerForQuestion 走视觉求解'
   )
 }
 
@@ -255,4 +262,56 @@ assert.ok(
   'AI 自述不会时必须返回 ai-declined：那是终态，别让老师反复重试白烧额度'
 )
 
-console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型两级链 + deepseek-flash 硬拦 + 批改链路零回归）')
+// ──  带图题视觉读图求解（2026-09-24 接入）─────────────────────────────────
+// 目标：带配图题不再走「纯文字必然拒答」，而是把图交给多模态强模型看图求解。
+// 铁律不变：只点名实测合格的强模型、绝不降级弱模型；视觉产出同样过 validateAIAnswer。
+{
+  // worker.solveOnce 必须有视觉分支，且走 callVisionCompletion 的显式 vendorChain（不降级）
+  assert.ok(
+    /if\s*\(imageDataURL\)[\s\S]{0,600}?callVisionCompletion\(\s*\{[\s\S]{0,400}?vendorChain:\s*chain/.test(workerSrc),
+    'generateAnswerForQuestion 必须在 imageDataURL 存在时走 callVisionCompletion + 显式 vendorChain（不降级弱模型）'
+  )
+  // 视觉降级时不得触发多路投票（那会重复起多次视觉调用，成本/延迟不可控），
+  // 由共识条件里的 !imageDataURL 闸把守
+  assert.ok(
+    /ANSWER_QUALITY\.CONSENSUS_ENABLED\s*&&\s*!imageDataURL/.test(workerSrc),
+    '视觉求解不得参与多路投票补采（共识条件必须含 !imageDataURL）'
+  )
+  // 默认视觉强模型链必须存在，且不得含 deepseek-flash（铁律 40）
+  assert.ok(
+    /ANSWER_SOLVE_VISION_VENDOR_CHAIN\s*=\s*\[/.test(aiSrc),
+    'ai.js 必须导出 ANSWER_SOLVE_VISION_VENDOR_CHAIN 视觉强模型链'
+  )
+  {
+    const cs = aiSrc.indexOf('ANSWER_SOLVE_VISION_VENDOR_CHAIN = [')
+    const chain = aiSrc.slice(cs, aiSrc.indexOf(']', cs) + 1)
+    assert.equal(/deepseek-flash/.test(chain), false, '视觉求解链绝不能含 deepseek-flash（禁止用于解析答案）')
+    assert.ok(/qwen3\.8-flash/.test(chain), '视觉求解链首选必须是 qwen3.8-flash')
+  }
+}
+{
+  // 重解析路由：带图题只跑一级强通道 + 传 imageUrl + 独立视觉预算
+  assert.ok(/hasFigure[\s\S]{0,200}RECOMPUTE_CHAIN\.slice\(0,\s*1\)/.test(body), '带图题重解析必须只跑一级通道')
+  assert.ok(/imageUrl:\s*q\.geometry_image_url/.test(body), '带图题重解析必须把配图 URL 交给求解链路')
+  assert.ok(/visionVendorChain:/.test(body), '带图题重解析必须显式点名视觉通道链（单级、不降级）')
+  // 不变量：视觉单级预算 < 总兜底（否则带图题必然撞穿 DEADLINE）
+  const m = body.match(/VISION_ENGINE_TIMEOUT_MS[\s\S]{0,120}?\|\|\s*([\d_]+)/)
+  const deadline = body.match(/DEADLINE_MS\s*=\s*([\d_]+)/)
+  assert.ok(m && deadline, 'VISION_ENGINE_TIMEOUT_MS 与 DEADLINE_MS 必须都能解析')
+  const vision = Number(m[1].replace(/_/g, ''))
+  const dl = Number(deadline[1].replace(/_/g, ''))
+  assert.ok(vision < dl, `视觉单级 ${vision / 1000}s 必须小于总兜底 ${dl / 1000}s（留余量给取图/写库/结算）`)
+}
+{
+  // 前端 timeout 必须严格大于后端 DEADLINE（否则前端先断开、后端还在跑并可能已写库）
+  const apiSrc = stripComments(readFileSync(join(here, '..', 'src', 'services', 'apiService.js'), 'utf8'))
+  const fn = apiSrc.slice(apiSrc.indexOf('recomputeQuestionAnswer'), apiSrc.indexOf('recomputeQuestionAnswer') + 700)
+  const feTimeout = Number((fn.match(/timeout:\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''))
+  const beDeadline = Number((body.match(/DEADLINE_MS\s*=\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''))
+  assert.ok(
+    Number.isFinite(feTimeout) && Number.isFinite(beDeadline) && feTimeout > beDeadline,
+    `前端 recomputeQuestionAnswer timeout(${feTimeout}) 必须严格大于后端 DEADLINE_MS(${beDeadline})`
+  )
+}
+
+console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型链 + 带图题视觉求解 + deepseek-flash 硬拦 + 批改链路零回归）')

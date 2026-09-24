@@ -622,6 +622,17 @@ export const ANSWER_PAGE_VENDOR_CHAIN = [
   { vendor: 'Bailian', model: 'qwen3.8-flash' },
   { vendor: 'SenseNova', model: 'kimi-k3' },
 ]
+
+// 带配图题「视觉求解标准答案」显式链（2026-09-24 重解析/批改接入读图）：
+//   与 ANSWER_PAGE_VENDOR_CHAIN 同族（两通道均多模态、实测合格的强模型），但语义不同：
+//   这里是「看图算答案并写库」，质量要求等同参考答案，绝不降级到链外弱模型。
+//   ① Bailian qwen3.8-flash —— 主：付费套餐内≈0 边际成本、读图 + 求解实测稳
+//   ② SenseNova kimi-k3 —— 兜：免费、JSON 健康、对不可判题诚实回「待人工补充」
+//   调用方（generateAnswerForQuestion）传 visionVendorChain 覆盖为单级时，备用不外溢。
+export const ANSWER_SOLVE_VISION_VENDOR_CHAIN = [
+  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+  { vendor: 'SenseNova', model: 'kimi-k3' },
+]
 // 练习册学生答案页 OCR（批改场景 JSON + 选项 + 配图字段）：
 //   ① SenseNova deepseek-flash —— 主：免费、18.5s、JSON 3/3、唯一选项填满、5 场景参数全稳
 //   ② Bailian qwen3.8-flash —— 兜底：批改场景唯一无灾难缺陷的次选（57.3s 慢但 JSON 稳）
@@ -1702,6 +1713,11 @@ export async function callVisionCompletion(opts) {
     //   链中后续步骤成功 → usedBackup:true（发生了降级，上层会记 parse_warning 提示复核）。
     //   传了 vendorChain 时 noBackup/strongBackupOnly/preferredVendor/onlyVendor/freeOnly 一律忽略。
     vendorChain = null,
+    // 单次 HTTP 调用超时覆盖（2026-09-24 带图题同步重解析引入）：
+    //   默认 null → 沿用 BACKUP_VISION_TIMEOUT_MS（180s），异步批改/OCR 链路行为零变化。
+    //   「同步等结果」的调用方（教师点按钮重算带图题答案）可下调，避免视觉慢通道把
+    //   整条同步链路的墙钟时间耗光、撞穿上层 DEADLINE。
+    timeout = null,
   } = opts
 
   // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
@@ -1845,7 +1861,7 @@ export async function callVisionCompletion(opts) {
             // 显式链 = 显式参数：直接用调用方给的 maxTokens，不套 backupModelMaxTokens 压缩
             //（压缩到 4096 曾把整页 OCR 的 JSON 截断，见该函数注释；调用方显式点名即显式负责）。
             maxTokens,
-            timeout: BACKUP_TIMEOUT,
+            timeout: timeout || BACKUP_TIMEOUT,
             // 与备份通道同口径：429/503 直接失败换链内下一步，不在单步里干等
             retry429: false,
             retry503: false,
@@ -1853,7 +1869,9 @@ export async function callVisionCompletion(opts) {
             extraBody: vendorDef.extraBody || null,
           })
           // 链首成功 = 走的是指定主力（不算降级）；链中成功 = 发生过降级（上层记 parse_warning）
-          return { content, usedBackup: idx > 0, vendorName: vendorDef.name }
+          // model 一并带回（2026-09-24）：视觉求解答案的调用方需要 `vendor:model` 通道标识
+          // 来判降级 / 留痕，仅靠 vendorName 无法区分同供应商下的不同模型。
+          return { content, usedBackup: idx > 0, vendorName: vendorDef.name, model: step.model }
         } catch (err) {
           err._provider = vendorDef.name.toLowerCase()
           // 单步失败必须可见：provider 主循环只汇总最后一个错误，链首失败会被链中成功掩盖，

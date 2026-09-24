@@ -39,11 +39,19 @@ const { renderGeometrySvg } = await import('../utils/geometrySvg.js')
 const { publishCleanGeometryUrl } = await import('../utils/geom/cleanGeometryUrl.js')
 const { updateQuestionDenormalizedSvg } = await import('../services/neonService.js')
 
-const figRe = ALL ? '' : `AND EXISTS (
-  SELECT 1 FROM wrong_questions wq
-  WHERE wq.question_id = questions.id
-    AND COALESCE(wq.lifecycle_status,'new') <> 'mastered'
-    AND wq.added_at >= NOW() - INTERVAL '30 days'
+// 重绘范围 = worker.js processTask 的权威口径（Step 7 判题终定后入队）：
+//   判错(is_correct=false) 或 空答(answer_source='blank'，未作答等同不会) 或 非mastered错题。
+// ⚠ 不能用「在 wrong_questions 里」当唯一判据：空答题和练习册自包含错题常常
+//   不落 wrong_questions（或 question_id 为空），会被漏判为「非错题不重绘」（2026-09-24 实测 22 张）。
+// 判对的题一律不入队（不烧额度），留待改判错时由 requeueGeometryRedrawOnRejudgeWrong 自动补绘。
+const figRe = ALL ? '' : `AND (
+  questions.is_correct = FALSE
+  OR questions.answer_source = 'blank'
+  OR EXISTS (
+    SELECT 1 FROM wrong_questions wq
+    WHERE wq.question_id = questions.id
+      AND COALESCE(wq.lifecycle_status,'new') <> 'mastered'
+  )
 )`
 
 const { rows } = await query(
@@ -51,7 +59,10 @@ const { rows } = await query(
      FROM questions
     WHERE deleted_at IS NULL
       AND geometry_image_url IS NOT NULL
-      AND clean_geometry_image_url IS NULL
+      -- 「未重绘」以"从未发布过矢量 dsl 图"为准，而非"clean 字段为空"：
+      -- 被配图增强写过 clean_geometry_image_url（去噪裁片，仍非矢量图）的题也应纳入，
+      -- 否则函数图象/几何错题因带增强裁片被漏在补录之外（2026-09-24 排查发现）。
+      AND (clean_geometry_image_url IS NULL OR clean_geometry_image_url NOT LIKE '%/images/dsl-%')
       AND NOT EXISTS (SELECT 1 FROM question_assets a
                       WHERE a.question_id = questions.id AND a.asset_type = 'geometry_image')
       ${figRe}
