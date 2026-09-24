@@ -37,6 +37,11 @@ const APPLY = process.argv.includes('--apply')
 const argOf = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null }
 const LIMIT = Number(argOf('--limit') || 100000)
 const CONC = Number(argOf('--conc') || 2)
+// --blank-only  只处理「参考答案也为空」的题（2026-09-24 加）。
+//   为什么需要：本脚本默认候选是「有 sub_no 且 parent_stem 空」= 全库 104 条，
+//   其中绝大多数**答案本来就正常**（补题干对它们没有产出，纯烧额度）。
+//   目标模式下真正要救的是「缺答案」那一批 —— 全库只有 11 条。
+const BLANK_ONLY = process.argv.includes('--blank-only')
 
 const PROMPT = `你是作业图片的文字转录助手。用户会指定页码上的某一道题，请**逐字转录**这道题的**公共题干**。
 
@@ -68,6 +73,7 @@ const rows = (await pool.query(
      AND q.sub_no IS NOT NULL
      AND (q.parent_stem IS NULL OR btrim(q.parent_stem) = '')
      AND q.content IS NOT NULL AND btrim(q.content) <> ''
+     ${BLANK_ONLY ? `AND (q.answer IS NULL OR btrim(q.answer) = '')` : ''}
    ORDER BY q.task_id, q.question_number
    LIMIT $1`,
   [LIMIT]
