@@ -31,6 +31,25 @@
         </div>
       </div>
       <div class="tb-right">
+        <!-- 讲题进度：解决「下次别再重复讲」的两个开关。
+             判定本身零点击（见 useTeachingMarks），这里只负责让老师能按状态收窄题单。 -->
+        <button
+          class="tb-btn tb-progress"
+          type="button"
+          :class="{ active: unTaughtOnly }"
+          :title="unTaughtOnly ? '显示全部题目' : `只看未讲的 ${unTaughtCount} 题`"
+          @click="toggleUnTaughtOnly"
+        >
+          只看未讲<span class="tb-count">{{ unTaughtCount }}</span>
+        </button>
+        <button
+          class="tb-btn"
+          type="button"
+          title="跳到第一道没讲过的题（也就是上次讲到哪儿）"
+          @click="resumeLecture"
+        >
+          续讲
+        </button>
         <button class="tb-btn" type="button" :class="{ active: showAnswer }" @click="toggleAnswer">
           {{ showAnswer ? '隐藏答案' : '参考答案' }}
         </button>
@@ -78,6 +97,20 @@
               <span v-if="currentStars" class="q-diff" :title="`难度 ${current.difficulty}`">{{ currentStars }}</span>
               <span v-else class="q-meta">难度未判定</span>
               <span class="q-meta">{{ current.studentCount }} 人错</span>
+              <!-- 讲题状态：未讲时不显示（不给画面添噪音）。
+                   判定是零点击的：离开这一题时按「停留时长 / 有没有写板书 / 有没有看答案」自动得出。 -->
+              <span
+                v-if="currentMarkBadge"
+                class="q-mark"
+                :class="`q-mark--${currentMarkBadge.status}`"
+                :title="currentMarkBadge.reworkDue
+                  ? '上次讲完之后学生又做错了 —— 建议回炉重讲'
+                  : (currentMarkBadge.source === 'auto' ? '按翻页停留自动判定，可长按底栏小圆点改' : '手动标记')"
+              >
+                {{ currentMarkBadge.label }}
+                <span v-if="currentMarkBadge.reworkDue" class="q-mark__due">建议回炉</span>
+              </span>
+              <span v-if="currentTaughtLabel" class="q-meta q-taught">{{ currentTaughtLabel }}</span>
             </div>
             <MathRender v-if="current.parentStem" class="q-parent" :content="current.parentStem" auto-detect />
             <div v-if="(current.subParts || []).length > 1" class="q-subparts">
@@ -206,7 +239,7 @@
         class="edge-nav edge-nav--next"
         type="button"
         title="下一题（→）"
-        :disabled="currentIndex === questions.length - 1"
+        :disabled="currentIndex === viewQuestions.length - 1"
         @click="nextQuestion"
       >
         <el-icon><ArrowRight /></el-icon>
@@ -224,13 +257,45 @@
       <button class="fb-btn" type="button" :disabled="currentIndex === 0" @click="prevQuestion">
         <el-icon><ArrowLeft /></el-icon>上一题
       </button>
+      <!-- 这排小圆点就是讲题进度条：颜色是自动派生出来的，不需要老师维护 -->
       <div class="fb-progress">
-        <span class="fb-dot" :class="{ current: i === currentIndex }" v-for="(q, i) in questions" :key="q.index" @click="gotoQuestion(i)" />
+        <span
+          v-for="(q, i) in viewQuestions"
+          :key="q.anchorKey || q.index"
+          class="fb-dot"
+          :class="[`fb-dot--${marks.statusOf(q)}`, { current: i === currentIndex }]"
+          :title="dotTitle(q, i)"
+          @click="onDotClick(i)"
+          @pointerdown="onDotPointerDown(i, $event)"
+          @pointerup="onDotPointerUp"
+          @pointerleave="onDotPointerUp"
+          @pointercancel="onDotPointerUp"
+          @contextmenu="onDotContextMenu(i, $event)"
+        />
       </div>
-      <button class="fb-btn" type="button" :disabled="currentIndex === questions.length - 1" @click="nextQuestion">
+      <button class="fb-btn" type="button" :disabled="currentIndex === viewQuestions.length - 1" @click="nextQuestion">
         下一题<el-icon><ArrowRight /></el-icon>
       </button>
       <span class="fb-hint">{{ navHint }}</span>
+
+      <!-- 长按小圆点的改判菜单（唯一需要老师动手的动作，且完全可选）。
+           自己实现而不用 el-popover：原生全屏时浏览器只渲染全屏元素及其子树，
+           teleport 到 body 的浮层会被整块盖住 —— el-dialog 已经踩过这个坑。 -->
+      <div v-if="markMenu" class="fb-menu" :style="{ left: markMenu.x + 'px' }">
+        <div class="fb-menu__title">第 {{ markMenu.index + 1 }} 题</div>
+        <button
+          v-for="opt in MARK_OPTIONS"
+          :key="opt.value"
+          type="button"
+          class="fb-menu__item"
+          :class="{ active: markMenu.q && marks.statusOf(markMenu.q) === opt.value }"
+          :title="opt.hint"
+          @click="chooseMark(opt.value)"
+        >
+          <span class="fb-menu__dot" :class="`fb-dot--${opt.value}`" />
+          <span class="fb-menu__label">{{ opt.label }}</span>
+        </button>
+      </div>
     </footer>
 
     <!-- 原卷图弹窗。
@@ -276,6 +341,7 @@ import { difficultyStars } from '../../utils/retryPaperOrder'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
 import MathRender from '../components/MathRender.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import { useTeachingMarks } from './useTeachingMarks'
 
 const route = useRoute()
 const router = useRouter()
@@ -297,6 +363,46 @@ const questionWrapRef = ref(null)
 const qBodyRef = ref(null)
 const boardPageRef = ref(null)
 
+// ── 讲题状态（零点击自动判定）────────────────────────────────────
+// 判定与落盘全在 useTeachingMarks 里；本页只负责在三个位置埋信号：
+//   gotoQuestion()（切题）/ onStrokesChange()（写了字）/ toggleAnswer()（看了答案）
+// 见 _周末班白板-讲题状态-产品评审-20260925.md §3.7。
+const marks = useTeachingMarks({
+  getGrade: () => handout.value?.grade || '',
+  getSubject: () => handout.value?.subject || '',
+  isImmersive: () => isImmersive.value,
+})
+// 只统计全屏讲题模式下的停留？—— 不。勘察发现 WeekendHandout 的 openBoard()
+// 从不传 fs=1，白板也从不读 fs，全屏必须老师手动点；把它当硬门槛会让自动判定
+// 在老师不点全屏时全军覆没。改用「停留分布 + 强信号」判据，快翻天然落进掠过分支。
+
+// 「只看未讲」的可见题单。null = 不过滤。
+// 刻意做成「切换时快照」而非响应式过滤：老师正在讲的题不能因为刚被自动标成
+// 「已讲」就从列表里当场消失。要重算，再点一次开关即可。
+const unTaughtOnly = ref(false)
+const viewSnapshot = ref(null)
+const viewQuestions = computed(() => viewSnapshot.value || questions.value)
+
+// 底栏长按小圆点的改判菜单
+const markMenu = ref(null) // { index, x, q }
+let markPressTimer = null
+let suppressDotClick = false
+/** 页面可见性监听解绑函数（切后台时停表，避免「人不在」被算成讲解） */
+let detachVisibility = null
+
+const MARK_OPTIONS = [
+  { value: 'done', label: '已讲 · 过关', hint: '讲清楚了，下次不再列出' },
+  { value: 'rework', label: '已讲 · 要回炉', hint: '讲错 / 没讲透，下次排最前' },
+  { value: 'skip', label: '不讲 · 跳过', hint: '不值得讲，从列表隐藏' },
+  { value: 'new', label: '清除标记', hint: '恢复为未讲' },
+]
+const MARK_LABEL = {
+  new: '未讲',
+  done: '已讲 · 过关',
+  rework: '已讲 · 要回炉',
+  skip: '不讲 · 跳过',
+}
+
 const penColors = [
   { label: '红', value: '#E11D48' },
   { label: '蓝', value: '#2563EB' },
@@ -309,7 +415,41 @@ const penSizes = [
   { label: '大', value: 6, dot: '11px' },
 ]
 
-const current = computed(() => questions.value[currentIndex.value] || null)
+// 当前题从「可见题单」取（可见题单受「只看未讲」影响）
+const current = computed(() => viewQuestions.value[currentIndex.value] || null)
+
+// ── 讲题状态展示 ──
+const currentMarkStatus = computed(() => (current.value ? marks.statusOf(current.value) : 'new'))
+const currentMarkDetail = computed(() => (current.value ? marks.detailOf(current.value) : null))
+/** 讲题状态徽标：未讲时不显示（不给画面添噪音） */
+const currentMarkBadge = computed(() => {
+  const st = currentMarkStatus.value
+  if (st === 'new') return null
+  const d = currentMarkDetail.value
+  return {
+    status: st,
+    label: MARK_LABEL[st] || st,
+    // 「讲完之后又被学生做错」的服务端提示：只提示，不自动改状态
+    reworkDue: !!d?.reworkDue && st === 'rework',
+    taughtAt: d?.taughtAt || '',
+    taughtTimes: d?.taughtTimes || 0,
+    source: d?.source || null,
+  }
+})
+const unTaughtCount = computed(() => questions.value.filter(q => marks.isUnTaught(q)).length)
+
+function fmtTaughtAt(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = n => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+const currentTaughtLabel = computed(() => {
+  const b = currentMarkBadge.value
+  if (!b || !b.taughtAt) return ''
+  return `上次讲 ${fmtTaughtAt(b.taughtAt)}${b.taughtTimes > 1 ? ` · 共 ${b.taughtTimes} 次` : ''}`
+})
 
 // 难度星级：与错题再测卷、周末班讲义列表共用同一口径（difficultyStars：1-2★ / 3★★ / 4-5★★★）。
 // 白板题头不写「基础 / 中等 / 较难」这类中文标签 —— 老师的视线在题干上，星级能一眼读出量级。
@@ -350,12 +490,40 @@ const optionsCompact = computed(() => {
   return opts.every(o => String(o).length <= 14)
 })
 
-// 笔迹 localStorage key：按「参数+题目 index」隔离
-const strokesKey = computed(() => {
+// ── 笔迹 localStorage key：按「题目稳定锚点」隔离（2026-09-25 修）──
+//
+// 原来用「年级+学科+时段 + 题目 index」。但 index 是本次聚合内 seq++ 的顺序号
+// （server/lib/weekendHandout.js），换个时段同一 index 会落到完全不同的题上 ——
+// 症状就是「上周的板书串到别的题上」，这是本次评审顺带发现的真隐患。
+//
+// 现在以 slide.anchorKey（复用 topicKey：练习册走 worksheet+页码+题号+题干指纹，
+// 其余走 normalizeStem 精确归一化）为键，跨时段稳定。
+// 锚点缺失时（旧版题单、或后端未升级）退回旧键，保证不丢已有板书。
+const legacyStrokesKey = computed(() => {
   if (!handout.value || !current.value) return ''
   const h = handout.value
   const base = [h.grade, h.subject || '', h.period.start, h.period.end].join('_').replace(/[^\w\u4e00-\u9fa5]/g, '')
   return `wb_strokes_${base}_q${current.value.index}`
+})
+
+/** FNV-1a 32 位：给超长锚点做短后缀，避免 localStorage 键过长 */
+function fnv1a(str) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < str.length; i += 1) {
+    h ^= str.charCodeAt(i)
+    h = Math.imul(h, 0x01000193) >>> 0
+  }
+  return h.toString(36)
+}
+
+const strokesKey = computed(() => {
+  const c = current.value
+  if (!handout.value || !c) return ''
+  const anchor = String(c.anchorKey || '')
+  if (!anchor) return legacyStrokesKey.value
+  // 短锚点直接可读（便于排查），超长锚点截断 + 哈希后缀防碰撞
+  const tail = anchor.length <= 120 ? anchor : `${anchor.slice(0, 100)}~${fnv1a(anchor)}`
+  return `wb_strokes_v2_${tail}`
 })
 const currentStrokes = ref([])
 
@@ -448,6 +616,12 @@ onMounted(async () => {
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
   window.addEventListener('keydown', onKeydown)
+  // 关页 / 切后台时把本次课讲的题尽量送达（keepalive），别让一节讲题白讲
+  window.addEventListener('pagehide', onPageHide)
+  document.addEventListener('click', onDocClick)
+  detachVisibility = marks.attachVisibilityListener()
+  // 初始进入第一题：不进入的话第一题的停留时长永远是 0，会被判成「掠过」而漏标。
+  marks.enterQuestion(viewQuestions.value[0])
 })
 
 // ── 全屏 / 沉浸模式 ──
@@ -465,7 +639,7 @@ const hint = ref('')
 let hintTimer = null
 const isFsOn = computed(() => isImmersive.value || nativeFs.value)
 const fsTitle = computed(() => (isFsOn.value ? '退出全屏（Esc）' : '全屏讲题（F）'))
-const showEdgeNav = computed(() => isTouchDevice.value && questions.value.length > 1)
+const showEdgeNav = computed(() => isTouchDevice.value && viewQuestions.value.length > 1)
 const navHint = computed(() => {
   if (allowTouch.value) return '手指绘制已开启 · 可用两侧箭头或底栏翻题'
   return isTouchDevice.value ? '左右滑动屏幕切题' : '← → 切题'
@@ -585,9 +759,20 @@ function saveStrokes() {
 }
 function loadStrokes() {
   currentStrokes.value = []
-  if (!strokesKey.value) return
+  const key = strokesKey.value
+  if (!key) return
   try {
-    const raw = localStorage.getItem(strokesKey.value)
+    let raw = localStorage.getItem(key)
+    if (!raw) {
+      // 一次性迁移：笔迹键从「时段+index」改成「稳定锚点」后，同一时段重开白板时
+      // 新键下还没有内容。这里兜底读一次旧键，读到就落到新键上，
+      // 避免升级当堂把老师已经写在屏幕上的板书弄没。
+      const legacy = legacyStrokesKey.value
+      if (legacy && legacy !== key) {
+        raw = localStorage.getItem(legacy)
+        if (raw) localStorage.setItem(key, raw)
+      }
+    }
     if (raw) currentStrokes.value = JSON.parse(raw)
   } catch {
     currentStrokes.value = []
@@ -596,6 +781,8 @@ function loadStrokes() {
 
 function onStrokesChange(val) {
   currentStrokes.value = val
+  // 在题上写了字 = 最强「讲过」信号（比停留时长可靠得多）
+  marks.noteStrokes(current.value, Array.isArray(val) && val.some(s => s?.points?.length))
   // 防抖保存（书写过程中也逐步落盘，切题/关页不丢）
   clearTimeout(saveTimer)
   saveTimer = setTimeout(saveStrokes, 300)
@@ -619,8 +806,17 @@ function playSlide(dir) {
 }
 
 function gotoQuestion(i, dir) {
-  if (i < 0 || i >= questions.value.length || i === currentIndex.value) return
+  const list = viewQuestions.value
+  if (i < 0 || i >= list.length || i === currentIndex.value) return
+  // 顺序要紧：saveStrokes() 依赖 current（旧题）算键，必须先存
   saveStrokes()
+  // 结算上一题 → 自动判定「讲过没有」。这里带上两个当场信号：
+  //   hasStrokes  —— 笔迹可能是上次留下的（从 localStorage 读回来的），也算讲过
+  //   viewedAnswer —— 讲完对答案是最典型的「这题讲完了」
+  marks.leaveQuestion({
+    hasStrokes: currentStrokes.value.some(s => s?.points?.length),
+    viewedAnswer: showAnswer.value,
+  })
   const d = dir ?? (i > currentIndex.value ? 1 : -1)
   currentIndex.value = i
   showAnswer.value = false
@@ -629,6 +825,8 @@ function gotoQuestion(i, dir) {
   if (qBodyRef.value) qBodyRef.value.scrollTop = 0
   if (hint.value) hint.value = ''
   playSlide(d)
+  marks.enterQuestion(list[i])
+  closeMarkMenu()
 }
 const prevQuestion = () => gotoQuestion(currentIndex.value - 1)
 const nextQuestion = () => gotoQuestion(currentIndex.value + 1)
@@ -719,12 +917,15 @@ function onKeydown(e) {
     case 'Home':
       e.preventDefault(); gotoQuestion(0, -1); break
     case 'End':
-      e.preventDefault(); gotoQuestion(questions.value.length - 1, 1); break
+      e.preventDefault(); gotoQuestion(viewQuestions.value.length - 1, 1); break
     case 'a': case 'A': toggleAnswer(); break
     case 'o': case 'O': toggleOriginal(); break
     case 'f': case 'F': toggleFullscreen(); break
     case 'z': case 'Z': undo(); break
+    case 'u': case 'U': toggleUnTaughtOnly(); break
+    case 'r': case 'R': resumeLecture(); break
     case 'Escape':
+      if (markMenu.value) { closeMarkMenu(); break }
       if (isImmersive.value) exitFullscreenMode()
       break
     default: break
@@ -750,8 +951,117 @@ function clearAll() {
   currentStrokes.value = []
   saveStrokes()
 }
-function toggleAnswer() { showAnswer.value = !showAnswer.value }
+function toggleAnswer() {
+  showAnswer.value = !showAnswer.value
+  // 点开参考答案 = 「这题讲完了，对一下答案」的强信号
+  if (showAnswer.value) marks.noteAnswerViewed(current.value)
+}
 function toggleOriginal() { showOriginal.value = !showOriginal.value }
+
+// ── 讲题状态：顶栏开关 ──────────────────────────────────────────
+/** 「只看未讲」：把已讲 / 跳过的题从可见题单里摘掉，解决「下次别再重复讲」 */
+function toggleUnTaughtOnly() {
+  if (!unTaughtOnly.value) {
+    const list = questions.value.filter(q => marks.isUnTaught(q))
+    if (list.length === 0) {
+      ElMessage.info('没有未讲的题了 —— 全部都已讲过或已跳过')
+      return
+    }
+    unTaughtOnly.value = true
+    viewSnapshot.value = list
+    showHint(`只看未讲：${list.length} 题（已隐藏 ${questions.value.length - list.length} 题）`)
+  } else {
+    unTaughtOnly.value = false
+    viewSnapshot.value = null
+    showHint(`已显示全部 ${questions.value.length} 题`)
+  }
+  // 可见题单换了，回到第一题。顺序同 gotoQuestion：先存笔迹、再结算、再切
+  saveStrokes()
+  marks.leaveQuestion({
+    hasStrokes: currentStrokes.value.some(s => s?.points?.length),
+    viewedAnswer: showAnswer.value,
+  })
+  currentIndex.value = 0
+  showAnswer.value = false
+  showOriginal.value = false
+  loadStrokes()
+  marks.enterQuestion(viewQuestions.value[0])
+  closeMarkMenu()
+}
+
+/** 「续讲」：跳到第一道没讲过的题 —— 也就是上次讲到哪儿 */
+function resumeLecture() {
+  const list = viewQuestions.value
+  const idx = list.findIndex(q => marks.isUnTaught(q))
+  if (idx < 0) {
+    ElMessage.info('这份题单已经全部讲过了')
+    return
+  }
+  gotoQuestion(idx)
+  showHint(idx === 0 ? '续讲：从第 1 题开始' : `续讲：跳到第 ${idx + 1} 题（前面 ${idx} 题已讲）`)
+}
+
+// ── 讲题状态：底栏小圆点 单击跳题 / 长按改判 ──
+// 长按而不是单击切状态：讲课时手指就在屏幕上，单击直接改状态太容易误触。
+function onDotPointerDown(i, ev) {
+  suppressDotClick = false
+  // 鼠标用右键改判（contextmenu），不做长按 —— 慢一点的单击不该被误判成长按
+  if (ev?.pointerType === 'mouse') return
+  clearTimeout(markPressTimer)
+  markPressTimer = setTimeout(() => {
+    markPressTimer = null
+    suppressDotClick = true
+    openMarkMenu(i, ev)
+  }, 520)
+}
+function onDotPointerUp() {
+  clearTimeout(markPressTimer)
+  markPressTimer = null
+}
+function onDotClick(i) {
+  // 长按已经弹过菜单，紧接着的 click 要吞掉，否则会顺手跳题
+  if (suppressDotClick) {
+    suppressDotClick = false
+    return
+  }
+  gotoQuestion(i)
+}
+function onDotContextMenu(i, ev) {
+  // PC 投屏时的右键等价于长按
+  ev.preventDefault()
+  openMarkMenu(i, ev)
+}
+function openMarkMenu(i, ev) {
+  const el = ev?.currentTarget
+  const x = el ? (el.offsetLeft || 0) + (el.offsetWidth || 0) / 2 : 0
+  markMenu.value = { index: i, x, q: viewQuestions.value[i] || null }
+}
+function closeMarkMenu() { markMenu.value = null }
+/** 小圆点 tooltip：把「为什么是这个颜色」说清楚，省得老师猜 */
+function dotTitle(q, i) {
+  const st = marks.statusOf(q)
+  const d = marks.detailOf(q)
+  const parts = [`第 ${i + 1} 题`, MARK_LABEL[st] || '未讲']
+  if (d?.reworkDue && st === 'rework') parts.push('上次讲完还错')
+  if (d?.taughtAt) parts.push(`上次讲 ${fmtTaughtAt(d.taughtAt)}`)
+  parts.push('长按改判')
+  return parts.join(' · ')
+}
+/** 点菜单外面 / 按 Esc 关掉改判菜单 */
+function onDocClick(e) {
+  if (!markMenu.value) return
+  if (e.target?.closest?.('.fb-menu, .fb-dot')) return
+  closeMarkMenu()
+}
+function chooseMark(status) {
+  const q = markMenu.value?.q
+  if (!q) return
+  marks.setManual(q, status)
+  showHint(status === 'new' ? '已清除标记' : `已标为「${MARK_LABEL[status]}」`)
+  // 开着「只看未讲」时不自动重算可见题单：老师正在讲的题不能因为刚被标成
+  // 「已讲」就从列表里当场消失。要重算，再点一次开关。
+  closeMarkMenu()
+}
 // 原卷图放大态：投屏时点图铺满整屏，再点还原
 const zoomedSrc = ref('')
 function toggleZoom(src) {
@@ -771,18 +1081,41 @@ function exportBoard() {
 function goBack() {
   // 返回时保存当前笔迹并退出全屏，避免整页全屏状态带到选题页
   saveStrokes()
+  // 结算当前题（自动判定「讲过没有」）并把待落盘的标记送出去。
+  // 不 await：返回选题页不该被网络请求卡住；失败会留在队列里，下次 flush 重发。
+  marks.leaveQuestion({
+    hasStrokes: currentStrokes.value.some(s => s?.points?.length),
+    viewedAnswer: showAnswer.value,
+  })
+  marks.flushNow()
   if (isFsOn.value) exitFullscreenMode()
   router.push('/weekend-ppt')
+}
+
+// 关标签页 / 切后台被杀：用 keepalive 尽力送达，别让这次课讲的题白讲
+function onPageHide() {
+  marks.leaveQuestion({
+    hasStrokes: currentStrokes.value.some(s => s?.points?.length),
+    viewedAnswer: showAnswer.value,
+  })
+  marks.flushNow({ keepalive: true })
 }
 
 onBeforeUnmount(() => {
   clearTimeout(saveTimer)
   clearTimeout(hintTimer)
   clearTimeout(topPullTimer)
+  clearTimeout(markPressTimer)
   try { slideAnim?.cancel() } catch { /* 忽略 */ }
   document.removeEventListener('fullscreenchange', onFullscreenChange)
   document.removeEventListener('webkitfullscreenchange', onFullscreenChange)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('pagehide', onPageHide)
+  document.removeEventListener('click', onDocClick)
+  detachVisibility?.()
+  // 组件卸载（路由离开）时兜一次：leaveQuestion 幂等，重复调用无副作用
+  onPageHide()
+  marks.dispose()
 })
 </script>
 
@@ -839,6 +1172,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 顶栏现在多了「只看未讲 / 续讲」两个开关，窄屏（平板竖屏）要能换行而不是溢出 */
+  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 16px;
   background: #fff;
@@ -915,7 +1250,19 @@ onBeforeUnmount(() => {
 .board-immersive .tb-title strong { font-size: 17px; }
 .board-immersive .tb-title span { font-size: 14px; }
 .board-immersive .tb-btn { font-size: 14px; }
-.tb-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.tb-right { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; }
+/* 「只看未讲」后面的剩余题数角标 */
+.tb-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--wb-primary-mist, #eef2ff);
+  color: var(--wb-primary, #6366f1);
+  font-size: 11.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.tb-btn.active .tb-count { background: #fff; }
 .tb-btn {
   display: inline-flex;
   align-items: center;
@@ -1001,6 +1348,23 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   flex-shrink: 0;
 }
+/* 讲题状态徽标：未讲时不渲染（不给画面添噪音） */
+.q-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: calc(3px * var(--s)) calc(10px * var(--s));
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: calc(12.5px * var(--s));
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.q-mark--done { background: #dcfce7; border-color: #86efac; color: #15803d; }
+.q-mark--rework { background: #fef3c7; border-color: #fcd34d; color: #b45309; }
+.q-mark--skip { background: #f1f5f9; border-color: #cbd5e1; color: #64748b; }
+.q-mark__due { font-weight: 600; }
+.q-taught { white-space: nowrap; }
 .q-parent { font-size: calc(18px * var(--s)); font-weight: 650; line-height: 1.8; color: var(--wb-text, #1e293b); }
 .q-subparts { margin-top: calc(10px * var(--s)); }
 .q-sub { font-size: calc(16.5px * var(--s)); line-height: 1.85; color: var(--wb-text, #1e293b); margin-top: calc(6px * var(--s)); }
@@ -1224,18 +1588,63 @@ onBeforeUnmount(() => {
 }
 .fb-btn:hover:not(:disabled) { color: var(--wb-primary, #6366f1); border-color: var(--wb-primary, #6366f1); }
 .fb-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.fb-progress { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: center; max-width: 480px; }
+.fb-progress { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 560px; }
 .fb-dot {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
   border-radius: 50%;
-  background: var(--wb-border, #e2e8f0);
   cursor: pointer;
   transition: 0.15s;
+  /* 长按改判要吃掉浏览器的默认长按行为（iOS 的 callout / 文本选择），否则菜单弹不出来 */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
 }
-.fb-dot:hover { background: #cbd5e1; }
-.fb-dot.current { background: var(--wb-primary, #6366f1); transform: scale(1.2); }
+/* 四色讲题状态 —— 全部自动派生，老师不需要维护（见 useTeachingMarks） */
+.fb-dot--new { background: #cbd5e1; }
+.fb-dot--done { background: #16a34a; }
+.fb-dot--rework { background: #f59e0b; }
+.fb-dot--skip { background: #fff; border-color: #cbd5e1; }
+.fb-dot:hover { filter: brightness(0.92); }
+/* 当前题用「描边圈」而不是换填充色：原来直接改 background 会把状态色盖掉，白看 */
+.fb-dot.current { border: 2px solid var(--wb-primary, #6366f1); transform: scale(1.12); }
 .fb-hint { position: absolute; right: 20px; font-size: 12px; color: var(--wb-text-tertiary, #94a3b8); }
+
+/* 长按小圆点的改判菜单（唯一需要老师动手的动作，完全可选） */
+.fb-menu {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  transform: translateX(-50%);
+  z-index: 20;
+  min-width: 172px;
+  padding: 6px;
+  border: 1px solid var(--wb-border, #e2e8f0);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
+}
+.fb-menu__title { padding: 4px 8px 6px; font-size: 12px; color: var(--wb-text-tertiary, #94a3b8); }
+.fb-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  font-size: 13px;
+  color: var(--wb-text, #1e293b);
+  text-align: left;
+  cursor: pointer;
+}
+.fb-menu__item:hover { background: var(--wb-bg-hover, #f1f5f9); }
+.fb-menu__item.active { background: var(--wb-primary-mist, #eef2ff); color: var(--wb-primary, #6366f1); }
+/* 只声明宽/样式，不写 border 简写 —— 否则会把 .fb-dot--skip 的 border-color 重置掉 */
+.fb-menu__dot { width: 10px; height: 10px; flex: 0 0 auto; border-width: 1px; border-style: solid; border-color: transparent; border-radius: 50%; box-sizing: border-box; }
 
 /* 原卷弹窗：投屏场景要能看清手写，图给足尺寸，点图可放大到整屏 */
 .original-tip { margin-bottom: 10px; font-size: 12.5px; color: var(--wb-text-tertiary, #94a3b8); }

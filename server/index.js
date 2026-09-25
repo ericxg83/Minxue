@@ -55,6 +55,7 @@ import { migrateGeometryManualOverride } from './migrations/056_add_geometry_man
 import { migrateQuestionParentStem } from './migrations/057_add_question_parent_stem.js'
 import { migrateWrongQuestionsLastWrongTaskId } from './migrations/058_add_wrong_questions_last_wrong_task_id.js'
 import { migrateWrongQuestionsIdentitySplit } from './migrations/059_wrongbook_identity_split.js'
+import { migrateTeachingMarks } from './migrations/060_teaching_marks.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -111,6 +112,7 @@ import examPdfRouter from './routes/examPdf.js'
 import wrongQuestionsExportRouter from './routes/wrongQuestionsExport.js'
 import dashboardRouter from './routes/dashboard.js'
 import weekendHandoutRouter from './routes/weekendHandout.js'
+import teachingMarksRouter from './routes/teachingMarks.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
@@ -4299,6 +4301,8 @@ app.use('/api/exam-pdf', examPdfRouter)
 app.use('/api/dashboard', dashboardRouter)
 // weekendHandout 路由内部已写完整路径（/api/weekend-ppt/*），直接挂载避免双重前缀
 app.use(weekendHandoutRouter)
+// teachingMarks 同理（内部为 /api/teaching-marks）—— 白板讲题状态的写入侧
+app.use(teachingMarksRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
 app.use((err, req, res, next) => {
@@ -4398,7 +4402,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateGeometryManualOverride', migrateGeometryManualOverride],
         ['migrateQuestionParentStem', migrateQuestionParentStem],
         ['migrateWrongQuestionsLastWrongTaskId', migrateWrongQuestionsLastWrongTaskId],
-        ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit]
+        ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit],
+        ['migrateTeachingMarks', migrateTeachingMarks]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

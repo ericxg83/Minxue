@@ -169,6 +169,8 @@ dist_p1check/
 dist_p2check/
 dist_verify/
 dist_verify2/
+dist_tmcheck/
+dist_tmcheck2/
 # 排障临时目录（含下载的 PDF、环境密钥清单等，绝不入库）
 tmp/
 # 学生作业截图（隐私）

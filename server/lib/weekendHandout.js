@@ -346,21 +346,34 @@ export async function buildHandout(opts) {
   /**
    * 把 topic t 并入按合并键分组的 map（若命中已有组则合并并返回 true）。
    * 合并键为空（短题面/self 兜底）时退回按原始 topicKey 查找，防止跨天同键覆盖丢学生。
+   *
+   * aliasMap（2026-09-25 新增）：题目身份键 t.key → 已合并对象的索引。
+   * 合并键（mergeKeyOf，含 subParts）与题目身份键（topicKey，只含 parent_stem+content）
+   * 是两套口径：同一道印刷题被两个学生 OCR 出不同小问结构时（实测：一个录到 3 个小问、
+   * 另一个漏掉「求证 PM=QM」只录到 2 个），mergeKeyOf 判为两题、topicKey 却相同，
+   * 跨天去重便不合并 → 同一道题出两条 slide 且共享同一个 anchorKey，白板的讲题标记与
+   * 手写板书会串到两条上。故合并键未命中时，再按题目身份键兜底找一次。
+   * 单天桶内 t.key 必然唯一（上游 topicMap 已按 topicKey 分组），此处对单天去重是空操作。
    */
-  function mergeTopicInto(map, t, keyOf) {
+  function mergeTopicInto(map, t, keyOf, aliasMap) {
     const mergedKey = keyOf(t)
     const lookupKey = mergedKey || t.key
-    const cur = map.get(lookupKey)
+    let cur = map.get(lookupKey)
+    if (!cur && t.key && aliasMap) cur = aliasMap.get(t.key)
     if (!cur) {
-      map.set(lookupKey, { ...t, _day: t._day || '' })
+      const fresh = { ...t, _day: t._day || '' }
+      map.set(lookupKey, fresh)
+      if (t.key && aliasMap) aliasMap.set(t.key, fresh)
       return false
     }
     cur.students = mergeStudents(cur.students, t.students)
     cur.studentCount = cur.students.length
     cur.rawCount += t.rawCount
+    cur.latestAddedAt = Math.max(cur.latestAddedAt || 0, t.latestAddedAt || 0)
     cur.diffValues = [...new Set([...(cur.diffValues || []), ...(t.diffValues || [])])].sort()
     cur.diffInconsistent = cur.diffValues.length >= 2
     if (t._day > cur._day) cur._day = t._day
+    if (t.key && aliasMap) aliasMap.set(t.key, cur)
     log(`   [去重] 完整题干相同合并: ${cur.questionNumber ?? ''} 现 ${cur.studentCount} 人错`)
     return true
   }
@@ -368,7 +381,8 @@ export async function buildHandout(opts) {
   /** 对一组 topic 做「完整题干相同」去重（2026-09-17 二次合并 / 2026-09-20 全局合并共用） */
   function dedupeTopics(topics, keyOf) {
     const completeMap = new Map()
-    for (const t of topics) mergeTopicInto(completeMap, t, keyOf)
+    const aliasMap = new Map()
+    for (const t of topics) mergeTopicInto(completeMap, t, keyOf, aliasMap)
     return [...completeMap.values()]
   }
 
@@ -389,8 +403,27 @@ export async function buildHandout(opts) {
     const stem = `${r.parent_stem || ''}${r.content || ''}`
     const norm = normalizeStem(stem)
     if (norm.length >= MIN_MERGE_KEY_LEN) return 'topic:' + norm
-    const own = r.question_id || `${r.worksheet_id || ''}#${r.question_no ?? ''}#${r.content || ''}`
-    return 'self:' + (own || r.wq_id)
+    // ── self: 兜底（2026-09-25 修复）──────────────────────────────────────
+    // 走到这里说明「题面指纹不足以识别这道题」（短题面 / q.content 缺失）。
+    // 此时**必须退回可区分行的身份**，绝不能用 `${worksheet_id}#${question_no}#${content}`
+    // 这种组合当身份：homework 行 q.content 为空时它会退化成 `#8#`，把
+    // 「梯形ABCD…」「直线l₁//l₂∥l₃…」「阳光透过窗口…」三道毫不相干的题合并成一条
+    // （实测 20 天窗口内 self:#8# 撞 5 行、self:## 撞 17 行）——正是本函数开头
+    // 「不能只用 worksheet+page+question_no 裸合并」那段护栏要防的同一个坑。
+    // 白板「讲题状态」与手写板书都挂在这个 key 上，撞键会让标记/板书串到别的题上。
+    // 优先级（从「最能代表题目身份」到「只能代表这一行」）：
+    //   ① question_id —— 同一道题的多行（多小问/多次错）仍合并，交给
+    //      buildCompleteQuestion 去做「多小问完整化」；
+    //   ② 任务内题号 —— 实测大量 homework 行的 question_id 为空、题面只在
+    //      wq.content 里（如陈施君 task=deb4a13d 的 qno=12 有 5 行，正是该题的
+    //      4 个小问）。任务是一份提交，同一任务内同题号必是同一道题，故用它分组，
+    //      既能把小问合回一道题，又不会跨学生/跨任务误并（毛辰绮 task=NULL 的
+    //      qno=11 有 4 道互不相干的题，正因没有任务号而不会被并到一起）；
+    //   ③ wq_id —— 错题行主键，必然唯一。宁可拆细，不可错并。
+    const own = r.question_id
+      || (r.last_wrong_task_id && r.question_no != null ? `${r.last_wrong_task_id}#${r.question_no}` : '')
+      || r.wq_id
+    return 'self:' + (own || `${r.student_id || ''}#${r.question_no ?? ''}#${r.added_at || ''}`)
   }
 
   /** 同卷同题小问完整化（多小问 → 完整题干 + 整题答案） */
@@ -579,6 +612,12 @@ export async function buildHandout(opts) {
         key,
         questionId: primary.q_id,
         questionNumber: primary.question_number ?? primary.question_no ?? null,
+        // 本题所有错题行里最近一次的 added_at（毫秒）。仅用于白板「讲完还错」判据：
+        // 与 teaching_marks.taught_at 比较，晚于它说明讲完之后学生又错了 → 建议回炉。
+        latestAddedAt: members.reduce((mx, m) => {
+          const ts = m.added_at ? new Date(m.added_at).getTime() : 0
+          return Number.isFinite(ts) && ts > mx ? ts : mx
+        }, 0),
         content: stemText,
         stemIsFallback: stemFallback,
         parentStem: complete.parentStem || primary.parent_stem || '',
@@ -783,6 +822,31 @@ export async function buildHandout(opts) {
   const periodLabel = `${toYmd(periodStart)} ~ ${toYmd(new Date(periodEnd.getTime() - 1))}`
   const nameOf = id => studentRows.find(s => s.id === id)?.name || ''
 
+  // ── 讲题状态（teaching_marks，2026-09-25）──────────────────────────────
+  // 白板需要知道每道题「讲过没有 / 要不要回炉」。这里一次性把本作用域（当前 = 年级）
+  // 的标记全捞出来，在内存里按锚点 join —— 白板打开一次就拿到全部标记，前端不必再发
+  // 一轮批量查询。只读，且失败不阻断课件生成（表未建 / 库抖动时退化为「全部未讲」）。
+  // 红线：本段绝不写回 lifecycle_status / knowledge_mastery —— 老师标记「讲过」不等于
+  // 学生会了，两者语义不同（见 _周末班白板-讲题状态-产品评审-20260925.md §3.1）。
+  const markByAnchor = new Map()
+  try {
+    const { rows: markRows } = await pool.query(
+      `SELECT anchor_key, anchor_key_alt, status, source, taught_at, taught_times
+         FROM teaching_marks
+        WHERE scope_key = $1`,
+      [grade]
+    )
+    for (const m of markRows) {
+      if (m.anchor_key) markByAnchor.set(m.anchor_key, m)
+      // 完整题干合并键也入索引：OCR 题面微差导致主锚点漂移时仍能命中。
+      // 不会与主键撞车 —— 主键恒带 ws:/topic:/self: 前缀，alt 是无前缀的归一化题干。
+      if (m.anchor_key_alt) markByAnchor.set(m.anchor_key_alt, m)
+    }
+    log(`[讲题状态] 命中 ${markRows.length} 条标记（作用域=${grade}）`)
+  } catch (e) {
+    log(`[讲题状态] 读取失败，按「全部未讲」继续：${e.message}`)
+  }
+
   // ── slides（PPT 渲染输入）──
   const slideList = []
   let seq = 0
@@ -802,9 +866,36 @@ export async function buildHandout(opts) {
     for (const t of sec.topics) {
       const tier = TIERS.find(x => x.match(t.difficulty)) || TIERS[TIERS.length - 1]
       seq++
+      // ── 稳定锚点（2026-09-25，白板「讲题状态」前置）────────────────────
+      // 白板的「已讲/要回炉/跳过」标记与手写板书隔离，都必须挂在这个 key 上。
+      // 绝对不能用 index：index 是本次聚合内 seq++ 的顺序号，换个时段就整体漂移，
+      // 会把标记和板书挂到别的题上（现有笔迹串题隐患正是这么来的）。
+      // anchorKey 复用既有 topicKey（练习册走 worksheet+页码+题号+题干指纹，
+      // 其余走 normalizeStem 精确归一化），不另写一套身份口径。
+      // anchorKeyAlt 是完整题干合并键，仅作 OCR 题面微差时的兜底匹配，可为空串。
+      const anchorKey = t.key
+      const anchorKeyAlt = mergeKeyOf(t) || ''
+      const mark = markByAnchor.get(anchorKey)
+        || (anchorKeyAlt ? markByAnchor.get(anchorKeyAlt) : null)
+        || null
+      // 「讲完还错」：标记为已讲之后，这道题又被学生做错 → 建议回炉。
+      // 只做提示，不自动改状态（要不要回炉由老师定，见评审 §3.4）。
+      const reworkDue = !!(mark && mark.status === 'done' && mark.taught_at
+        && (t.latestAddedAt || 0) > new Date(mark.taught_at).getTime())
       slideList.push({
         kind: 'question',
         index: seq,
+        anchorKey,
+        anchorKeyAlt,
+        mark: mark
+          ? {
+            status: mark.status,
+            source: mark.source,
+            taughtAt: mark.taught_at,
+            taughtTimes: mark.taught_times,
+          }
+          : null,
+        reworkDue,
         sectionLabel: secLabel,
         day: sec.day,
         dayLabel: t.dayLabel || sec.day,

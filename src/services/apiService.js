@@ -1141,6 +1141,47 @@ export const exportWrongPaper = async (body) => {
 }
 
 // ─────────────────────────────────────────────
+// 白板讲题状态（teaching_marks）
+// ─────────────────────────────────────────────
+
+/**
+ * 批量幂等写入白板「讲题状态」（已讲 / 要回炉 / 跳过）。
+ *
+ * 只写 teaching_marks —— 不触碰掌握度（wrong_questions.lifecycle_status /
+ * knowledge_mastery）与判分字段（questions.review_status / is_correct）。
+ * 老师标记「讲过」不等于学生会了。
+ *
+ * 读侧没有对应接口：白板题单由 buildHandout 产出时已把标记挂在每张 slide 的
+ * `mark` / `reworkDue` 上，打开一次就拿到了。
+ *
+ * @param {Object} body - { grade, subject?, scopeKey?, marks: Array }
+ * @param {{keepalive?: boolean}} [opts] - keepalive 用于 pagehide，尽力送达不等响应
+ */
+export const saveTeachingMarks = async (body, opts = {}) => {
+  if (opts.keepalive) {
+    // 页面正在卸载：apiRequest 的超时/重试机制在这里没意义，改用 keepalive 尽力送达。
+    // 幂等 upsert，重复送达无副作用。
+    try {
+      await fetch(`${API_BASE}/teaching-marks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+        keepalive: true,
+      })
+    } catch {
+      // 卸载路径不抛错：标记丢了最多下次重讲一遍，不值得打断关页
+    }
+    return { success: true, keepalive: true }
+  }
+  // 写操作不重试（retries=1）：失败时调用方保留待落盘队列，下次 flush 自然重发
+  return apiRequest('/teaching-marks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  }, 1)
+}
+
+// ─────────────────────────────────────────────
 // 知识点驱动学习数据层（成长中心 / 讲义引擎）
 // ─────────────────────────────────────────────
 
