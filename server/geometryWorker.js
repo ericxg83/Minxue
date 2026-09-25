@@ -56,24 +56,37 @@ const RETRY_DELAYS = [
 ]
 const MAX_RETRIES = RETRY_DELAYS.length // 3
 
-// ── 几何重绘专用视觉通道（2026-09-19）─────────────────────────────────────────
-// **当前默认关闭**：几何重绘继续走原有降级链（魔搭 → 辉辉云 …）。
-//
-// 为什么不启用原生 Gemini：Google 免费档配额是「按项目 × 按模型 × 按天」，
-// gemini-3.8-flash 实测只有 **20 次/天**（另有 5 RPM）。DSL 闭环每图约 2.5 次视觉调用
-// → 每天最多 ~8 张图，105 张存量回填要 ~13 天。稳态量 4–20 张/天，覆盖不了。
-// （能力本身没问题：同一模型经辉辉云跑基准 19/20 = 95%，直连实测也能出图。）
-//
-// 想启用这条通道时，两个开关都要打开：
-//   1) GEMINI_DIRECT_ENABLED=1   （ai.js：点亮 Gemini 直连通道）
-//   2) GEOMETRY_VISION_VENDOR=GoogleGeminiDirect （本文件：把该通道置顶到几何链路）
-// 关闭：GEOMETRY_VISION_VENDOR=off（或 none/0/false），或不设置（默认即为关闭）。
-const GEOMETRY_VISION_VENDOR = (() => {
-  const raw = process.env.GEOMETRY_VISION_VENDOR
-  if (raw === undefined) return null                     // 未设置 → 不指定（走原降级链）
-  const v = String(raw).trim()
-  return /^(?:off|none|0|false)$/i.test(v) ? null : (v || null)
-})()
+// ── 几何重绘专用视觉通道 ─────────────────────────────────────────────────────
+// 【2026-09-25 起改为显式 vendorChain，见下方 GEOMETRY_VISION_VENDOR_CHAIN。
+//   旧参数 GEOMETRY_VISION_VENDOR 已废弃删除：它以 preferredVendor 形式传入
+//   callVisionCompletion，而对非 Gemini 直连通道**从未生效过**（那里只匹配
+//   gemini|googlegeminidirect）——.env 里配的 HuihuiyunGemini 一直是无效配置，
+//   几何重绘实际走的是通用降级链。删掉它避免再次误配。
+//   历史注：Google 免费档 Gemini 直连（GEMINI_DIRECT_ENABLED=1）因配额太小
+//   （gemini-3.8-flash 20 次/天）从未作为几何主力，见 git 历史本段旧注释。】
+// ── 几何重绘显式供应商链（2026-09-25）─────────────────────────────────────────
+// 旧写法 preferredVendor: GEOMETRY_VISION_VENDOR 对非 Gemini 直连通道**不生效**
+// （callVisionCompletion 里 preferredVendor 只匹配 gemini|googlegeminidirect），
+// 几何重绘实际一直在走通用降级链（魔搭 → SenseNova → 辉辉云 → …）——而 2026-09-19
+// 同题 13 张 A/B（_diag_37_vs_38_ab.mjs）的结论是 gemini-3.7-flash 几何 DSL 92.3% 最强，
+// 却被排在 SenseNova 之后。改为显式 vendorChain，把实测强者置顶：
+//   ① HuihuiyunGemini gemini-3.7-flash —— 几何 DSL 主力（付费池，单次 ~$0.0015）
+//   ② Bailian qwen3.8-flash —— 兜底（2026-09-25 几何 DSL 基准 12 张难题裁片：
+//      与 gemini 同为 11/12 成功，平均 60s/次（gemini 10s）、一次 180s 超时，
+//      核心点标注两家一致 —— 慢但稳，适合兜底位。Token Plan 套餐内边际成本≈0；
+//      Bailian vlModels 为空，vendorChain 显式点名绕过）
+//   ③ SenseNova deepseek-flash —— 免费再兜（2026-09-22 矩阵评测批改场景赢家）
+// vendorChain 语义 = 链外一律不碰（含魔搭与末轮魔搭兜底），全链失败宁可失败不静默换弱模型。
+// 可用 env GEOMETRY_VISION_VENDOR_CHAIN 覆盖，格式 'Vendor:model,Vendor:model'。
+const GEOMETRY_VISION_VENDOR_CHAIN = (process.env.GEOMETRY_VISION_VENDOR_CHAIN ||
+  'HuihuiyunGemini:gemini-3.7-flash,Bailian:qwen3.8-flash,SenseNova:deepseek-flash')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  .map(s => {
+    const [vendor, model] = s.split(':')
+    return { vendor, model }
+  })
 
 // ── 辅助 ──
 
@@ -153,7 +166,7 @@ async function verifySegmentsInFigure({ dataURL, segments, shortId }) {
         userText,
         temperature: 0,
         maxTokens: 512,
-        preferredVendor: GEOMETRY_VISION_VENDOR,
+        vendorChain: GEOMETRY_VISION_VENDOR_CHAIN,
       }),
       { onWait: ({ attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 线段复核 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
     )
@@ -183,7 +196,7 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
       userText: '请识别这张几何图中的纯几何结构（点/线/圆/标注），只输出结构化 JSON。',
       temperature: 0.1,
       maxTokens: 3072,
-      preferredVendor: GEOMETRY_VISION_VENDOR
+      vendorChain: GEOMETRY_VISION_VENDOR_CHAIN
     }),
     { onWait: ({ kind, attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 结构识别 ${kind} 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
   )
@@ -386,7 +399,7 @@ async function processSingleAsset(asset) {
           const imageDataURL = `data:image/png;base64,${rawBuffer2.toString('base64')}`
           const callVision = async ({ systemPrompt, userText, imageDataURL: img }) => {
             const r = await withProviderRetry(
-              () => callVisionCompletion({ imageDataURL: img, systemPrompt, userText, temperature: 0.1, maxTokens: 2048, preferredVendor: GEOMETRY_VISION_VENDOR }),
+              () => callVisionCompletion({ imageDataURL: img, systemPrompt, userText, temperature: 0.1, maxTokens: 2048, vendorChain: GEOMETRY_VISION_VENDOR_CHAIN }),
               { onWait: ({ kind, attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 函数图象视觉补标注 ${kind} 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
             )
             return r.content
@@ -526,7 +539,7 @@ async function processSingleAsset(asset) {
                 userText,
                 temperature: 0.1,
                 maxTokens: 3072,
-                preferredVendor: GEOMETRY_VISION_VENDOR
+                vendorChain: GEOMETRY_VISION_VENDOR_CHAIN
               }),
               { onWait: ({ kind, attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: DSL 视觉 ${kind} 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
             )
