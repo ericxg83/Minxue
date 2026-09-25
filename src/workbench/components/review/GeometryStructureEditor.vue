@@ -18,9 +18,9 @@
       <div class="gse-canvas-wrap">
         <div class="gse-toolbar">
           <el-radio-group v-model="mode" size="small">
-            <el-radio-button label="add">加点</el-radio-button>
-            <el-radio-button label="link">连线</el-radio-button>
-            <el-radio-button label="move">拖动</el-radio-button>
+            <el-radio-button value="add">加点</el-radio-button>
+            <el-radio-button value="link">连线</el-radio-button>
+            <el-radio-button value="move">拖动</el-radio-button>
           </el-radio-group>
           <span class="gse-hint">
             {{ mode === 'add' ? '点击空白处添加顶点' : mode === 'link' ? (linkStart ? `起点 ${linkStart} → 再点一个点连线` : '点击第一个顶点') : '拖动顶点调整位置' }}
