@@ -574,6 +574,72 @@ export function splitOcrQuestionsBySubNo(questions) {
 }
 
 /**
+ * 跨页题缝合（2026-09-25）：原卷上一道题跨两页时（题干前半在上页末尾、
+ * 后半在本页顶部），逐页独立 OCR 会把它切成两道独立题。本函数把模型标记为
+ * continues_previous_page 的本页首题片段缝回上一页末题。
+ *
+ * 只信模型的显式标记（first.continues_previous_page === true），不做启发式自动合并：
+ * 填空题题干合法地以横线结尾、解答题常无句号，任何"末题没句号就并"的启发式都会误合并。
+ * 标记由 worker.js 在 OCR 时通过 buildCrossPageHint 注入上一页末题上下文后才可能产生，
+ * 上一页 OCR 失败时提示不传、合并不执行，不会把本页新题错缝进更早的题。
+ *
+ * @returns {boolean} 是否发生了合并（pageQuestions[0] 已被移除并缝入 allQuestions 末题）
+ */
+export function mergeCrossPageContinuation(allQuestions, pageQuestions) {
+  if (!Array.isArray(allQuestions) || allQuestions.length === 0) return false
+  if (!Array.isArray(pageQuestions) || pageQuestions.length === 0) return false
+  const first = pageQuestions[0]
+  if (!first || typeof first !== 'object' || first.continues_previous_page !== true) return false
+  const prev = allQuestions[allQuestions.length - 1]
+  if (!prev || typeof prev !== 'object') return false
+
+  const tail = String(first.content || '').trim()
+  const prevContent = String(prev.content || '').replace(/\s+$/, '')
+  prev.content = tail ? prevContent + tail : prevContent
+
+  // 页面后半段才出现的手写答案/选项/配图回填给合并后的题（前半段页面上没有时才补）
+  if (!prev.student_answer && first.student_answer) prev.student_answer = first.student_answer
+  if ((!Array.isArray(prev.options) || prev.options.length === 0) && Array.isArray(first.options) && first.options.length > 0) {
+    prev.options = first.options
+  }
+  if (!prev.answer && first.answer) prev.answer = first.answer
+  if (!prev.question_type && first.question_type) prev.question_type = first.question_type
+  if (!prev.parent_stem && first.parent_stem) prev.parent_stem = first.parent_stem
+  if (first.has_figure && !prev.has_figure) {
+    prev.has_figure = true
+    prev.image_type = first.image_type
+    prev.image_bbox = first.image_bbox
+  }
+  if (typeof prev.confidence === 'number' && typeof first.confidence === 'number') {
+    prev.confidence = Math.min(prev.confidence, first.confidence)
+  }
+  // block_coordinates 保留上一页末题的框（题从上一页开始）；本页承接段暂时没有
+  // 跨页多框的存储口径，靠日志留下线索供人工修订。
+  delete prev.continues_previous_page
+  prev._cross_page_merged = true
+  pageQuestions.splice(0, 1)
+  return true
+}
+
+/**
+ * 构造逐页 OCR 的跨页衔接提示（拼进 userText，不改动静态 system prompt）。
+ * 上一页末题的题号 + 题干结尾是模型判断"本页顶部是不是上一题的延续"的唯一依据。
+ * @returns {string} 无上一页末题时返回空串（调用方直接用原 userText）。
+ */
+export function buildCrossPageHint(prevQuestion, prevPageNo) {
+  if (!prevQuestion || typeof prevQuestion !== 'object') return ''
+  const tail = String(prevQuestion.content || '').trim().slice(-80)
+  if (!tail) return ''
+  const subNo = prevQuestion.sub_no != null && String(prevQuestion.sub_no).trim() !== ''
+    ? ` 小问(${prevQuestion.sub_no})` : ''
+  return `\n\n【跨页衔接检查】上一页（第${prevPageNo || '?'}页）最后一题是第${prevQuestion.question_number}题${subNo}，题干结尾为："……${tail}"。` +
+    `请检查本页最上方的印刷内容：若它是上述题目的直接延续（句子未完结、没有新的题号开头），` +
+    `请在输出的第一个题目对象上加 "continues_previous_page": true，question_number/sub_no 沿用上一页该题的题号，` +
+    `content 只写本页承接的续文（不要重复上一页已识别的文字），学生写在续文下方的手写答案照常填入 student_answer。` +
+    `若本页顶部是带自己题号的独立新题，绝不要加该标记。`
+}
+
+/**
  * 严格子题序列选择：
  *   - 至少 2 个 mark
  *   - 第一个 mark 必须是 1

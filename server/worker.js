@@ -28,7 +28,7 @@ import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, describeUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
-import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole } from './services/answerParseService.js'
+import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, mergeCrossPageContinuation, buildCrossPageHint } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
@@ -5187,6 +5187,14 @@ export const processWorkbookGrading = async (job) => {
     }
   }
 
+  // 跨页题缝合状态（2026-09-25）：原卷上一道题跨两页时（题干前半在上页末尾、后半在
+  // 本页顶部），逐页独立 OCR 会把它切成两道独立题。上一成功页的末题作为下一页 OCR 的
+  // 衔接上下文（buildCrossPageHint 拼进 userText），模型据此在首题上标记
+  // continues_previous_page，识别后 mergeCrossPageContinuation 缝回上一页末题。
+  // 上一页失败/0 题时锚点置空——上下文断了的延续宁可放弃合并，也不能缝错对象。
+  let prevPageTailQuestion = null
+  let prevPageTailPageNo = null
+
   for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
     const { image_url: url } = imageList[pageIdx]
     console.log(`   [Workbook] 处理第 ${pageIdx + 1}/${imageList.length} 页: ${url.substring(0, 60)}...`)
@@ -5198,6 +5206,8 @@ export const processWorkbookGrading = async (job) => {
     } catch (e) {
       console.error(`   [Workbook] 第 ${pageIdx + 1} 页下载失败:`, e.message)
       ocrErrors++
+      prevPageTailQuestion = null
+      prevPageTailPageNo = null
       continue
     }
 
@@ -5226,7 +5236,7 @@ export const processWorkbookGrading = async (job) => {
     const { content } = await callVisionCompletion({
       imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
       systemPrompt: workbookPrompt,
-      userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+      userText: '识别这张作业图片的页面标题和所有题目的学生答案。' + buildCrossPageHint(prevPageTailQuestion, prevPageTailPageNo),
       temperature: 0.1,
       maxTokens: 4096,
       vendorChain: WORKBOOK_OCR_VENDOR_CHAIN,
@@ -5235,6 +5245,8 @@ export const processWorkbookGrading = async (job) => {
     if (!content) {
       console.error(`   [Workbook] 第 ${pageIdx + 1} 页AI识别返回为空，跳过`)
       ocrErrors++
+      prevPageTailQuestion = null
+      prevPageTailPageNo = null
       continue
     }
 
@@ -5283,6 +5295,8 @@ export const processWorkbookGrading = async (job) => {
       console.error(`   [Workbook] 第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
       if (aiHint) console.error(`   AI 原始响应(前200字): ${aiHint}`)
       ocrErrors++
+      prevPageTailQuestion = null
+      prevPageTailPageNo = null
       continue
     }
 
@@ -5299,6 +5313,15 @@ export const processWorkbookGrading = async (job) => {
 
     // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
     questions = splitOcrQuestionsBySubNo(questions)
+
+    // 跨页题缝合：本页首题被模型标记为上一页末题的延续时并回（continues_previous_page）
+    if (mergeCrossPageContinuation(allQuestions, questions)) {
+      const merged = allQuestions[allQuestions.length - 1]
+      console.log(`   🔗 [Workbook] 第 ${pageIdx + 1} 页首题是上一页末题的跨页延续，已缝合（合并后 Q${merged.question_number}，题干 ${String(merged.content || '').length} 字）`)
+    }
+    // 更新跨页衔接锚点：本页识别 ≥1 题时末题成为下一页的上下文；0 题则断开
+    prevPageTailQuestion = questions.length > 0 ? questions[questions.length - 1] : null
+    prevPageTailPageNo = questions.length > 0 ? pageNo : null
 
     // 题干垃圾检测：识别出"× ×"这类无意义符号题干时标记，触发整页重试一次。
     // 根因：模型把印刷体数学题干错误转录成纯符号堆（如"÷ = × ×."）。
@@ -5382,6 +5405,9 @@ export const processWorkbookGrading = async (job) => {
       let allQuestionsRetry = []
       let ocrErrorsRetry = 0
       const pageDataListRetry = []
+      // 跨页题缝合锚点（与主循环同口径），重试轮独立维护
+      let prevPageTailQuestionRetry = null
+      let prevPageTailPageNoRetry = null
       for (let pageIdx = 0; pageIdx < imageList.length; pageIdx++) {
         const { image_url: url } = imageList[pageIdx]
         let imageBuffer
@@ -5390,6 +5416,8 @@ export const processWorkbookGrading = async (job) => {
         } catch (e) {
           console.error(`   [Workbook] 重试第 ${pageIdx + 1} 页下载失败:`, e.message)
           ocrErrorsRetry++
+          prevPageTailQuestionRetry = null
+          prevPageTailPageNoRetry = null
           continue
         }
         const compressedBuffer = await sharp(imageBuffer)
@@ -5403,12 +5431,12 @@ export const processWorkbookGrading = async (job) => {
         const { content } = await callVisionCompletion({
           imageDataURL: `data:image/jpeg;base64,${compressedBuffer.toString('base64')}`,
           systemPrompt: workbookPrompt,
-          userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+          userText: '识别这张作业图片的页面标题和所有题目的学生答案。' + buildCrossPageHint(prevPageTailQuestionRetry, prevPageTailPageNoRetry),
           temperature: 0.1,
           maxTokens: 4096,
           vendorChain: retryChain, // 主次对调的重试链，不锁单一模型（见上方 2026-09-22 注释）
         })
-        if (!content) { ocrErrorsRetry++; continue }
+        if (!content) { ocrErrorsRetry++; prevPageTailQuestionRetry = null; prevPageTailPageNoRetry = null; continue }
         let questions = []
         let pageTitle = null
         let sectionTitle = null
@@ -5429,6 +5457,8 @@ export const processWorkbookGrading = async (job) => {
           console.error(`   [Workbook] 重试第 ${pageIdx + 1} 页JSON解析失败:`, e.message)
           if (aiHint) console.error(`   重试 AI 原始响应(前200字): ${aiHint}`)
           ocrErrorsRetry++
+          prevPageTailQuestionRetry = null
+          prevPageTailPageNoRetry = null
           continue
         }
         const pageNo = imageList[pageIdx].page_number || (pageIdx + 1)
@@ -5438,6 +5468,11 @@ export const processWorkbookGrading = async (job) => {
           if (lessonCode) q._lesson_code = lessonCode
         }
         questions = splitOcrQuestionsBySubNo(questions)
+        if (mergeCrossPageContinuation(allQuestionsRetry, questions)) {
+          console.log(`   🔗 [Workbook] 重试第 ${pageIdx + 1} 页首题是上一页末题的跨页延续，已缝合`)
+        }
+        prevPageTailQuestionRetry = questions.length > 0 ? questions[questions.length - 1] : null
+        prevPageTailPageNoRetry = questions.length > 0 ? pageNo : null
         allQuestionsRetry.push(...questions)
         pageDataListRetry.push({ pageTitle, sectionTitle, lessonCode, rawOcrText: content, imageUrl: url, questions, pageNumber: pageNo, chapterHint: null })
         console.log(`   [Workbook] 重试第 ${pageIdx + 1} 页: 识别到 ${questions.length} 道题`)
@@ -6459,6 +6494,10 @@ const processAnswerBankGrading = async (job) => {
     const pageDataList = []
     let ocrErrors = 0
     let totalQuestions = 0
+    // 跨页题缝合锚点（2026-09-25，与 workbook 管线同口径）：答案册原题跨两页时，
+    // 逐页独立 OCR 会把题干切成两道题。上一成功页末题作为下一页 OCR 的衔接上下文。
+    let prevPageTailQuestion = null
+    let prevPageTailPageNo = null
 
     for (let pageIdx = 0; pageIdx < imageBuffers.length; pageIdx++) {
       const { pageNumber, buffer } = imageBuffers[pageIdx]
@@ -6470,6 +6509,8 @@ const processAnswerBankGrading = async (job) => {
       } catch (e) {
         console.error(`   [AnswerBank] 第 ${pageNumber} 页压缩失败: ${e.message}`)
         ocrErrors++
+        prevPageTailQuestion = null
+        prevPageTailPageNo = null
         continue
       }
 
@@ -6489,7 +6530,7 @@ const processAnswerBankGrading = async (job) => {
           const result = await callVisionCompletion({
             imageDataURL: bufferToBase64(compressed),
             systemPrompt: answerBankPrompt,
-            userText: '识别这张作业图片的页面标题和所有题目的学生答案。',
+            userText: '识别这张作业图片的页面标题和所有题目的学生答案。' + buildCrossPageHint(prevPageTailQuestion, prevPageTailPageNo),
             temperature: 0.1,
             maxTokens: 4096,
             // 配图字段（image_type/image_bbox）是本次新增采集，弱备份模型不守 schema 会整列丢失
@@ -6548,6 +6589,8 @@ const processAnswerBankGrading = async (job) => {
       if (questions.length === 0) {
         console.error(`   [AnswerBank] 第 ${pageNumber} 页 OCR 失败（重试 ${maxAttempts} 次后放弃）: ${ocrLastError}`)
         ocrErrors++
+        prevPageTailQuestion = null
+        prevPageTailPageNo = null
         continue
       }
 
@@ -6561,6 +6604,14 @@ const processAnswerBankGrading = async (job) => {
 
       // 把 AI 合并输出的多小问大题拆成独立题目（如 q21(1)、q21(2)）
       questions = splitOcrQuestionsBySubNo(questions)
+
+      // 跨页题缝合：本页首题被模型标记为上一页末题的延续时并回（目标题在上一页的
+      // questions 数组里，pageDataList 持有同一对象引用，改它即改全局）
+      if (mergeCrossPageContinuation(pageDataList.length > 0 ? pageDataList[pageDataList.length - 1].questions : [], questions)) {
+        console.log(`   🔗 [AnswerBank] 第 ${pageNumber} 页首题是上一页末题的跨页延续，已缝合`)
+      }
+      prevPageTailQuestion = questions.length > 0 ? questions[questions.length - 1] : null
+      prevPageTailPageNo = questions.length > 0 ? pageNumber : null
 
       // 稀疏/垃圾题干检测 + 区域聚焦重 OCR（与 workbook 管线同一套逻辑）：
       // 整页 OCR 对复杂数学题干易只识别出"计算："这类指令词而丢失算式，
