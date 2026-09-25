@@ -35,6 +35,7 @@ import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmpty
 import { correctDslByVision } from './utils/geom/dsl/reactLoop.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
 import { validateStructureAgainstContent, detectNonGeometryFigure } from './utils/geometryContentGate.js'
+import { detectNumberAxis } from './utils/geom/structure.js'
 import { computeGeometryConsistency } from './utils/geom/consistency.js'
 import { correctGeometryFigure } from './utils/geom/correctedRender.js'
 import { canPublishDerivedFigure } from './utils/geom/derivedCoverage.js'
@@ -227,7 +228,14 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
     return { ok: false, reason: 'no_figure', retriable: false }
   }
 
-  if (gateText.trim() || (Array.isArray(options) && options.length > 0)) {
+  // 数轴图跳过内容引用闸：数轴本质是"一条轴 + 轴上一堆点/刻度"，线段(轴本身)与点
+  // 本就不会在题干里被"线段AD/点O"逐字引用，用普通几何的引用校验会必然误杀。
+  // 检出为数轴（detectNumberAxis）时不走 validateStructureAgainstContent。
+  const isNumberAxis = !!detectNumberAxis(validated.points, validated.segments, {
+    coordinateSystem: !!(validated.coordinate_system && validated.coordinate_system.exists),
+  }) || /数轴/.test(gateText)
+
+  if (!isNumberAxis && (gateText.trim() || (Array.isArray(options) && options.length > 0))) {
     const gate = validateStructureAgainstContent(validated, gateText, options)
     if (!gate.ok) {
       // 若驳回理由**全部**是「线段无引用」（硬规则 2），用原图做一次视觉复核：
