@@ -127,6 +127,49 @@ async function downloadImageBuffer(url) {
  *   注意：含派生点的结构不再在这里早退——它要交给求解器验证，
  *   由 processSingleAsset 的派生点安全网统一裁决（见该处注释）。
  */
+/**
+ * 线段是否在图中真实画出——原图视觉复核（2026-09-25，用户选定路线：
+ * 不放宽文本规则，而是引入独立证据源——真实配图本身）。
+ *
+ * 仅当硬规则 2（线段在题干未逐字写出）单独驳回到时调用：把被点名的线段交回
+ * 视觉模型，逐条判断这张原图里是否真的画了这条线。全部确认存在 → 放行；
+ * 任一不存在或调用失败 → 维持回退。只加不改，不触碰几何一致性校验本身。
+ *
+ * @returns {Promise<{ok:true}|{ok:false,reason:string}|null>} null=调用异常（当作未确认）
+ */
+async function verifySegmentsInFigure({ dataURL, segments, shortId }) {
+  const list = [...new Set(segments)].filter(Boolean)
+  if (list.length === 0) return { ok: false, reason: '无待复核线段' }
+  const userText =
+    `这张几何图中可能画了以下若干条线段（用两端点字母表示）：${list.join('、')}。\n` +
+    `请逐条判断：在【这张图里】该线段是否被真实画成一条直线段（不论题面文字有没有提到它）。\n` +
+    `只输出严格 JSON，形如 {"AC": true, "BD": false}，键为上述线段原样，值为是否画出。不要输出任何解释。`
+  try {
+    const r = await withProviderRetry(
+      () => callVisionCompletion({
+        imageDataURL: dataURL,
+        systemPrompt: '你是几何图判读者。只判断指定线段是否在图中真实画出，输出严格 JSON。',
+        userText,
+        temperature: 0,
+        maxTokens: 512,
+        preferredVendor: GEOMETRY_VISION_VENDOR,
+      }),
+      { onWait: ({ attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 线段复核 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
+    )
+    const jsonStr = (String(r.content).match(/\{[\s\S]*\}/) || [''])[0]
+    const obj = JSON.parse(jsonStr || '{}')
+    // 归一化：去下标/大小写/脉号差异，只比字母骨架，避免模型回的格式与理由不一
+    const norm = (k) => String(k).toUpperCase().replace(/[₀-₉]/g, (m) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(m))).replace(/[′'’]/g, '')
+    const map = {}
+    for (const [k, v] of Object.entries(obj)) map[norm(k)] = v === true
+    const present = list.every((s) => map[norm(s)] === true)
+    return present ? { ok: true } : { ok: false, reason: '图中未确认到全部线段' }
+  } catch (e) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 线段视觉复核调用异常（维持回退）: ${e.message}`)
+    return null
+  }
+}
+
 async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '') {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
@@ -177,8 +220,23 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
   if (gateText.trim() || (Array.isArray(options) && options.length > 0)) {
     const gate = validateStructureAgainstContent(validated, gateText, options)
     if (!gate.ok) {
-      console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过 → ${gate.reasons.join('；')}`)
-      return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+      // 若驳回理由**全部**是「线段无引用」（硬规则 2），用原图做一次视觉复核：
+      // 真图画了这些线就是误杀，放行；含其它类理由（派生点缺失/位置关系/作图漏画）则不复核。
+      const segReasonRe = /^重绘图上的线段 ([A-Z][₀-₉0-9]*)([A-Z][₀-₉0-9]*) 在题干中无引用$/
+      const segOnly = gate.reasons.length > 0 && gate.reasons.every((r) => segReasonRe.test(r))
+      if (segOnly) {
+        const segs = gate.reasons.map((rte) => { const m = rte.match(segReasonRe); return `${m[1]}${m[2]}` })
+        const verdict = await verifySegmentsInFigure({ dataURL, segments: segs, shortId })
+        if (verdict && verdict.ok) {
+          console.log(`   ✅ [几何Worker] ${shortId}: 视觉复核确认 ${segs.join('、')} 均在原图中 → 放行`)
+        } else {
+          console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过且复核未确认(${verdict?.reason || '调用失败'}) → ${gate.reasons.join('；')}`)
+          return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+        }
+      } else {
+        console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过 → ${gate.reasons.join('；')}`)
+        return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+      }
     }
   }
 
