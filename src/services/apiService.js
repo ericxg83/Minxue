@@ -492,6 +492,20 @@ export const retryGeometry = async (questionId) => {
   })
 }
 
+// [人工兜底重绘] 取回模型已抽结构草稿 + 裁片 URL（供编辑器预载）
+export const getGeometryStructure = async (questionId) => {
+  return apiRequest(`/questions/${questionId}/geometry-structure`)
+}
+
+// [人工兜底重绘] 提交老师确认的几何结构 → 服务端确定性出清晰矢量图
+export const saveGeometryStructure = async (questionId, structure) => {
+  return apiRequest(`/questions/${questionId}/geometry-structure`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ structure })
+  })
+}
+
 export const updateQuestionReviewStatus = async (questionId, reviewStatus, metadata = {}) => {
   return apiRequest(`/questions/${questionId}`, {
     method: 'PUT',

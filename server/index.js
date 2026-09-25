@@ -71,7 +71,10 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, markAiAnswerRisk } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, markAiAnswerRisk, updateQuestionDenormalizedSvg, updateQuestionAssetCleanData } from './services/neonService.js'
+// [人工兜底重绘] 教师手改几何结构 → 服务端确定性渲 SVG → 发布干净图 URL
+import { renderGeometrySvg } from './utils/geometrySvg.js'
+import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
 import { judgeAnswer, findDirtyAnswers } from './services/judgeService.js'
 import { checkQuestionCompleteness, hasFigureReference } from './utils/questionCompleteness.js'
 import { isFigurePreflightSkipEnabled, MISSING_FIGURE_SKIP_REASON } from './utils/figureRequirementGuard.js'
@@ -1235,6 +1238,60 @@ app.post('/api/admin/geometry/retry/:assetId', async (req, res) => {
     })
   } catch (error) {
     console.error('[admin/geometry/retry] 失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ── [人工兜底重绘] 教师手改几何结构 → 确定性出清晰矢量图 ──
+// 背景：被文本闸门判「多画/无法重绘」回退成模糊裁片的题，老师一眼能认出正确结构。
+// 本接口把老师确认的结构交给服务端确定性渲染器（不经视觉模型、不过文本闸门——
+// 人工即权威），出干净 SVG 并发布图片 URL，回写 questions + question_assets，
+// 标 geometry_manual_override=true（人工背书，前端直读展示）。
+app.get('/api/questions/:id/geometry-structure', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await query(
+      `SELECT a.geometry_structure_json, a.cropped_image_url, q.geometry_image_url\n         FROM ${TABLES.QUESTION_ASSETS} a\n         JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id\n        WHERE a.question_id = $1 AND a.asset_type = 'geometry_image'\n        ORDER BY a.created_at DESC LIMIT 1`,
+      [id]
+    )
+    if (rows.length === 0) return res.json({ structure: null, cropUrl: null })
+    res.json({
+      structure: rows[0].geometry_structure_json || null,
+      cropUrl: rows[0].cropped_image_url || rows[0].geometry_image_url || null,
+    })
+  } catch (error) {
+    console.error('[geometry-structure GET] 失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+app.post('/api/questions/:id/geometry-structure', async (req, res) => {
+  try {
+    const { id } = req.params
+    const structure = req.body?.structure
+    if (!structure || !Array.isArray(structure.points) || structure.points.length === 0) {
+      return res.status(400).json({ error: '结构为空：至少需要标注一个顶点' })
+    }
+    const svg = renderGeometrySvg(structure)
+    if (!svg) return res.status(422).json({ error: '结构无法渲染（点/线不足或坐标缺失）' })
+
+    await updateQuestionDenormalizedSvg(id, svg)
+    const pub = await publishCleanGeometryUrl({ questionId: id, svg })
+    await updateQuestionAssetCleanData(id, {
+      clean_geometry_svg: svg,
+      clean_geometry_image_url: pub?.ok ? pub.url : undefined,
+      geometry_structure_json: structure,
+    })
+    await query(
+      `UPDATE ${TABLES.QUESTION_ASSETS} SET tikz_status = 'completed', last_error = NULL, updated_at = NOW()\n        WHERE question_id = $1 AND asset_type = 'geometry_image'`,
+      [id]
+    )
+    await query(`UPDATE ${TABLES.QUESTIONS} SET geometry_manual_override = TRUE, updated_at = NOW() WHERE id = $1`, [id])
+
+    console.log(`[geometry-structure POST] q=${id.slice(0, 8)} 人工结构出图 SVG ${svg.length} 字符, 发布URL=${pub?.ok ? 'ok' : (pub?.reason || 'skip')}`)
+    res.json({ success: true, svg, url: pub?.ok ? pub.url : null, published: !!pub?.ok })
+  } catch (error) {
+    console.error('[geometry-structure POST] 失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

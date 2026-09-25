@@ -275,6 +275,11 @@
                 :title="q.asset_last_error || '视觉模型判定此图无法重建，已回退到裁剪原图'">
           使用原图
         </el-tag>
+        <el-button
+          v-if="q.geometry_image_url || q.clean_geometry_svg"
+          size="small" type="primary" plain
+          @click="geomEditorVisible = true"
+        >手工绘制几何图</el-button>
         <el-tag v-if="geometryConsistency && !geometryConsistency.skipped" size="small" :type="geometryConsistency.pass ? 'success' : 'danger'" effect="dark">
           几何自洽{{ geometryConsistency.pass ? '通过' : '存疑' }}
         </el-tag>
@@ -399,6 +404,13 @@
       </template>
     </el-dialog>
 
+    <!-- [人工兜底重绘] 几何结构编辑器：图上点顶点/连边 → 确定性出清晰矢量图 -->
+    <GeometryStructureEditor
+      v-model="geomEditorVisible"
+      :question="q"
+      @saved="onGeometryStructureSaved"
+    />
+
     <el-image-viewer v-if="fullscreenImage" :url-list="[fullscreenImage]" @close="fullscreenImage = ''" />
     <el-dialog v-model="showFullscreenSvg" title="几何矢量图" width="480px" :close-on-click-modal="true" @close="fullscreenSvg = ''">
       <div class="tikz-fullscreen-svg" v-html="fullscreenSvg" style="display:flex;justify-content:center;"></div>
@@ -484,6 +496,8 @@ import { updateQuestion, rejudgeQuestion, recomputeQuestionAnswer, retryGeometry
 import { recognizeAnswer, recognizeQuestion } from '../../../api/answerOCR'
 import { processExamImage } from '../../../utils/imageProcessor'
 import { getGeometryDisplayUrl, getTikzStatus } from '../../../utils/geometryDisplay'
+// [人工兜底重绘] 几何结构编辑器
+import GeometryStructureEditor from './GeometryStructureEditor.vue'
 import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 // 多小问（题组）共享题干展示口径：与错题卡片、重练卷共用同一套实现
@@ -1478,6 +1492,20 @@ const deleteImage = () => {
 }
 
 const retryGeometryLoading = ref(false)
+
+// [人工兜底重绘] 几何结构编辑器开关 + 保存后刷新本地题目（免整页重载）
+const geomEditorVisible = ref(false)
+function onGeometryStructureSaved({ svg, url }) {
+  const question = q.value
+  if (!question) return
+  if (svg) question.clean_geometry_svg = svg
+  if (url) question.clean_geometry_image_url = url
+  question.geometry_manual_override = true
+  question.tikz_status = 'completed'
+  question.display_image_type = question.display_image_type || 'clean'
+  // 刷新展示（displayType/displayImageUrl 由 q 派生）
+  showOriginal.value = false
+}
 
 const handleRetryGeometry = async () => {
   const question = q.value

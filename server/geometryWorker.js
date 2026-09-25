@@ -231,11 +231,11 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
           console.log(`   ✅ [几何Worker] ${shortId}: 视觉复核确认 ${segs.join('、')} 均在原图中 → 放行`)
         } else {
           console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过且复核未确认(${verdict?.reason || '调用失败'}) → ${gate.reasons.join('；')}`)
-          return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+          return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons, structure: validated }
         }
       } else {
         console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过 → ${gate.reasons.join('；')}`)
-        return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons }
+        return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons, structure: validated }
       }
     }
   }
@@ -438,6 +438,18 @@ async function processSingleAsset(asset) {
       } else {
         // 确定性结论：这题没有可重画的图，或题干核对未过 → 退回裁剪原图
         await markNotReconstructable(asset, result.reason, result.detail?.join('；'))
+        // [人工兜底重绘] content_mismatch 被拒时，把模型已抽结构存进 geometry_structure_json，
+        // 供教师端编辑器预载改绘（best-effort，失败不影响回退判定）。
+        if (result.reason === 'content_mismatch' && result.structure) {
+          try {
+            await query(
+              `UPDATE ${TABLES.QUESTION_ASSETS} SET geometry_structure_json = $1::jsonb, updated_at = NOW()\n                 WHERE question_id = $2 AND asset_type = 'geometry_image'`,
+              [JSON.stringify(result.structure), asset.question_id]
+            )
+          } catch (e) {
+            console.warn(`   ⚠️ [几何Worker] ${shortId}: 草稿结构留存失败（不影响回退）: ${e.message.slice(0, 60)}`)
+          }
+        }
       }
       return false
     }
