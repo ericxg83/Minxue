@@ -33,10 +33,10 @@
                与参考答案无关，老师根本不知道它干嘛用。
                实测端到端 5~35s（DB 首次建连 + 答案引擎），loading 文案要明确，
                否则老师对着一个不动的转圈会以为卡死。 -->
-          <el-button size="small" type="primary" plain :loading="recomputeAnswerLoading"
+          <el-button size="small" type="primary" plain :loading="!!recomputeJob?.loading"
             @click="handleRecomputeAnswer">
-            <el-icon v-if="!recomputeAnswerLoading"><MagicStick /></el-icon>
-            {{ recomputeAnswerLoading ? `AI 计算中 ${recomputeAnswerElapsed}s…` : 'AI 重解析' }}
+            <el-icon v-if="!recomputeJob?.loading"><MagicStick /></el-icon>
+            {{ recomputeJob?.loading ? `AI 计算中 ${recomputeJob.elapsed}s…` : 'AI 重解析' }}
           </el-button>
           <template v-if="!editing">
             <el-button size="small" type="primary" plain @click="handleEnterEdit">
@@ -174,13 +174,13 @@
            「什么都没变」的样子。这里把结论留在页面上，尤其「AI 明确说不会」
            这种终态，避免老师反复点、每次白等十几秒还烧额度。 -->
       <el-alert
-        v-if="recomputeAnswerNotice"
-        :title="recomputeAnswerNotice.text"
-        :type="recomputeAnswerNotice.type"
+        v-if="recomputeJob?.notice"
+        :title="recomputeJob.notice.text"
+        :type="recomputeJob.notice.type"
         show-icon
         closable
         class="ops-recompute-notice"
-        @close="recomputeAnswerNotice = null"
+        @close="recomputeJob.notice = null"
       />
 
       <!-- ═══ 完整题目内容（始终可见，不折叠） ═══ -->
@@ -629,8 +629,8 @@ const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
 const showOriginal = ref(false)
 watch(() => q.value?.id, () => {
   showOriginal.value = false
-  // 切题时清掉上一题的重解析结论，避免把 A 题的结果挂在 B 题下面
-  recomputeAnswerNotice.value = null
+  // 重解析结论已按题目 ID 建档存于 store（recomputeJobs），切题无需清理，
+  // 各题结论互不串扰（2026-09-25）
 })
 
 const displayImageUrl = computed(() => {
@@ -740,18 +740,10 @@ const recognizeResult = ref(null)
 const recognizePreviewUrl = ref('')
 let recognizePreviewUrlToRevoke = ''
 
-// 「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题参考答案
-const recomputeAnswerLoading = ref(false)
-// 已用秒数：等待期间显示在按钮上。最坏情况（kimi-k3 限流重试 + 付费通道慢）要等
-// 一分多钟，只给一个不动的「AI 计算中…」老师会以为卡死。
-const recomputeAnswerElapsed = ref(0)
-let recomputeAnswerTimer = null
-// 上一次重解析的结论，常驻在参考答案下方（可手动关掉）。
-// 为什么必须常驻（2026-09-24）：原先只弹一条 3 秒的 ElMessage，老师点完去别处转一圈
-// 回来，toast 早没了、页面上一点痕迹都没有 —— 表现就是「点了没用 / 什么都没变 /
-// 不知道发生了啥」。尤其是「AI 明确说不会」（ai-declined）这种终态，更要说清楚，
-// 否则老师会反复点，每次白等十几秒还烧额度。
-const recomputeAnswerNotice = ref(null)
+// 「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题参考答案。
+// 在途状态 / 计时 / 结论横幅都存在 store 的 recomputeJobs 里、按题目 ID 建档
+// （2026-09-25）：离开批改页再回来 loading 仍在、结论不丢；A 题在算不会污染 B 题的按钮。
+const recomputeJob = computed(() => store.recomputeJobFor(q.value?.id))
 
 // 单题「重新识别」：吃原卷框选裁剪图，重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
 const questionRecognizeDialogVisible = ref(false)
@@ -1111,10 +1103,13 @@ const cancelQuickStudentAnswerEdit = () => {
 }
 // 「AI 重解析」按钮 handler：调答案引擎重算当前题的标准答案。
 // 已存在答案 → 弹确认框（force=true 强制覆盖）；不存在 → 直接跑。
+// 在途状态与结果全部写回 store.recomputeJobs（按题目 ID 建档）：即便老师中途
+// 离开批改页、组件被卸载，这段异步流程仍会跑完并把答案/结论写回 store，
+// 回到页面时按钮继续显示「AI 计算中」、完成后结论常驻该题下方。
 const handleRecomputeAnswer = async () => {
   const question = q.value
   if (!question?.id) return
-  if (recomputeAnswerLoading.value) return
+  if (store.recomputeJobFor(question.id)?.loading) return
   let force = false
   if (question.answer && String(question.answer).trim()) {
     try {
@@ -1128,44 +1123,34 @@ const handleRecomputeAnswer = async () => {
       return
     }
   }
-  recomputeAnswerLoading.value = true
-  recomputeAnswerElapsed.value = 0
-  recomputeAnswerNotice.value = null
-  // 计时器：按钮上显示已用秒数，让老师知道请求还活着（不是卡死）
-  clearInterval(recomputeAnswerTimer)
-  recomputeAnswerTimer = setInterval(() => { recomputeAnswerElapsed.value += 1 }, 1000)
+  const questionId = question.id
+  store.beginRecomputeJob(questionId)
   try {
-    const resp = await recomputeQuestionAnswer(question.id, { force })
+    const resp = await recomputeQuestionAnswer(questionId, { force })
     if (resp?.answer) {
-      question.answer = resp.answer
-      if (resp.analysis) question.analysis = resp.analysis
-      if (typeof resp.is_correct !== 'undefined') question.is_correct = resp.is_correct
-      // 标记来源为 AI，让老师后续能看到「参考答案由 AI 重算」
-      question.answer_source = 'ai'
+      // 答案落到 store 当前题目列表（按 ID 现查，兼容中途切走后列表重载的情况）
+      store.applyRecomputeAnswer(questionId, resp)
       // 同步入册风险标签
       const studentId = store.currentStudent?.id
       if (studentId) clearStudentCaches(studentId)
+      let notice
       if (resp.degraded) {
         // 主模型不可用、答案来自降级通道：绝不给绿色「完成」，否则老师会把它当标准答案
         // 照单全收。后端已同步写入 ai_answer_risk_reason，这里用黄色长提示让老师核一遍。
-        recomputeAnswerNotice.value = {
+        notice = {
           type: 'warning',
           text: `主模型此时不可用，已用降级通道${resp.engine ? '（' + resp.engine + '）' : ''}算出答案，请核对后再用：${String(resp.answer).slice(0, 40)}`
         }
-        ElMessage({
-          type: 'warning',
-          duration: 6000,
-          message: recomputeAnswerNotice.value.text
-        })
       } else {
-        recomputeAnswerNotice.value = {
+        notice = {
           type: 'success',
           text: `AI 重算完成${resp.engine ? '（' + resp.engine + '）' : ''}：${String(resp.answer).slice(0, 40)}`
         }
-        ElMessage.success(recomputeAnswerNotice.value.text)
       }
+      store.finishRecomputeJob(questionId, notice)
+      ElMessage({ type: notice.type, duration: 6000, message: notice.text })
     } else {
-      recomputeAnswerNotice.value = { type: 'warning', text: 'AI 未返回有效答案' }
+      store.finishRecomputeJob(questionId, { type: 'warning', text: 'AI 未返回有效答案' })
       ElMessage.warning('AI 未返回有效答案')
     }
   } catch (err) {
@@ -1180,12 +1165,8 @@ const handleRecomputeAnswer = async () => {
     // error 呈现 —— 这不是系统故障，别让老师以为是坏了、反复重试烧额度。其余错误码
     // （timeout / primary-model-unavailable / db-unavailable）都是「这次没成」，用 error，可稍后重试。
     const declined = err?.payload?.error === 'ai-declined'
-    recomputeAnswerNotice.value = { type: declined ? 'warning' : 'error', text: readable }
+    store.finishRecomputeJob(questionId, { type: declined ? 'warning' : 'error', text: readable })
     ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `AI 重解析：${readable}` })
-  } finally {
-    clearInterval(recomputeAnswerTimer)
-    recomputeAnswerTimer = null
-    recomputeAnswerLoading.value = false
   }
 }
 const saveQuickStudentAnswer = async () => {

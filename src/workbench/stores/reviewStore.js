@@ -1094,6 +1094,57 @@ export const useReviewStore = defineStore('review', () => {
     currentPageIndex.value = 0
   }
 
+  // ── 「AI 重解析」在途任务表（2026-09-25）────────────────────────────
+  // 此前 loading / 计时 / 结论横幅都是 QuestionDetailPanel 的组件级 ref，有两个问题：
+  //   ① 老师离开批改页再回来，组件重建后 loading 消失（后端其实还在跑并会写库），
+  //     表现为「离开页面它就不算了」；
+  //   ② 状态不分题：A 题在算，切到 B 题按钮也显示「正在重解析」。
+  // 改为 store 级、按题目 ID 建档：跨切题、跨页面导航存续，不同题互不串扰，
+  // 且允许多题同时在算。组件卸载后进行中的 Promise 仍会把结果写回这里。
+  const recomputeJobs = ref({}) // questionId -> { loading, elapsed, notice: {type, text} | null }
+  let recomputeTickTimer = null
+  const stopRecomputeTickIfIdle = () => {
+    if (recomputeTickTimer && !Object.values(recomputeJobs.value).some(job => job.loading)) {
+      clearInterval(recomputeTickTimer)
+      recomputeTickTimer = null
+    }
+  }
+  const recomputeJobFor = (questionId) => {
+    if (questionId == null) return null
+    return recomputeJobs.value[questionId] || null
+  }
+  const beginRecomputeJob = (questionId) => {
+    recomputeJobs.value[questionId] = { loading: true, elapsed: 0, notice: null }
+    // 单一秒表给所有在途题计时，全部结束即停，不留空转 interval
+    if (!recomputeTickTimer) {
+      recomputeTickTimer = setInterval(() => {
+        for (const job of Object.values(recomputeJobs.value)) {
+          if (job.loading) job.elapsed += 1
+        }
+      }, 1000)
+    }
+  }
+  const finishRecomputeJob = (questionId, notice) => {
+    const job = recomputeJobs.value[questionId]
+    if (job) {
+      job.loading = false
+      if (notice) job.notice = notice
+    }
+    stopRecomputeTickIfIdle()
+  }
+  // 重解析结果落到「当前题目列表」里的对象：按 ID 现查而不是沿用发起时持有的引用 ——
+  // 老师中途切到别的学生/试卷时 allQuestions 已重载，旧引用改了也白改。
+  // 列表里找不到（如已切走）就不改本地对象，答案已在库里，回来重新拉题自然能看到。
+  const applyRecomputeAnswer = (questionId, resp) => {
+    if (!resp?.answer) return
+    const q = allQuestions.value.find(item => String(item.id) === String(questionId))
+    if (!q) return
+    q.answer = resp.answer
+    if (resp.analysis) q.analysis = resp.analysis
+    if (typeof resp.is_correct !== 'undefined') q.is_correct = resp.is_correct
+    q.answer_source = 'ai'
+  }
+
   // 获取人工复核进度
   const getManualReviewProgress = () => {
     const total = allQuestions.value.length
@@ -1544,6 +1595,11 @@ export const useReviewStore = defineStore('review', () => {
     source,
     setTaskType,
     resetReviewMode,
+    // 「AI 重解析」在途任务（按题目 ID 建档，跨切题/跨页面存续）
+    recomputeJobFor,
+    beginRecomputeJob,
+    finishRecomputeJob,
+    applyRecomputeAnswer,
     // 多页试卷查看
     currentPageIndex,
     currentPaperPages,
