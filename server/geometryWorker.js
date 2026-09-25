@@ -238,6 +238,34 @@ async function processSingleAsset(asset) {
     }
   }
 
+  // ── 兄弟小问文本并入闸门比对（2026-09-25）──
+  // 一张完整配图被复制挂到大题的每个小问行（同 task_id + 同 question_number），但闸门
+  // 默认只比对「parent_stem + 当前小问」→ 原图里为「其它小问」画的点线被误判「多画/题干
+  // 无引用」而回退（实测 09-24 批 34 张 content_mismatch 里 23 张是这种拆行小问）。
+  // 把同题兄弟小问的题干与选项一并纳入出处：只有整道大题（含所有小问）都没提的字母，
+  // 才算模型幻觉。放宽的是「出处来源」，不放宽点线几何一致性校验本身。
+  let gateParentStem = asset.parent_stem || ''
+  try {
+    const { rows: sib } = await query(
+      `SELECT q2.content, q2.options FROM ${TABLES.QUESTIONS} q2
+         JOIN ${TABLES.QUESTIONS} q1 ON q1.id = $1
+        WHERE q2.deleted_at IS NULL
+          AND q2.id <> $1
+          AND q1.task_id IS NOT NULL AND q2.task_id = q1.task_id
+          AND q1.question_number IS NOT NULL AND q2.question_number = q1.question_number`,
+      [asset.question_id]
+    )
+    if (sib.length > 0) {
+      const sibText = sib.map(s => {
+        const opt = Array.isArray(s.options) ? s.options.join(' ') : (s.options || '')
+        return `${s.content || ''} ${opt}`
+      }).join('\n')
+      gateParentStem = [gateParentStem, sibText].filter(Boolean).join('\n')
+    }
+  } catch (e) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 兄弟小问文本读取失败（仅用本行题干比对）:`, e.message)
+  }
+
   // 2.4 内容闸门：流程图 / 数值转换器 / 输入输出表格类配图**不适用几何重绘**
   //     （图内是中文说明文字或分数数值表格；DSL 的 label 通道有意只放行数学符号，
   //      以免手写答案被当成题设文字画进图里）。命中就直接保留原图，且省下模型额度。
@@ -344,7 +372,7 @@ async function processSingleAsset(asset) {
 
   let svg, structure
   try {
-    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content, options, asset.parent_stem)
+    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content, options, gateParentStem)
     if (!result.ok) {
       if (result.retriable) {
         // 模型没遵守输出格式：重试有意义，绝不能锁死成永久 failed
