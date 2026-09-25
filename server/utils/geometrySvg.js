@@ -244,8 +244,25 @@ export function renderGeometrySvg(structure) {
     const a = findCoord(seg?.from)
     const b = findCoord(seg?.to)
     if (!a || !b) continue
+    // 直线模式：沿方向向量向两端各延长 14%，画成穿过两点的直线（l₁/l₂/l₃ 类）
+    let x1 = a.x, y1 = a.y, x2 = b.x, y2 = b.y
+    if (seg.extend) {
+      const dx = x2 - x1, dy = y2 - y1
+      const len = Math.hypot(dx, dy) || 1
+      const ux = dx / len, uy = dy / len
+      const pad = 4
+      // 沿单位方向，分别算 a 反向 / b 正向到画布边的可用距离，取最小，避免延长后越界被裁
+      const distToEdge = (px, py, sx, sy) => {
+        let m = Infinity
+        if (sx > 1e-6) m = Math.min(m, (SVG_W - pad - px) / sx); else if (sx < -1e-6) m = Math.min(m, (pad - px) / sx)
+        if (sy > 1e-6) m = Math.min(m, (SVG_H - pad - py) / sy); else if (sy < -1e-6) m = Math.min(m, (pad - py) / sy)
+        return m === Infinity ? len * 0.14 : m
+      }
+      const ext = Math.max(0, Math.min(len * 0.14, distToEdge(x1, y1, -ux, -uy), distToEdge(x2, y2, ux, uy)))
+      x1 -= ux * ext; y1 -= uy * ext; x2 += ux * ext; y2 += uy * ext
+    }
     parts.push(
-      `<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(b.x)}" y2="${fmt(b.y)}"${strokeDash(seg.style)}/>`
+      `<line x1="${fmt(x1)}" y1="${fmt(y1)}" x2="${fmt(x2)}" y2="${fmt(y2)}"${strokeDash(seg.style)}/>`
     )
 
     // 垂直标记：在交点处画小方块（如果 relation 是 perpendicular 且没有 rightAngles 条目）

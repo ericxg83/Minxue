@@ -113,7 +113,9 @@ export function normalizeStructure(obj) {
       from: seg.from ?? seg.start ?? '',
       to: seg.to ?? seg.end ?? '',
       style: seg.style || 'solid',
-      relation: seg.relation || 'normal'
+      relation: seg.relation || 'normal',
+      // 直线模式：渲染时沿两端各延长一截，画成穿过两点的直线（如平行线 l₁/l₂/l₃）
+      extend: !!(seg.extend || seg.type === 'line')
     }
   }).filter(s => s.from && s.to)
 
