@@ -22,13 +22,14 @@ test('纯文字的相似比例题不出图', () => {
   assert.equal(r.reason, 'no_figure_reference')
 })
 
-test('数轴题即使写了「如图」也不走几何渲染', () => {
-  // 数轴用点线渲染器画出来是一条无意义线段，实测被画成 2 点 1 线
+test('数轴题不再被入口闸门一刀切禁入（改由 worker 质量下限兜底）', () => {
+  // 2026-09-25：渲染器有专门数轴通道（resolveNumberAxisLabels），09-20 前 26 张数轴重绘得很好。
+  // 旧策略因一条"2点1线"就整体禁用，误杀能画好的。现入口放行；
+  // 退化（<3点）由 geometryWorker 的数轴质量下限回退裁片，不在本闸门处理。
   const r = checkFigureReference(
     '如图，数轴上原点为点O，且OA=6，线段OA上是否存在两个点X和Y，使得在1、2、3、4、5、6中任取一个数字a，总可以找到由O、X、Y、A中某两点为端点的线段长为a？'
   )
-  assert.equal(r.ok, false)
-  assert.equal(r.reason, 'number_line')
+  assert.equal(r.ok, true)
 })
 
 test('明确写了「如图」的几何题放行', () => {

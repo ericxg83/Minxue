@@ -217,6 +217,16 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
   // 模型画对的 AC/AD/MP/NP 会被误判"题干中无引用" → content_mismatch 永久拒稿，
   // 白板只能显示模糊原图。与完整性判定「引图判定必须含 parent_stem」同一类问题。
   const gateText = [String(parentStem || ''), String(content || '')].join('\n')
+
+  // ── 数轴质量下限（2026-09-25）──
+  // 数轴已放开重绘（渲染器有专门通道 resolveNumberAxisLabels），但当年那种
+  // "2 点 1 线"的退化图仍会误导。判据：题干含"数轴"但抽出结构 <3 个点（轴+刻度都凑不齐）
+  // → 判无意义，回退裁片（复用 no_figure 确定性结论，不重试）。
+  if (/数轴/.test(gateText) && (validated.points?.length || 0) < 3) {
+    console.log(`   [几何Worker] ${shortId}: 数轴结构过稀(${validated.points?.length || 0}点)，判退化回退裁片`)
+    return { ok: false, reason: 'no_figure', retriable: false }
+  }
+
   if (gateText.trim() || (Array.isArray(options) && options.length > 0)) {
     const gate = validateStructureAgainstContent(validated, gateText, options)
     if (!gate.ok) {

@@ -25,8 +25,12 @@ const FIGURE_REF_RE = /如图|如下图|见图|图中|图\s*[0-9０-９]|图\s*[
  * 放进来只会产出必然失败的假重绘（实测 74 张待重画资产里 44 张是函数图象题）。
  * 坐标系本身保留放行：画在坐标轴上的多边形是渲染器支持的能力。
  */
-const FIGURE_CONTEXT_RE = /折叠|翻折|对折|旋转|作图|网格|方格|小正方形|坐标系|展开图|三视图|扇形|圆锥|正方体|长方体|俯视图|主视图|左视图/
+const FIGURE_CONTEXT_RE = /折叠|翻折|对折|旋转|作图|网格|方格|小正方形|坐标系|数轴|展开图|三视图|扇形|圆锥|正方体|长方体|俯视图|主视图|左视图/
 
+// 数轴不再一刀切禁入（2026-09-25）：渲染器有专门的数轴通道（resolveNumberAxisLabels：
+// 刻度吸附轴、数字等距），实测 09-20 闸门上线前 26 张数轴都重绘得很好。当年只因
+// 一条被画成"2点1线"就整体禁用，误杀了能画好的。现改为放行，退化判定交给
+// geometryWorker 的质量下限（数轴结构 <3 点才回退裁片）。
 const NUMBER_LINE_RE = /数轴/
 
 /**
@@ -64,8 +68,8 @@ export const FIGURE_GATE_MESSAGE = {
 export function checkFigureReference(content, parentStem = '') {
   const text = [String(parentStem || ''), String(content || '')].join('\n')
   if (!text.trim()) return { ok: false, reason: 'no_figure_reference' }
-  // 排除项先于放行项：这两类图渲染器画不出来，题干写没写「如图」都不该进重画。
-  if (NUMBER_LINE_RE.test(text)) return { ok: false, reason: 'number_line' }
+  // 排除项先于放行项：函数图象曲线渲染器画不出。
+  // 数轴不再在此拦截（已移入 FIGURE_CONTEXT_RE 放行，退化由 geometryWorker 质量下限兜底）。
   if (FUNCTION_GRAPH_RE.test(text)) return { ok: false, reason: 'function_graph' }
   if (FIGURE_REF_RE.test(text) || FIGURE_CONTEXT_RE.test(text)) return { ok: true }
   return { ok: false, reason: 'no_figure_reference' }
