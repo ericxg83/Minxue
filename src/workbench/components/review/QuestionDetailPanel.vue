@@ -1496,14 +1496,19 @@ const retryGeometryLoading = ref(false)
 // [人工兜底重绘] 几何结构编辑器开关 + 保存后刷新本地题目（免整页重载）
 const geomEditorVisible = ref(false)
 function onGeometryStructureSaved({ svg, url }) {
-  const question = q.value
+  const idx = store.currentReviewIndex
+  const question = store.allQuestions[idx]
   if (!question) return
-  if (svg) question.clean_geometry_svg = svg
-  if (url) question.clean_geometry_image_url = url
-  question.geometry_manual_override = true
-  question.tikz_status = 'completed'
-  question.display_image_type = question.display_image_type || 'clean'
-  // 刷新展示（displayType/displayImageUrl 由 q 派生）
+  // 必须替换整个对象（新引用），而非只改属性：displayImageUrl/displayType 是
+  // computed，仅改属性不一定触发其重算（实测保存后面板配图不刷新）。
+  store.allQuestions[idx] = {
+    ...question,
+    ...(svg ? { clean_geometry_svg: svg } : {}),
+    ...(url ? { clean_geometry_image_url: url } : {}),
+    geometry_manual_override: true,
+    tikz_status: 'completed',
+    display_image_type: question.display_image_type || 'clean',
+  }
   showOriginal.value = false
 }
 
