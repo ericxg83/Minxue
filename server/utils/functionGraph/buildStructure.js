@@ -33,6 +33,29 @@ export function xInterceptsOf(a, h, k) {
 }
 
 /**
+ * 联立抛物线 y=a(x-h)²+k0 与直线 y=lk·x+lb：ax²-(2ah+lk)x+(ah²+k0-lb)=0。
+ * 必须有两个**不同实根**（题面写明「交于X、Y两点」）；相切/不相交返回 null。
+ * 视野计算（computeView）与复合拼装（lineParabola）共用，两处解必须同源。
+ * @returns {[number,number]|null} 升序两个交点横坐标
+ */
+export function solveLineParabolaRoots(a, h, k0, lk, lb) {
+  if (!Number.isFinite(a) || a === 0 || !Number.isFinite(h) || !Number.isFinite(k0)) return null
+  if (!Number.isFinite(lk) || !Number.isFinite(lb)) return null
+  const A = a
+  const B = -(2 * a * h + lk)
+  const C = a * h * h + k0 - lb
+  const disc = B * B - 4 * A * C
+  if (!(disc > 1e-9)) return null
+  const sq = Math.sqrt(disc)
+  // 数值稳定求根：先取 q = -½(B + sign(B)·√disc)，根为 q/A 与 C/q
+  const q = -0.5 * (B + Math.sign(B || 1) * sq)
+  const r1 = q / A
+  const r2 = C / q
+  if (!Number.isFinite(r1) || !Number.isFinite(r2) || Math.abs(r1 - r2) < 1e-9) return null
+  return r1 < r2 ? [r1, r2] : [r2, r1]
+}
+
+/**
  * 计算视野与采样点。
  *
  * 两个必须守住的约束：
@@ -56,8 +79,14 @@ export function computeView(spec) {
   const named = Array.isArray(spec.curvePoints) ? spec.curvePoints : []
   const roots = xInterceptsOf(a, h, k)
 
+  // 复合构造（抛物线×直线，2026-09-27）：交点与 y 轴截距是窗口的一等锚点。
+  // 交点在骨架窗口外时若强行只画半截直线 = 残图，故把交点 x 纳入 base；
+  // 真解不出（相切/无直线字段）则不参与，行为与旧版逐字相同。
+  const line = spec.line && Number.isFinite(spec.line.k) && Number.isFinite(spec.line.b) ? spec.line : null
+  const lineRoots = line ? solveLineParabolaRoots(a, h, k, line.k, line.b) : null
+
   // ── x 窗口 ──
-  const interesting = [0, ...roots, ...named.map(p => p.x)]
+  const interesting = [0, ...roots, ...named.map(p => p.x), ...(lineRoots || [])]
   const base = Math.max(1, ...interesting.map(x => Math.abs(x - h))) * 1.25
   const cap = 8 / Math.abs(a) // y 跨度上限 ≈ 8 倍 x 跨度
   let half = Math.max(base, Math.abs(h))
@@ -68,7 +97,9 @@ export function computeView(spec) {
   const curve = sampleParabola(a, h, k, xLo, xHi)
 
   // ── y 窗口 ──
-  const ys = curve.map(p => p[1]).concat(named.map(p => p.y))
+  // y 轴截距 (0,b) 与两交点的 y 值是复合构造的一等锚点（B 常在曲线采样高处）
+  const lineYs = line ? [line.b, ...(lineRoots || []).map(x => line.k * x + line.b)] : []
+  const ys = curve.map(p => p[1]).concat(named.map(p => p.y), lineYs)
   let yLo = Math.min(...ys)
   let yHi = Math.max(...ys)
   // x 轴离得不远就纳进来（教材里的抛物线图基本都带 x 轴）

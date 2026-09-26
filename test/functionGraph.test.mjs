@@ -13,6 +13,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseFunctionGraphSpec } from '../server/utils/functionGraph/parseSpec.js'
 import { buildFunctionGraphFromStem, buildFunctionGraphSvg, hasOtherGeometry } from '../server/utils/functionGraph/index.js'
+import { parseLineParabola } from '../server/utils/functionGraph/lineParabola.js'
 import { renderGeometrySvg } from '../server/utils/geometrySvg.js'
 import { xInterceptsOf } from '../server/utils/functionGraph/buildStructure.js'
 
@@ -186,7 +187,7 @@ test('纯度闸门：三角形/辅助线/垂线/平行线必须拦下', () => {
 
 test('纯度闸门：拦下后 buildFunctionGraphSvg 返回 null（回退裁剪原图）', () => {
   const impure = '如图，抛物线 y=2(x-2)² 与平行于 x 轴的直线交于点 A、B，抛物线顶点为 C，△ABC 为等边三角形，求：(3)△ABC的面积.'
-  assert.equal(buildFunctionGraphSvg('', impure, renderGeometrySvg), null, '纯度闸门必须拦下，否则会画出一张缺三角形的残图')
+  assert.equal(buildFunctionGraphSvg('', impure, renderGeometrySvg), null, '直线无显式表达式（平行于x轴），复合构造解不出，必须拦下回退原图')
   // 诊断用途下可绕过纯度闸门（仅统计理论覆盖率，不用于生产）
   assert.ok(buildFunctionGraphSvg('', impure, renderGeometrySvg, { ignorePurity: true }))
 })
@@ -290,4 +291,79 @@ test('曲线上符号点：符号点与带坐标点共存时不冲突', () => {
   const labelMap = new Map(built.structure.points.map(p => [p.label, p]))
   assert.ok(labelMap.has('C') && labelMap.has('D'), 'C(带坐标) 与 D(符号) 都应画出')
   assert.ok(near(labelMap.get('C').y, 3), 'C 应在 y=3')
+})
+
+// ══ 复合构造：抛物线 + 直线（2026-09-27「35条其他」：通道没接上 → 接线） ══
+// 实证题 2c84e156：抛物线 y=(x-2)² 顶点 C，直线 y=2x+4 交抛物线于 A、B，求 △ABC 面积。
+// 旧行为：hasOtherGeometry 一刀切拦回 DSL 目测通道（画不出曲线）→ 内容闸毙 → 长期描摹/裁片。
+// 新行为：交点坐标由联立**解出**，直线/弦/三角形边全部确定性可画 → 通道直接出图。
+
+test('复合解析：直线y=kx+b+交点字母+顶点字母+三角形', () => {
+  const lp = parseLineParabola('如图，已知抛物线 y=(x-2)^2 的顶点为 C，直线 y=2x+4 与抛物线交于 A、B 两点，求 △ABC 的面积.')
+  assert.ok(lp, '应识别为可解复合构造')
+  assert.equal(lp.k, 2)
+  assert.equal(lp.b, 4)
+  assert.deepEqual([lp.l1, lp.l2], ['A', 'B'])
+  assert.equal(lp.vertexLabel, 'C')
+  assert.equal(lp.triangle, true)
+})
+
+test('复合解析：无直线表达式的「平行于x轴的直线」不收（回退旧行为）', () => {
+  assert.equal(parseLineParabola('抛物线 y=2(x-2)^2 与平行于 x 轴的直线交于点 A、B'), null)
+})
+
+test('复合出图：抛物线+直线+△ABC 端到端（交点解数验证）', () => {
+  const stem = '如图，已知抛物线 y=(x-2)² 的顶点为 C，直线 y=2x+4 与抛物线交于 A、B 两点，求 △ABC 的面积.'
+  const built = buildFunctionGraphSvg('', stem, renderGeometrySvg)
+  assert.ok(built, '复合构造应直接出图，不再落回画不出曲线的 DSL 通道')
+  const labelMap = new Map(built.structure.points.map(p => [p.label, p]))
+  // 联立 (x-2)² = 2x+4 → x²-6x=0 → x=0 或 x=6；左交点 A(0,4)、右交点 B(6,16)，顶点 C(2,0)
+  assert.ok(labelMap.has('A') && labelMap.has('B') && labelMap.has('C'), 'A/B/C 三点齐全')
+  assert.ok(near(labelMap.get('A').x, 0) && near(labelMap.get('A').y, 4), `A 应为 (0,4)，实际 (${labelMap.get('A').x},${labelMap.get('A').y})`)
+  assert.ok(near(labelMap.get('B').x, 6) && near(labelMap.get('B').y, 16), `B 应为 (6,16)，实际 (${labelMap.get('B').x},${labelMap.get('B').y})`)
+  assert.ok(near(labelMap.get('C').x, 2) && near(labelMap.get('C').y, 0), 'C 应为顶点 (2,0)')
+  const segKeys = new Set(built.structure.segments.map(s => [s.from, s.to].sort().join('|')))
+  assert.ok(segKeys.has('A|B'), '弦 AB 应画出')
+  assert.ok(segKeys.has('A|C') && segKeys.has('B|C'), '△ABC 两边应连到顶点')
+  assert.ok([...segKeys].some(k => k.includes('_LINE_p1')), '直线本体应画出')
+  // 交点必须在曲线上也在直线上（双约束自洽）
+  for (const lab of ['A', 'B']) {
+    const p = labelMap.get(lab)
+    assert.ok(near(p.y, (p.x - 2) ** 2, 1e-6), `${lab} 在抛物线上`)
+    assert.ok(near(p.y, 2 * p.x + 4, 1e-6), `${lab} 在直线上`)
+  }
+  const svg = built.svg
+  assert.ok(svg && !/NaN/.test(svg), 'SVG 渲染无 NaN')
+})
+
+test('复合拒绝：无实交点（直线在抛物线上方不相交）→ null 回退原图', () => {
+  // y=(x-2)² 开口向上顶点 y=0；直线 y=2x+10：x²-6x+4-10+2… 判别式=( -6)²-4·1·(-4+10-4+…) 一算便知无交点：
+  // (x-2)² = 2x+10 → x²-6x-2=0 有实根——改选 y=(x-2)²+10（顶点 y=10，开口向上）与水平线 y=2 必不相交
+  const built = buildFunctionGraphSvg('', '如图，抛物线 y=(x-2)²+10 与直线 y=2 交于 A、B 两点，求 △ABC 的面积.', renderGeometrySvg)
+  assert.equal(built, null, '无实交点与题面矛盾，必须拒绝不出图')
+})
+
+test('复合拒绝：字母与x轴交点声明冲突 → null', () => {
+  // 同一对字母既声明为 x 轴交点又声明为直线交点（语义打架）→ 拒
+  const built = buildFunctionGraphSvg('', '如图，抛物线 y=x²-2x-3 与 x 轴交于 A、B 两点，直线 y=2x+4 与抛物线交于 A、B 两点，求 △ABC 的面积.', renderGeometrySvg)
+  assert.equal(built, null, '同字母一图两义必须拒绝，不能二选一硬画')
+})
+
+test('复合拒绝：三角形第三点不是顶点（无坐标）→ 不画三角形，但直线/弦照画', () => {
+  // 「连接CD」的 D 无任何坐标依据 → applyLineParabola 不补 D，只画直线+弦（题干点名的构造）
+  const stem = '如图，抛物线 y=(x-2)² 的顶点为 C，直线 y=2x+4 与抛物线交于 A、B 两点，连接 CD.'
+  const lp = parseLineParabola(stem)
+  assert.ok(lp && !lp.triangle, 'D 非顶点 → triangle 应为 false')
+  const built = buildFunctionGraphSvg('', stem, renderGeometrySvg)
+  assert.ok(built, '弦/直线仍可确定性出图')
+  assert.ok(!built.structure.points.some(p => p.label === 'D'), '无坐标依据的 D 不得凭空补画')
+})
+
+test('多曲线/平移题拒绝：第二条曲线位置只在图里 → 画原曲线是把特例当图示（比不出图更误导）', () => {
+  // 实证 b456c04d/0b31b1fa「反碟长」：抛物线 L₁: y=-x² 沿直线平移后得 L₂，配图真身是 L₂
+  const shifted = '定义：如果直线y=-1与开口向下的抛物线有两个交点，那么这两个交点之间的距离叫作这条抛物线的“反碟长”。如图，抛物线L₁：y=-x²随其顶点沿直线y=1/2x平移一定距离后，得到新抛物线L₂，若L₂的反碟长为4，求L₂的表达式'
+  assert.equal(buildFunctionGraphSvg('', shifted, renderGeometrySvg), null, '含「平移/新抛物线」且目标表达式未知 → 拒')
+  // 平移后表达式已知时仍可画（不回归旧能力）
+  const known = '将抛物线 y=x² 平移得到新抛物线 y=(x-1)²-2，画出该函数的图像'
+  assert.ok(buildFunctionGraphSvg('', known, renderGeometrySvg), '平移后表达式已知 → 照常出图', )
 })
