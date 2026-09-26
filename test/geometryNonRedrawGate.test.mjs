@@ -71,6 +71,30 @@ test('四选项函数图象题 → 不重绘（DSL 无多坐标系）', () => {
   assert.equal(r.kind, 'multi_panel_option_graph')
 })
 
+// ────────────────────────── 格点/网格图（2026-09-26 图5事故沉淀） ──────────────────────────
+
+test('格点三等分点（图5原文）→ 不重绘（网格底图丢失）', () => {
+  const r = detectNonGeometryFigure('如图，每个小正方形的边长均为1，点A、B、C均在格点上。请仅用无刻度的直尺作线段BC的三等分点E、F。')
+  assert.equal(r.skip, true)
+  assert.equal(r.kind, 'grid_figure')
+})
+
+test('格点相似三角形题 → 不重绘', () => {
+  const r = detectNonGeometryFigure('如图，每个小正方形的边长均为1，图中三角形的顶点都在格点上。在△ABC、△ABD中与涂色三角形相似的是____')
+  assert.equal(r.skip, true)
+  assert.equal(r.kind, 'grid_figure')
+})
+
+test('正方形网格题 → 不重绘', () => {
+  assert.equal(detectNonGeometryFigure('如图，在正方形网格中，小正方形的边长均为1，△ABC的顶点都在格点上').skip, true)
+})
+
+test('普通「正方形ABCD」题不含格点信号 → 照常重绘（防误伤）', () => {
+  for (const s of ['如图，在正方形ABCD中，E是边BC上一点，连接AE，求∠AEB的度数', '如图，两个相邻的正方形面积分别为4和10，求阴影面积']) {
+    assert.equal(detectNonGeometryFigure(s).skip, false, s)
+  }
+})
+
 // ────────────────────────── 不得跳过（防误伤，比漏判更重要） ──────────────────────────
 
 test('只引用「图2」一处 → 照常重绘', () => {

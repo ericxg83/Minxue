@@ -327,12 +327,18 @@ async function processSingleAsset(asset) {
     }
   }
 
-  // ── 兄弟小问文本并入闸门比对（2026-09-25）──
-  // 一张完整配图被复制挂到大题的每个小问行（同 task_id + 同 question_number），但闸门
-  // 默认只比对「parent_stem + 当前小问」→ 原图里为「其它小问」画的点线被误判「多画/题干
-  // 无引用」而回退（实测 09-24 批 34 张 content_mismatch 里 23 张是这种拆行小问）。
+ // ── 兄弟小问文本并入闸门比对（2026-09-25；2026-09-26 收紧为"共享同一张配图"）──
+  // 一张完整配图被复制挂到大题的每个小问行（同 task_id + 同 question_number + 同一张裁图），
+  // 但闸门默认只比对「parent_stem + 当前小问」→ 原图里为「其它小问」画的点线被误判「多画/
+  // 题干无引用」而回退（实测 09-24 批 34 张 content_mismatch 里 23 张是这种拆行小问）。
   // 把同题兄弟小问的题干与选项一并纳入出处：只有整道大题（含所有小问）都没提的字母，
   // 才算模型幻觉。放宽的是「出处来源」，不放宽点线几何一致性校验本身。
+  //
+  // ⚠️ 2026-09-26 收紧：只按 task_id + question_number 合并会**跨题污染**——同一 task 里
+  // 恰好同号的**两道不同题**（各自的配图不同）会被并进来，把 A 题的"点D在BC上""正方形ABCD"
+  // 强加到 B 题的图上，触发位置/形状规则误杀（实测图2 c6a40e96 被兄弟 af2e7724「Rt△ABC…
+  // 点D在边BC上」误杀、图1 b5ad38fc 被兄弟「正方形ABCD」误杀）。合并的前提本就是"共享同一
+  // 张配图"，故追加 `geometry_image_url` 相等约束：只有真正复制挂同一裁图的兄弟小问才并入。
   let gateParentStem = asset.parent_stem || ''
   try {
     const { rows: sib } = await query(
@@ -341,7 +347,9 @@ async function processSingleAsset(asset) {
         WHERE q2.deleted_at IS NULL
           AND q2.id <> $1
           AND q1.task_id IS NOT NULL AND q2.task_id = q1.task_id
-          AND q1.question_number IS NOT NULL AND q2.question_number = q1.question_number`,
+          AND q1.question_number IS NOT NULL AND q2.question_number = q1.question_number
+          AND q1.geometry_image_url IS NOT NULL
+          AND q2.geometry_image_url = q1.geometry_image_url`,
       [asset.question_id]
     )
     if (sib.length > 0) {

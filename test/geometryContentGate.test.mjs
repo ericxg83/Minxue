@@ -272,3 +272,46 @@ test('extractPointOnSegmentConstraints：三种句式 + 防误伤', async () => 
     []
   )
 })
+
+// ────────────────── 形状约束「闭合成环」前置判据（2026-09-26 图1误杀事故） ──────────────────
+
+test('图1：两三角形顶点碰巧含 A/B/C/D，被兄弟小问「正方形ABCD」污染 → 不得按等边比误杀', () => {
+  // Rt△ABC(AB=3,AC=4) + Rt△DEF：segments 只有 AC/AB/CB + DF/DE/FE，
+  // A/B/C/D 并未连成闭合四边形（缺 BC/CD/DA 中的 CD、DA）。
+  // 旧闸门拿这 4 点当正方形四角、按边长比 2.09:1 拒稿。新判据：不成环 → 豁免形状约束。
+  const structure = {
+    points: [
+      { label: 'A', x: 28, y: 75 }, { label: 'C', x: 10, y: 45 }, { label: 'B', x: 45, y: 45 },
+      { label: 'D', x: 70, y: 85 }, { label: 'F', x: 25, y: 20 }, { label: 'E', x: 90, y: 40 }
+    ],
+    segments: [
+      { from: 'A', to: 'C' }, { from: 'A', to: 'B' }, { from: 'C', to: 'B' },
+      { from: 'D', to: 'F' }, { from: 'D', to: 'E' }, { from: 'F', to: 'E' }
+    ]
+  }
+  // 题干被兄弟小问污染进一句「在正方形ABCD中…」
+  const content = '如图，在Rt△ABC和Rt△DEF中，∠BAC=∠EDF=90°。另：在正方形ABCD中，E是边BC上一点。'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.ok(
+    !r.reasons.some((s) => s.includes('正方形ABCD') && s.includes('边长比')),
+    `A/B/C/D 未连成正方形，不得套等边约束误杀：${r.reasons.join('；')}`
+  )
+})
+
+test('真把正方形画成 2:1 矩形（四边成环）→ 形状约束仍拦住', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 0, y: 0 }, { label: 'B', x: 100, y: 0 },
+      { label: 'C', x: 100, y: 48 }, { label: 'D', x: 0, y: 48 }
+    ],
+    segments: [
+      { from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'D' }, { from: 'D', to: 'A' }
+    ]
+  }
+  const content = '在边长为5的正方形ABCD中，求阴影面积'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.ok(
+    r.reasons.some((s) => s.includes('正方形ABCD') && s.includes('边长比')),
+    `成环且边长比 100:48 失衡，必须仍判正方形误画：${r.reasons.join('；')}`
+  )
+})

@@ -247,11 +247,34 @@ function checkShapeConstraints(structure, content, reasons) {
   }
   const dist = (a, b) => Math.hypot(pmap[a].x - pmap[b].x, pmap[a].y - pmap[b].y)
 
+  // ── 闭合成环前置判据（2026-09-26，图1「正方形ABCD」误杀事故沉淀）──
+  // 旧口径只看「命名的 4 点在不在 pmap 里」就套等边约束。但兄弟小问文本并入闸门比对后，
+  // 一道「Rt△ABC 和 Rt△DEF」的图里 A/B/C/D 四点齐全（分属两个三角形），题干又被污染进
+  // 一句「在正方形ABCD中…」，于是拿这两个三角形的顶点当正方形四角、按等边比 2.09:1 拒稿。
+  // 判据收紧：只有当命名的相邻点对**在重绘 segments 里真连成了闭合多边形**（正方形需
+  // AB/BC/CD/DA 四边、等边三角形需 AB/BC/CA 三边都在），才认定这张图真的在画该形状、
+  // 才套等边约束。点齐但没连成环 = 不是这个形状（或属另一子图/兄弟小问），直接豁免。
+  const segKeys = new Set()
+  for (const s of structure?.segments || []) {
+    if (s?.from && s?.to) segKeys.add([String(s.from), String(s.to)].sort().join('|'))
+  }
+  const closedCycle = (letters) => {
+    const n = letters.length
+    for (let i = 0; i < n; i++) {
+      const a = letters[i]
+      const b = letters[(i + 1) % n]
+      if (!segKeys.has([a, b].sort().join('|'))) return false
+    }
+    return true
+  }
+
   for (const { re, sides, name } of EQUILATERAL_SHAPES) {
     for (const m of String(content).matchAll(re)) {
       const letters = [...m[1].matchAll(/[A-Z][′'’]?/g)].map(x => x[0].replace(/[′'’]/g, '′'))
       if (letters.length !== sides) continue
       if (!letters.every(l => pmap[l])) continue
+      // 未连成闭合多边形 → 这张图并没有在画该形状，跳过（防兄弟小问/跨子图污染误杀）
+      if (!closedCycle(letters)) continue
       const lens = letters.map((l, i) => dist(l, letters[(i + 1) % sides]))
       if (lens.some(v => v < 1e-6)) continue
       const ratio = Math.max(...lens) / Math.min(...lens)
@@ -512,6 +535,17 @@ export function validateStructureAgainstContent(structure, content, options) {
 const FLOWCHART_RE = /(数值|数据)?转换器|流程(图|式)|程序框图|运算程序|计算程序|操作程序|按键程序|算法程序/
 const IO_TABLE_RE = /输入\s*[:：][\s\S]{0,150}?输出\s*[:：]/
 
+// ── 格点/网格图判据（2026-09-26，图5「格点三等分点」丢网格事故沉淀）──
+//
+// 为什么需要：格点题（「每个小正方形的边长均为1，点均在格点上」）的**网格本身就是题设**——
+// 作图、数格子、找格点全靠这张方格底图。而几何 DSL 的坐标空间是连续平面，没有「网格背景」
+// 图元：模型即便定义了 _g1_0…_g4_3 一堆格点，也不会（也没命令去）把整张方格线画出来。
+// 实测 `dc357206`：重绘只剩三角形 + 3 条竖线，网格整块丢失，对学生就是一张错的、无法用的图。
+// 按用户底线「宁可回退原卷裁片，也不发错图」：格点图**一律不重绘**，保留原图（与数轴/统计图同类）。
+// 判据只认强信号（格点/网格/方格纸/「小正方形的边长均为1」），避免误伤普通「正方形ABCD」题。
+const GRID_FIGURE_RE = /格点|网格|方格纸|每个小正方形的边长均?为[1１]|小正方形的边长均为单位1/
+
+
 // ── 多子图/多面板判据（2026-09-21 新增）──
 //
 // 为什么需要：题干形如「小明把…的两个长方形沿对角线剪开，围成**如图2**所示的一个大正方形」
@@ -594,6 +628,13 @@ export function detectMultiPanelFigure(content) {
  */
 export function detectNonGeometryFigure(content) {
   const t = String(content || '')
+  if (GRID_FIGURE_RE.test(t)) {
+    return {
+      skip: true,
+      kind: 'grid_figure',
+      reason: '格点/网格图：网格底图是题设的一部分，几何 DSL 是连续坐标平面、无网格图元，重绘必然丢失方格背景'
+    }
+  }
   if (FLOWCHART_RE.test(t)) {
     return {
       skip: true,
