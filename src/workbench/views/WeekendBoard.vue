@@ -331,7 +331,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import {
   ArrowLeft, ArrowRight, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
 } from '@element-plus/icons-vue'
@@ -598,13 +597,15 @@ onMounted(async () => {
         s => s.kind === 'question' && selSet.has(s.index)
       )
       if (questions.value.length === 0) {
-        ElMessage.warning('没有获取到勾选的题目')
+        // 用页内 hint 而不是 ElMessage：原生全屏时 body 上的 toast 落在
+        // 全屏元素之外，老师根本看不见
+        showHint('没有获取到勾选的题目 — 返回选题页重新勾选', 7000)
         return
       }
       currentIndex.value = 0
       loadStrokes()
     } catch (e) {
-      ElMessage.error('加载题目失败：' + (e.message || '网络错误'))
+      showHint('加载题目失败：' + (e.message || '网络错误'), 8000)
     } finally {
       loading.value = false
     }
@@ -656,10 +657,13 @@ function showHint(text, ms = 4200) {
 function onFullscreenChange() {
   const wasNativeFs = nativeFs.value
   nativeFs.value = !!currentFsElement()
-  // 用户按 Esc 退出浏览器全屏后，同步退出沉浸讲题模式，避免还要再按一次 Esc。
-  if (wasNativeFs && !nativeFs.value) {
-    isImmersive.value = false
-    showTopbar.value = false
+  // 浏览器层全屏被外部因素打断（系统通知、输入法候选框、F11、窗口失焦、
+  // 误触 Esc……）时，讲题模式（沉浸版式）保持不退，只丢掉浏览器外壳。
+  // 原先把两者绑死：任何一次浏览器全屏退出都会把老师踹回工作台布局 ——
+  // 这就是「全屏老是退出」。真正想结束讲题：再按一次 Esc（下方 keydown
+  // 处理）或点顶栏「退出全屏」。
+  if (wasNativeFs && !nativeFs.value && isImmersive.value) {
+    showHint('浏览器全屏已退出，讲题版式仍保持 · 按 Esc 或点「退出全屏」结束')
   }
 }
 function onBoardMouseMove(e) {
@@ -667,11 +671,13 @@ function onBoardMouseMove(e) {
   if (e.clientY <= 18) showTopbar.value = true
   else if (e.clientY > 90) showTopbar.value = false
 }
-// ── 顶部下拉手势：从屏幕顶部往下拉唤出控制条，继续下拉退出全屏 ──
+// ── 顶部下拉手势：从屏幕顶部往下拉唤出控制条 ──
+// 刻意不做「继续下拉退出全屏」：白板顶端就是书写区，写字时手掌 / 手指从
+// 上边缘滑过就会被当成下拉手势，把全屏直接拉出去（「全屏老是退出」的主因）。
+// 退出全屏只走两条明确路径：Esc 键、顶栏「退出全屏」按钮（下拉即出）。
 const topPull = ref(null)
 let topPullTimer = null
-const TOP_PULL_EXIT = 110 // 下拉超过该距离视为退出全屏
-const TOP_PULL_SHOW = 36 // 下拉超过该距离先唤出控制条
+const TOP_PULL_SHOW = 36 // 下拉超过该距离唤出控制条
 function onBoardPointerDown(e) {
   if (e.pointerType !== 'touch' || !isImmersive.value) return
   if (topPull.value) return
@@ -689,11 +695,6 @@ function onBoardPointerUp(e) {
   if (!g || e.pointerId !== g.id) return
   topPull.value = null
   const dy = e.clientY - g.y
-  const dt = Date.now() - g.t
-  if (dy >= TOP_PULL_EXIT && dt <= 900) {
-    exitFullscreenMode()
-    return
-  }
   if (dy <= TOP_PULL_SHOW) {
     showTopbar.value = isTouchDevice.value ? false : true
     return
@@ -731,9 +732,13 @@ async function enterFullscreenMode() {
   showTopbar.value = false
   // 进入时先不播收起动画，避免顶栏从常驻位置跳到悬浮位置造成画面跳动
   suppressTopbarTransition.value = true
-  const ok = await enterNativeFs()
   const el = boardPageRef.value || document.documentElement
-  if (!ok && !(el.requestFullscreen || el.webkitRequestFullscreen)) {
+  const fn = el.requestFullscreen || el.webkitRequestFullscreen
+  if (fn) {
+    const ok = await enterNativeFs()
+    // 讲题版式已生效，原生全屏失败只提示不阻断（例如被浏览器策略拦截）
+    if (!ok) showHint('浏览器没有进入全屏（可能被拦截），讲题版式已生效')
+  } else {
     showHint('已进入讲题模式。iOS 可点「分享 → 添加到主屏幕」，从主屏打开即无浏览器边框。', 7000)
   }
   await nextTick()
@@ -746,6 +751,8 @@ async function exitFullscreenMode() {
   suppressTopbarTransition.value = false
 }
 function toggleFullscreen() {
+  // 吃掉按钮焦点：全屏后按空格 / 回车不应再次触发这个按钮（误退全屏）
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   if (isFsOn.value) exitFullscreenMode()
   else enterFullscreenMode()
 }
@@ -920,7 +927,10 @@ function onKeydown(e) {
       e.preventDefault(); gotoQuestion(viewQuestions.value.length - 1, 1); break
     case 'a': case 'A': toggleAnswer(); break
     case 'o': case 'O': toggleOriginal(); break
-    case 'f': case 'F': toggleFullscreen(); break
+    case 'f': case 'F':
+      // 长按 f 会连续翻转全屏，看起来就像「全屏自己退了」
+      if (!e.repeat) toggleFullscreen()
+      break
     case 'z': case 'Z': undo(); break
     case 'u': case 'U': toggleUnTaughtOnly(); break
     case 'r': case 'R': resumeLecture(); break
@@ -964,7 +974,7 @@ function toggleUnTaughtOnly() {
   if (!unTaughtOnly.value) {
     const list = questions.value.filter(q => marks.isUnTaught(q))
     if (list.length === 0) {
-      ElMessage.info('没有未讲的题了 —— 全部都已讲过或已跳过')
+      showHint('没有未讲的题了 —— 全部都已讲过或已跳过')
       return
     }
     unTaughtOnly.value = true
@@ -994,7 +1004,8 @@ function resumeLecture() {
   const list = viewQuestions.value
   const idx = list.findIndex(q => marks.isUnTaught(q))
   if (idx < 0) {
-    ElMessage.info('这份题单已经全部讲过了')
+    // 页内 hint：ElMessage 挂在 body 上，原生全屏时看不见
+    showHint('这份题单已经全部讲过了')
     return
   }
   gotoQuestion(idx)
