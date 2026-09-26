@@ -69,6 +69,23 @@ export function isDegenerateGeometrySvg(svg) {
  * 服务端已经在裁剪原图上判不出几何结构，再展示出来只会把错东西端给用户。
  * 其他 'none' 原因（派生点未解 / 题干引用不符）保留裁剪原图展示，让用户至少能看到图。
  *
+ * ⚠️ 该闸门只拦**原始裁片回退**，位置在优先级 6 之前（2026-09-26 下移）。
+ *
+ * 下移前的写法是把它放在优先级 0（紧跟 manual_override），无条件 return none。
+ * 实测全库 229 道引图错题，它一刀切挡住 14 道，其中 11 道裁片经目检完全可用
+ * （数轴 / A₀ 折纸示意 / 加密流程图 / 3×3 格点图 / △ABC …），另 3 道是裁到了学生手写，
+ * 已用视觉重新定位修好。根因是**判据偷换了命题**：
+ *   原意「服务端在裁剪原图上判不出几何结构 ⇒ 这张裁片不可信」
+ *   实际「重绘通道（DSL 构造式）判不出可重绘结构」——数轴/统计图/流程图/折纸本来就不属于
+ *   DSL 的图元范畴，判不出来是**通道能力边界**，不是裁片有问题。
+ * 且该闸门在优先级 1~5 之前，会把上游**已经产出并验证过**的干净产物一起吞掉
+ * （clean_geometry_svg / clean_geometry_image_url 都是独立产物，与裁片可信度无关）。
+ * 本函数已有的先例是同层的 `geometry_manual_override`（人工背书优先于闸门）——
+ * 这次是把同一条原则贯彻到所有上游产物。
+ *
+ * ⛔ 不得因此把闸门整体删掉：`仅剩原始裁片` 且判「无可重绘」的题仍必须挡住。
+ * 回归测试 test/geometryDisplayNonRedrawGate.test.mjs 锁定这两个方向。
+ *
  * ⚠️ 画残的 SVG（见 isDegenerateGeometrySvg）跳过，继续沿优先级往下找 ——
  * 「一张几乎空白的图」比「裁剪原图」更误导人。
  */
@@ -79,13 +96,6 @@ export function getGeometryDisplayUrl(question) {
   // 该分支同时保证：即便几何重建已经产出 SVG，只要老师覆盖了配图，就用老师的。
   if (question.geometry_manual_override && question.geometry_image_url) {
     return { url: question.geometry_image_url, type: 'raw' }
-  }
-
-  // 服务端已结论：原图根本不是几何结构（实物/统计图/数轴），裁剪图不可信
-  if (question.tikz_status === 'none'
-    && typeof question.asset_last_error === 'string'
-    && /无可重绘的几何结构/.test(question.asset_last_error)) {
-    return { url: null, type: 'none' }
   }
 
   // 1. clean_geometry_svg 是干净 SVG 源码 → 内联渲染（新主流程）
@@ -109,12 +119,20 @@ export function getGeometryDisplayUrl(question) {
     return { url: question.clean_geometry_image_url, type: 'tikz_code' }
   }
 
-  // 5. clean_geometry_image_url 是 URL（第一阶段旧数据）
+  // 5. clean_geometry_image_url 是 URL（第一阶段旧数据 / 矢量化描摹产物）
   if (question.clean_geometry_image_url) {
     return { url: question.clean_geometry_image_url, type: 'clean' }
   }
 
-  // 6. 回退到原始裁剪几何图（仅当 tikz_status 不是"无可重绘"时；上面已拦）
+  // 6. 服务端已结论：原图根本不是几何结构（实物/统计图/数轴），裁剪图不可信
+  //    ⚠️ 只拦到这里的原始裁片；上面 1~5 的独立产物不受影响（见函数头注释）
+  if (question.tikz_status === 'none'
+    && typeof question.asset_last_error === 'string'
+    && /无可重绘的几何结构/.test(question.asset_last_error)) {
+    return { url: null, type: 'none' }
+  }
+
+  // 7. 回退到原始裁剪几何图
   if (question.geometry_image_url) {
     return { url: question.geometry_image_url, type: 'raw' }
   }
