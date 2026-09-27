@@ -283,7 +283,7 @@ export async function buildHandout(opts) {
     const scopeTaskIds = [...new Set(rows.map(r => r.q_task_id).filter(Boolean))]
     if (scopeTaskIds.length) {
       const { rows: subRows } = await pool.query(
-        `SELECT task_id, question_number, sub_no, parent_stem, content,
+        `SELECT id, task_id, question_number, sub_no, parent_stem, content,
                 answer, is_correct, page_number
            FROM questions
           WHERE task_id = ANY($1::uuid[])
@@ -463,20 +463,40 @@ export async function buildHandout(opts) {
       const re = new RegExp(`^\\s*[（(]\\s*${subNo}\\s*[）)]\\s*`)
       return String(content || '').replace(re, '')
     }
-    const subParts = subItems.map(x => ({ subNo: x.sub_no, content: stripSubPrefix(x.sub_no, x.content) }))
+    const subParts = subItems.map(x => ({
+      subNo: x.sub_no,
+      content: stripSubPrefix(x.sub_no, x.content),
+      // 每个小问行各自的题目 id 与答案：供预览页「内联编辑原题」按行定位落库
+      questionId: x.id || null,
+      answer: String(x.answer || '').trim(),
+    }))
     let stem
     if (wholeItem) stem = wholeItem.content
     else if (subItems.length > 1) stem = subItems.map(x => `(${x.sub_no})${stripSubPrefix(x.sub_no, x.content)}`).join('')
     else if (subItems.length === 1) stem = subItems[0].content
     else stem = group.map(x => x.content).find(Boolean) || ''
-    const answer = group.map(x => x.answer || '').filter(Boolean).sort((a, b) => b.length - a.length)[0] || ''
+    // 多小问答案合并（2026-09-27 修复「参考答案只有第一问」）：
+    // 旧实现 `group...sort(by length)[0]` 只取组内最长的一条答案，当一道题被拆成
+    // (1)(2)(3) 多个小问行、每行各带自己的答案时只会保留其中一问（往往是最长那条），
+    // 其余小问答案全部丢失 → 预览/白板只显示一问答案。
+    // 新策略：整题行（sub_no 为空）若已给全（长度不劣于各小问答案之和）则优先用它，
+    // 避免与分小问答案重复；否则按小问顺序拼接，每段带 (n) 标号。
+    const wholeAns = String(wholeItem?.answer || '').trim()
+    const subAnsList = subParts.filter(p => p.answer)
+    const subAnsTotal = subAnsList.reduce((s, p) => s + p.answer.length, 0)
+    let answer
+    if (subAnsList.length > 1 && (!wholeAns || wholeAns.length < subAnsTotal)) {
+      answer = subAnsList.map(p => `(${p.subNo}) ${p.answer}`).join('\n')
+    } else {
+      answer = group.map(x => x.answer || '').filter(Boolean).sort((a, b) => b.length - a.length)[0] || ''
+    }
     const memberSubs = [...new Set(members.map(m => m.sub_no).filter(Boolean))]
     const mergedSubNos = subParts.map(x => String(x.subNo))
     const missingSubs = memberSubs.filter(s => !mergedSubNos.includes(String(s)))
     if (missingSubs.length) {
       log(`   [合并] ${gKey} 缺小问: 组内=${mergedSubNos.join('/') || '整题'} 错题涉及=${missingSubs.join('/')} — 渲染端会标注「见原卷图」`)
     }
-    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, numberCollision: false }
+    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, wholeQuestionId: wholeItem?.id || null, numberCollision: false }
   }
 
   /**
@@ -611,6 +631,8 @@ export async function buildHandout(opts) {
       topics.push({
         key,
         questionId: primary.q_id,
+        // 整题行（sub_no 为空）的题目 id：单题编辑时优先落这条，缺则回落 primary
+        wholeQuestionId: complete.wholeQuestionId || null,
         questionNumber: primary.question_number ?? primary.question_no ?? null,
         // 本题所有错题行里最近一次的 added_at（毫秒）。仅用于白板「讲完还错」判据：
         // 与 teaching_marks.taught_at 比较，晚于它说明讲完之后学生又错了 → 建议回炉。
@@ -903,6 +925,10 @@ export async function buildHandout(opts) {
         tierLabel: tier.label,
         questionNumber: t.questionNumber,
         questionType: t.questionType,
+        // 供预览页「内联编辑原题」定位落库：单题走 questionId/wholeQuestionId，
+        // 多小问走 subParts[].questionId（逐行改）。
+        questionId: t.questionId || null,
+        wholeQuestionId: t.wholeQuestionId || null,
         typeLabel: QTYPE_LABEL[t.questionType] || t.questionType || '',
         difficulty: t.difficulty,
         diffValues: t.diffValues,

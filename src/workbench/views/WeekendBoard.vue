@@ -135,7 +135,14 @@
             <transition name="ans-pop">
               <div v-if="showAnswer" class="answer-layer">
                 <div class="ans-title">参考答案{{ current.answerSourceLabel ? ' · ' + current.answerSourceLabel : '' }}</div>
-                <div class="ans-body"><MathRender :content="current.answer || '参考答案暂缺 — 讲前请人工补'" auto-detect :force-inline="answerIsShort" /></div>
+                <div class="ans-body">
+                  <template v-if="answerLines.length > 1">
+                    <div v-for="(ln, i) in answerLines" :key="i" class="ans-line">
+                      <MathRender :content="ln" auto-detect :force-inline="true" tag="span" />
+                    </div>
+                  </template>
+                  <MathRender v-else :content="current.answer || '参考答案暂缺 — 讲前请人工补'" auto-detect :force-inline="answerIsShort" />
+                </div>
                 <div v-if="current.answerRisk" class="ans-risk">⚠ {{ current.answerRisk }}</div>
               </div>
             </transition>
@@ -491,6 +498,8 @@ const showOptions = computed(() => {
 // 短答案（选择题字母、数值）保持行内排版：纯数学内容会被 renderContent 标成
 // 独立公式，一个「A」会渲染成居中放大的斜体 A，既不像卷面也不像答案。
 const answerIsShort = computed(() => String(current.value?.answer || '').trim().length <= 20)
+// 多小问拼接答案（后端以「(n) …\n」下发）逐行渲染，避免换行被 HTML 折叠成一坨
+const answerLines = computed(() => String(current.value?.answer || '').split('\n').map(s => s.trim()).filter(Boolean))
 
 // 选项排布：中考卷面短选项（≤4 条、单条 ≤14 字）走两列，长选项单列铺满
 const optionsCompact = computed(() => {

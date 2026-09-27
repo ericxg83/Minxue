@@ -231,6 +231,12 @@
                     ⚠ 缺小问 {{ q.missingSubs.join('/') }}
                   </span>
                   <span v-if="!q.hasAnswer" class="item-no-answer">答案暂缺</span>
+                  <button
+                    class="item-edit-btn"
+                    :class="{ 'item-edit-btn--off': !canEdit(q) }"
+                    :title="canEdit(q) ? '订正识别错误的题干 / 参考答案' : '本题无对应题库题目行，暂不支持编辑'"
+                    @click="openEdit(q)"
+                  >✎ 编辑原题</button>
                 </div>
                 <div class="item-stem">
                   <MathRender v-if="q.parentStem" :content="q.parentStem" auto-detect tag="span" />
@@ -260,7 +266,15 @@
                 </div>
                 <div class="item-answer" v-if="withAnswer">
                   <span class="ans-label">参考答案</span>
+                  <!-- 多小问拼接答案（每段 (n) …，以换行分隔）逐行渲染，
+                       避免 HTML 把 \n 折叠成空格、几问答案挤成一坨 -->
+                  <template v-if="answerLines(q).length > 1">
+                    <div v-for="(ln, i) in answerLines(q)" :key="i" class="ans-line">
+                      <MathRender class="ans-text" :content="ln" auto-detect :force-inline="true" tag="span" />
+                    </div>
+                  </template>
                   <MathRender
+                    v-else
                     class="ans-text"
                     :content="q.answer || '（库里为空，讲前请人工补）'"
                     auto-detect
@@ -281,6 +295,43 @@
         title="还没有题单"
         description="设置上方的年级、时段与学生范围，点击「预览题单」聚合错题。"
       />
+
+      <!-- 内联编辑原题：发现某题数学/字母识别错误时，就地订正题干与参考答案。
+           多小问逐小问行写回各自题目行；单题写回整题行。仅改题库题目，不动错题记录。 -->
+      <el-dialog
+        v-model="editVisible"
+        title="订正原题（题干 / 参考答案）"
+        width="640px"
+        :close-on-click-modal="false"
+        append-to-body
+      >
+        <div v-if="editDraft" class="edit-form">
+          <p v-if="editDraft.parentStem" class="edit-parent">
+            公共题干：<MathRender :content="editDraft.parentStem" auto-detect tag="span" />
+          </p>
+          <template v-if="editDraft.mode === 'multi'">
+            <div v-for="(s, i) in editDraft.subs" :key="s.questionId || i" class="edit-block">
+              <div class="edit-label">（{{ s.subNo }}）小问题干</div>
+              <el-input v-model="s.content" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" />
+              <div class="edit-label">（{{ s.subNo }}）参考答案</div>
+              <el-input v-model="s.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 4 }" />
+            </div>
+          </template>
+          <template v-else>
+            <div class="edit-block">
+              <div class="edit-label">题干</div>
+              <el-input v-model="editDraft.single.content" type="textarea" :autosize="{ minRows: 2, maxRows: 8 }" />
+              <div class="edit-label">参考答案</div>
+              <el-input v-model="editDraft.single.answer" type="textarea" :autosize="{ minRows: 1, maxRows: 6 }" />
+            </div>
+          </template>
+          <p class="edit-tip">修改会写回题库对应题目行，仅订正识别错误，不影响错题记录与判题审计。</p>
+        </div>
+        <template #footer>
+          <el-button @click="editVisible = false">取消</el-button>
+          <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
+        </template>
+      </el-dialog>
     </div>
   </div>
 </template>
@@ -290,7 +341,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Download, MagicStick, Reading, Search } from '@element-plus/icons-vue'
-import { apiRequest } from '../../services/apiService'
+import { apiRequest, updateQuestion } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -487,6 +538,93 @@ function toggleQuestion(idx, val) {
 }
 function toggleAll(val) {
   selected.value = val ? new Set(questionSlides.value.map(q => q.index)) : new Set()
+}
+
+// ── 多小问拼接答案逐行渲染 ──
+/** 后端把多小问答案以「(n) …\n」拼接下发；按换行拆成多行，供预览逐行展示 */
+function answerLines(q) {
+  return String(q?.answer || '')
+    .split('\n')
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+// ── 内联编辑原题 ──
+const editVisible = ref(false)
+const editSaving = ref(false)
+const editDraft = ref(null)
+let editTargetQ = null
+
+/** 是否可编辑：多小问需至少一个小问行有 questionId；单题需整题行或 primary 题目 id */
+function canEdit(q) {
+  const subs = (q?.subParts || []).filter(s => s.questionId)
+  if (subs.length > 1) return true
+  return !!(subs[0]?.questionId || q?.wholeQuestionId || q?.questionId)
+}
+
+function openEdit(q) {
+  if (!canEdit(q)) {
+    ElMessage.warning('本题无对应题库题目行（练习册自包含错题），暂不支持编辑')
+    return
+  }
+  editTargetQ = q
+  const subs = (q.subParts || []).filter(s => s.questionId)
+  if (subs.length > 1) {
+    editDraft.value = {
+      mode: 'multi',
+      parentStem: q.parentStem || '',
+      subs: subs.map(s => ({ questionId: s.questionId, subNo: s.subNo, content: s.content || '', answer: s.answer || '' })),
+    }
+  } else {
+    // 单题：优先写回唯一小问行 / 整题行，缺则回落 primary
+    const id = subs[0]?.questionId || q.wholeQuestionId || q.questionId
+    editDraft.value = {
+      mode: 'single',
+      parentStem: q.parentStem || '',
+      single: { questionId: id, content: q.stem || '', answer: q.answer || '' },
+    }
+  }
+  editVisible.value = true
+}
+
+async function saveEdit() {
+  const d = editDraft.value
+  if (!d || !editTargetQ) return
+  editSaving.value = true
+  try {
+    if (d.mode === 'multi') {
+      for (const s of d.subs) {
+        await updateQuestion(s.questionId, { content: s.content, answer: s.answer })
+      }
+      // 本地同步：回写各小问 content/answer，并按分小问规则重建展示答案
+      for (const s of d.subs) {
+        const sp = (editTargetQ.subParts || []).find(x => x.questionId === s.questionId)
+        if (sp) { sp.content = s.content; sp.answer = s.answer }
+      }
+      const joined = d.subs
+        .filter(s => String(s.answer).trim())
+        .map(s => `(${s.subNo}) ${String(s.answer).trim()}`)
+        .join('\n')
+      if (joined) { editTargetQ.answer = joined; editTargetQ.hasAnswer = true }
+    } else {
+      await updateQuestion(d.single.questionId, { content: d.single.content, answer: d.single.answer })
+      editTargetQ.stem = d.single.content
+      editTargetQ.answer = d.single.answer
+      editTargetQ.hasAnswer = !!String(d.single.answer).trim()
+      // 若单题实为唯一小问行，同步 subParts[0] 以免重渲染取到旧值
+      const sp0 = (editTargetQ.subParts || [])[0]
+      if (sp0 && sp0.questionId === d.single.questionId) {
+        sp0.content = d.single.content
+        sp0.answer = d.single.answer
+      }
+    }
+    ElMessage.success('已保存，题库原题已订正')
+    editVisible.value = false
+  } catch (e) {
+    ElMessage.error('保存失败：' + (e.message || '网络错误'))
+  } finally {
+    editSaving.value = false
+  }
 }
 
 // ── 预览 ──
@@ -864,5 +1002,59 @@ async function runGenerate() {
   font-size: 11px;
   color: #b45309;
   margin-left: 8px;
+}
+/* 多小问拼接答案逐行 */
+.ans-line {
+  display: block;
+}
+/* 内联编辑入口：靠题目标签行右侧，不抢主视觉 */
+.item-edit-btn {
+  margin-left: auto;
+  align-self: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--wb-primary, #6366f1);
+  background: transparent;
+  border: 1px solid var(--wb-primary, #6366f1);
+  padding: 3px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.item-edit-btn:hover {
+  background: #eef2ff;
+}
+.item-edit-btn--off {
+  color: #94a3b8;
+  border-color: #cbd5e1;
+  cursor: not-allowed;
+}
+.item-edit-btn--off:hover {
+  background: transparent;
+}
+/* 编辑弹窗表单 */
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.edit-parent {
+  margin: 0;
+  font-size: 13px;
+  color: var(--wb-text-secondary, #64748b);
+}
+.edit-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.edit-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--wb-text, #1e293b);
+}
+.edit-tip {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
 }
 </style>
