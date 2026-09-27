@@ -240,7 +240,10 @@ export function normalizeStructure(obj) {
   if (vtxLabels.size) {
     labels = labels.filter(l => !(l?.text && vtxLabels.has(String(l.text).trim())))
   }
-  labels = labels.filter(l => isSymbolLabel(l?.text))
+  // isSymbolLabel 过滤是针对「视觉模型输出」的信任边界：拦模型把手写文字抄进图。
+  // 确定性构造管线（scripts/construct-*.mjs）的标注是人工对照原卷核实过的常量，
+  // 用 verified: true 显式声明信任级别后绕过该过滤（默认无该字段，行为不变）。
+  labels = labels.filter(l => l?.verified === true || isSymbolLabel(l?.text))
 
   return {
     points,

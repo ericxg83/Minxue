@@ -615,5 +615,9 @@ function arcPathD(arc, findCoord, radiusPx) {
     ? { x: c.x + r * Math.cos(angB), y: c.y - r * Math.sin(angB) }
     : b
 
-  return `M ${fmt(start.x)} ${fmt(start.y)} A ${fmt(r)} ${fmt(r)} 0 ${largeArc} 1 ${fmt(end.x)} ${fmt(end.y)}`
+  // sweep 必须是 0：delta 是数学坐标下的逆时针角，而数学逆时针在屏幕上（y 已翻转）
+  // 是视觉逆时针，对应 SVG sweep=0。曾误写 1 导致圆心被镜像到弦的另一侧，
+  // 所有 <180° 的弧都画在错误一侧（2026-09-27 由 622afd21 构造图实证，此前库内
+  // 从未有成功发布的弧，零回溯影响——见 test/geometryArcSweep.test.mjs）。
+  return `M ${fmt(start.x)} ${fmt(start.y)} A ${fmt(r)} ${fmt(r)} 0 ${largeArc} 0 ${fmt(end.x)} ${fmt(end.y)}`
 }
