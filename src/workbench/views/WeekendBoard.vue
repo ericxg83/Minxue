@@ -210,6 +210,16 @@
             <el-icon><Delete /></el-icon>
           </button>
         </div>
+        <!-- 板书上下平移：写到接近底边会自动向下生长跟随笔尖，这里负责「回看已写内容」。
+             与题干阅读滚动（q-body 自滚）互不干扰。 -->
+        <div class="tool-group">
+          <button type="button" class="tool-btn" title="板书上翻（回看已写内容）" @click="panBoard(-1)">
+            <el-icon><ArrowUp /></el-icon>
+          </button>
+          <button type="button" class="tool-btn" title="板书下翻" @click="panBoard(1)">
+            <el-icon><ArrowDown /></el-icon>
+          </button>
+        </div>
         <div class="tool-group">
           <button
             type="button"
@@ -332,7 +342,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, ArrowRight, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
@@ -961,6 +971,12 @@ function clearAll() {
   currentStrokes.value = []
   saveStrokes()
 }
+// 板书上下平移（dir=-1 上翻 / dir=1 下翻），委托给画布的虚拟滚动
+function panBoard(dir) {
+  const el = questionWrapRef.value
+  const step = Math.max(200, (el?.clientHeight || 600) * 0.8)
+  canvasRef.value?.panBoard(dir * step)
+}
 function toggleAnswer() {
   showAnswer.value = !showAnswer.value
   // 点开参考答案 = 「这题讲完了，对一下答案」的强信号
@@ -1313,7 +1329,9 @@ onBeforeUnmount(() => {
 .question-layer {
   position: absolute;
   inset: 0;
-  padding: 22px 28px;
+  /* 右侧预留工具栏宽度（颜色/触笔栏 absolute 悬浮在面板右缘，宽≈46px +
+     right:12px 偏移 + 安全间距）：长题干排到右边缘时不会被工具栏白底盖住。 */
+  padding: 22px 72px 22px 28px;
   z-index: 1;
   /* 纵向两区：题干区（自己滚）+ 配图区（吃剩余高度）。外层不再滚动——
      原来是「整层滚动」、配图排在末尾，屏幕一矮就被推到折线以下，看着就是被裁掉了。 */

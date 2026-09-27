@@ -256,6 +256,8 @@ html, body {
   padding: 0;
   overflow: hidden;
   height: 100%;
+  /* 关闭橡皮筋回弹：iPad 主屏 Web App 下防止整页被横向拖动/回弹（白板左右漂）。 */
+  overscroll-behavior: none;
 }
 
 body {

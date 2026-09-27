@@ -2,7 +2,13 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- 锁死缩放 + viewport-fit=cover + 禁双击缩放：iPad「添加到主屏幕」全屏打开时，
+         可缩放/回弹会让整块页面左右漂移。配合全局 overscroll-behavior:none 固定页面。 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="敏学工作台" />
     <title>敏学成长工作台</title>
     <link rel="icon" type="image/png" href="/icon-192x192.png" />
   </head>
