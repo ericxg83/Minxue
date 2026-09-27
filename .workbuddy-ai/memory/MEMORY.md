@@ -21,6 +21,21 @@
 
 ## 4. 几何重画（详情 topics/geometry-pipeline）
 - 强制 DSL 构造式通道（forceDsl）；DSL 成功后直接用 `correctDslByVision` 返回的 structure，禁二次 executeDsl。
+- 配图显示唯一入口 `getGeometryDisplayUrl`（`src/utils/geometryDisplay.js`，**无 server 镜像副本**）。
+  ⛔ 「无可重绘的几何结构」闸门已从优先级 0 **下移到原始裁片回退之前**（2026-09-26）：它原判的是
+  「DSL 重绘通道判不出可重绘结构」（数轴/统计图/流程图/折纸本就不在 DSL 范畴），却把上游已验证的
+  `clean_geometry_svg`/`clean_geometry_image_url` 一起吞掉。现只拦「仅剩原始裁片」的题，闸门没删。
+- 出图通道（互补，别混）：① 视觉 JSON→`renderGeometrySvg` ② DSL 构造式+视觉闭环 ③ **裁片矢量化描摹**
+  （`utils/figureVectorize.js`，忠实不构造，只适用于原图本身就对；去不了手写）④ 原图高清重裁
+  （`utils/figureCropHiRes.js`，框仍在 1800px 压缩页上算、再映射回原图坐标）。
+- ⛔ 视觉定位配图框的两个硬事实：① 模型框会被 `figureRegionRefiner` 误伤（格点图+学生作图墨迹
+  覆盖率 21.5% > `MAX_INK_COVERAGE=0.14` 被判「文字带」）——不放松生产闸门，走 `FIGURE_REFINE=0`
+  + 已人工目检的框；② **视觉模型非确定性**（同题两次框不同）⇒「先目检再 apply」必须用 plan 复用同一个框。
+- ⛔ 判「裁片好不好」没有确定性判据（14 条实测全部 `isFigureBand=true`、连通域/占比两组重叠）
+  ⇒ 只能视觉定位 + 人工目检；**缩略图会误判，必须放大再看**（2026-09-26 三次初判可疑全部翻案）。
+- 存量脏重绘图（图上印内部变量名，绕过 `isVertexSymbolLabel`）走 `scripts/retract-dirty-figures.mjs`；
+  判据分 definite（自动作废）/ suspect（只列清单交人工，`C1` 可能是 `C₁` 的 ASCII 写法）两档。
+- 当前状态（2026-09-26 收工）：229 道引图错题 **100% 出图**（158 内联 SVG + 71 矢量化 clean URL）。
 
 ## 5. 本地开发环境（详情 topics/local-dev-process）
 - ⛔ 入口第一行必 `import './loadEnv.js'`（ESM 静态 import 早于模块体）；验配置改动脉只认启动日志 `🧠 [Answer Engine] 启用 → …`。

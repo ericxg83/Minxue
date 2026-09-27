@@ -305,15 +305,28 @@ test('callVisionCompletion 支持指定通道，且 onlyVendor 会清空降级�
 
 test('几何链路的每个视觉调用点都带上专用通道指定', () => {
   const sites = [...GEO_SRC.matchAll(/callVisionCompletion\(\{/g)].length
-  const pins = [...GEO_SRC.matchAll(/preferredVendor:\s*GEOMETRY_VISION_VENDOR/g)].length
-  // ⚠️ 不断言固定条数：调用点数随几何通道演进会变（HEAD 一处；函数图象/DSL 落地后三处）。
-  //    契约是「每个调用点都带指定」，不是「恰好 N 个」。
+  // 2026-09-25 契约变更：旧 `preferredVendor: GEOMETRY_VISION_VENDOR` 对非 Gemini 直连通道
+  // **从未生效过**（callVisionCompletion 里 preferredVendor 只匹配 gemini|googlegeminidirect），
+  // 几何重绘实际一直在走通用降级链。现改为显式 `vendorChain`，链外一律不碰。
+  // 断言强度不变：仍是「每个调用点都必须带专用指定」，不是「恰好 N 个」。
+  const pins = [...GEO_SRC.matchAll(/vendorChain:\s*GEOMETRY_VISION_VENDOR_CHAIN/g)].length
   assert.ok(sites >= 1, `几何链路应有视觉调用点，实际 ${sites}`)
-  assert.equal(pins, sites, `每个调用点都要带 preferredVendor（${pins}/${sites}）`)
+  assert.equal(pins, sites, `每个调用点都要带 vendorChain（${pins}/${sites}）`)
 })
 
-test('几何链路的专用通道**默认关闭**，需显式指定才置顶', () => {
-  assert.match(GEO_SRC, /process\.env\.GEOMETRY_VISION_VENDOR/)
-  assert.match(GEO_SRC, /if \(raw === undefined\) return null\s*\/\/\s*未设置 → 不指定/,
-    '未设置时必须不指定（默认走原降级链，几何由辉辉云承担）')
+test('几何链路的专用链**默认写死实测主力**（不靠 env 才有效），且链外一律不碰', () => {
+  // 旧写法失败模式：默认「不指定」= 静默落到通用降级链，实测最强的 gemini-3.7-flash
+  // 被排在 SenseNova 之后（09-19 同题 13 张 A/B：gemini-3.7-flash 几何 DSL 92.3%）。
+  assert.match(GEO_SRC, /process\.env\.GEOMETRY_VISION_VENDOR_CHAIN/,
+    '必须支持 env 覆盖，否则换供应商要发版')
+  const m = /GEOMETRY_VISION_VENDOR_CHAIN\s*=\s*\(process\.env\.GEOMETRY_VISION_VENDOR_CHAIN\s*\|\|\s*'([^']+)'\)/
+    .exec(GEO_SRC)
+  assert.ok(m, '默认链必须写成 `(process.env.X || \'字面量\')` 形式——env 未配时仍须是几何实测主力链')
+  const vendors = m[1].split(',').map((s) => s.trim()).filter(Boolean)
+  assert.ok(vendors.length >= 2,
+    `默认链至少要两家供应商兜底（单家全挂即整链失败），实际 ${vendors.length}`)
+  assert.match(vendors[0], /^HuihuiyunGemini:gemini-3\.7-flash$/,
+    '首位必须是实测几何 DSL 主力；若确要换主力，请同步本断言与几何Worker 头部实测记录')
+  assert.doesNotMatch(m[1], /ModelScope|魔搭/,
+    '链外一律不碰：几何专用链不得含魔搭（它会静默换弱模型，正是本契约要防的失败模式）')
 })
