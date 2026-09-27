@@ -107,6 +107,16 @@ let scrollY = 0
 let contentMaxY = 0 // 已写笔迹的最大板面 Y，决定手动下滚的边界
 const PAN_EDGE = 72 // 距可视底边多少 px 触发自动下滚跟随
 
+// 滚轮平滑拉板的状态与取消（动画本体见文件尾 wheelPanBy）。声明必须在最前：
+// strokes watch 是 immediate:true，setup 期间就会走切题路径调到 cancelWheelPan，
+// 放在后面会踩 TDZ（Cannot access before initialization），整块题目区渲染失败。
+let wheelTargetY = null
+let wheelRafId = 0
+function cancelWheelPan() {
+  if (wheelRafId) { cancelAnimationFrame(wheelRafId); wheelRafId = 0 }
+  wheelTargetY = null
+}
+
 function dpr() { return Math.min(window.devicePixelRatio || 1, 2) }
 
 /** 统一设置绘制变换：设备像素比 + 板面→屏幕的 -scrollY 平移 */
@@ -155,6 +165,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (rafId) cancelAnimationFrame(rafId)
+  cancelWheelPan()
 })
 
 // 外部替换笔迹（切题 / 撤销 / 清空）→ 覆盖本地并重绘。
@@ -172,6 +183,7 @@ watch(() => props.strokes, (val) => {
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   localStrokes.value = Array.isArray(val) ? val : []
   // 切题 / 外部替换：视图回到顶部，重算下边界
+  cancelWheelPan()
   scrollY = 0
   recomputeContentMax()
   redraw()
@@ -262,6 +274,7 @@ function maybeAutoPan() {
   const last = liveStroke.points[liveStroke.points.length - 1]
   const screenY = last.y - scrollY
   if (screenY > H - PAN_EDGE) {
+    cancelWheelPan() // 书写跟随接管视图，滚轮动画立即停
     scrollY += screenY - (H - PAN_EDGE)
     renderLiveFully()
     return true
@@ -506,6 +519,7 @@ function exportPng(filename = '板书.png') {
 
 /** 手动上下平移板书（工具栏 ▲/▼）。dir<0 上翻、dir>0 下翻；下滚不超过已写内容底边 */
 function panBoard(dy) {
+  cancelWheelPan()
   const H = wrapRef.value?.clientHeight || 0
   const maxScroll = Math.max(0, contentMaxY - H + 60)
   const next = Math.min(Math.max(0, scrollY + dy), maxScroll)
@@ -515,10 +529,46 @@ function panBoard(dy) {
 }
 /** 回到顶部（露出题干） */
 function resetView() {
+  cancelWheelPan()
   if (scrollY !== 0) { scrollY = 0; redraw() }
 }
 
-defineExpose({ exportPng, redraw, syncSize, panBoard, resetView })
+// ── 滚轮丝滑拉板（2026-09-27）───────────────────────────────────────
+// 滚轮由 WeekendBoard 链式转发到这里：向下先把题干滚完、再往下拉板书。
+// 板书侧做指数趋近平滑动画（网页滚轮手感），并允许向下拉出已写内容下方
+// 约一屏的新空白纸面 —— 写进去后 contentMaxY 生长，可拉上限随之扩展。
+// （wheelTargetY / wheelRafId / cancelWheelPan 声明在文件头 scrollY 旁）
+
+function wheelMaxScroll() {
+  const H = wrapRef.value?.clientHeight || 0
+  return Math.max(0, contentMaxY + H)
+}
+
+function animateWheelPan() {
+  wheelRafId = requestAnimationFrame(() => {
+    wheelRafId = 0
+    if (wheelTargetY === null) return
+    const diff = wheelTargetY - scrollY
+    if (Math.abs(diff) < 1) {
+      scrollY = wheelTargetY
+      wheelTargetY = null
+      liveStroke ? renderLiveFully() : redraw()
+      return
+    }
+    scrollY += diff * 0.28
+    // 书写中滚轮：redraw 会把进行中的一笔擦掉，必须连它一起重画
+    liveStroke ? renderLiveFully() : redraw()
+    animateWheelPan()
+  })
+}
+
+function wheelPanBy(delta) {
+  if (wheelTargetY === null) wheelTargetY = scrollY
+  wheelTargetY = Math.min(Math.max(0, wheelTargetY + delta), wheelMaxScroll())
+  if (!wheelRafId) animateWheelPan()
+}
+
+defineExpose({ exportPng, redraw, syncSize, panBoard, resetView, wheelPanBy, boardScrolled: () => scrollY > 0 })
 </script>
 
 <style scoped>

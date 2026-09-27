@@ -885,13 +885,30 @@ const nextQuestion = () => gotoQuestion(currentIndex.value + 1)
 // Canvas 手写层覆盖整个题目区且 touch-action:none，会吃掉手指的原生滚动，
 // 因此这里统一转发：横向 → 切题，纵向 → 手动滚动题干。
 // 手指绘制开启时（allowTouch）手指优先写字，不做滑动切题，避免与笔迹冲突。
+//
+// 手掌拒绝（2026-09-27「白板页面上下弹动」修复）：画布层拒画 touch（防手掌
+// 误触），但本手势转发层原来不拒 —— 写字时手掌搭在屏幕上产生的 touch 指针
+// 会被当成「上下滑动」，题干区跟着手掌晃动滚动，看上去就是整个页面上下弹。
+// 规则：触控笔优先 —— 笔有活动（落笔 / 悬空移动）时 touch 一律不作手势；
+// 笔落下时立即作废已进行中的 touch 手势（手掌往往先于笔尖落屏）。
 const SWIPE_TRIGGER = 56 // 触发切题的水平位移阈值（px）
 const SWIPE_MAX_MS = 900 // 手势时长上限，超过视为慢拖不切题
+const PEN_GRACE_MS = 1200 // 笔收笔后该窗口内的 touch 仍视为手掌（抬笔带起的蹭动）
+let lastPenActiveAt = 0
 let gesture = null
 
 function onGestureStart(e) {
+  if (e.pointerType === 'pen') {
+    lastPenActiveAt = Date.now()
+    gesture = null
+    return
+  }
   if (e.pointerType !== 'touch' || allowTouch.value) return
+  // 已有手势进行中：忽略后续触点，多指互抢会把题面拽来拽去 / 误判横向切题
+  if (gesture) return
+  if (Date.now() - lastPenActiveAt < PEN_GRACE_MS) return
   gesture = {
+    id: e.pointerId,
     x: e.clientX,
     y: e.clientY,
     t: Date.now(),
@@ -901,7 +918,8 @@ function onGestureStart(e) {
   try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* 忽略 */ }
 }
 function onGestureMove(e) {
-  if (!gesture || e.pointerType !== 'touch') return
+  if (e.pointerType === 'pen') { lastPenActiveAt = Date.now(); return }
+  if (!gesture || e.pointerType !== 'touch' || e.pointerId !== gesture.id) return
   const dx = e.clientX - gesture.x
   const dy = e.clientY - gesture.y
   if (!gesture.axis) {
@@ -914,7 +932,7 @@ function onGestureMove(e) {
   }
 }
 function onGestureEnd(e) {
-  if (!gesture) return
+  if (!gesture || e.pointerId !== gesture.id) return
   const g = gesture
   gesture = null
   try { e.currentTarget.releasePointerCapture?.(e.pointerId) } catch { /* 忽略 */ }
@@ -925,28 +943,34 @@ function onGestureEnd(e) {
   else if (dx >= SWIPE_TRIGGER) prevQuestion()
 }
 
-// ── 鼠标滚轮：转发给光标下最近的可滚动区 ──
-// 手写 Canvas 铺满整个题目区（z-index 3、touch-action:none），滚轮事件落在 Canvas 上，
-// 而题干滚动区是它的兄弟节点，事件不会冒泡进去 —— 症状就是「明明有内容没显示，滚轮却没反应」。
-// 这里在题目区统一接住滚轮，再交给光标下最近的可滚动元素（答案层自己也可能要滚）。
-function findScroller(node) {
-  let el = node instanceof Element ? node : null
-  while (el && el !== questionWrapRef.value) {
-    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight - el.clientHeight > 2) return el
-    el = el.parentElement
-  }
-  return null
-}
+// ── 鼠标滚轮：像普通网页一样的链式滚动（2026-09-27）──
+// 手写 Canvas 铺满整个题目区（z-index 3、touch-action:none），滚轮事件只能落在
+// 题目区统一接住。方向链：向下 = 先把题干区滚到底 → 再平滑往下拉板书（可拉出
+// 已写内容下方约一屏的新纸面，写进去后可拉范围继续生长）；向上 = 先把板书推回
+// 顶部 → 再往上滚题干。板书侧的平滑动画在 DrawingCanvas.wheelPanBy。
 function onWheel(e) {
+  if (e.ctrlKey) return // Ctrl+滚轮 = 页面缩放，留给浏览器
   // deltaMode 1 = 按行滚动（部分鼠标驱动），换算成像素，否则一格几乎不动
   const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
   if (!step) return
-  const el = findScroller(e.target) || qBodyRef.value
-  if (!el || el.scrollHeight - el.clientHeight <= 2) return
-  const before = el.scrollTop
-  el.scrollTop = before + step
-  // 已经滚到头时不再拦截，避免把滚动"吃掉"
-  if (el.scrollTop !== before) e.preventDefault()
+  e.preventDefault()
+  const qBody = qBodyRef.value
+  if (step > 0) {
+    if (qBody) {
+      const room = qBody.scrollHeight - qBody.clientHeight - qBody.scrollTop
+      if (room > 1) {
+        qBody.scrollTop += Math.min(step, room)
+        return
+      }
+    }
+    canvasRef.value?.wheelPanBy(step)
+  } else {
+    if (canvasRef.value?.boardScrolled?.()) {
+      canvasRef.value.wheelPanBy(step)
+      return
+    }
+    if (qBody && qBody.scrollTop > 0) qBody.scrollTop = Math.max(0, qBody.scrollTop + step)
+  }
 }
 
 // ── 键盘快捷键（讲题时不必回到底栏） ──
@@ -1184,6 +1208,13 @@ onBeforeUnmount(() => {
   position: relative;
   display: flex;
   flex-direction: column;
+  /* iPad 手写间隙手指/笔杆压到题目文字会触发系统文本选择（蓝色框 + 拷贝/翻译/
+     共享… 呼出菜单），打断讲题。白板是纯书写/展示场景，整页禁选 + 禁长按呼出：
+     user-select 的 auto 取父级生效值、-webkit-touch-callout 可继承，子树全覆盖。
+     （PC 端无此行为，禁选也无副作用。） */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   /* 父容器是「工作台内容区」（100vh 减顶栏 52px）。这里必须用 100% 跟随父容器，
      用 100vh 会超出 52px 并被父级 overflow:hidden 裁掉——底栏「上一题/下一题」
      正是这样被裁到视口外的。 */
