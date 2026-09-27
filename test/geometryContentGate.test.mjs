@@ -363,3 +363,31 @@ test('对照：真实字母顶点凭空多画 → 仍必须拦（防豁免放宽
     '真实字母 C 无出处，必须仍拦：' + r.reasons.join('；')
   )
 })
+
+// ── 2026-09-27 SVG 文本标注层校验（findSuspiciousSvgLabels）──────────────
+// 背景：09-20 批次发布的重绘图图面上印着模型自造的内部变量名（X_pos/P1_L/p_0…）。
+// 发布侧对 SVG 源码再拦一道：渲染器本不该画的名字一律可疑，合法顶点符号必须有题干出处。
+import { findSuspiciousSvgLabels } from '../server/utils/geometryContentGate.js'
+
+test('SVG标注：内部变量名（X_pos/P1_L/p_0）一律判可疑', () => {
+  const svg = '<svg><text>X_pos</text><text>Y_neg</text><text>P1_L</text><text>p_0</text><text>R_BL</text></svg>'
+  const r = findSuspiciousSvgLabels(svg, '如图，点A在抛物线上运动')
+  assert.deepEqual(r.sort(), ['P1_L', 'R_BL', 'X_pos', 'Y_neg', 'p_0'].sort())
+})
+
+test('SVG标注：合法顶点符号题干有出处 → 放行；无出处 → 拦截', () => {
+  const svg = '<svg><text>A</text><text>B</text><text>C</text><text>O</text><text>x</text><text>1</text><text>-2</text></svg>'
+  assert.deepEqual(findSuspiciousSvgLabels(svg, '如图，在△ABC中，BC=5，O为原点'), [])
+  const r = findSuspiciousSvgLabels(svg, '如图，点D在AB边上')
+  assert.ok(r.includes('C'), 'C 不在题干里必须拦截')
+  assert.ok(!r.includes('O') && !r.includes('x') && !r.includes('1'), '轴名/刻度豁免')
+})
+
+test('SVG标注：下标/带撇标注按去撇 bare 字母与题干比对', () => {
+  const svg = '<svg><text>C′</text><text>A₁</text></svg>'
+  assert.deepEqual(findSuspiciousSvgLabels(svg, '将△BCE沿BE折叠得到△BC′E，记A₁为顶点'), [])
+})
+
+test('SVG标注：无文本标注的 SVG 放行', () => {
+  assert.deepEqual(findSuspiciousSvgLabels('<svg><rect/></svg>', ''), [])
+})

@@ -528,6 +528,41 @@ export function validateStructureAgainstContent(structure, content, options) {
 }
 
 /**
+ * 文本闸驳回理由分类（2026-09-27，视觉复核豁免从「只管线段」扩到「线段 + 点」）。
+ *
+ * 为什么放在本文件：理由字符串由本文件生成，解析也必须留在本文件。生成侧（geometryWorker）
+ * 的复核逻辑与发布侧若各写一份正则，判据一改就两头脱节（本文件已有「两处调用点必须同时生效」
+ * 的老教训）。
+ *
+ * 分类结果怎么用（消费方，见 geometryWorker 的 gate 分支）：
+ *   - segments[]：硬规则 2「线段无引用」→ 回原图做一次**独立证据源**复核（原图真画了就是误杀）；
+ *   - points[]  ：硬规则 3「点未出现」  → 同上，回原图看那个字母是不是**真实印在图上**；
+ *   - other[]   ：派生点缺失 / 位置关系 / 作图漏画 / 形状约束不符 / 多子图 → **不复核**，
+ *                 一律维持回退（这些是结构性错误，看图看不出对错）。
+ * 只要 other 非空，或点/线两组里任一组复核没全过，就维持 content_mismatch（只加不放宽）。
+ *
+ * @param {string[]} reasons validateStructureAgainstContent 返回的 reasons
+ * @returns {{segments:string[], points:string[], other:string[]}}
+ */
+const SEG_REASON_RE = /^重绘图上的线段 ([A-Z][₀-₉0-9]*)([A-Z][₀-₉0-9]*) 在题干中无引用$/
+const POINT_REASON_RE = /^重绘图上的点 (\S+) 在题干中未出现$/
+
+export function classifyTextGateReasons(reasons) {
+  const segments = []
+  const points = []
+  const other = []
+  for (const r of Array.isArray(reasons) ? reasons : []) {
+    const text = String(r)
+    const ms = SEG_REASON_RE.exec(text)
+    if (ms) { segments.push(`${ms[1]}${ms[2]}`); continue }
+    const mp = POINT_REASON_RE.exec(text)
+    if (mp) { points.push(mp[1]); continue }
+    other.push(text)
+  }
+  return { segments, points, other }
+}
+
+/**
  * 「流程图 / 数值转换器 / 输入→输出表格」类配图的**内容闸门**（2026-09-19 新增）。
  *
  * 为什么需要：这类题的配图里有**中文说明文字**（"输入""求算术平方根""是否为无理数""输出"）
@@ -685,4 +720,47 @@ export function shouldSkipRedraw(pref, structure = null) {
     return !(structure && structure.grid) // DSL 通道 + 产物真带网格底图 → 放行
   }
   return true
+}
+
+/**
+ * SVG 文本标注层校验（2026-09-27）：已渲染 SVG 里的 `<text>` 标注是否可信。
+ *
+ * 背景（2026-09-27 视觉评审）：09-20 批次发布的一部分重绘图（`56b77a92`/`b9550fe9`/
+ * `cb625fc3`/`2373ea24` 等）图面上印着 `X_pos`/`Y_neg`/`P1_L`/`P4_0_t`/`p_0…p_10`
+ * 这类**模型自造的内部变量名**。成因是历史渲染器版本没有按 `isVertexSymbolLabel`
+ * 过滤文本标注，而这些题后来重跑时的闸门拒稿记录（last_error）与线上旧产物并存。
+ *
+ * 本函数在**发布侧**对 SVG 源码再拦一道（C3 发布脚本目录里只有 SVG、没有
+ * structure.json，无法走 validateStructureAgainstContent 的结构层核对）：
+ *   - 渲染器**本不该画**的名字（含下划线、超长英文、`xxx_pos/neg/min/max/ext`、
+ *     `P1_L` 这类调试变量形态）→ 一律可疑；
+ *   - 合法顶点符号（A、C₁、B′…）若题干/选项里找不到该字母 → 可疑（幻觉标注）；
+ *   - 刻度数字/根式刻度与轴名 O/X/Y/x/y 豁免（同 validateStructureAgainstContent 口径）。
+ *
+ * 返回可疑标注去重列表；空数组 = 放行。只用于发布侧拦截（宁可少显示，不显示错图），
+ * 不参与生成侧判稿。
+ */
+export function findSuspiciousSvgLabels(svg, content, options = null) {
+  const texts = []
+  for (const m of String(svg || '').matchAll(/<text[^>]*>([^<]*)<\/text>/gi)) {
+    const t = m[1].trim()
+    if (t) texts.push(t)
+  }
+  if (!texts.length) return []
+  const allText = [content || '', ...(Array.isArray(options) ? options.filter(Boolean) : [])].join('\n')
+
+  const suspicious = []
+  for (const t of texts) {
+    if (isTickNumberLabel(t) || /^-?\d{0,2}√\d{1,3}$/.test(t)) continue // 刻度数字/根式刻度
+    if (/^[OXYxy]['′]?$/.test(t)) continue // 原点与轴名
+    if (isVertexSymbolLabel(t)) {
+      const bare = t.replace(/['′]/g, '')
+      if (allText.includes(bare)) continue
+      suspicious.push(t)
+      continue
+    }
+    if (isAuxPointLabel(t)) continue // `_` 前缀辅助点：渲染器既不画名字也不画圆点，出现在文本层说明是旧渲染器产物
+    suspicious.push(t)
+  }
+  return [...new Set(suspicious)]
 }

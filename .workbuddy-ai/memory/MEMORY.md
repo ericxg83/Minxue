@@ -36,6 +36,37 @@
 - 存量脏重绘图（图上印内部变量名，绕过 `isVertexSymbolLabel`）走 `scripts/retract-dirty-figures.mjs`；
   判据分 definite（自动作废）/ suspect（只列清单交人工，`C1` 可能是 `C₁` 的 ASCII 写法）两档。
 - 当前状态（2026-09-26 收工）：229 道引图错题 **100% 出图**（158 内联 SVG + 71 矢量化 clean URL）。
+- 2026-09-27 全量视觉评审（`server/_diag_fig_export_0927.mjs` 导出 229 对「原图裁片 vs 当前展示图」
+  拼对比长图逐张目检 + 可疑项放大复核，产物在 `server/_figcheck_0927/`）：「100% 出图」≠「100% 画对」，
+  确认 30 道画错/带幻觉标注：① 调试标签族（X_pos/P1_L/p_0…印在图面上，7 道）② 画错/丢元素
+  （丢直线/丢曲线/数轴 D 点数值画错/两三角形比例颠倒，9 道）③ 四选项格点图只画一个面板（4 道）
+  ④ 丢题干必需的尺寸/刻度标注（8 道）⑤ 圆形角标伪影（1 道）。根因：09-20 批次发布时内容闸
+  还没有点标签核对，旧渲染器也没过滤文本标注。
+  修复 `scripts/retract-bad-figures-0927.mjs`（--apply 已执行）：17 道 SVG 坏但 clean URL 好（逐张
+  目检过）→ 只撤 SVG 落到 clean；13 道两者都坏 → 撤到裁片。撤前必须核对资产 last_error 不含
+  「无可重绘」否则展示闸会返回 none。
+  防复发：`geometryContentGate.js` 新增 `findSuspiciousSvgLabels`（SVG 文本标注层校验，发布侧用，
+  测试锁定 test/geometryContentGate.test.mjs）；`publish-dsl-redraws.mjs`（C3）补上两道发布闸。
+  当前显示分布：173 svg + 36 clean + 20 raw（含 worker 并发撤回的数轴目测缺标注/人工复核作废），
+  引图错题 **0 道无图可显**；20 道 raw 是后续「画出来」的工作清单（数轴/流程图/分数长方形/
+  多面板选项图——numberAxis 通道可接管数轴类）。
+- 2026-09-27 追记（实画收尾）：raw 20 道中 **4 道确定性重绘落库**（`scripts/publish-figredraws-0927.mjs`）：
+  b6b1112e（numberAxis 新增**枚举模式**：「O、A、B、C、D 五个点，分别表示数 0、2、3、4、5」
+  字母串+数值串一一对应，数不匹配整题放弃）、c1619a2e（functionGraph 新增**因变量归一 fallback**：
+  h=20t-5t² → y=20x-5x^2，只在常规 y= 解析失败后启用；物理情境曲线裁剪到 [t0,t1]+轴字母替换 x/y→t/h），
+  00dd9f69/d3bd5ed2（新模块 `utils/fractionRect`：分数乘法面积模型，两级灰度直接产 SVG，
+  零文字标注）。每道先「原图 vs 新图」放大对比目检再落库。
+  **3 道确认不可忠实重绘**（维持裁片）：f30f042b（裁片错裁成另一题的手写）、fe7f2bc4（裁片缺 a 的位置）、
+  3baefdea（原图标注 √5/1.5 转录不确定）。⚠️ 数轴/函数通道画图铁律：数值必须全部来自题干文本，
+  图里才有的位置绝不靠猜。回归 191/191。
+- 2026-09-27 第二轮（重裁+视觉重跑，用户指示）：raw 16→6。重裁 8 道（`relocate-figures-gate14.mjs`
+  dry-run 目检→plan 复用 apply；**apply 不带 --ids 会按默认口径扩围，未目检的框必须事后补检**；
+  快照 scripts/logs/relocate-gate14-backup-*.json）。视觉重跑（`_rerunRejectedGeometry.mjs --ids=<assetId>`
+  直调 processGeometryReconstruction，绕过 Redis，逐个串行）**成功 6 道**（反碟长×2/74a4114d/fbb823fc/
+  79741aad/f30f042b——DSL 已有 curve 命令可画抛物线；重跑非确定性，失败题值得重试一轮）；
+  9b409c35/2d0554b8 **两轮重试都画不出图中数字**（刻度/尺寸转录是视觉通道能力缺口）→ 撤回维持裁片；
+  b77fd012 结构画错撤回。最终 **183 svg + 40 clean + 6 raw = 229，0 无图**；
+  6 道 raw 全部显示正确裁片（3 道视觉能力缺口、2 道结构歧义、1 道作图题无需重绘）。
 
 ## 5. 本地开发环境（详情 topics/local-dev-process）
 - ⛔ 入口第一行必 `import './loadEnv.js'`（ESM 静态 import 早于模块体）；验配置改动脉只认启动日志 `🧠 [Answer Engine] 启用 → …`。

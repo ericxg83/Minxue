@@ -34,7 +34,7 @@ import { withProviderRetry } from './utils/aiProviderRetry.js'
 import { parseGeometryStructure, renderGeometrySvg, isEmptyStructure, isRawEmptyStructure, hasDerivedPoints } from './utils/geometrySvg.js'
 import { correctDslByVision } from './utils/geom/dsl/reactLoop.js'
 import { validateGeometryLabels } from './utils/geometryLabelValidator.js'
-import { validateStructureAgainstContent, detectNonGeometryFigure } from './utils/geometryContentGate.js'
+import { validateStructureAgainstContent, detectNonGeometryFigure, classifyTextGateReasons } from './utils/geometryContentGate.js'
 import { detectNumberAxis } from './utils/geom/structure.js'
 import { computeGeometryConsistency } from './utils/geom/consistency.js'
 import { correctGeometryFigure } from './utils/geom/correctedRender.js'
@@ -186,6 +186,54 @@ async function verifySegmentsInFigure({ dataURL, segments, shortId }) {
   }
 }
 
+/**
+ * 点字母是否真实印在原图上——原图视觉复核（2026-09-27，与 verifySegmentsInFigure 同一条路线）。
+ *
+ * 为什么需要：内容闸的视觉复核豁免此前**只覆盖「线段无引用」**（硬规则 2），而「点 X 未出现」
+ * （硬规则 3）同样存在整类误杀：题面写「图中三角形」「如图的两个正方形」「如图所示的格点」时，
+ * 字母只印在图上、从不逐字进题干，重绘照抄原图字母反而被判成幻觉点。实测该缺口占内容闸误杀
+ * 批次的一半（另一半是线段），是「判据缺口」而非画错。
+ *
+ * 判据与线段版完全对称：把被点名的字母交回视觉模型，逐个判断这张原图里是否真印有该标注
+ * （不论题面文字有没有提到）。全部确认 → 放行；任一不存在或调用失败 → 维持回退。
+ * 只增加一条**独立证据源**，不触碰硬规则 3 本身：题干里凭空多出的真实字母仍会被拦，
+ * 且复核失败一律按未确认处理（只加不放宽）。
+ *
+ * @returns {Promise<{ok:true}|{ok:false,reason:string}|null>} null=调用异常（当作未确认）
+ */
+async function verifyPointsInFigure({ dataURL, points, shortId }) {
+  const list = [...new Set(points)].filter(Boolean)
+  if (list.length === 0) return { ok: false, reason: '无待复核点' }
+  const userText =
+    `这张几何图中可能印有以下若干字母标注（标注通常在交点、顶点或圆点旁）：${list.join('、')}。\n` +
+    `请逐个判断：在【这张图里】是否真实印有该字母标注（不论题面文字有没有提到它）。\n` +
+    `只输出严格 JSON，形如 {"A": true, "P": false}，键为上述字母原样，值为是否印在图上。不要输出任何解释。`
+  try {
+    const r = await withProviderRetry(
+      () => callVisionCompletion({
+        imageDataURL: dataURL,
+        systemPrompt: '你是几何图判读者。只判断指定字母标注是否在图中真实印出，输出严格 JSON。',
+        userText,
+        temperature: 0,
+        maxTokens: 512,
+        vendorChain: GEOMETRY_VISION_VENDOR_CHAIN,
+      }),
+      { onWait: ({ attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 点标注复核 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
+    )
+    const jsonStr = (String(r.content).match(/\{[\s\S]*\}/) || [''])[0]
+    const obj = JSON.parse(jsonStr || '{}')
+    // 归一化口径与线段复核完全一致（去下标/大小写/撇号差异），避免模型回的格式与理由不一
+    const norm = (k) => String(k).toUpperCase().replace(/[₀-₉]/g, (m) => String('₀₁₂₃₄₅₆₇₈₉'.indexOf(m))).replace(/[′'’]/g, '')
+    const map = {}
+    for (const [k, v] of Object.entries(obj)) map[norm(k)] = v === true
+    const present = list.every((p) => map[norm(p)] === true)
+    return present ? { ok: true } : { ok: false, reason: '图中未确认到全部点标注' }
+  } catch (e) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 点标注视觉复核调用异常（维持回退）: ${e.message}`)
+    return null
+  }
+}
+
 async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '', skipTextGate = false) {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
@@ -257,17 +305,26 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
   if (!isNumberAxis && (gateText.trim() || (Array.isArray(options) && options.length > 0))) {
     const gate = validateStructureAgainstContent(validated, gateText, options)
     if (!gate.ok) {
-      // 若驳回理由**全部**是「线段无引用」（硬规则 2），用原图做一次视觉复核：
-      // 真图画了这些线就是误杀，放行；含其它类理由（派生点缺失/位置关系/作图漏画）则不复核。
-      const segReasonRe = /^重绘图上的线段 ([A-Z][₀-₉0-9]*)([A-Z][₀-₉0-9]*) 在题干中无引用$/
-      const segOnly = gate.reasons.length > 0 && gate.reasons.every((r) => segReasonRe.test(r))
-      if (segOnly) {
-        const segs = gate.reasons.map((rte) => { const m = rte.match(segReasonRe); return `${m[1]}${m[2]}` })
-        const verdict = await verifySegmentsInFigure({ dataURL, segments: segs, shortId })
-        if (verdict && verdict.ok) {
-          console.log(`   ✅ [几何Worker] ${shortId}: 视觉复核确认 ${segs.join('、')} 均在原图中 → 放行`)
+      // 若驳回理由**全部**是「线段无引用」（硬规则 2）/「点未出现」（硬规则 3），用原图做一次
+      // 视觉复核（独立证据源）：真图画了这些线、真印了这些字母就是误杀，放行；
+      // 含其它类理由（派生点缺失/位置关系/作图漏画/形状约束不符）则不复核，直接回退。
+      // 2026-09-27：复核范围由「只看线段」扩到「线段 + 点」——点类理由此前无豁免入口，
+      // 而「字母只印在图上、不进题干」的题（图中三角形/如图的两个正方形）是整类误杀。
+      // 判据分类走 classifyTextGateReasons（正则与理由生成同文件，避免生成侧/发布侧两头脱节）。
+      const { segments: segs, points: pts, other } = classifyTextGateReasons(gate.reasons)
+      const reviewable = other.length === 0 && (segs.length > 0 || pts.length > 0)
+      if (reviewable) {
+        const segVerdict = segs.length > 0
+          ? await verifySegmentsInFigure({ dataURL, segments: segs, shortId })
+          : { ok: true }
+        const ptVerdict = pts.length > 0
+          ? await verifyPointsInFigure({ dataURL, points: pts, shortId })
+          : { ok: true }
+        if (segVerdict && segVerdict.ok && ptVerdict && ptVerdict.ok) {
+          console.log(`   ✅ [几何Worker] ${shortId}: 视觉复核确认 ${[...segs, ...pts].join('、')} 均在原图中 → 放行`)
         } else {
-          console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过且复核未确认(${verdict?.reason || '调用失败'}) → ${gate.reasons.join('；')}`)
+          const why = [segVerdict, ptVerdict].filter((v) => v && !v.ok).map((v) => v.reason).join('；')
+          console.warn(`   ⚠️ [几何Worker] ${shortId}: 题干核对未过且复核未确认(${why || '调用失败'}) → ${gate.reasons.join('；')}`)
           return { ok: false, reason: 'content_mismatch', retriable: false, detail: gate.reasons, structure: validated }
         }
       } else {
@@ -733,6 +790,44 @@ async function processSingleAsset(asset) {
     }
   }
 
+  // 3.9 数轴目测出口安全闸（2026-09-27）：防"清晰但缺标注"的半张数轴入库。
+  //     数轴确定性通道（2.6）已在前面提前 return，能走到这里的数轴**必是目测/DSL 产物**，
+  //     而 DSL 目测对数轴没有字母/刻度齐全校验（实测 fe7f2bc4 丢了 a 和 √3 仍入库）。
+  //     复用函数图象通道的"原图‖重画"闭环范式：缺关键字母点/刻度即判 FIX → 回退原图。
+  //     判读失败/拼图异常一律 fail-open（verifyNumberAxisByVision 内部保证），绝不误伤好图。
+  const finalIsAxis = detectNumberAxis(structure.points, structure.segments, {
+    coordinateSystem: !!(structure.coordinate_system && structure.coordinate_system.exists),
+  })
+  if (finalIsAxis) {
+    try {
+      const { verifyNumberAxisByVision } = await import('./utils/numberAxis/verifyAxis.js')
+      const axisCallVision = async ({ systemPrompt, userText, imageDataURL }) => {
+        const r = await withProviderRetry(
+          () => callVisionCompletion({
+            imageDataURL, systemPrompt, userText, temperature: 0, maxTokens: 256,
+            vendorChain: GEOMETRY_VISION_VENDOR_CHAIN,
+          }),
+          { onWait: ({ kind, attempt, waitMs }) => console.warn(`   ⏳ [几何Worker] ${shortId}: 数轴闭环 ${kind} 第 ${attempt} 次，等待 ${Math.round(waitMs / 1000)}s`) }
+        )
+        return r.content
+      }
+      const verdict = await verifyNumberAxisByVision({
+        originalImageDataUrl: `data:image/png;base64,${rawBuffer.toString('base64')}`,
+        renderSvg: svg,
+        content: [asset.parent_stem, content].filter(Boolean).join(' '),
+        callVision: axisCallVision,
+      })
+      if (!verdict.ok) {
+        console.warn(`   ⚠️ [几何Worker] ${shortId}: 数轴闭环未过(${verdict.reason}) → 不发缺标注半图，回退原图`)
+        await markNotReconstructable(asset, 'axis_incomplete', '数轴重绘相对原图缺字母点/刻度标注')
+        return false
+      }
+    } catch (e) {
+      // 安全闸自身异常：不阻断（verify 内部已 fail-open，这里兜底任何意外）
+      console.warn(`   ⚠️ [几何Worker] ${shortId}: 数轴闭环检查异常（放行）:`, e.message)
+    }
+  }
+
   // 4. 成功 → 入库
   try {
     await updateGeometryReconstructionStatus(asset.id, {
@@ -797,6 +892,7 @@ const NOT_RECONSTRUCTABLE = {
   no_figure: '图中无可重绘的几何结构（数轴/实物/统计图）',
   derived_deferred: '含派生点（垂足/中点/交点），求解器未能确定其位置，回退裁剪原图',
   content_mismatch: '重绘结构与题干引用不符（多画/漏画），回退裁剪原图',
+  axis_incomplete: '数轴目测重绘相对原图缺字母点/刻度标注（清晰但画错），回退裁剪原图',
   non_geometry_figure: '图内是文字/数值（流程图、数值转换器、输入输出表格）或多子图，不适用几何重绘，保留原卷裁片'
 }
 

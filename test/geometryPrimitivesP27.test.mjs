@@ -83,13 +83,17 @@ test('普通几何题不受 grid 影响（防误伤）', () => {
 
 // ──────────────────────── ② 数轴确定性生成通道 ────────────────────────
 
-test('parseAxisNumber：整数/小数/负号变体/根式；带运算的表达式一律拒', () => {
+test('parseAxisNumber：整数/小数/负号变体/根式/分数；带运算的表达式一律拒', () => {
   assert.equal(parseAxisNumber('-2'), -2)
   assert.equal(parseAxisNumber('−3.5'), -3.5) // 全角负号
   assert.equal(Math.abs(parseAxisNumber('√2') - Math.SQRT2) < 1e-12, true)
   assert.equal(Math.abs(parseAxisNumber('-√3') + Math.sqrt(3)) < 1e-12, true)
   assert.equal(Math.abs(parseAxisNumber('2√5') - 2 * Math.sqrt(5)) < 1e-12, true)
-  for (const bad of ['-√2+2', '1/2', 'x', '', 'a', '√']) assert.equal(parseAxisNumber(bad), null, `应拒: ${bad}`)
+  // 分数刻度是精确值，2026-09-27 起放行（d0ccaf00「点A表示的数是-2/3」真题曾因此不出图）
+  assert.equal(parseAxisNumber('1/2'), 0.5)
+  assert.equal(parseAxisNumber('-2/3'), -2 / 3)
+  assert.equal(parseAxisNumber('1/0'), null, '分母为 0 仍拒')
+  for (const bad of ['-√2+2', '1/2x', 'x', '', 'a', '√']) assert.equal(parseAxisNumber(bad), null, `应拒: ${bad}`)
 })
 
 test('根式刻度进入标签白名单（文字刻度不配圆点）', () => {
@@ -98,6 +102,19 @@ test('根式刻度进入标签白名单（文字刻度不配圆点）', () => {
   assert.equal(isTickNumberLabel('2√'), false)
   assert.equal(isVertexSymbolLabel('-√2'), true)
   assert.equal(isVertexSymbolLabel('-√2+1'), false)
+})
+
+test('分数刻度同白名单口径：1/2 与 0.5 是同一个数（要上屏、不配圆点）', () => {
+  // 2026-09-27：分数刻度与根式同一可信级（题干明写的精确数，不是目测的几何事实）。
+  // 修复前 `1/2` 既不是刻度数字也不是可上屏符号 ⇒ 标注被整条丢掉，画面上只剩一颗没有读数的点。
+  assert.equal(isTickNumberLabel('1/2'), true)
+  assert.equal(isVertexSymbolLabel('1/2'), true)
+  assert.equal(isTickNumberLabel('-2/3'), true)
+  assert.equal(isVertexSymbolLabel('-2/3'), true)
+  assert.equal(isTickNumberLabel('1/0'), false, '分母为 0 不成数，仍拒')
+  assert.equal(isVertexSymbolLabel('1/0'), false, '分母为 0 不成数，仍拒')
+  assert.equal(isTickNumberLabel('x/2'), false, '含变量不是刻度')
+  assert.equal(isTickNumberLabel('1/2/3'), false, '连除不是刻度')
 })
 
 test('数轴通道：点值明示 → 出图且布局精确（刻度间距相等、点名吸附在整数值上）', () => {
@@ -111,22 +128,65 @@ test('数轴通道：点值明示 → 出图且布局精确（刻度间距相等
   const gaps = nums.slice(1).map((v, i) => v.x - nums[i].x)
   const base = gaps[0]
   assert.ok(gaps.every(gp => Math.abs(gp - base) < 0.5), `刻度间距必须相等（亚像素容差）: ${gaps.join(',')}`)
+
+  // ── 摆位：点名在轴上方、刻度数字在轴下方（2026-09-27）──
+  // 修复前点名与刻度数字同写 y=-9 ⇒ 整数值点的字母与刻度数字**逐位重叠**（"A" 压在 "-2" 上），
+  // 学生根本读不出题面点名。这里锁死「异侧 + 不重叠」两条。
+  const allTexts = [...b.svg.matchAll(/<text x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)<\/text>/g)]
+    .map(m => ({ x: +m[1], y: +m[2], t: m[3] }))
+  const letterA = allTexts.find(v => v.t === 'A')
+  const numMinus2 = allTexts.find(v => v.t === '-2')
+  assert.ok(letterA && numMinus2, '点 A 与刻度数字 -2 都必须上屏')
+  assert.ok(letterA.y < numMinus2.y, `点名必须在轴上方、刻度数字在轴下方（实测 A.y=${letterA.y} / -2.y=${numMinus2.y}）`)
+  const seenPos = new Set()
+  for (const v of allTexts) {
+    const key = `${v.x}|${v.y}`
+    assert.ok(!seenPos.has(key), `两个标注坐标完全相同（叠死）: ${v.t} @ ${key}`)
+    seenPos.add(key)
+  }
+  // 圆点吸附在轴上（字母点的 y=+9 只是排版意图，不是悬空的点）
+  const dots = [...b.svg.matchAll(/<circle cx="([-\d.]+)" cy="([-\d.]+)"/g)].map(m => ({ x: +m[1], y: +m[2] }))
+  assert.equal(dots.length, 2, 'A、B 两颗圆点都要上屏')
+  assert.equal(dots[0].y, dots[1].y, '两颗圆点必须同在轴线上')
+  assert.ok(dots[0].y > letterA.y && dots[0].y < numMinus2.y, '圆点在轴上：位于字母行与数字行之间')
 })
 
 test('数轴通道：解集 x>2 → 空心端点+右向解线；x≤−1 → 实心端点+左向解线', () => {
   const gt = buildNumberAxisSvg('', '不等式的解集为 x>2，请在数轴上表示出来.', renderGeometrySvg)
   assert.ok(gt)
-  const dotGt = gt.structure.points.find(p => p.label === '_sd2')
+  const dotGt = gt.structure.points.find(p => p.label.startsWith('sd_'))
   assert.equal(dotGt.type, 'origin', '严格不等 → 空心圆点')
+  // 载体不能是 `_` 辅助点：辅助点渲染器既不画圆点也不画文字，严格/含等的唯一视觉区分就没了
+  assert.ok(!dotGt.label.startsWith('_'), '端点圆点载体不得为 `_` 辅助点（否则圆点整颗丢失）')
+  assert.match(gt.svg, /<circle[^>]*r="3"[^>]*fill="none"/, '严格不等必须真的画出空心圆点')
   const rayEndGt = gt.structure.points.find(p => p.label === '_se>')
   assert.ok(rayEndGt.x > dotGt.x, 'x>2 解线朝右')
 
   const le = buildNumberAxisSvg('', '不等式 2x+4≤2 的解集为 x≤−1，在数轴上表示该解集.', renderGeometrySvg)
   assert.ok(le, '全角负号必须能解析')
-  const dotLe = le.structure.points.find(p => p.label === '_sd-1')
+  const dotLe = le.structure.points.find(p => p.label.startsWith('sd_'))
   assert.equal(dotLe.type, 'vertex', '含等号 → 实心圆点')
+  assert.match(le.svg, /<circle[^>]*r="2\.4"/, '含等必须真的画出实心圆点')
+  assert.ok(!/<circle[^>]*fill="none"/.test(le.svg), '含等不能出现空心圆点')
   const rayEndLe = le.structure.points.find(p => p.label === '_se<')
   assert.ok(rayEndLe.x < dotLe.x, 'x≤−1 解线朝左')
+})
+
+test('数轴通道：分数刻度（-2/3 点值 / x>1/2 端点）位置精确且读数上屏', () => {
+  // 点值：旧口径 parseAxisNumber 拒分数 ⇒ d0ccaf00「点A表示的数是-2/3」整题不出图
+  const b = buildNumberAxisSvg('', '如图，在数轴上，点A表示的数是-2/3，点B表示的数是1/2，则AB的长为____.', renderGeometrySvg)
+  assert.ok(b, '分数点值必须能出图')
+  const texts = [...b.svg.matchAll(/<text x="([-\d.]+)" y="([-\d.]+)"[^>]*>([^<]*)<\/text>/g)]
+    .map(m => ({ x: +m[1], t: m[3] }))
+  const xOf = (t) => texts.find(v => v.t === t)?.x
+  assert.ok(xOf('A') > xOf('-1') && xOf('A') < xOf('0'), '-2/3 必须精确落在 -1 与 0 之间（不是 -2 刻度上）')
+  assert.ok(xOf('B') > xOf('0') && xOf('B') < xOf('1'), '1/2 必须精确落在 0 与 1 之间')
+
+  // 解集端点：分数端点值必须上屏（否则只剩一颗没有读数的点）
+  const gt = buildNumberAxisSvg('', '不等式的解集为 x>1/2，请在数轴上表示出来.', renderGeometrySvg)
+  assert.ok(gt, '分数解集端点必须能出图')
+  assert.match(gt.svg, /<circle[^>]*r="3"[^>]*fill="none"/, '严格不等端点仍是空心圆点')
+  assert.ok([...gt.svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].some(m => m[1] === '1/2'), '分数端点值 1/2 必须上屏')
 })
 
 test('数轴通道：位置只在图里/含其它构造/点缺值 → 坚决不出图（回退描摹/目测闭环）', () => {
@@ -143,8 +203,32 @@ test('数轴通道：位置只在图里/含其它构造/点缺值 → 坚决不�
 
 test('数轴通道：解集线引线用 extend 豁免刻度纠偏（产物仍识别为数轴、形态不被改写）', () => {
   const b = buildNumberAxisSvg('', '不等式的解集为 x>2，请在数轴上表示出来.', renderGeometrySvg)
-  const lead = b.structure.segments.find(s => s.from === '_sd2')
+  const lead = b.structure.segments.find(s => s.from.startsWith('sd_'))
   assert.equal(lead.extend, true, '引线必须标 extend（否则会被 normalizeTickMarks 当刻度改写）')
   const e1 = b.structure.points.find(p => p.label === '_sl>')
   assert.ok(e1.y > 0, '解线必须抬到轴上方（与轴同高会重合，学生看不出解）')
+})
+
+// ── 2026-09-27 枚举式点值（b6b1112e 实题回归）────────────────────────────
+test('parseNumberAxisSpec 枚举模式：字母串+数值串一一对应', async () => {
+  const { parseNumberAxisSpec } = await import('../server/utils/numberAxis/parseSpec.js')
+  const spec = parseNumberAxisSpec('如图，数轴上有 O、A、B、C、D 五个点，分别表示数 0、2、3、4、5，则表示数 \sqrt{2}\times\sqrt{12}-2 的点会落在（ ）')
+  assert.deepEqual(spec.points.map(p => [p.label, p.value]), [['O', 0], ['A', 2], ['B', 3], ['C', 4], ['D', 5]])
+  // 字母数与数值数不匹配 → 整题放弃（位置可能只在图里，宁缺毋错）
+  const bad = parseNumberAxisSpec('数轴上有 A、B、C 三个点，分别表示数 1、2')
+  assert.equal(bad, null)
+  // 位置只在图里（无数值）→ 不出图
+  assert.equal(parseNumberAxisSpec('实数a、b在数轴上对应的点的位置如图所示'), null)
+})
+
+// ── 2026-09-27 物理量因变量归一（c1619a2e 实题回归）──────────────────────
+test('parseFunctionGraphSpec 归一 fallback：h=20t-5t² → y=20x-5x^2', async () => {
+  const { parseFunctionGraphSpec } = await import('../server/utils/functionGraph/parseSpec.js')
+  const spec = parseFunctionGraphSpec('', '小球的飞行高度h(米)与飞行时间t(秒)之间满足函数关系h=20t-5t².则小球从飞出到落地瞬间所需要的时间为')
+  assert.equal(spec.kind, 'parabola')
+  assert.equal(spec.opens, 'down')
+  assert.deepEqual(spec.vertex, { x: 2, y: 20 })
+  // 常规 y=… 路径零回归
+  const plain = parseFunctionGraphSpec('', '如图，抛物线 y=x²-2x-3 与 x 轴交于点A、B')
+  assert.equal(plain.kind, 'parabola')
 })

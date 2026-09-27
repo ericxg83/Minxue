@@ -17,6 +17,7 @@ import path from 'node:path'
 import pg from 'pg'
 import sharp from 'sharp'
 import { uploadFile } from '../services/ossService.js'
+import { detectNonGeometryFigure, shouldSkipRedraw, findSuspiciousSvgLabels } from '../utils/geometryContentGate.js'
 
 const OUT = 'D:/Minxue_App_V3/server/scripts/logs/c3-dsl-redraw'
 const PROGRESS = path.join(OUT, 'progress.json')
@@ -38,6 +39,16 @@ for (const [i, { id, rec }] of rows.entries()) {
     const svgPath = path.join(OUT, rec.svg)
     if (!fs.existsSync(svgPath)) throw new Error('本地 SVG 缺失')
     const svg = fs.readFileSync(svgPath, 'utf8')
+    // ── 发布侧两道闸（2026-09-27 补，对标 publish-nonc3-dsl-redraws.mjs）──
+    // 本脚本早于闸门上线，曾把「不该重绘的流程图」和「图面印模型内部变量名
+    // （X_pos/P1_L/p_0…）的旧渲染器产物」发上线。发布必须自证，判据与生成侧同源。
+    const meta = await pool.query('SELECT content, parent_stem, options FROM questions WHERE id = $1', [id])
+    const qrow = meta.rows[0] || {}
+    const allStem = [String(qrow.parent_stem || ''), String(qrow.content || '')].join('\n')
+    const pref = detectNonGeometryFigure(allStem)
+    if (shouldSkipRedraw(pref)) throw new Error(`不该重绘：${pref.kind || pref.reason || 'non_geometry'}`)
+    const suspicious = findSuspiciousSvgLabels(svg, allStem, qrow.options)
+    if (suspicious.length) throw new Error(`图面含无出处/内部标注: ${suspicious.join(',').slice(0, 80)}`)
     const png = await sharp(Buffer.from(svg)).resize({ width: 800, withoutEnlargement: false }).png().toBuffer()
     const url = await uploadFile(png, 'png', 'images', `dsl-${tag}`)
     await pool.query('UPDATE questions SET clean_geometry_image_url = $1, updated_at = NOW() WHERE id = $2', [url, id])

@@ -652,5 +652,52 @@ export function parseFunctionGraphSpec(parentStem, content) {
     }
   }
 
+  // ── 物理量因变量归一 fallback（2026-09-27）──
+  // 「飞行高度h(米)与飞行时间t(秒)之间满足函数关系h=20t-5t²」这类物理情境题，
+  // 函数式用的是 h/s/v 等因变量字母与 t/u 自变量，旧口径只认 `y=…x…` ⇒ 永远 null。
+  // 归一是**纯重记号**（h→y、t→x），不改变任何系数 ⇒ 图形与原式逐点相同；
+  // 且只在常规解析失败时启用（原路径行为零回归），解析不出仍返回 null。
+  const dep = normalizeDependentVariableEquation(text)
+  if (dep) {
+    const text2 = normalizeText(text.slice(0, dep.start) + dep.rewritten + text.slice(dep.end))
+    const conditions2 = parseSignConditions(text2)
+    const namedPoints2 = extractNamedPoints(text2)
+    const curvePoints2 = extractCurvePoints(text2, namedPoints2)
+    const ctx2 = { conditions: conditions2, axisOfSymmetry: parseAxisOfSymmetry(text2), vertexCoord: parseVertexCoord(text2), curvePoints: curvePoints2, xInterceptLabels: collectXInterceptLabels(text2), symbolicCurveLabels: collectSymbolicCurveLabels(text2) }
+    for (const m of text2.matchAll(/y\s*=\s*([^;]{1,70})/g)) {
+      const rhs = cleanRhs(m[1])
+      if (!rhs) continue
+      const spec = tryParseQuadratic(rhs, ctx2)
+      if (spec) return wrap(spec, rhs, ctx2, namedPoints2)
+    }
+  }
+
+  return null
+}
+
+/**
+ * 在文本里找「因变量=含自变量的二次式」方程（h=20t-5t² / s=15t-3t² …），
+ * 返回 { start, end, rewritten }（rewritten 已把因变量换成 y、自变量换成 x）；
+ * 找不到（或不像二次式）返回 null。保守口径：
+ *   - 因变量限 h/s/v/w/l（物理量函数名惯例），自变量限 t/u；
+ *   - RHS 必须含自变量的 ^2（或 ²）二次项，否则不算本通道形态。
+ */
+function normalizeDependentVariableEquation(rawText) {
+  const text = String(rawText ?? '')
+  const re = /(?:^|[^a-z0-9])([hsvwl])\s*=\s*([^；;\n]{1,60}?)(?=[；;\n]|$)/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const lhs = m[1]
+    const rhs = m[2]
+    const vm = rhs.match(/(?:^|[^a-z])([tu])(?=\s*\^?\s*2|²)/)
+    if (!vm) continue
+    const v = vm[1]
+    if (!new RegExp(`(?:^|[^a-z])${v}\\s*(?:\\^\\s*2|²)`).test(rhs)) continue
+    const rhs2 = rhs.replace(new RegExp(`(?:^|(?<=[^a-z]))${v}(?=[^a-z]|$)`, 'g'), 'x')
+    if (rhs2 === rhs) continue
+    const eqStart = m.index + (m[0].length - (m[2].length + m[1].length + 1))
+    const eqEnd = m.index + m[0].length
+    return { start: eqStart, end: eqEnd, rewritten: `${lhs}=`.replace(lhs, 'y') + rhs2 }
+  }
   return null
 }
