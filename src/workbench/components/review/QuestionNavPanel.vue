@@ -7,9 +7,35 @@
       </span>
     </div>
 
+    <!-- 状态优先导航（2026-09-27 交互重构）：连续批改的主线是"从待处理清到零"，
+         所以列表第一屏默认只给待处理的题；已确认的收进「已确认」页，不打断主线。
+         过滤只改显示，不重排 store.allQuestions —— 题目序号、卷标/页标、跳转索引
+         全部保持原卷顺序，业务逻辑零改动。 -->
+    <div class="nav-filter" role="tablist">
+      <button type="button" role="tab" class="nav-filter-tab"
+        :class="{ active: filter === 'todo', danger: todoCount > 0 }"
+        :aria-selected="filter === 'todo'"
+        @click="filter = 'todo'">
+        待处理 <span class="nav-filter-count">{{ todoCount }}</span>
+      </button>
+      <button type="button" role="tab" class="nav-filter-tab"
+        :class="{ active: filter === 'done' }"
+        :aria-selected="filter === 'done'"
+        @click="filter = 'done'">
+        已确认 <span class="nav-filter-count">{{ doneCount }}</span>
+      </button>
+      <button type="button" role="tab" class="nav-filter-tab"
+        :class="{ active: filter === 'all' }"
+        :aria-selected="filter === 'all'"
+        @click="filter = 'all'">
+        全部 <span class="nav-filter-count">{{ store.allQuestions.length }}</span>
+      </button>
+    </div>
+
     <div class="nav-list" v-if="store.allQuestions.length > 0">
+      <template v-if="visibleItems.length > 0">
       <div
-        v-for="(q, idx) in store.allQuestions"
+        v-for="{ q, idx } in visibleItems"
         :key="q.id"
         class="nav-item"
         :class="{
@@ -30,11 +56,9 @@
           v-if="paperLabels[idx]"
           class="item-paper-tag"
         >{{ paperLabels[idx] }}</span>
-        <span
-          v-if="q.difficulty != null"
-          class="item-difficulty"
-          :class="'diff-' + q.difficulty"
-        >{{ difficultyText(q.difficulty) }}</span>
+        <!-- [2026-09-27 视觉降噪] 每行的「难度N」彩色签与「95」置信度灰签已删：
+             难度是复核时的二次信息，置信度仅低置信才有行动意义——
+             低置信时仍以警告色小签出现，正常置信的行完全安静 -->
         <span
           v-if="store.getAiState(q) === 'exception' || store.getAiState(q) === 'blank'"
           class="item-confidence"
@@ -44,9 +68,8 @@
           v-else-if="store.getAiState(q) === 'processing'"
           class="item-confidence processing">处理中</span>
         <span
-          v-else-if="q.confidence != null"
-          class="item-confidence"
-          :class="{ low: q.confidence < store.confidenceThreshold }"
+          v-else-if="q.confidence != null && q.confidence < store.confidenceThreshold"
+          class="item-confidence low"
         >{{ Math.round(q.confidence * 100) }}</span>
         <span
           v-for="risk in (q.wrong_book_risks || [])"
@@ -55,6 +78,11 @@
           :class="risk"
           :title="riskHint(risk)"
         >{{ riskLabel(risk) }}</span>
+      </div>
+      </template>
+      <div v-else class="nav-filtered-empty">
+        <template v-if="filter === 'todo'">没有待处理的题<br /><span>切「全部」可回看整卷</span></template>
+        <template v-else-if="filter === 'done'">还没有已确认的题</template>
       </div>
     </div>
 
@@ -88,6 +116,30 @@ import { buildRetryAnswerPageLabels } from '../../../utils/retryAnswerPageLabel'
 
 const store = useReviewStore()
 const threshold = ref(store.confidenceThreshold)
+
+// ── 状态优先导航（2026-09-27 交互重构）──
+// 三个页签：待处理 / 已确认 / 全部，计数与 reviewStore.questionConfirmationMap
+// （6 态同源口径）完全一致 —— 「待处理」= pending/exception/processing，
+// 与顶栏「还差 N 题」、needsAttentionCount 是同一个数，不会出现两个口径打架。
+// [2026-09-27 修正] 默认页签必须是「全部」：状态过滤只能由老师主动点击触发，
+// 不能当默认遮罩 —— 否则打开一份已复核完的卷（待处理 0），列表就是空的，
+// 老师第一反应是"题没了"而不是"我过滤了"。
+// 只过滤显示、不重排数组：idx 仍是 store.allQuestions 的真实下标，
+// jumpToQuestion / 卷标 / 页标 / paper-start 分隔全部原样生效。
+const filter = ref('all')
+const todoCount = computed(() => store.reviewProgress.unconfirmed)
+const doneCount = computed(() => store.reviewProgress.confirmed)
+const visibleItems = computed(() => {
+  const all = store.allQuestions
+  if (filter.value === 'all') return all.map((q, idx) => ({ q, idx }))
+  const wantConfirmed = filter.value === 'done'
+  const map = store.questionConfirmationMap
+  const items = []
+  all.forEach((q, idx) => {
+    if (!!map[q.id] === wantConfirmed) items.push({ q, idx })
+  })
+  return items
+})
 
 // 状态文案走同源函数：exception 桶里"学生未作答"与"AI 判不出"是两回事，
 // 旧版一律写死「未识别答案」，会让答案明明已识别的题看着像 OCR 故障。
@@ -189,12 +241,6 @@ const subLabel = (q) => {
   return no ? `第${no}题(${subNo})` : `(${subNo})`
 }
 
-// 难度等级（1-5）简短标签
-const difficultyText = (d) => {
-  const map = { 1: '难度1', 2: '难度2', 3: '难度3', 4: '难度4', 5: '难度5' }
-  return map[d] || ''
-}
-
 // 错题本入册风险标签（后端 GET /api/questions/task/:taskId 在每道题上算 wrong_book_risks）
 // 让复核老师看到"这题虽判错/未作答，但会被错题本挡"——需现场处理。
 // 2026-09-11：此前后端只报 missing_figure，任何「不完整」的题都显示「⚠ 缺图」，
@@ -254,6 +300,51 @@ const onThresholdChange = (val) => {
   font-weight: 600;
   white-space: nowrap;
 }
+
+/* ── 状态优先导航页签 ── */
+.nav-filter {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wb-border);
+  flex-shrink: 0;
+}
+.nav-filter-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 0;
+  border: 1px solid transparent;
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: var(--wb-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-filter-tab:hover { background: var(--wb-bg); }
+.nav-filter-tab.active {
+  background: var(--wb-primary-mist);
+  border-color: var(--wb-primary-soft);
+  color: var(--wb-primary);
+  font-weight: 600;
+}
+.nav-filter-tab.danger:not(.active) { color: var(--wb-danger); font-weight: 600; }
+.nav-filter-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+.nav-filtered-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--wb-text-tertiary);
+  font-size: 13px;
+  line-height: 1.9;
+}
+.nav-filtered-empty span { font-size: 12px; opacity: 0.8; }
 .nav-list {
   flex: 1;
   overflow-y: auto;
@@ -318,14 +409,6 @@ const onThresholdChange = (val) => {
   color: var(--wb-processing);
   background: var(--wb-processing-soft);
 }
-.item-difficulty {
-  font-size: 11px;
-  padding: 0 6px;
-  border-radius: var(--wb-radius-sm);
-  white-space: nowrap;
-  color: var(--wb-success);
-  background: var(--wb-success-soft);
-}
 .item-paper-tag {
   font-size: 10px;
   padding: 0 5px;
@@ -335,15 +418,6 @@ const onThresholdChange = (val) => {
   background: var(--wb-primary-mist);
   border: 1px solid var(--wb-primary-soft);
   flex-shrink: 0;
-}
-.item-difficulty.diff-3 {
-  color: var(--wb-warning);
-  background: var(--wb-warning-soft);
-}
-.item-difficulty.diff-4,
-.item-difficulty.diff-5 {
-  color: var(--wb-danger);
-  background: var(--wb-danger-soft);
 }
 .item-wrong-book-risk {
   font-size: 10px;

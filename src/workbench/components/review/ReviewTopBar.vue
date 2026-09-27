@@ -81,47 +81,28 @@
       <el-tag v-if="!store.currentPaperReviewable" type="info" effect="plain" class="blocked-tag">
         该卷{{ blockedPaperHint }}，暂无可复核内容
       </el-tag>
-      <!-- 置信阈值全局提示：与左栏 slider 相同一变量（store.confidenceThreshold），
-           提升"AI 正确免复核"判定的可见性；不改判定来源 -->
+      <!-- [2026-09-27 视觉降噪] 低频动作（撤销 / 改批改方式 / 重新处理 / 留底）收进「更多」，
+           顶栏只留三个按钮：更多 / 完成复核 / 下一份 —— 主按钮唯一（下一份），
+           终态动作保留实体（完成复核）。原「AI置信 ≥ N% 免复核」chip 删除：
+           阈值语义与左栏 slider 完全同源，常驻 chip 只是重复小字。 -->
       <template v-if="store.currentPaperReviewable">
-        <el-tooltip
-          content="AI 置信度 ≥ 该阈值时自动判定为「正确」无需复核；低于阈值的自动判定将进入待复核。拖动左栏下方滑块可即时调整。"
-          placement="bottom"
-        >
-          <span class="threshold-badge" :class="{ 'threshold-warn': store.confidenceThreshold >= 0.85 }">
-            AI置信 ≥ {{ (store.confidenceThreshold * 100).toFixed(0) }}% 免复核
-          </span>
-        </el-tooltip>
-        <el-button size="default" :disabled="!store.canUndo" @click="handleUndoLast">
-          ↩ 撤销上一笔
-        </el-button>
-        <!-- 上传时选错批改方式（典型：选了练习册、但这份卷根本不是该册的）→ 按新方式重批。
-             与「重新处理」的区别：后者重跑同一条管线，这里先换批改路线再重跑。
-             高危（清空题目/判题/错题 + 连带删已发布重绘图），对话框内先 dryRun 预演影响面，
-             老师确认后才执行。重练卷（generated_exam_id 非空）后端直接拒绝，不显示此入口。 -->
-        <el-button
-          v-if="canConvertRoute"
-          size="default"
-          type="warning"
-          plain
-          @click="openConvertRoute"
-        >
-          ⇄ 改批改方式
-        </el-button>
-        <el-button size="default" type="warning"
-          :disabled="!store.currentTask" :loading="retryLoading"
-          @click="handleRetryTask">
-          ⟳ 重新处理
-        </el-button>
+        <el-dropdown trigger="click" @command="handleMoreCommand">
+          <el-button size="default" :disabled="moreBusy">
+            ⋯ 更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="undo" :disabled="!store.canUndo">撤销上一笔</el-dropdown-item>
+              <el-dropdown-item v-if="canConvertRoute" command="convert">改批改方式</el-dropdown-item>
+              <el-dropdown-item command="retry" :disabled="!store.currentTask || retryLoading">重新处理</el-dropdown-item>
+              <el-dropdown-item command="archive" divided :disabled="!canArchive || archiveLoading">留底为答案库</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button size="default" type="success"
           :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
           @click="handleComplete">
           ✓ {{ store.reviewConfig.completeLabel }}
-        </el-button>
-        <el-button size="default" plain
-          :disabled="!canArchive" :loading="archiveLoading"
-          @click="handleArchive">
-          📌 留底为答案库
         </el-button>
         <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
           ▶ 下一份
@@ -227,6 +208,7 @@
 import { ref, computed, watch, inject, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
 import ConvertRouteDialog from './ConvertRouteDialog.vue'
@@ -362,6 +344,15 @@ const canNextTask = computed(() => {
   return idx >= 0 && idx < store.pendingTasks.length - 1
 })
 
+// 「更多」下拉：命令分发到原有 handler，动作本身零改动
+const moreBusy = computed(() => retryLoading.value || archiveLoading.value)
+const handleMoreCommand = (cmd) => {
+  if (cmd === 'undo') handleUndoLast()
+  else if (cmd === 'convert') openConvertRoute()
+  else if (cmd === 'retry') handleRetryTask()
+  else if (cmd === 'archive') handleArchive()
+}
+
 // 重练卷不可复核时顶栏的提示文案（与 ReviewWorkspace 的空态说明保持一致）
 const blockedPaperHint = computed(() =>
   store.currentPaperState === RETRY_PAPER_STATE.GRADING ? 'AI 正在识别与判题' : '学生还没有提交答卷'
@@ -418,8 +409,8 @@ const doComplete = async () => {
     await store.completeTaskReview()
     ElMessage.success('试卷复核完成，已保存')
     const tip = store.pendingTasks.length > 0
-      ? '可点击「📌 留底为答案库」沉淀答案，或「▶ 下一份」继续处理'
-      : '可点击「📌 留底为答案库」沉淀答案；当前学生已无待复核试卷'
+      ? '可在「更多」菜单留底为答案库，或点「下一份」继续处理'
+      : '可在「更多」菜单留底为答案库；当前学生已无待复核试卷'
     ElMessage.info(tip)
   } catch (err) {
     // 落库失败时绝不能提示成功：completeTaskReview 现在会把服务端错误原样抛出，
@@ -705,31 +696,7 @@ const handleRetryTask = async () => {
   gap: 8px;
 }
 
-/* 置信阈值全局提示 */
-.threshold-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: var(--wb-radius-md);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-  color: var(--wb-text-secondary);
-  background: var(--wb-bg-hover);
-  border: 1px solid var(--wb-border);
-  cursor: help;
-  transition: all 0.2s;
-}
-.threshold-badge:hover {
-  border-color: var(--wb-primary-soft);
-  color: var(--wb-primary);
-}
-.threshold-badge.threshold-warn {
-  color: var(--wb-warning);
-  background: var(--wb-warning-soft);
-  border-color: var(--wb-warning-soft);
-}
+/* 置信阈值 chip 已删（2026-09-27 视觉降噪）：阈值语义由左栏 slider 独自承载 */
 
 .back-btn {
   font-size: 13px;
@@ -861,7 +828,6 @@ const handleRetryTask = async () => {
 .top-bar-left :deep(.el-select:first-child) { width: 150px !important; }
 .top-bar-left :deep(.el-select:nth-child(2)) { width: 260px !important; margin-left: 0 !important; }
 .top-bar-right { gap: 6px; }
-.threshold-badge { padding: 4px 8px; border-radius: 5px; font-size: 11px; }
 .top-bar-right :deep(.el-button) { min-height: 30px; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
 .top-bar-right :deep(.el-button--success) { color: #fff; background: var(--wb-success); border-color: var(--wb-success); }
 .top-bar-right :deep(.el-button--primary) { color: #fff; background: var(--wb-primary); border-color: var(--wb-primary); }
@@ -875,7 +841,7 @@ const handleRetryTask = async () => {
   font-size: 12px;
 }
 
-@media (max-width: 1200px) { .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
+@media (max-width: 1200px) { .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
 @media (max-width: 900px) { .top-bar { align-items: flex-start; height: auto; min-height: 58px; flex-direction: column; gap: 8px; padding: 10px 14px; } .top-bar-right { width: 100%; overflow-x: auto; padding-bottom: 2px; } }
 
 /* ── 试卷下拉里的「自动复核」角标 ── */

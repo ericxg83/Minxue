@@ -10,14 +10,11 @@
       <!-- ═══ 顶栏 ═══ -->
       <div class="ops-header">
         <div class="ops-header__left">
-          <span class="ops-mode-title">{{ store.reviewConfig.detailTitle }}</span>
-          <el-tag :type="typeTagType" size="small" effect="dark" class="ops-type-tag">
-            {{ typeLabel }}
-          </el-tag>
+          <!-- [2026-09-27 视觉降噪] 去掉「作业批改」模式标题与「难度N·中等」标签：
+               前者与页面上下文重复，后者左栏行内已有、复核时是二次信息。
+               题号是复核场景唯一的定位锚点，放大为主；题型退为一行小字。 -->
           <span class="ops-qnum">#{{ store.currentReviewIndex + 1 }}</span>
-          <el-tag v-if="difficultyLabel" :type="difficultyTagType" size="small" effect="plain" class="ops-difficulty-badge">
-            {{ difficultyLabel }}
-          </el-tag>
+          <span class="ops-type-plain">{{ typeLabel }}</span>
           <el-tag v-if="q.review_status" :type="reviewStatusTagType" size="small" effect="dark" class="ops-review-badge">
             {{ reviewStatusLabel }}
           </el-tag>
@@ -33,13 +30,13 @@
                与参考答案无关，老师根本不知道它干嘛用。
                实测端到端 5~35s（DB 首次建连 + 答案引擎），loading 文案要明确，
                否则老师对着一个不动的转圈会以为卡死。 -->
-          <el-button size="small" type="primary" plain :loading="!!recomputeJob?.loading"
+          <el-button size="small" plain :loading="!!recomputeJob?.loading"
             @click="handleRecomputeAnswer">
             <el-icon v-if="!recomputeJob?.loading"><MagicStick /></el-icon>
             {{ recomputeJob?.loading ? `AI 计算中 ${recomputeJob.elapsed}s…` : 'AI 重解析' }}
           </el-button>
           <template v-if="!editing">
-            <el-button size="small" type="primary" plain @click="handleEnterEdit">
+            <el-button size="small" plain @click="handleEnterEdit">
               <el-icon><EditPen /></el-icon> 编辑
             </el-button>
           </template>
@@ -54,6 +51,11 @@
         </div>
       </div>
 
+      <!-- ═══ 统一 Review Card（2026-09-27 交互重构）═══
+           答案对照 / AI 判定 / 题目内容原先是三张零散卡片，视觉上互相打架，
+           老师扫一眼要跨三个背景块。现在收进同一张卡：顶栏（元信息）固定、
+           卡内整体滚动、底部操作区固定 —— 面板职责变成「一张卡看全一道题」。 -->
+      <div class="ops-review-card">
       <!-- ═══ 答案对照（紧凑） ═══ -->
       <div class="ops-compare-bar">
         <div class="ops-compare-item">
@@ -83,7 +85,12 @@
         <div class="ops-compare-item">
           <div class="ops-cmp-label-row">
             <span class="ops-cmp-label">
-              参考答案
+              参考答案<span
+                v-if="refAnswerOrigin"
+                class="ops-ref-origin"
+                :class="`origin-${refAnswerOrigin.tone}`"
+                :title="refAnswerOrigin.hint"
+              > · {{ refAnswerOrigin.label }}</span>
               <span v-if="editing" style="color:var(--wb-warning);font-weight:400;"> 编辑</span>
             </span>
             <!-- 截图/拍照 → 后端视觉模型识别 → 弹窗预览 → 一键填入。
@@ -96,14 +103,6 @@
               <el-icon><Camera /></el-icon> 📷 截图识别答案
             </el-button>
           </div>
-          <!-- 参考答案来源（答案库 / AI 解答，两档）。卷面只印题目不印答案，
-               老师看不出来源时会把 AI 算错的参考答案当成"学生答错"，事故里就是这样
-               反复怀疑批改逻辑的。AI 解答那档带悬停说明，措辞只提示不施压。 -->
-          <span v-if="refAnswerOrigin" class="ops-ref-origin"
-                :class="`origin-${refAnswerOrigin.tone}`"
-                :title="refAnswerOrigin.hint">
-            {{ refAnswerOrigin.label }}
-          </span>
           <!-- AI 解析自检未通过时标红 + 给老师"答案可能错"的红色横幅。
                数据来自 worker.js 调 aiParseSelfCheck 写入 questions.ai_self_check_issues。
                移动端 Grading\index.jsx:538 已对齐相同 UX，避免老师改题无据可依。 -->
@@ -153,21 +152,13 @@
         <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
         <!-- 判不出的原因：让老师知道为什么这题要自己定，而不是以为系统坏了 -->
         <span v-if="unjudgedReason" class="ops-ai-reason">{{ unjudgedReason }}</span>
+        <!-- 图题风险（视觉推理不稳）从独立 alert 框降为行内小字（2026-09-27 视觉降噪），
+             语义保留、悬停可看全文，不再每题占一整条横幅 -->
+        <span v-if="aiAnswerRiskReason" class="ops-ai-reason" :title="aiAnswerRiskReason">{{ aiAnswerRiskReason }}</span>
         <el-progress v-if="q.confidence != null && getAiState(q) === 'pending'" :percentage="Math.round(q.confidence * 100)"
           :stroke-width="8" :color="q.confidence >= store.confidenceThreshold ? 'var(--wb-success)' : 'var(--wb-warning)'"
           style="width:100px;margin-left:auto;" />
       </div>
-
-      <!-- 图题风险提示：客观题 + 配图（geometry/chart）时 AI 视觉推理不擅长，
-           软提示老师核对参考答案。wrong/correct 状态都展示，避免把"AI 错误"信以为真。 -->
-      <el-alert
-        v-if="aiAnswerRiskReason"
-        :title="aiAnswerRiskReason"
-        type="warning"
-        show-icon
-        :closable="false"
-        class="ops-image-risk"
-      />
 
       <!-- 「AI 重解析」的上次结论（2026-09-24）。常驻而非只弹 toast：
            老师点完按钮常去别处转一圈再回来，3 秒的 toast 早没了，页面又回到
@@ -311,6 +302,7 @@
           </div>
         </div>
       </div>
+      </div><!-- /ops-review-card -->
 
       <!-- ═══ 底部操作区（固定） ═══ -->
       <div class="ops-actions">
@@ -330,12 +322,14 @@
               @click="handleReview('correct')">
               <span class="ops-btn-icon">✓</span>
               <span>{{ store.reviewConfig.buttons.correct }}</span>
+              <span class="ops-btn-kbd">Space</span>
             </button>
             <button class="ops-btn ops-btn-wrong"
               :class="{ 'ops-btn-active': q.review_status === 'wrong', 'animate': animatingBtn === 'wrong' }"
               @click="handleReview('wrong')">
               <span class="ops-btn-icon">✗</span>
               <span>{{ store.reviewConfig.buttons.wrong }}</span>
+              <span class="ops-btn-kbd">X</span>
             </button>
             <button v-if="store.reviewConfig.showExclude" class="ops-btn ops-btn-exclude"
               :class="{ 'ops-btn-active': q.review_status === 'exclude', 'animate': animatingBtn === 'exclude' }"
@@ -346,13 +340,15 @@
           </div>
           <div class="ops-buttons-secondary">
             <el-button size="default" @click="prevQ" :disabled="store.currentReviewIndex === 0">
-              <el-icon><ArrowLeft /></el-icon> 上一题
+              <el-icon><ArrowLeft /></el-icon> 上一题 <span class="ops-el-kbd">←</span>
             </el-button>
-            <el-button size="default" type="primary" @click="handleEnterEdit">
+            <el-button size="default" @click="handleEnterEdit">
               <el-icon><EditPen /></el-icon> 编辑
             </el-button>
-            <el-button size="default" @click="nextQ" :disabled="store.currentReviewIndex >= store.allQuestions.length - 1">
-              下一题 <el-icon><ArrowRight /></el-icon>
+            <!-- 唯一主按钮（2026-09-27 交互重构）：连续批改的主线动作只有「下一题」，
+                 编辑/AI重解析/上一题全部退为次级样式，眼睛只追一个高亮目标 -->
+            <el-button size="default" type="primary" @click="nextQ" :disabled="store.currentReviewIndex >= store.allQuestions.length - 1">
+              下一题 <span class="ops-el-kbd">→</span> <el-icon><ArrowRight /></el-icon>
             </el-button>
           </div>
         </template>
@@ -490,7 +486,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, recomputeQuestionAnswer, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
 import { recognizeAnswer, recognizeQuestion } from '../../../api/answerOCR'
@@ -554,27 +550,12 @@ const typeLabel = computed(() => {
   if (!q.value) return ''
   return TYPE_MAP[normalizeType(q.value)] || '未知题型'
 })
-const typeTagType = computed(() => {
-  const map = { choice: '', fill: 'success', answer: 'warning', judge: 'primary' }
-  return map[normalizeType(q.value)] || 'info'
-})
 const optionsList = computed(() => normalizeOptions(q.value?.options || []))
 
 // 参考答案来源（答案库 / AI 解答，两档）。纯展示，帮助老师判断该不该相信这个答案 ——
 // 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
+// [2026-09-27 视觉降噪] 从独立琥珀色块降为「参考答案 · AI 解答」行内小字，悬停仍有说明。
 const refAnswerOrigin = computed(() => getReferenceAnswerOrigin(q.value))
-
-// 难度系数（1-5）显示
-const difficultyLabel = computed(() => {
-  const d = q.value?.difficulty
-  if (d == null) return ''
-  const map = { 1: '基础', 2: '简单', 3: '中等', 4: '较难', 5: '难题' }
-  return `难度${d}·${map[d] || ''}`
-})
-const difficultyTagType = computed(() => {
-  const map = { 1: 'success', 2: 'success', 3: 'warning', 4: 'danger', 5: 'danger' }
-  return map[q.value?.difficulty] || 'info'
-})
 
 const reviewStatusLabel = computed(() => {
   if (!q.value?.review_status) return ''
@@ -1452,6 +1433,46 @@ const handleReview = async (result) => {
 const nextQ = () => { store.nextQuestion() }
 const prevQ = () => { store.prevQuestion() }
 
+// ── 连续批改快捷键（2026-09-27 交互重构）──
+// Space=正确 / X=错误 / →=下一题 / ←=上一题。
+// 只接键不改任何业务动作：全部复用 handleReview / nextQ / prevQ，
+// 触发路径与鼠标点击完全一致（含误判归因弹窗、完整性门禁、删除确认）。
+// 守卫（按序）：
+//   ① 编辑态整体禁用 —— 翻题会丢弃未保存的表单内容；
+//   ② 焦点在输入类元素（input/textarea/select/contenteditable）时让位给打字；
+//   ③ 任何 el-dialog / ElMessageBox 打开时让位 —— 否则弹窗里按 X/Space 会
+//      穿透到底下的「标错/标对」，这是快捷键最危险的翻车点；
+//   ④ 修饰键组合（Ctrl+X 剪切等）不劫持。
+const isEditableTarget = (el) => {
+  if (!el) return false
+  const tag = el.tagName
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable
+}
+const hasOpenOverlay = () => !!document.querySelector('.el-overlay:not([style*="display: none"])')
+const onPanelKeydown = (e) => {
+  if (editing.value || !q.value) return
+  if (!store.currentPaperReviewable) return
+  if (isEditableTarget(e.target)) return
+  if (hasOpenOverlay()) return
+  if (e.metaKey || e.ctrlKey || e.altKey) return
+  if (e.code === 'Space' || e.key === ' ') {
+    // Space 默认滚动页面 / 激活聚焦按钮，批改场景里它只属于「正确」
+    e.preventDefault()
+    handleReview('correct')
+  } else if (e.key === 'x' || e.key === 'X') {
+    e.preventDefault()
+    handleReview('wrong')
+  } else if (e.key === 'ArrowRight') {
+    e.preventDefault()
+    nextQ()
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault()
+    prevQ()
+  }
+}
+onMounted(() => { window.addEventListener('keydown', onPanelKeydown) })
+onUnmounted(() => { window.removeEventListener('keydown', onPanelKeydown) })
+
 const handleImageUpload = async (file) => {
   const question = q.value
   if (!question?.id) { ElMessage.error('题目ID不存在'); return false }
@@ -1554,6 +1575,10 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* 编辑模式下右侧多出「取消/保存」两个按钮，窄面板时整行放不下，
+     不允许换行会把「保存」挤出可视区（老师改完答案找不到保存按钮）。 */
+  flex-wrap: wrap;
+  row-gap: 6px;
   padding: 10px 16px;
   background: #fff;
   border-bottom: 1px solid var(--wb-border);
@@ -1563,8 +1588,12 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  row-gap: 4px;
 }
 .ops-type-tag { font-weight: 600; }
+/* 题型行内小字（原为 effect=dark 实心 tag，降噪后改纯文本） */
+.ops-type-plain { font-size: 12px; color: var(--wb-text-tertiary); }
 .ops-qnum {
   font-size: 16px;
   font-weight: 700;
@@ -1593,39 +1622,47 @@ const handleRetryGeometry = async () => {
   cursor: help;
 }
 
-/* 参考答案来源标签（答案库 / AI 解答，两档）。
-   中性信息用灰，AI 解答用琥珀 —— 不是报错，是"别无条件信它"，所以刻意不用红色：
-   红色留给上面那个真正表示"解析自检没过"的 ⚠ AI 不可信。 */
+/* 参考答案来源（答案库 / AI 解答）：并入「参考答案」标签行的小字，
+   中性信息用灰，AI 解答用琥珀 —— 不是报错，是"别无条件信它"。
+   悬停 tooltip 保留完整说明。 */
 .ops-ref-origin {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-size: var(--fs-10);
-  font-weight: 600;
+  font-weight: 400;
   cursor: help;
   white-space: nowrap;
 }
 .ops-ref-origin.origin-info {
-  color: #475569;
-  background: #f1f5f9;
-  border: 1px solid #cbd5e1;
+  color: #64748B;
 }
 .ops-ref-origin.origin-warning {
-  color: #b45309;
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  color: #B45309;
 }
+
+/* ═══ 统一 Review Card（2026-09-27 交互重构）═══
+   右栏唯一内容容器：答案对照 / AI 判定 / 题目内容三段收进同一张白卡，
+   卡体整体滚动，顶栏与底部操作区固定。段落间只用分隔线，不再各自成卡。 */
+.ops-review-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 10px;
+  background: #fff;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius-sm);
+  display: flex;
+  flex-direction: column;
+}
+.ops-review-card::-webkit-scrollbar { width: 8px; }
+.ops-review-card::-webkit-scrollbar-thumb { background: #B6C2D2; border-radius: var(--wb-radius-xs); }
+.ops-review-card::-webkit-scrollbar-thumb:hover { background: #8E9DB2; }
 
 /* ── 答案对照条 ── */
 .ops-compare-bar {
   display: flex;
   align-items: stretch;
-  background: #fff;
-  margin: 8px 10px 0;
   padding: 10px 14px;
-  border-radius: var(--wb-radius-xs);
-  box-shadow: var(--wb-shadow-sm);
-  flex: 0 1 auto;
+  border-bottom: 1px solid var(--wb-border);
+  flex-shrink: 0;
   min-height: 0;
   max-height: 38vh;
 }
@@ -1717,20 +1754,12 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
-  margin: 0 10px;
   padding: 8px 14px;
-  border-bottom: 1px solid var(--wb-bg-hover);
+  border-bottom: 1px solid var(--wb-border);
   flex-shrink: 0;
 }
 
-/* ── 顶栏模式标题 ── */
-.ops-mode-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--wb-text);
-  margin-right: 4px;
-}
+/* ── AI 判定图标 ── */
 .ops-ai-icon {
   width: 22px; height: 22px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
@@ -1744,22 +1773,10 @@ const handleRetryGeometry = async () => {
 .ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
 .ops-ai-reason { font-size: 12px; color: var(--wb-warning); }
 
-/* 图题风险提示：客观题 + 几何/图表配图时，软提示老师核对参考答案 */
-.ops-image-risk {
-  flex-shrink: 0;
-  margin: 8px 10px 0;
-  padding: 6px 10px;
-}
-.ops-image-risk :deep(.el-alert__title) {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--wb-warning);
-}
-
 /* 「AI 重解析」上次结论：常驻在参考答案下方，可关闭 */
 .ops-recompute-notice {
   flex-shrink: 0;
-  margin: 8px 10px 0;
+  margin: 8px 12px 0;
   padding: 6px 10px;
 }
 .ops-recompute-notice :deep(.el-alert__title) {
@@ -1768,12 +1785,9 @@ const handleRetryGeometry = async () => {
   line-height: 1.5;
 }
 
-/* ═══ 完整题目内容区（可滚动） ═══ */
+/* ═══ 题目内容区（Review Card 内的第三段，随卡滚动） ═══ */
 .ops-question-body {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  min-height: 120px;
-  padding: 12px 16px;
+  padding: 12px 16px 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -1937,6 +1951,29 @@ const handleRetryGeometry = async () => {
   background: #fff;
 }
 .ops-btn-icon { font-size: 18px; }
+
+/* 快捷键提示角标：让 Space/X/←/→ 与按钮的对应关系始终可见，
+   老师不需要背快捷键 —— 看一眼按钮就知道 */
+.ops-btn-kbd {
+  margin-left: 6px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  opacity: 0.55;
+}
+.ops-el-kbd {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 13px;
+  opacity: 0.65;
+}
 
 .ops-btn-correct { color: var(--wb-success); border-color: var(--wb-success-soft); background: var(--wb-success-soft); }
 .ops-btn-correct:hover { background: var(--wb-success-soft); border-color: var(--wb-success); }
