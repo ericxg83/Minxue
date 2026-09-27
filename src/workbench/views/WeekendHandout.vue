@@ -97,6 +97,15 @@
             />
           </div>
           <div class="param-field">
+            <label title="按白板里的讲题状态（teaching_marks）过滤：排除已讲后，题数限额只留给没讲过的题">讲过的题</label>
+            <WorkbenchSelect
+              v-model="params.taught"
+              :options="taughtOptions"
+              width="220px"
+              aria-label="讲过的题筛选"
+            />
+          </div>
+          <div class="param-field">
             <label>章节</label>
             <el-tree-select
               v-model="params.chapter"
@@ -376,6 +385,7 @@ const params = ref({
   mergeThin: 0,
   difficulty: 'medium',
   chapter: '',
+  taught: '',
 })
 const periodPreset = ref('days7')
 // 版本固定为讲义版（含参考答案，2026-09-23 用户指定）：界面不再提供切换，
@@ -403,6 +413,15 @@ const difficultyOptions = [
   { label: '中等（难度3）', value: 'medium' },
   { label: '较难（难度4-5）', value: 'hard' },
   { label: '难度未判定', value: 'unknown' },
+]
+
+// 讲过的题筛选（2026-09-27）：按白板讲题状态（teaching_marks）过滤。
+// 后端在薄天合并与题数限额之前过滤，排除已讲后限额只留给没讲过的题；
+// 「讲完学生又错」的回炉题在「不再出现」模式下仍会保留（正是要再讲的题）。
+const taughtOptions = [
+  { label: '全部显示（含已讲）', value: '' },
+  { label: '排除已讲（只看未讲）', value: 'untaught' },
+  { label: '只看已讲（复习用）', value: 'taught' },
 ]
 
 const chapterTreeOptions = ref([])
@@ -668,6 +687,7 @@ function buildParamsBody(extra = {}) {
     mergeThin: Number(params.value.mergeThin) || 0,
     difficulty: params.value.difficulty || undefined,
     chapter: params.value.chapter || undefined,
+    taught: params.value.taught || undefined,
     withAnswer: true,
     ...extra,
   }
@@ -717,6 +737,7 @@ function openBoard() {
     mergeThin: body.mergeThin ? String(body.mergeThin) : '',
     difficulty: body.difficulty || '',
     chapter: body.chapter || '',
+    taught: body.taught || '',
     students: body.students.join(','),
     selected: [...selected.value].join(','),
   }

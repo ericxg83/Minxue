@@ -99,6 +99,7 @@ function chapterNodeIds(catalog, nodeId) {
  * @param {number} [opts.mergeThin=0] 题量小于该值的天并入其后第一个足量日
  * @param {boolean} [opts.withAnswer=true]
  * @param {string} [opts.chapter=''] 标准教材章节 id（空=不限）
+ * @param {string} [opts.taught='']  讲题状态过滤：'' 全部 / 'untaught' 排除已讲 / 'taught' 只看已讲
  * @param {(msg:string)=>void} [opts.logger]
  */
 export async function buildHandout(opts) {
@@ -115,6 +116,7 @@ export async function buildHandout(opts) {
     difficulty = '',
     chapter = '',
     withAnswer = true,
+    taught = '',
     logger = () => {},
   } = opts
   const log = logger
@@ -757,6 +759,72 @@ export async function buildHandout(opts) {
     log(`[3] 全局跨天去重: 共错题合并 → ${daysOut.reduce((s, d) => s + d.totalTopics, 0)} 题（归到最近错题日期节）`)
   }
 
+  // ── 讲题状态（teaching_marks，2026-09-25）──────────────────────────────
+  // 白板需要知道每道题「讲过没有 / 要不要回炉」。这里一次性把本作用域（当前 = 年级）
+  // 的标记全捞出来，在内存里按锚点 join —— 白板打开一次就拿到全部标记，前端不必再发
+  // 一轮批量查询。只读，且失败不阻断课件生成（表未建 / 库抖动时退化为「全部未讲」）。
+  // 红线：本段绝不写回 lifecycle_status / knowledge_mastery —— 老师标记「讲过」不等于
+  // 学生会了，两者语义不同（见 _周末班白板-讲题状态-产品评审-20260925.md §3.1）。
+  // [2026-09-27] 查询从 slides 组装段前移到这里：taught 过滤必须发生在薄天合并与
+  // limit 之前，否则题数限额先被已讲题占掉 —— 症状就是「按时间选出来的全是讲过的题」。
+  const markByAnchor = new Map()
+  try {
+    const { rows: markRows } = await pool.query(
+      `SELECT anchor_key, anchor_key_alt, status, source, taught_at, taught_times
+         FROM teaching_marks
+        WHERE scope_key = $1`,
+      [grade]
+    )
+    for (const m of markRows) {
+      if (m.anchor_key) markByAnchor.set(m.anchor_key, m)
+      // 完整题干合并键也入索引：OCR 题面微差导致主锚点漂移时仍能命中。
+      // 不会与主键撞车 —— 主键恒带 ws:/topic:/self: 前缀，alt 是无前缀的归一化题干。
+      if (m.anchor_key_alt) markByAnchor.set(m.anchor_key_alt, m)
+    }
+    log(`[讲题状态] 命中 ${markRows.length} 条标记（作用域=${grade}）`)
+  } catch (e) {
+    log(`[讲题状态] 读取失败，按「全部未讲」继续：${e.message}`)
+  }
+
+  // ── 讲过的题过滤（taught=untaught / taught，2026-09-27）─────────────────
+  // 'untaught'：排除已讲（done 且无需回炉 / skip）。讲完学生又错（reworkDue）的题
+  //   仍然保留 —— 「下周要讲的题单」里它正是要再讲的；'rework' 状态同理保留。
+  // 'taught'：只看已讲（有任何标记 done / rework / skip），复习 / 回看用。
+  // 口径与白板 isUnTaught 的差异：白板的「只看未讲」把 rework 也算已讲（讲课中过滤），
+  // 生成题单这里是「选题」，回炉题必须能再次出现。
+  if (taught === 'untaught' || taught === 'taught') {
+    const markOfTopic = (t) => {
+      const m = markByAnchor.get(t.key)
+        || (mergeKeyOf(t) ? markByAnchor.get(mergeKeyOf(t)) : null)
+        || null
+      // 与 slides 组装段同一条 reworkDue 判据：讲完之后这道题又被做错
+      const reworkDue = !!(m && m.status === 'done' && m.taught_at
+        && (t.latestAddedAt || 0) > new Date(m.taught_at).getTime())
+      return { m, reworkDue }
+    }
+    daysOut = daysOut
+      .map(d => {
+        const topics = d.topics.filter(t => {
+          const { m, reworkDue } = markOfTopic(t)
+          const st = m?.status || 'new'
+          if (taught === 'untaught') return st === 'new' || st === 'rework' || reworkDue
+          return st !== 'new'
+        })
+        const studentIds = [...new Set(topics.flatMap(t => t.students.map(st => st.id)))]
+        return {
+          ...d,
+          topics,
+          rawRows: topics.reduce((s, t) => s + t.rawCount, 0),
+          studentCount: studentIds.length,
+          studentIds,
+          totalTopics: topics.length,
+        }
+      })
+      .filter(d => d.topics.length > 0)
+    log(`[3.5] 讲题状态过滤(${taught}): → ${daysOut.reduce((s, d) => s + d.totalTopics, 0)} 题`)
+    // 过滤后为空是正常业务结果（该时段的题都讲过了），不抛错 —— 前端展示空态引导调参数
+  }
+
   // ── 薄天合并 ──
   function tierIndexOf(t) { return TIERS.findIndex(x => x.match(t.difficulty)) }
   function sortTopics(list) {
@@ -844,32 +912,8 @@ export async function buildHandout(opts) {
   const periodLabel = `${toYmd(periodStart)} ~ ${toYmd(new Date(periodEnd.getTime() - 1))}`
   const nameOf = id => studentRows.find(s => s.id === id)?.name || ''
 
-  // ── 讲题状态（teaching_marks，2026-09-25）──────────────────────────────
-  // 白板需要知道每道题「讲过没有 / 要不要回炉」。这里一次性把本作用域（当前 = 年级）
-  // 的标记全捞出来，在内存里按锚点 join —— 白板打开一次就拿到全部标记，前端不必再发
-  // 一轮批量查询。只读，且失败不阻断课件生成（表未建 / 库抖动时退化为「全部未讲」）。
-  // 红线：本段绝不写回 lifecycle_status / knowledge_mastery —— 老师标记「讲过」不等于
-  // 学生会了，两者语义不同（见 _周末班白板-讲题状态-产品评审-20260925.md §3.1）。
-  const markByAnchor = new Map()
-  try {
-    const { rows: markRows } = await pool.query(
-      `SELECT anchor_key, anchor_key_alt, status, source, taught_at, taught_times
-         FROM teaching_marks
-        WHERE scope_key = $1`,
-      [grade]
-    )
-    for (const m of markRows) {
-      if (m.anchor_key) markByAnchor.set(m.anchor_key, m)
-      // 完整题干合并键也入索引：OCR 题面微差导致主锚点漂移时仍能命中。
-      // 不会与主键撞车 —— 主键恒带 ws:/topic:/self: 前缀，alt 是无前缀的归一化题干。
-      if (m.anchor_key_alt) markByAnchor.set(m.anchor_key_alt, m)
-    }
-    log(`[讲题状态] 命中 ${markRows.length} 条标记（作用域=${grade}）`)
-  } catch (e) {
-    log(`[讲题状态] 读取失败，按「全部未讲」继续：${e.message}`)
-  }
-
   // ── slides（PPT 渲染输入）──
+  // 讲题状态标记已在上方捞出（markByAnchor），这里只做按锚点 join。
   const slideList = []
   let seq = 0
   for (const sec of sections) {
@@ -971,6 +1015,7 @@ export async function buildHandout(opts) {
       students: studentFilter.length ? studentFilter : null,
       chapter: chapterNode?.id || null,
       chapterName: chapterNode?.name || null,
+      taught: taught || null,
     },
     stats: {
       rawRows: totalRows, topics: totalTopics, questionSlides: seq,

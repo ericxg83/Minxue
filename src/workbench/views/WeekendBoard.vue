@@ -182,6 +182,29 @@
 
       <!-- 右侧工具栏：放在主区内（相对主区定位），避免顶到顶栏右侧的按钮 -->
       <aside v-if="current" class="board-toolbar">
+        <!-- 全屏讲题模式下顶栏默认隐藏（悬停屏幕顶部 / 下拉才唤出），写板书过程中
+             想对答案是高频动作，把两个最常用的开关常驻在这里 —— 2026-09-27
+             「白板模式也要能点参考答案」。普通模式顶栏常驻，不重复展示。 -->
+        <div v-if="isImmersive" class="tool-group">
+          <button
+            type="button"
+            class="tool-btn"
+            :class="{ active: showAnswer }"
+            title="参考答案（A）"
+            @click="toggleAnswer"
+          >
+            <el-icon><View /></el-icon>
+          </button>
+          <button
+            type="button"
+            class="tool-btn"
+            :class="{ active: showOriginal }"
+            title="原卷图（O）"
+            @click="toggleOriginal"
+          >
+            <el-icon><Picture /></el-icon>
+          </button>
+        </div>
         <div class="tool-group">
           <button
             v-for="c in penColors"
@@ -349,7 +372,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Pointer, Reading, RefreshLeft, Remove,
+  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Picture, Pointer, Reading, RefreshLeft, Remove, View,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
@@ -598,6 +621,7 @@ onMounted(async () => {
         mergeThin: Number(q.mergeThin) || 0,
         difficulty: q.difficulty ? String(q.difficulty) : undefined,
         chapter: q.chapter ? String(q.chapter) : undefined,
+        taught: q.taught ? String(q.taught) : undefined,
         withAnswer: true,
       }
       const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })

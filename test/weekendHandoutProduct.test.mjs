@@ -215,3 +215,32 @@ test('章节筛选：标准教材目录 + 树形下拉 + preview/generate/白板
   assert.ok(B_SRC.includes('chapter: q.chapter'), 'WeekendBoard 必须从 query 读取 chapter')
   assert.ok(ROUTE_SRC.includes("router.get('/api/weekend-ppt/chapters'"), '必须提供章节树接口')
 })
+
+test('讲过的题筛选：teaching_marks 过滤前置于薄天合并/限额 + 全链路透传（2026-09-27）', () => {
+  // 后端 lib：taught 参数解构 + 过滤实现
+  assert.ok(LIB_SRC.includes("taught = ''"), 'buildHandout 必须解构 taught（默认空=全部）')
+  assert.ok(LIB_SRC.includes('taught === \'untaught\' || taught === \'taught\''),
+    '必须按 taught 取值实现过滤分支')
+  assert.ok(LIB_SRC.includes('reworkDue'), '排除已讲时必须保留「讲完学生又错」的回炉题')
+  // 过滤必须发生在薄天合并与 limit 之前，否则限额先被已讲题占掉
+  const marksIdx = LIB_SRC.indexOf('讲题状态过滤')
+  const mergeIdx = LIB_SRC.indexOf('── 薄天合并 ──')
+  const limitIdx = LIB_SRC.indexOf('总题数上限')
+  assert.ok(marksIdx > -1 && mergeIdx > -1 && limitIdx > -1, '关键代码段必须存在')
+  assert.ok(marksIdx < mergeIdx, '讲题状态过滤必须在薄天合并之前')
+  assert.ok(marksIdx < limitIdx, '讲题状态过滤必须在整份题数上限之前')
+  // 路由：白名单取值（非法值回退全部，不抛错）
+  assert.ok(ROUTE_SRC.includes("['untaught', 'taught'].includes(str(body.taught))"),
+    'sanitizeParams 必须白名单校验 taught')
+  // 前端选题页：下拉 + 参数 + buildParamsBody + 白板 query 透传
+  assert.ok(VIEW_SRC.includes('params.taught'), '前端参数必须包含 taught')
+  assert.ok(VIEW_SRC.includes('排除已讲'), '下拉必须提供「排除已讲」选项（本次需求的主场景）')
+  assert.ok(VIEW_SRC.includes('taught: params.value.taught'), 'buildParamsBody 必须把 taught 发给后端')
+  assert.ok(VIEW_SRC.includes('taught: body.taught'), 'openBoard 必须把 taught 带给白板')
+  // 白板回退拉取（刷新/书签直开）也要透传
+  const B_SRC = readFileSync(resolve(ROOT, 'src/workbench/views/WeekendBoard.vue'), 'utf8')
+  assert.ok(B_SRC.includes('taught: q.taught'), 'WeekendBoard 回退取数必须透传 taught')
+  // 沉浸模式右侧工具栏必须常驻参考答案 / 原卷图（顶栏隐藏时的可达入口）
+  assert.ok(B_SRC.includes('v-if="isImmersive" class="tool-group"'),
+    '全屏讲题模式右侧工具栏必须有常驻开关组')
+})
