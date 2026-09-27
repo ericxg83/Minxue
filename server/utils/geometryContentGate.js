@@ -11,7 +11,7 @@
  * 原则沿用 geometryLabelValidator："宁愿少显示，也不显示错误信息"。
  */
 
-import { isAuxPointLabel, isTickNumberLabel, detectNumberAxis, detectCoordAxes } from './geom/structure.js'
+import { isAuxPointLabel, isTickNumberLabel, isVertexSymbolLabel, detectNumberAxis, detectCoordAxes } from './geom/structure.js'
 
 const GREEK = 'αβγδεζηθικλμνξοπρστυφχψω'
 
@@ -330,10 +330,20 @@ export function validateStructureAgainstContent(structure, content, options) {
     for (const l of ['O', 'X', 'Y', 'x', 'y']) axisLabels.add(l) // 原点惯例 O，轴名 X/x、Y/y
   }
   const isAxisLabel = (label) => axisLabels.size > 0 && axisLabels.has(normalizeLabel(label))
+  // ── 渲染家具豁免（2026-09-26 四修）──
+  // ④ 渲染层**根本不会标注**的内部变量名：含下划线（`X_NEGX_POS`、`L1_leftL1_right`、
+  //    `V_bottomV_top`）、超长、英文单词、半角数字后缀（`P1`、`X1`、`B1B2`、`P00P10`）。
+  //    渲染器只画这些对象的几何形状、**不画它们的名字**（geometrySvg.js 用
+  //    isVertexSymbolLabel 过滤标注），学生看到的图上没有这个字母 ⇒ 题干当然不会引用它。
+  //    闸门若拿这些名字去比题干，就是把「上屏内容」与「结构原文」混为一谈。
+  //    实测（2026-09-26 全库 244 道引图错题）：`181eccb8`（坐标轴被命名成 X_NEG/X_POS）、
+  //    `3bf6cd04`（平行线 L1_left/L1_right）、`46a96080`（阶梯网格 B1B2/P00P10）、
+  //    `54244833`（P1P2）等本已画出正确几何、仅因内部名对不上题干而被拒稿。
   const isFurniture = (label) =>
     isAuxPointLabel(label) ||
     isTickNumberLabel(label) ||
-    isAxisLabel(label)
+    isAxisLabel(label) ||
+    !isVertexSymbolLabel(label)
 
   const pts = (structure?.points || [])
     .filter(p => p?.label && !isFurniture(p.label))
@@ -543,6 +553,11 @@ const IO_TABLE_RE = /输入\s*[:：][\s\S]{0,150}?输出\s*[:：]/
 // 实测 `dc357206`：重绘只剩三角形 + 3 条竖线，网格整块丢失，对学生就是一张错的、无法用的图。
 // 按用户底线「宁可回退原卷裁片，也不发错图」：格点图**一律不重绘**，保留原图（与数轴/统计图同类）。
 // 判据只认强信号（格点/网格/方格纸/「小正方形的边长均为1」），避免误伤普通「正方形ABCD」题。
+//
+// ⚠️ 2026-09-26 P2-7 更新：DSL 已补 `grid` 网格图元（commands.js + 两渲染器底图 + 提示词例 4），
+// 「无网格图元」这一拦处理由不再成立。消费方（geometryWorker 2.4）在 **DSL 强制通道开启时
+// 放行 grid_figure**重绘；GEOMETRY_FORCE_DSL=0（只剩 JSON 目测通道，画不出网格）时仍按本判据
+// 保留原图。发布侧脚本复用同一判据 + 同一豁免口径，不得只改一头。
 const GRID_FIGURE_RE = /格点|网格|方格纸|每个小正方形的边长均?为[1１]|小正方形的边长均为单位1/
 
 
@@ -650,4 +665,24 @@ export function detectNonGeometryFigure(content) {
     }
   }
   return detectMultiPanelFigure(t)
+}
+
+/**
+ * skip 结论的**最终处置**：是否真的不进重绘（2026-09-26 P2-7 补）。
+ *
+ * 存在意义：`grid_figure` 的拦处理由是「DSL 无网格图元」，图元补齐后该理由只在
+ * JSON 目测通道（GEOMETRY_FORCE_DSL=0）下成立。生成侧 worker 与发布侧脚本**必须
+ * 共用这一个口径**，不得只改一头（本判据有两处必须同时生效调用点的老教训）。
+ *
+ * @param {{skip:boolean, kind?:string}} pref detectNonGeometryFigure 的返回值
+ * @param {object|null} [structure] 重绘产物结构（发布侧传入；带 grid 图元即证明不是丢网格的残图）
+ * @returns {boolean} true = 不进重绘/产物不得发布
+ */
+export function shouldSkipRedraw(pref, structure = null) {
+  if (!pref || !pref.skip) return false
+  if (pref.kind === 'grid_figure') {
+    if (process.env.GEOMETRY_FORCE_DSL === '0') return true // 目测通道画不出网格，维持旧口径
+    return !(structure && structure.grid) // DSL 通道 + 产物真带网格底图 → 放行
+  }
+  return true
 }

@@ -53,6 +53,10 @@ export function isVertexSymbolLabel(text) {
   if (/[_]/.test(t)) return false
   // 数轴刻度数字（可带负号）：-2、0、1、2
   if (/^-?\d{1,3}$/.test(t)) return true
+  // 数轴上的根式刻度（2026-09-26 P2-7 数轴确定性通道）：√2、-√3、2√5。
+  // 只收「(±)(系数)√整数」单式，不含变量/加减号 —— 与刻度数字同一可信级：
+  // 它们是题干里明写的数，不是模型目测的几何事实。
+  if (/^-?\d{0,2}√\d{1,3}$/.test(t)) return true
   // 单字母（含希腊字母）可带撇号：A、A'、B′、O、M、x、α
   if (/^[A-Za-zα-ωΑ-Ω]['′]?$/.test(t)) return true
   // 字母+Unicode 下标：A₁、B₂、x₀（教材下标标注；**半角数字 P1/X1/k1 是
@@ -217,6 +221,10 @@ export function normalizeStructure(obj) {
   points = ticked.points
   segments = ticked.segments
 
+  // ── 网格底图图元（2026-09-26 P2-7）──
+  // 参数不合法（缺字段/非正值/越界）一律判无网格，不猜。
+  const grid = normalizeGrid(obj?.grid)
+
   // ── 双通道去重（2026-09-20）──
   // 模型偶尔把同一符号同时写进 points[]（顶点标注通道）与 labels[]（文字通道），
   // 两条通道各渲染一次 ⇒ 图上同一字母出现两遍（9c679f37 的 O 完全重叠）。
@@ -243,6 +251,7 @@ export function normalizeStructure(obj) {
     figure_type,
     coordinate_system,
     constraints: Array.isArray(obj?.constraints) ? obj.constraints : [],
+    ...(grid ? { grid } : {}),
   }
 }
 
@@ -307,15 +316,20 @@ export function isEmptyStructure(s) {
     m => named.has(m?.vertex) && named.has(m?.from) && named.has(m?.to)
   )
   const curves = (s.curves || []).filter(c => (c?.points || []).length >= 2)
+  // 网格图元本身也是可渲染内容（格点题可以只有网格+点，没有线段）
+  const hasGrid = !!normalizeGrid(s.grid)
   return (
     pts.length === 0 && segs.length === 0 && circles.length === 0 &&
     polygons.length === 0 && arcs.length === 0 && angleMarks.length === 0 &&
-    curves.length === 0
+    curves.length === 0 && !hasGrid
   )
 }
 
 /**
- * 刻度数字标签：纯数字（可带负号/小数），如 `0`、`1`、`-2`、`1.5`。
+ * 刻度数字标签：纯数字（可带负号/小数）或单式根号数，如 `0`、`1`、`-2`、`1.5`、`-√2`、`2√3`。
+ *
+ * 根式形态与 isVertexSymbolLabel 的根式白名单同一口径（2026-09-26 P2-7 数轴确定性通道）：
+ * 数轴上表示 -√2 这类无理数的刻度标签也是**文字刻度**，不配实体圆点。
  *
  * 为什么要单独识别（2026-09-19）：数轴/坐标轴的刻度数字是**文字刻度**，
  * 模型用 `point` 承载它的坐标只是为了定位，不是真有一个顶点在那里。
@@ -324,7 +338,7 @@ export function isEmptyStructure(s) {
  */
 export function isTickNumberLabel(text) {
   const t = String(text ?? '').trim().replace(/[−–—]/g, '-')
-  return /^-?[0-9]+(\.[0-9]+)?$/.test(t)
+  return /^-?[0-9]+(\.[0-9]+)?$/.test(t) || /^-?\d{0,2}√[0-9]{1,3}$/.test(t)
 }
 
 /**
@@ -579,6 +593,34 @@ function collectUsedLabels(s) {
   collect(s.angleMarks)
   collect(s.rightAngles)
   return used
+}
+
+/**
+ * 网格/格点底图图元的归一化（2026-09-26 P2-7 程序化图元）。
+ *
+ * 为什么需要：格点题（「每个小正方形的边长均为1，点均在格点上」）的**方格底图就是题设**——
+ * 数格子、找格点全靠它。此前 DSL 坐标空间是连续平面、没有网格图元，重绘必然丢方格背景，
+ * 于是 `geometryContentGate` 把格点图整类拦在重绘之外（grid_figure skip）。
+ * 本图元补上这块能力：`{ x, y, unit, cols, rows }` = 从 (x,y) 起、unit 为边长、
+ * cols×rows 个方格的线框网格（**只画格线，不画外框加粗、不画坐标轴**）。
+ *
+ * 纪律：参数不完整/不正值一律判无网格（返回 null），绝不猜尺寸画一张错的底图。
+ * cols/rows 封顶 80，防模型刷屏把图糊成灰块。
+ *
+ * @param {object|null} raw 结构里的 grid 字段
+ * @returns {{x:number,y:number,unit:number,cols:number,rows:number}|null}
+ */
+export function normalizeGrid(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const x = Number(raw.x)
+  const y = Number(raw.y)
+  const unit = Number(raw.unit)
+  const cols = Number(raw.cols)
+  const rows = Number(raw.rows)
+  if (!isNum(x) || !isNum(y) || !isNum(unit) || unit <= 0) return null
+  if (!Number.isInteger(cols) || !Number.isInteger(rows)) return null
+  if (cols < 1 || rows < 1 || cols > 80 || rows > 80) return null
+  return { x, y, unit, cols, rows }
 }
 
 /**

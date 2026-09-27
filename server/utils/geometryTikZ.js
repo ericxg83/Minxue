@@ -10,6 +10,7 @@
 import {
   parseGeometryStructure,
   normalizeStructure,
+  normalizeGrid,
   isEmptyStructure,
   isVertexSymbolLabel,
   isAuxPointLabel,
@@ -51,6 +52,22 @@ export function renderGeometryTikZ(structure) {
 
   const lines = []
   lines.push('\\begin{tikzpicture}[scale=1]')
+
+  // ── 网格底图（2026-09-26 P2-7 程序化图元，与 SVG 渲染器同一口径）──
+  // 先画背景格线再画坐标轴/图形，保证网格在底层；无 grid 字段时输出逐字节不变。
+  const gridDef = normalizeGrid(s.grid)
+  if (gridDef) {
+    const gW = gridDef.unit * gridDef.cols
+    const gH = gridDef.unit * gridDef.rows
+    for (let i = 0; i <= gridDef.cols; i++) {
+      const x = fmt(gridDef.x + gridDef.unit * i)
+      lines.push(`\\draw[thin,black!25] (${x},${fmt(gridDef.y)}) -- (${x},${fmt(gridDef.y + gH)});`)
+    }
+    for (let j = 0; j <= gridDef.rows; j++) {
+      const y = fmt(gridDef.y + gridDef.unit * j)
+      lines.push(`\\draw[thin,black!25] (${fmt(gridDef.x)},${y}) -- (${fmt(gridDef.x + gW)},${y});`)
+    }
+  }
 
   // ── 坐标轴 ──
   const cs = s.coordinate_system

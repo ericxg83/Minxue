@@ -45,7 +45,7 @@ import { updateQuestionAssetCleanData, updateQuestionAssetTikz, createQuestionAs
 import { renderGeometrySvg } from '../utils/geometrySvg.js'
 import { renderGeometryTikZ } from '../utils/geometryTikZ.js'
 import { normalizeStructure } from '../utils/geom/structure.js'
-import { validateStructureAgainstContent, detectNonGeometryFigure } from '../utils/geometryContentGate.js'
+import { validateStructureAgainstContent, detectNonGeometryFigure, shouldSkipRedraw } from '../utils/geometryContentGate.js'
 
 const ROOT = 'D:/Minxue_App_V3/server/scripts/logs/non-c3-test'
 const PROGRESS = path.join(ROOT, 'progress.json')
@@ -115,7 +115,7 @@ const repairMissingAssets = async () => {
     const pref = detectNonGeometryFigure(
       [String(has.rows[0].parent_stem || ''), String(has.rows[0].content || '')].join('\n'),
     )
-    if (pref.skip) {
+    if (shouldSkipRedraw(pref)) {
       console.log(`⏭ 跳过补齐资产行 ${tag}：${pref.kind}（不该重绘）`)
       continue
     }
@@ -186,10 +186,11 @@ for (const [id, rec] of rows) {
     const text = stem?.text || rec.content || ''
     const options = stem?.options ?? null
     if (!text.trim()) throw new Error('题干为空，无法过闸门')
-    // ── 闸门 0（硬性，2026-09-21 补）：这类图**根本不该重绘**，产物直接作废 ──
-    // 判据上线（09-20 12:13）之前生成的旧产物不会自己消失，只能在发布时拦。
+    // ── 闸门 0（硬性，2026-09-21 补；2026-09-26 P2-7 改共用 shouldSkipRedraw 口径）：
+    //    这类图**根本不该重绘**，产物直接作废。判据上线前生成的旧产物不会自己消失，只能在发布时拦。
+    //    格点图例外：产物真带 grid 网格图元才放行（无网格的旧残图仍拦）。
     const pref = detectNonGeometryFigure(text)
-    if (pref.skip) {
+    if (shouldSkipRedraw(pref, structure)) {
       skippedNonGeom.push({ tag, kind: pref.kind, reason: pref.reason })
       continue
     }

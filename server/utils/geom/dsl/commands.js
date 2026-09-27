@@ -65,8 +65,8 @@ function clipCurveOutliers(pts) {
   return kept.length >= 2 ? kept : pts
 }
 
-/** 类型字符：p 点 / s 线段 / l 直线 / r 射线 / c 圆 / C 圆弧 / P 多边形 / k 函数曲线 / f 函数式 / n 数值表达式 */
-export const TYPES = ['p', 's', 'l', 'r', 'c', 'C', 'P', 'k', 'f', 'n']
+/** 类型字符：p 点 / s 线段 / l 直线 / r 射线 / c 圆 / C 圆弧 / P 多边形 / k 函数曲线 / g 网格底图 / f 函数式 / n 数值表达式 */
+export const TYPES = ['p', 's', 'l', 'r', 'c', 'C', 'P', 'k', 'g', 'f', 'n']
 
 const isP = (o) => o?.kind === 'p'
 const isLineLike = (o) => o?.kind === 'l' || o?.kind === 's' || o?.kind === 'r'
@@ -409,6 +409,23 @@ export const COMMANDS = {
       const outObj = { kind: 'k', label: out[0], points, expr: f.expr }
       if (breaks.length) outObj.breaks = breaks
       return [outObj]
+    }
+  },
+
+  // ── 网格底图（2026-09-26 P2-7 程序化图元）──
+  // 格点题的方格底图就是题设（「每个小正方形的边长均为1，点均在格点上」）。
+  // 此前 DSL 没有网格图元，重绘必丢方格背景，于是格点图整类被闸门拦在重绘之外。
+  // 语义：从 (x,y) 起、unit 为边长、cols×rows 个方格。unit 必须取题干明说的单位
+  // （如「小正方形的边长均为1」⇒ unit=1），**不许猜**；参数非法由 normalizeGrid 兜底判无网格。
+  grid: {
+    inputs: ['n', 'n', 'n', 'n', 'n'], outputs: 1, creates: 'g',
+    help: 'grid : <x起> <y起> <边长> <列数> <行数> -> g1   （方格底图；格点题必须先画它再放点，边长按题干单位，点数≤100）',
+    run: ([x, y, unit, cols, rows], ctx, out) => {
+      if (!(unit > 0)) return { error: 'BAD_GRID_UNIT', hint: '网格边长必须是正数，且只能取题干明说的单位（如“小正方形边长均为1”则写 1）' }
+      if (!Number.isInteger(cols) || !Number.isInteger(rows) || cols < 1 || rows < 1)
+        return { error: 'BAD_GRID_SIZE', hint: '列数/行数必须是正整数（按原图数格子，不许猜）' }
+      if (cols * rows > 100) return { error: 'GRID_TOO_BIG', hint: `网格 ${cols}×${rows} 超过 100 格，检查列数/行数是否多数了` }
+      return [{ kind: 'g', label: out[0], x, y, unit, cols, rows }]
     }
   },
 

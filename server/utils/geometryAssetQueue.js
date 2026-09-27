@@ -35,6 +35,8 @@
 import { createQuestionAsset, updateQuestionDenormalizedSvg } from '../services/neonService.js'
 import { renderGeometrySvg } from './geometrySvg.js'
 import { buildFunctionGraphSvg } from './functionGraph/index.js'
+// 数轴确定性图元通道（P2-7）：题面写明数值/解集时当场出图，不烧视觉额度、不目测坐标
+import { buildNumberAxisSvg } from './numberAxis/index.js'
 import { publishCleanGeometryUrl } from './geom/cleanGeometryUrl.js'
 import { checkFigureReference, FIGURE_GATE_MESSAGE } from './geometryFigureGate.js'
 
@@ -103,6 +105,37 @@ export async function registerGeometryAssets({
           tikzStatus = 'none'
           assetError = FIGURE_GATE_MESSAGE[figureGate.reason] || figureGate.reason
           log(`   [几何图] 第 ${q.question_number} 题不进重画队列（${figureGate.reason}），回退裁剪原图`)
+        }
+      } else if (/数轴/.test(`${q.parent_stem || ''}\n${q.content || ''}`)) {
+        // P2-7 数轴图元通道：闸门已放行数轴（09-25 质量口径），但目测闭环对「题面写明数」
+        // 的题是杀鸡用牛刀且坐标靠目测——能确定性出图的先当场出，出不了再入队走闭环
+        //（位置只在图里的题仍需模型看原图）。
+        try {
+          const axisBuilt = buildNumberAxisSvg(q.parent_stem, q.content, renderGeometrySvg)
+          if (axisBuilt) {
+            tikzStatus = 'completed'
+            await updateQuestionDenormalizedSvg(q.id, axisBuilt.svg)
+            try {
+              await publishCleanGeometryUrl({ questionId: q.id, svg: axisBuilt.svg, studentId })
+            } catch (e) {
+              warn(`   [数轴图元] 第 ${q.question_number} 题配图 URL 发布异常: ${e.message}`)
+            }
+            log(`   [数轴图元] 第 ${q.question_number} 题确定性出图（点 ${axisBuilt.spec.points.length} / 解集 ${axisBuilt.spec.solutions.length}），零视觉调用`)
+            await createQuestionAsset({
+              question_id: q.id,
+              asset_type: 'geometry_image',
+              original_image_url: sourcePageUrl || null,
+              cropped_image_url: q.geometry_image_url,
+              bbox: imageBbox,
+              tikz_status: 'completed',
+              tikz_code: axisBuilt.svg,
+              tikz_json: axisBuilt.structure,
+              last_error: '',
+            })
+            return true // 已当场入库，不建行不入队（下方通用建行跳过）
+          }
+        } catch (e) {
+          warn(`   ⚠️ [数轴图元] 第 ${q.question_number} 题确定性渲染异常（转入队目测闭环）: ${e.message}`)
         }
       }
     }

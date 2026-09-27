@@ -315,3 +315,51 @@ test('真把正方形画成 2:1 矩形（四边成环）→ 形状约束仍拦�
     `成环且边长比 100:48 失衡，必须仍判正方形误画：${r.reasons.join('；')}`
   )
 })
+
+// ────────────────── 内部变量名豁免（2026-09-26 四修） ──────────────────
+
+test('内部变量名线段/点（渲染层不标注）不得被内容闸判为「凭空多画」', () => {
+  // 181eccb8 实录：坐标轴被模型命名成 X_NEG / X_POS / Y_NEG / Y_POS。
+  // 渲染器按 isVertexSymbolLabel 只画这两条线、**不标注名字**（学生看不到），
+  // 题干自然不引用它们。闸门若拿这些名字比题干，就会把正确的坐标轴判成多画。
+  const structure = {
+    points: [
+      { label: 'X_NEG', x: -40, y: 0 }, { label: 'X_POS', x: 40, y: 0 },
+      { label: 'Y_NEG', x: 0, y: -30 }, { label: 'Y_POS', x: 0, y: 30 }
+    ],
+    segments: [
+      { from: 'X_NEG', to: 'X_POS' }, { from: 'Y_NEG', to: 'Y_POS' }
+    ]
+  }
+  const content = '已知关于x的二次函数 y=-1/2x²+bx+c 的图像如图所示，则这个二次函数的表达式为'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.equal(r.ok, true, '内部变量名不应触发内容闸：' + r.reasons.join('；'))
+})
+
+test('半角数字后缀构造名（P1P2 / B1B2 / P00P10）同样豁免', () => {
+  // 54244833 / 46a96080 实录：模型用 P1、P2、B1…P00 命名内部构造点，
+  // 渲染层按「半角数字后缀是构造点编号」一律不标注。
+  const structure = {
+    points: [
+      { label: 'P1', x: 0, y: 10 }, { label: 'P2', x: 20, y: 10 },
+      { label: 'B1', x: 0, y: 0 }, { label: 'B2', x: 20, y: 0 }
+    ],
+    segments: [{ from: 'P1', to: 'P2' }, { from: 'B1', to: 'B2' }]
+  }
+  const content = '如图，关于 x 的二次函数 y=ax²+bx+c 的图像与直线 y=3 相交于点 A(0,3)和点 B'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.equal(r.ok, true, '半角数字构造名不应触发内容闸：' + r.reasons.join('；'))
+})
+
+test('对照：真实字母顶点凭空多画 → 仍必须拦（防豁免放宽过头）', () => {
+  const structure = {
+    points: [{ label: 'A', x: 0, y: 0 }, { label: 'B', x: 40, y: 0 }, { label: 'C', x: 0, y: 40 }],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }]
+  }
+  const content = '如图，点A在数轴上表示-1，求点B表示的数。'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.ok(
+    !r.ok && r.reasons.some((s) => s.includes('线段 BC')),
+    '真实字母 C 无出处，必须仍拦：' + r.reasons.join('；')
+  )
+})

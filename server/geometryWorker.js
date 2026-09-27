@@ -41,6 +41,8 @@ import { correctGeometryFigure } from './utils/geom/correctedRender.js'
 import { canPublishDerivedFigure } from './utils/geom/derivedCoverage.js'
 // 函数图象确定性通道：零视觉调用，出图即入库，不消耗模型额度
 import { buildFunctionGraphSvg } from './utils/functionGraph/index.js'
+// 数轴确定性图元通道（P2-7）：题面写明数值/解集时服务端精确布局，零视觉调用
+import { buildNumberAxisSvg } from './utils/numberAxis/index.js'
 // SVG → 图片 URL 发布通道：让重画产物对周末课件（读 clean_geometry_image_url）可见
 import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
 import {
@@ -184,7 +186,7 @@ async function verifySegmentsInFigure({ dataURL, segments, shortId }) {
   }
 }
 
-async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '') {
+async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '', skipTextGate = false) {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
   const dataURL = `data:image/png;base64,${base64}`
@@ -244,9 +246,13 @@ async function reconstructGeometrySvg(imageBuffer, questionId, content, options,
   // 数轴图跳过内容引用闸：数轴本质是"一条轴 + 轴上一堆点/刻度"，线段(轴本身)与点
   // 本就不会在题干里被"线段AD/点O"逐字引用，用普通几何的引用校验会必然误杀。
   // 检出为数轴（detectNumberAxis）时不走 validateStructureAgainstContent。
+  // 同理适用于带 `grid` 图元的格点图（P2-7）：三角形顶点在题干里常写作
+  // 「图中三角形」而非逐字「△ABC」，文本引用核对对它是必然误杀；它的真值核对
+  // 走 DSL 视觉闭环（原图‖重绘对照），不是文本闸。skipTextGate 由调用方在格点图
+  // 重绘开关开启时传入（与 validated.grid 双保险）。
   const isNumberAxis = !!detectNumberAxis(validated.points, validated.segments, {
     coordinateSystem: !!(validated.coordinate_system && validated.coordinate_system.exists),
-  }) || /数轴/.test(gateText)
+  }) || /数轴/.test(gateText) || !!validated.grid || skipTextGate
 
   if (!isNumberAxis && (gateText.trim() || (Array.isArray(options) && options.length > 0))) {
     const gate = validateStructureAgainstContent(validated, gateText, options)
@@ -368,8 +374,16 @@ async function processSingleAsset(asset) {
   //      以免手写答案被当成题设文字画进图里）。命中就直接保留原图，且省下模型额度。
   //     同理"多子图/多面板"（图1+图2、图甲+图乙、四选项函数图象）：DSL 只有一个画布，
   //     重绘必然只画其中一个（实测 845802c9 只画了图1、图2 整块丢失）。
+  //     ⚠️ 格点/网格图（grid_figure）（2026-09-26 P2-7）：当年拦它的唯一理由是「DSL 无网格图元」，
+  //     现已补 `grid` 命令 + 两渲染器网格底图 + 提示词例 4，图元层面已能画。但把格点图从
+  //     「不重绘」改成「进 DSL 重绘」是**核心路由变更**（会改变哪些题烧视觉额度、产物需逐条回归），
+  //     故用**显式 opt-in 开关** GEOMETRY_GRID_REDRAW=1 控制，默认关（保持现有 skip 行为）。
+  //     开启后：格点图走 DSL（文本闸对它们豁免，同数轴口径），并由下方 grid_missing 回验闸
+  //     保证——产物不含 grid 网格图元就不发布（回退原卷裁片），不会把丢网格的残图发给学生。
+  const gridRedrawOn = process.env.GEOMETRY_GRID_REDRAW === '1' && process.env.GEOMETRY_FORCE_DSL !== '0'
   const nonGeom = detectNonGeometryFigure(content)
-  if (nonGeom.skip) {
+  const isGridFigure = nonGeom.kind === 'grid_figure'
+  if (nonGeom.skip && !(isGridFigure && gridRedrawOn)) {
     console.log(`   ⏭ [几何Worker] ${shortId}: ${nonGeom.reason} → 保留原图，不重绘`)
     // ⚠️ 必须同时作废**历史上已发布**的干净图：判据是后来才加的，旧产物不会自己消失，
     //    否则前端照旧显示那张（错的/残缺的）重绘图 —— 2026-09-21 第 90 题空框流程图即此因。
@@ -459,6 +473,30 @@ async function processSingleAsset(asset) {
     console.warn(`   ⚠️ [几何Worker] ${shortId}: 函数图象通道异常（继续走视觉重画）:`, e.message)
   }
 
+  // 2.6 数轴确定性图元通道（P2-7，零视觉调用）：题面把数写明（点A表示-√2 / 解集为 x>2）
+  //     时服务端按单位长度精确布局，坐标零目测；解析不出/含其它几何构造/提到的点没有
+  //     显式值 → 返回 null，照旧落回 DSL 目测闭环（位置只在图里的题仍需看原图）。
+  try {
+    const axisBuilt = buildNumberAxisSvg(asset.parent_stem, content, renderGeometrySvg)
+    if (axisBuilt) {
+      await updateGeometryReconstructionStatus(asset.id, {
+        tikz_status: 'completed',
+        tikz_json: axisBuilt.structure,
+        tikz_code: axisBuilt.svg,
+        last_error: '',
+        processed_at: new Date().toISOString()
+      })
+      await updateQuestionDenormalizedSvg(asset.question_id, axisBuilt.svg)
+      await publishCleanUrlFor(asset.question_id, axisBuilt.svg, shortId)
+      console.log(
+        `   ✅ [几何Worker] ${shortId}: 数轴图元通道出图（点 ${axisBuilt.spec.points.length} / 解集 ${axisBuilt.spec.solutions.length}，零视觉调用）`
+      )
+      return true
+    }
+  } catch (e) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 数轴图元通道异常（继续走视觉重画）:`, e.message)
+  }
+
   // 3. Vision API 识别几何结构 → 服务端渲染干净 SVG
   const rawBuffer = await downloadImageBuffer(imageUrl)
   if (!rawBuffer) {
@@ -469,7 +507,7 @@ async function processSingleAsset(asset) {
 
   let svg, structure
   try {
-    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content, options, gateParentStem)
+    const result = await reconstructGeometrySvg(rawBuffer, asset.question_id, content, options, gateParentStem, isGridFigure && gridRedrawOn)
     if (!result.ok) {
       if (result.retriable) {
         // 模型没遵守输出格式：重试有意义，绝不能锁死成永久 failed
@@ -557,6 +595,14 @@ async function processSingleAsset(asset) {
         })
 
         if (dslResult.ok) {
+          // ⚠️ 格点图回验闸（P2-7 新增硬闸，只收紧不放宽）：题干是格点图时，
+          //    重绘产物**必须真带 grid 图元**——没有方格底图的格点图对学生就是错的图
+          //    （当年整类禁重绘的原因）。模型没吐 grid 命令 = 闭环不可信，回退原卷裁片。
+          if (nonGeom.kind === 'grid_figure' && !dslResult.structure?.grid) {
+            console.warn(`   ⚠️ [几何Worker] ${shortId}: 格点图重绘产物无网格底图 → 不发残图，保留原卷裁片`)
+            await markNotReconstructable(asset, 'grid_missing', '格点图重绘产物未包含 grid 网格图元，发出去必是丢方格底图的残图')
+            return false
+          }
           // ⚠️ 2026-09-18：必须直接用 correctDslByVision 返回的 structure——
           // 它已经过 normalizeStructure，且是模型**看过渲染对照图后确认 OK** 的那一版。
           // 此前这里误用 executeDsl(dslResult.dsl) 二次执行拿到**未 normalize** 的

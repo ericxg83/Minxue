@@ -14,6 +14,7 @@
 import {
   parseGeometryStructure,
   normalizeStructure,
+  normalizeGrid,
   isSymbolLabel,
   isVertexSymbolLabel,
   isAuxPointLabel,
@@ -108,6 +109,12 @@ export function renderGeometrySvg(structure) {
       if (isNum(pt?.[0]) && isNum(pt?.[1])) { xs.push(pt[0]); ys.push(pt[1]) }
     }
   }
+  // 网格底图同样计入包围盒（格点题的图就是这张网格，不能只按点算视野）
+  const gridDef = normalizeGrid(s.grid)
+  if (gridDef) {
+    xs.push(gridDef.x, gridDef.x + gridDef.unit * gridDef.cols)
+    ys.push(gridDef.y, gridDef.y + gridDef.unit * gridDef.rows)
+  }
   if (xs.length === 0 || ys.length === 0) return null
 
   const minX = Math.min(...xs)
@@ -141,6 +148,26 @@ export function renderGeometrySvg(structure) {
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SVG_W} ${SVG_H}" width="${SVG_W}" height="${SVG_H}">`
   )
   parts.push(`<rect x="0" y="0" width="${SVG_W}" height="${SVG_H}" fill="#ffffff"/>`)
+
+  // ── 网格底图（2026-09-26 P2-7 程序化图元）──
+  // 必须在一切图形之前画：方格线是背景，不能盖住阴影/线段/顶点。
+  // 只在结构声明了 grid 时输出 —— 存量结构的 SVG 逐字节不变。
+  if (gridDef) {
+    const gx0 = toX(gridDef.x)
+    const gx1 = toX(gridDef.x + gridDef.unit * gridDef.cols)
+    const gy0 = toY(gridDef.y)
+    const gy1 = toY(gridDef.y + gridDef.unit * gridDef.rows)
+    parts.push(`<g stroke="#c9c9c9" stroke-width="0.8" fill="none">`)
+    for (let i = 0; i <= gridDef.cols; i++) {
+      const x = fmt(gx0 + ((gx1 - gx0) * i) / gridDef.cols)
+      parts.push(`<line x1="${x}" y1="${fmt(Math.min(gy0, gy1))}" x2="${x}" y2="${fmt(Math.max(gy0, gy1))}"/>`)
+    }
+    for (let j = 0; j <= gridDef.rows; j++) {
+      const y = fmt(gy0 + ((gy1 - gy0) * j) / gridDef.rows)
+      parts.push(`<line x1="${fmt(Math.min(gx0, gx1))}" y1="${y}" x2="${fmt(Math.max(gx0, gx1))}" y2="${y}"/>`)
+    }
+    parts.push(`</g>`)
+  }
 
   // ── 坐标轴（在线段之前绘制，确保在底层） ──
   const cs = s.coordinate_system
