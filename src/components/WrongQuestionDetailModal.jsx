@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react'
 import dayjs from 'dayjs'
 import MathText from './MathText'
@@ -5,6 +6,9 @@ import BottomSheet from './BottomSheet'
 import { normalizeOptions } from '../utils/optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、重练卷长按共用同一套实现
 import { resolveQuestionDisplayStem } from '../utils/questionStem'
+// 题干配图：与 PC 端 / 复核页共用同一套优先级（干净 SVG → 描摹/裁片 URL → 闸门拦截）
+import { getGeometryDisplayUrl } from '../utils/geometryDisplay'
+import { tikzToSvg } from '../utils/tikzGenerator'
 
 // 状态词汇与错题本列表 Tab 对齐：待复习 / 基本掌握 / 完全掌握（2026-09-13 两级掌握口径）
 const statusMap = {
@@ -19,6 +23,17 @@ const statusMap = {
 export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRetry, onViewImage }) {
   const wq = wrongQuestion
   const q = wq.question || wq
+  // 题干配图（2026-09-26 补）：之前这里只认 q.image_url（整页试卷图/自包含行映射的模糊裁片），
+  // 干净 SVG / 描摹产物在学生端从来没有显示过。现在与 PC 端同一套取图优先级。
+  const geoDisplay = getGeometryDisplayUrl(q)
+  const geoSvg = useMemo(() => {
+    if (geoDisplay.type === 'svg_code') return geoDisplay.url
+    if (geoDisplay.type === 'tikz_code') return tikzToSvg(geoDisplay.url)
+    return null
+  }, [geoDisplay.url, geoDisplay.type])
+  const geoImageUrl = (geoDisplay.type === 'clean' || geoDisplay.type === 'raw' || geoDisplay.type === 'tikz')
+    ? geoDisplay.url
+    : null
   // 题干展示口径：content 自身已含 parent_stem 时 parentStem 为空串，不会重复渲染
   const displayStem = resolveQuestionDisplayStem(q)
   const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
@@ -69,8 +84,36 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
           </div>
         )}
 
-        {/* 配图 */}
-        {q.image_url && (
+        {/* 配图：题级配图优先（重绘 SVG / 描摹 / 裁片），点击进全屏查看器。
+            没有题级配图时回退 q.image_url（旧数据是整页试卷图），保持历史行为。 */}
+        {(geoSvg || geoImageUrl) ? (
+          <div className='mt-3'>
+            <button
+              onClick={() => onViewImage(geoSvg
+                ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(geoSvg)}`
+                : geoImageUrl)}
+              className='w-full rounded-xl overflow-hidden block'
+              style={{ background: 'var(--bg-secondary)' }}
+            >
+              {geoSvg ? (
+                <div
+                  className='tikz-svg-container'
+                  // SVG 来自服务端确定性渲染或矢量化描摹，信任源（与复核页同口径）
+                  dangerouslySetInnerHTML={{ __html: geoSvg }}
+                  style={{ width: '100%', maxHeight: '260px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '8px 0' }}
+                />
+              ) : (
+                <img
+                  src={geoImageUrl}
+                  alt='配图'
+                  loading='lazy'
+                  className='w-full'
+                  style={{ maxHeight: '260px', objectFit: 'contain' }}
+                />
+              )}
+            </button>
+          </div>
+        ) : q.image_url && (
           <div className='mt-3'>
             <button
               onClick={() => onViewImage(q.image_url)}
@@ -94,16 +137,16 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
                 }}
               />
             </button>
-            {q.full_image_url && q.full_image_url !== q.image_url && (
-              <button
-                onClick={() => onViewImage(q.full_image_url)}
-                className='mt-2 w-full py-2 rounded-lg text-[12px] font-medium'
-                style={{ background: 'var(--primary-soft)', color: 'var(--primary-hover)' }}
-              >
-                查看完整原图（含本题）
-              </button>
-            )}
           </div>
+        )}
+        {q.full_image_url && (
+          <button
+            onClick={() => onViewImage(q.full_image_url)}
+            className='mt-2 w-full py-2 rounded-lg text-[12px] font-medium'
+            style={{ background: 'var(--primary-soft)', color: 'var(--primary-hover)' }}
+          >
+            查看完整原图（含本题）
+          </button>
         )}
 
         {/* 答案 */}

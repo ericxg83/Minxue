@@ -573,6 +573,16 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
           image_url: dbQuestion.geometry_image_url || dbQuestion.image_url || null,
           // 整页原图（一定包含本题），供错题详情“查看原图”兜底使用
           full_image_url: dbQuestion.image_url || wq.page_image_url || null,
+          // 配图显示链字段透传（getGeometryDisplayUrl 入参）：干净产物不下发的话
+          // 自包含错题在移动端永远只能看到模糊裁片，与旧记录分支（整行展开）不对齐
+          geometry_image_url: dbQuestion.geometry_image_url || null,
+          clean_geometry_svg: dbQuestion.clean_geometry_svg || null,
+          clean_geometry_image_url: dbQuestion.clean_geometry_image_url || null,
+          display_image_type: dbQuestion.display_image_type || null,
+          tikz_svg_url: dbQuestion.tikz_svg_url || null,
+          geometry_manual_override: dbQuestion.geometry_manual_override || null,
+          tikz_status: dbQuestion.tikz_status || null,
+          asset_last_error: dbQuestion.asset_last_error || null,
           answer: wq.correct_answer || dbQuestion.answer || null,
           student_answer: wq.student_answer || dbQuestion.student_answer || null,
           question_type: wq.question_type || dbQuestion.question_type || 'choice',

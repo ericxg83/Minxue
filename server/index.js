@@ -3289,11 +3289,23 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
              -- 难度星级（difficultyStars）：组卷预览与重打预览必须同一口径，缺了会只在重打链路显示
              'difficulty', q.difficulty,
              -- 多小问（题组）：公共题干 + 小问号 + 原题号，供错题卡片补回被拆行丢掉的公共条件
-             'parent_stem', q.parent_stem, 'sub_no', q.sub_no, 'question_number', q.question_number
+             'parent_stem', q.parent_stem, 'sub_no', q.sub_no, 'question_number', q.question_number,
+             -- 配图显示链（getGeometryDisplayUrl 入参）：干净产物 + 几何资产状态。
+             -- 2026-09-26 补：缺了这几列学生端只能看到整页原图或模糊裁片，干净 SVG/描摹产物永远下不去
+             'clean_geometry_svg', q.clean_geometry_svg, 'clean_geometry_image_url', q.clean_geometry_image_url,
+             'display_image_type', q.display_image_type, 'tikz_svg_url', q.tikz_svg_url,
+             'geometry_manual_override', q.geometry_manual_override,
+             'tikz_status', a.tikz_status, 'asset_last_error', a.last_error
            )
          END AS question
        FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+       LEFT JOIN LATERAL (
+         SELECT tikz_status, last_error
+           FROM ${TABLES.QUESTION_ASSETS}
+          WHERE question_id = q.id AND asset_type = 'geometry_image'
+          ORDER BY created_at DESC LIMIT 1
+       ) a ON TRUE
        WHERE wq.student_id = $1
          AND (q.is_complete = TRUE OR wq.question_id IS NULL)
        ORDER BY wq.added_at DESC LIMIT $2 OFFSET $3`,
