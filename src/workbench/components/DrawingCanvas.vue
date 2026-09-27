@@ -52,8 +52,11 @@
  * 5. 橡皮改为 destination-out 真擦除：原先在透明画布上涂白色，会把橡皮
  *    轨迹下的题目文本一起盖掉。导出图改为在独立透明层上按同样语义先画
  *    笔迹再合成，橡皮不再擦掉导出图里的题干。
- * 6. getContext({ desynchronized: true })：Chrome/Edge 下降低落笔到出墨的
- *    合成延迟；不支持时浏览器自动忽略。
+ * 6. getContext 不使用 desynchronized（2026-09-26 撤回）：曾短暂改为
+ *    `getContext('2d', { desynchronized: true })` 想降低合成延迟，实测在
+ *    Windows Chrome / 部分 GPU 驱动下，透明画布会被合成为纯黑 —— 白板一
+ *    打开整块题目区变黑（笔迹浮在黑底上），且落笔反而更迟滞。故回到默认
+ *    合成路径，透明叠加恢复正常。
  */
 import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 
@@ -95,7 +98,32 @@ let liveDrawnSegs = 0
 let cachedRect = null
 let rafId = null
 
+// ── 无限向下生长的虚拟画布（2026-09-26）────────────────────────────
+// 画布 DOM 尺寸恒等于可视面板（内存有界，不做超高 canvas），笔迹坐标存
+// 「板面空间」：boardY = 屏幕Y + scrollY。scrollY 越大 = 视图越往下移，露出
+// 更多下方板书。写到接近可视底边时自动增大 scrollY 跟随笔尖 → 「无限往下写」。
+// 题目阅读滚动（q-body 自滚）与本板书滚动互不干扰：板书回看走工具栏 ▲/▼。
+let scrollY = 0
+let contentMaxY = 0 // 已写笔迹的最大板面 Y，决定手动下滚的边界
+const PAN_EDGE = 72 // 距可视底边多少 px 触发自动下滚跟随
+
 function dpr() { return Math.min(window.devicePixelRatio || 1, 2) }
+
+/** 统一设置绘制变换：设备像素比 + 板面→屏幕的 -scrollY 平移 */
+function applyTransform() {
+  if (!ctx) return
+  const ratio = dpr()
+  ctx.setTransform(ratio, 0, 0, ratio, 0, -scrollY * ratio)
+}
+
+/** 重算已写内容的板面下边界（切题 / 收笔后调用） */
+function recomputeContentMax() {
+  let m = 0
+  for (const s of localStrokes.value) {
+    for (const p of (s.points || [])) if (p.y > m) m = p.y
+  }
+  contentMaxY = m
+}
 
 function syncSize() {
   const canvas = canvasRef.value
@@ -109,7 +137,8 @@ function syncSize() {
   canvas.height = Math.round(h * ratio)
   canvas.style.width = w + 'px'
   canvas.style.height = h + 'px'
-  ctx = canvas.getContext('2d', { desynchronized: true })
+  // 不能用 desynchronized:true —— 见文件头注释 6，会把透明层渲染成黑屏
+  ctx = canvas.getContext('2d')
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
@@ -142,6 +171,9 @@ watch(() => props.strokes, (val) => {
   liveStroke = null
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   localStrokes.value = Array.isArray(val) ? val : []
+  // 切题 / 外部替换：视图回到顶部，重算下边界
+  scrollY = 0
+  recomputeContentMax()
   redraw()
 }, { deep: false, immediate: true })
 
@@ -149,7 +181,7 @@ function pointFromEvent(e) {
   const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
   return {
     x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    y: e.clientY - rect.top + scrollY,
     p: e.pressure && e.pressure > 0 ? e.pressure : 0.5,
   }
 }
@@ -187,7 +219,8 @@ function startStroke(e, eraserEnd) {
     points: [pointFromEvent(e)],
   }
   liveDrawnSegs = 0
-  // 落笔即出墨点：单击 / 顿笔也要立刻可见
+  // 落笔即出墨点：单击 / 顿笔也要立刻可见（先对齐含 scrollY 的变换）
+  applyTransform()
   drawDot(ctx, liveStroke)
 }
 
@@ -221,11 +254,43 @@ function appendLivePoint(pt) {
   pts.push(pt)
 }
 
+/** 写到接近可视底边 → 下移视图跟随笔尖（无限往下）。平移后需整体重绘。
+ *  返回 true 表示本帧已整体重绘，调用方无需再增量画。 */
+function maybeAutoPan() {
+  if (!liveStroke || !cachedRect) return false
+  const H = cachedRect.height
+  const last = liveStroke.points[liveStroke.points.length - 1]
+  const screenY = last.y - scrollY
+  if (screenY > H - PAN_EDGE) {
+    scrollY += screenY - (H - PAN_EDGE)
+    renderLiveFully()
+    return true
+  }
+  return false
+}
+
+/** 整体重绘：已提交笔迹 + 进行中的一笔（自动下滚后增量段失效时用） */
+function renderLiveFully() {
+  redraw()
+  if (!liveStroke || !ctx) return
+  applyTransform()
+  const s = liveStroke
+  if (s.points.length === 1) {
+    drawDot(ctx, s)
+  } else {
+    for (let i = 1; i < s.points.length; i++) drawSegment(ctx, s, i)
+    drawTail(ctx, s)
+  }
+  liveDrawnSegs = s.points.length - 1
+}
+
 function scheduleLiveRender() {
   if (rafId) return
   rafId = requestAnimationFrame(() => {
     rafId = null
     if (!liveStroke) return
+    // 自动下滚每帧至多一次（会整体重绘），避免逐 pointermove 反复全量重绘
+    if (maybeAutoPan()) return
     drawLiveSegments(ctx, liveStroke, liveDrawnSegs)
     liveDrawnSegs = liveStroke.points.length - 1
   })
@@ -258,6 +323,7 @@ function finishStroke() {
   if (stroke.points.length >= 2) drawTail(ctx, stroke)
   // 提交 + 通知父组件（localStorage 防抖保存、讲题信号都挂在这一刻）
   localStrokes.value = [...localStrokes.value, stroke]
+  for (const p of stroke.points) if (p.y > contentMaxY) contentMaxY = p.y
   emit('update:strokes', localStrokes.value)
 }
 
@@ -329,8 +395,11 @@ function drawLiveSegments(g, s, fromSegs) {
 function redraw() {
   if (!ctx || !canvasRef.value) return
   const ratio = dpr()
+  // 清屏用屏幕空间（不含 scrollY），把整块可视区擦净
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.clearRect(0, 0, canvasRef.value.width / ratio, canvasRef.value.height / ratio)
+  // 笔迹按板面空间绘制（含 -scrollY 平移）
+  applyTransform()
   for (const s of localStrokes.value) {
     if (!s.points || s.points.length === 0) continue
     if (s.points.length === 1) { drawDot(ctx, s); continue }
@@ -362,7 +431,8 @@ function exportPng(filename = '板书.png') {
   if (!canvas || !wrap) return
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
   const W = wrap.clientWidth
-  const H = wrap.clientHeight
+  // 导出高度：覆盖到已写板面的下边界（无限往下写的板书完整导出），至少一屏
+  const H = Math.max(wrap.clientHeight, Math.ceil(contentMaxY) + 40)
   const out = document.createElement('canvas')
   out.width = Math.round(W * ratio)
   out.height = Math.round(H * ratio)
@@ -434,7 +504,21 @@ function exportPng(filename = '板书.png') {
   finish()
 }
 
-defineExpose({ exportPng, redraw, syncSize })
+/** 手动上下平移板书（工具栏 ▲/▼）。dir<0 上翻、dir>0 下翻；下滚不超过已写内容底边 */
+function panBoard(dy) {
+  const H = wrapRef.value?.clientHeight || 0
+  const maxScroll = Math.max(0, contentMaxY - H + 60)
+  const next = Math.min(Math.max(0, scrollY + dy), maxScroll)
+  if (next === scrollY) return
+  scrollY = next
+  redraw()
+}
+/** 回到顶部（露出题干） */
+function resetView() {
+  if (scrollY !== 0) { scrollY = 0; redraw() }
+}
+
+defineExpose({ exportPng, redraw, syncSize, panBoard, resetView })
 </script>
 
 <style scoped>
