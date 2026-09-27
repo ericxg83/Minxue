@@ -97,8 +97,9 @@ test('白板模式：路由 + 手写组件 + 入口', () => {
   assert.ok(CANVAS_SRC.includes('z-index: 3'), '手写层必须在题目层之上')
   assert.ok(CANVAS_SRC.includes('exportPng'), '必须支持板书导出')
   // 平板防手掌误触：手指(touch)默认忽略，仅触控笔/鼠标可书写，除非显式开启
+  // （2026-09-27 双指缩放：touch 分支同时承担捏合触点跟踪，拒画语义不变）
   assert.ok(
-    CANVAS_SRC.includes("e.pointerType === 'touch' && !props.allowTouch"),
+    CANVAS_SRC.includes("if (!props.allowTouch) trackTouchDown(e)"),
     '手指默认不绘制（防手掌误触），须 allowTouch 开启'
   )
   assert.ok(CANVAS_SRC.includes('allowTouch: { type: Boolean, default: false }'), 'allowTouch 默认关闭')

@@ -169,6 +169,7 @@
           :export-texts="exportTexts"
           :export-figure="displayFigureUrl"
           @update:strokes="onStrokesChange"
+          @pinchstart="onPinchStart"
         />
       </div>
 
@@ -369,7 +370,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Picture, Pointer, Reading, RefreshLeft, Remove, View,
@@ -566,7 +567,10 @@ const strokesKey = computed(() => {
   const tail = anchor.length <= 120 ? anchor : `${anchor.slice(0, 100)}~${fnv1a(anchor)}`
   return `wb_strokes_v2_${tail}`
 })
-const currentStrokes = ref([])
+// 笔迹必须 shallowRef：深度 ref 会在模板解包时给数组套上响应式代理传回
+// DrawingCanvas，子组件「自身 emit 回流」的引用等值判断失效 —— 每一笔收笔都
+// 被当成外部替换，画布视图被强制归零（书写中页面上下弹动的元凶之一）。
+const currentStrokes = shallowRef([])
 
 // 导出用：题干文本
 const exportTitle = computed(() => {
@@ -904,6 +908,8 @@ function onGestureStart(e) {
     return
   }
   if (e.pointerType !== 'touch' || allowTouch.value) return
+  // 双指捏合缩放进行中（画布层接管）：单指手势让路，否则题干会跟着二指乱滚
+  if (canvasRef.value?.pinchActive?.()) return
   // 已有手势进行中：忽略后续触点，多指互抢会把题面拽来拽去 / 误判横向切题
   if (gesture) return
   if (Date.now() - lastPenActiveAt < PEN_GRACE_MS) return
@@ -943,13 +949,23 @@ function onGestureEnd(e) {
   else if (dx >= SWIPE_TRIGGER) prevQuestion()
 }
 
+// 画布层进入双指捏合缩放：立刻取消单指题干手势（第二触点落下前它已启动）
+function onPinchStart() {
+  gesture = null
+}
+
 // ── 鼠标滚轮：像普通网页一样的链式滚动（2026-09-27）──
 // 手写 Canvas 铺满整个题目区（z-index 3、touch-action:none），滚轮事件只能落在
 // 题目区统一接住。方向链：向下 = 先把题干区滚到底 → 再平滑往下拉板书（可拉出
 // 已写内容下方约一屏的新纸面，写进去后可拉范围继续生长）；向上 = 先把板书推回
 // 顶部 → 再往上滚题干。板书侧的平滑动画在 DrawingCanvas.wheelPanBy。
 function onWheel(e) {
-  if (e.ctrlKey) return // Ctrl+滚轮 = 页面缩放，留给浏览器
+  // Ctrl+滚轮 = 以光标为锚缩放板面（PC 没有双指捏合；也避免整页浏览器缩放）
+  if (e.ctrlKey) {
+    e.preventDefault()
+    canvasRef.value?.zoomAt(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY)
+    return
+  }
   // deltaMode 1 = 按行滚动（部分鼠标驱动），换算成像素，否则一格几乎不动
   const step = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY
   if (!step) return

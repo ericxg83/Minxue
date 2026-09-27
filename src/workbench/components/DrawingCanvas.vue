@@ -58,7 +58,7 @@
  *    打开整块题目区变黑（笔迹浮在黑底上），且落笔反而更迟滞。故回到默认
  *    合成路径，透明叠加恢复正常。
  */
-import { onMounted, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { onMounted, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue'
 
 const props = defineProps({
   strokes: { type: Array, default: () => [] },
@@ -71,7 +71,7 @@ const props = defineProps({
   // 需要手指绘图时由页面工具栏显式开启。
   allowTouch: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:strokes'])
+const emit = defineEmits(['update:strokes', 'pinchstart', 'pinchend'])
 
 const tool = defineModel('tool', { type: String, default: 'pen' })
 const color = defineModel('color', { type: String, default: '#E11D48' })
@@ -98,13 +98,18 @@ let liveDrawnSegs = 0
 let cachedRect = null
 let rafId = null
 
-// ── 无限向下生长的虚拟画布（2026-09-26）────────────────────────────
+// ── 无限向下生长的虚拟画布 + 纸面缩放（2026-09-26/27）────────────────
 // 画布 DOM 尺寸恒等于可视面板（内存有界，不做超高 canvas），笔迹坐标存
-// 「板面空间」：boardY = 屏幕Y + scrollY。scrollY 越大 = 视图越往下移，露出
-// 更多下方板书。写到接近可视底边时自动增大 scrollY 跟随笔尖 → 「无限往下写」。
-// 题目阅读滚动（q-body 自滚）与本板书滚动互不干扰：板书回看走工具栏 ▲/▼。
-let scrollY = 0
+// 「板面空间」。视图变换（纸面 → 屏幕）：screen = board × zoom − pan。
+// zoom=1 时 panX 恒为 0（横向不出界）。panY 越大 = 视图越往下移，露出更多
+// 下方板书；写到接近可视底边时自动增大 panY 跟随笔尖 → 「无限往下写」。
+// 双指捏合 / Ctrl+滚轮可缩放纸面（笔迹随纸面一起放大，像真纸）。
+let zoom = 1
+const ZOOM_MAX = 4
+let panX = 0
+let panY = 0
 let contentMaxY = 0 // 已写笔迹的最大板面 Y，决定手动下滚的边界
+let contentMaxX = 0 // 最大板面 X（放大平移后导出板书图要用）
 const PAN_EDGE = 72 // 距可视底边多少 px 触发自动下滚跟随
 
 // 滚轮平滑拉板的状态与取消（动画本体见文件尾 wheelPanBy）。声明必须在最前：
@@ -113,26 +118,54 @@ const PAN_EDGE = 72 // 距可视底边多少 px 触发自动下滚跟随
 let wheelTargetY = null
 let wheelRafId = 0
 function cancelWheelPan() {
-  if (wheelRafId) { cancelAnimationFrame(wheelRafId); wheelRafId = 0 }
+  if (wheelRafId) { clearTimeout(wheelRafId); wheelRafId = 0 }
   wheelTargetY = null
+}
+
+// ── 双指捏合缩放（仅笔模式 allowTouch=false；手指绘画模式两指就是两笔画）──
+// 触点记在这里，第二个触点落下才开始捏合。书写中 / 笔尖悬停时两个 touch 更
+// 可能是手掌，拒绝缩放；收笔后只留 500ms 短窗口 —— 老师写完立刻捏合要跟手，
+// 不能沿用 WeekendBoard 题干手势的 1200ms 长窗。
+const PEN_PINCH_GRACE = 500
+const touchPts = new Map() // 进行中的 touch 指针：pointerId → {x,y}
+let pinch = null // 捏合会话：{ rect, startDist, startZoom, anchorBx, anchorBy }
+let lastPenActiveAt = 0
+
+/** 可视视口下各方向允许的平移上限（屏幕像素）。
+ *  横向按「纸面宽度」：板面纸宽 = 视口宽（zoom 1 时恰好铺满），放大后可平移
+ *  看右半张纸 —— 不能用墨迹边界做上限，否则缩放锚点需要的平移量会被钳掉，
+ *  锚点跟随被破坏（点会跳位）。纵向纸面向下无限：内容底 + 一个 zoom 视口的
+ *  空白纸面，写进去后 contentMaxY 生长，上限随之扩展。 */
+function panYMax() {
+  const H = wrapRef.value?.clientHeight || 0
+  return Math.max(0, (contentMaxY + H) * zoom)
+}
+function panXMax() {
+  const W = wrapRef.value?.clientWidth || 0
+  return Math.max(0, W * (zoom - 1))
 }
 
 function dpr() { return Math.min(window.devicePixelRatio || 1, 2) }
 
-/** 统一设置绘制变换：设备像素比 + 板面→屏幕的 -scrollY 平移 */
+/** 统一设置绘制变换：设备像素比 × 纸面缩放 + 板面→屏幕的 -pan 平移 */
 function applyTransform() {
   if (!ctx) return
   const ratio = dpr()
-  ctx.setTransform(ratio, 0, 0, ratio, 0, -scrollY * ratio)
+  ctx.setTransform(ratio * zoom, 0, 0, ratio * zoom, -panX * ratio, -panY * ratio)
 }
 
-/** 重算已写内容的板面下边界（切题 / 收笔后调用） */
+/** 重算已写内容的板面边界（切题 / 收笔后调用） */
 function recomputeContentMax() {
-  let m = 0
+  let mx = 0
+  let my = 0
   for (const s of localStrokes.value) {
-    for (const p of (s.points || [])) if (p.y > m) m = p.y
+    for (const p of (s.points || [])) {
+      if (p.y > my) my = p.y
+      if (p.x > mx) mx = p.x
+    }
   }
-  contentMaxY = m
+  contentMaxY = my
+  contentMaxX = mx
 }
 
 function syncSize() {
@@ -174,7 +207,10 @@ onBeforeUnmount(() => {
 // 更糟的是随后第一笔会以空数组为底写入，把已存的笔迹覆盖掉。
 // 自身收笔 emit 的数组回流（同一引用）在这里被识别并跳过，不做无谓重绘。
 watch(() => props.strokes, (val) => {
-  if (val === localStrokes.value) return
+  // 回流识别要用 toRaw：父组件若是深度 ref，模板解包传回来的是响应式代理
+  // （数组与内部笔画对象都被代理），严格等值比较必然失败 → 每笔收笔都被
+  // 误判为「外部替换」而把视图归零（书写中上下弹动的元凶）。
+  if (val === localStrokes.value || toRaw(val) === toRaw(localStrokes.value)) return
   // 切题 / 撤销发生在一笔未收时：直接丢弃进行中的一笔（尚未提交，不会串题）
   drawing = false
   penArmed = false
@@ -182,9 +218,12 @@ watch(() => props.strokes, (val) => {
   liveStroke = null
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   localStrokes.value = Array.isArray(val) ? val : []
-  // 切题 / 外部替换：视图回到顶部，重算下边界
+  // 切题 / 外部替换：视图回原位（顶部 + 1:1），重算边界，丢弃进行中的捏合
   cancelWheelPan()
-  scrollY = 0
+  if (pinch) { pinch = null; touchPts.clear(); emit('pinchend') }
+  zoom = 1
+  panX = 0
+  panY = 0
   recomputeContentMax()
   redraw()
 }, { deep: false, immediate: true })
@@ -192,16 +231,71 @@ watch(() => props.strokes, (val) => {
 function pointFromEvent(e) {
   const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top + scrollY,
+    x: (e.clientX - rect.left + panX) / zoom,
+    y: (e.clientY - rect.top + panY) / zoom,
     p: e.pressure && e.pressure > 0 ? e.pressure : 0.5,
+  }
+}
+
+// ── 双指捏合：跟踪触点 → 第二触点落下进入捏合 → 移动更新视图 ─────────
+function trackTouchDown(e) {
+  touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+  if (pinch || touchPts.size < 2) return
+  // 正在书写 / 笔尖刚离屏片刻（悬停也算）：双触点是手掌，不缩放
+  if (drawing || liveStroke || Date.now() - lastPenActiveAt < PEN_PINCH_GRACE) {
+    touchPts.delete(e.pointerId)
+    return
+  }
+  const [a, b] = [...touchPts.values()]
+  const rect = canvasRef.value.getBoundingClientRect()
+  pinch = {
+    rect,
+    startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+    startZoom: zoom,
+    // 锚点 = 捏合开始时中点下的板面坐标；缩放/平移全程保持它贴住中点
+    anchorBx: ((a.x + b.x) / 2 - rect.left + panX) / zoom,
+    anchorBy: ((a.y + b.y) / 2 - rect.top + panY) / zoom,
+  }
+  cancelWheelPan()
+  emit('pinchstart')
+}
+
+function schedulePinchRender() {
+  // 同步重算视图（pointermove 频率 60-120Hz，全量重绘毫秒级，可承受）；
+  // 不走 rAF 节流 —— 后台/节流场景 rAF 不触发会让缩放完全失效
+  const pts = [...touchPts.values()]
+  if (pts.length < 2) return
+  const [a, b] = pts
+  const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+  const midX = (a.x + b.x) / 2 - pinch.rect.left
+  const midY = (a.y + b.y) / 2 - pinch.rect.top
+  zoom = Math.min(ZOOM_MAX, Math.max(1, pinch.startZoom * dist / pinch.startDist))
+  panX = Math.min(Math.max(0, pinch.anchorBx * zoom - midX), panXMax())
+  panY = Math.min(Math.max(0, pinch.anchorBy * zoom - midY), panYMax())
+  redraw()
+}
+
+function endPinch() {
+  const wasPinching = !!pinch
+  pinch = null
+  if (wasPinching) {
+    panX = Math.min(Math.max(0, panX), panXMax())
+    panY = Math.min(Math.max(0, panY), panYMax())
+    redraw()
+    emit('pinchend')
   }
 }
 
 // ── 落笔 ────────────────────────────────────────────────────────────
 function onPointerDown(e) {
   if (props.disabled) return
-  if (e.pointerType === 'touch' && !props.allowTouch) return
+  if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
+  if (e.pointerType === 'touch') {
+    // 手指绘画开启时手指就是笔，两指 = 两笔画，不做捏合；笔模式下跟踪触点，
+    // 第二个触点落下进入捏合缩放
+    if (!props.allowTouch) trackTouchDown(e)
+    return
+  }
   // 鼠标仍要求左键；触控笔不挑 button（见文件头注释 4①）
   if (e.pointerType === 'mouse' && e.button !== 0) return
   // 一笔没收完前忽略新的落笔（双指 / 手掌不会叠出第二笔）
@@ -231,13 +325,20 @@ function startStroke(e, eraserEnd) {
     points: [pointFromEvent(e)],
   }
   liveDrawnSegs = 0
-  // 落笔即出墨点：单击 / 顿笔也要立刻可见（先对齐含 scrollY 的变换）
+  // 落笔即出墨点：单击 / 顿笔也要立刻可见（先对齐含 zoom/pan 的变换）
   applyTransform()
   drawDot(ctx, liveStroke)
 }
 
 // ── 行笔：只收点 + 增量画新段。不碰响应式、不 emit、不全量重绘 ──────
 function onPointerMove(e) {
+  // 捏合中的双指触点：更新位置并按 rAF 节流重算视图
+  if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
+    touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pinch) schedulePinchRender()
+    return
+  }
+  if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
   if (!drawing) {
     // 「待命」中的笔杆键 + 笔尖此刻贴屏 → 补起笔
     if (penArmed && e.pointerId === activePointerId
@@ -272,10 +373,10 @@ function maybeAutoPan() {
   if (!liveStroke || !cachedRect) return false
   const H = cachedRect.height
   const last = liveStroke.points[liveStroke.points.length - 1]
-  const screenY = last.y - scrollY
+  const screenY = last.y * zoom - panY
   if (screenY > H - PAN_EDGE) {
     cancelWheelPan() // 书写跟随接管视图，滚轮动画立即停
-    scrollY += screenY - (H - PAN_EDGE)
+    panY += screenY - (H - PAN_EDGE)
     renderLiveFully()
     return true
   }
@@ -311,6 +412,12 @@ function scheduleLiveRender() {
 
 // ── 收笔（pointerup / cancel / 捕获丢失 / buttons 归零共用）─────────
 function onPointerUp(e) {
+  // 捏合 / 待跟踪的 touch 触点抬起：清触点，双指不足则结束捏合
+  if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
+    touchPts.delete(e.pointerId)
+    if (pinch && touchPts.size < 2) endPinch()
+    return
+  }
   // 待命中的笔杆键抬起了（没等到笔尖贴屏）：撤销待命，不出墨
   if (!drawing) {
     if (penArmed && e.pointerId === activePointerId) penArmed = false
@@ -336,7 +443,10 @@ function finishStroke() {
   if (stroke.points.length >= 2) drawTail(ctx, stroke)
   // 提交 + 通知父组件（localStorage 防抖保存、讲题信号都挂在这一刻）
   localStrokes.value = [...localStrokes.value, stroke]
-  for (const p of stroke.points) if (p.y > contentMaxY) contentMaxY = p.y
+  for (const p of stroke.points) {
+    if (p.y > contentMaxY) contentMaxY = p.y
+    if (p.x > contentMaxX) contentMaxX = p.x
+  }
   emit('update:strokes', localStrokes.value)
 }
 
@@ -408,10 +518,10 @@ function drawLiveSegments(g, s, fromSegs) {
 function redraw() {
   if (!ctx || !canvasRef.value) return
   const ratio = dpr()
-  // 清屏用屏幕空间（不含 scrollY），把整块可视区擦净
+  // 清屏用屏幕空间（不含 zoom/pan），把整块可视区擦净
   ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
   ctx.clearRect(0, 0, canvasRef.value.width / ratio, canvasRef.value.height / ratio)
-  // 笔迹按板面空间绘制（含 -scrollY 平移）
+  // 笔迹按板面空间绘制（含 zoom/pan 变换）
   applyTransform()
   for (const s of localStrokes.value) {
     if (!s.points || s.points.length === 0) continue
@@ -443,8 +553,8 @@ function exportPng(filename = '板书.png') {
   const wrap = wrapRef.value
   if (!canvas || !wrap) return
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
-  const W = wrap.clientWidth
-  // 导出高度：覆盖到已写板面的下边界（无限往下写的板书完整导出），至少一屏
+  // 导出宽度/高度按板面内容的实际边界（缩放平移后笔迹可能超出可视区），至少一屏
+  const W = Math.max(wrap.clientWidth, Math.ceil(contentMaxX) + 40)
   const H = Math.max(wrap.clientHeight, Math.ceil(contentMaxY) + 40)
   const out = document.createElement('canvas')
   out.width = Math.round(W * ratio)
@@ -520,55 +630,82 @@ function exportPng(filename = '板书.png') {
 /** 手动上下平移板书（工具栏 ▲/▼）。dir<0 上翻、dir>0 下翻；下滚不超过已写内容底边 */
 function panBoard(dy) {
   cancelWheelPan()
-  const H = wrapRef.value?.clientHeight || 0
-  const maxScroll = Math.max(0, contentMaxY - H + 60)
-  const next = Math.min(Math.max(0, scrollY + dy), maxScroll)
-  if (next === scrollY) return
-  scrollY = next
+  const next = Math.min(Math.max(0, panY + dy), Math.max(0, contentMaxY * zoom - (wrapRef.value?.clientHeight || 0) + 60))
+  if (next === panY) return
+  panY = next
   redraw()
 }
-/** 回到顶部（露出题干） */
+/** 回到原位（顶部 + 1:1，露出题干） */
 function resetView() {
   cancelWheelPan()
-  if (scrollY !== 0) { scrollY = 0; redraw() }
+  if (panY !== 0 || panX !== 0 || zoom !== 1) {
+    panX = 0
+    panY = 0
+    zoom = 1
+    redraw()
+  }
+}
+
+/** 以屏幕点 (clientX, clientY) 为锚缩放纸面（Ctrl+滚轮；捏合走 trackTouchDown 一路） */
+function zoomAt(factor, clientX, clientY) {
+  cancelWheelPan()
+  const rect = canvasRef.value?.getBoundingClientRect()
+  if (!rect) return
+  const z2 = Math.min(ZOOM_MAX, Math.max(1, zoom * factor))
+  if (z2 === zoom) return
+  // 保持锚点下的板面坐标贴住屏幕点
+  const bx = (clientX - rect.left + panX) / zoom
+  const by = (clientY - rect.top + panY) / zoom
+  zoom = z2
+  panX = Math.min(Math.max(0, bx * zoom - (clientX - rect.left)), panXMax())
+  panY = Math.min(Math.max(0, by * zoom - (clientY - rect.top)), panYMax())
+  liveStroke ? renderLiveFully() : redraw()
 }
 
 // ── 滚轮丝滑拉板（2026-09-27）───────────────────────────────────────
 // 滚轮由 WeekendBoard 链式转发到这里：向下先把题干滚完、再往下拉板书。
 // 板书侧做指数趋近平滑动画（网页滚轮手感），并允许向下拉出已写内容下方
 // 约一屏的新空白纸面 —— 写进去后 contentMaxY 生长，可拉上限随之扩展。
-// （wheelTargetY / wheelRafId / cancelWheelPan 声明在文件头 scrollY 旁）
+// （wheelTargetY / wheelRafId / cancelWheelPan 声明在文件头 panY 旁）
 
 function wheelMaxScroll() {
-  const H = wrapRef.value?.clientHeight || 0
-  return Math.max(0, contentMaxY + H)
+  return panYMax()
 }
 
 function animateWheelPan() {
-  wheelRafId = requestAnimationFrame(() => {
+  // 用 16ms 定时器而非 rAF：rAF 绑定合成器帧，窗口被遮挡 / 省电节流时完全
+  // 停摆，滚轮会「拉不动」；定时器在任何可见性状态下都确定性运行，指数趋近
+  // 的缓动手感不受影响。
+  wheelRafId = setTimeout(() => {
     wheelRafId = 0
     if (wheelTargetY === null) return
-    const diff = wheelTargetY - scrollY
+    const diff = wheelTargetY - panY
     if (Math.abs(diff) < 1) {
-      scrollY = wheelTargetY
+      panY = wheelTargetY
       wheelTargetY = null
       liveStroke ? renderLiveFully() : redraw()
       return
     }
-    scrollY += diff * 0.28
+    panY += diff * 0.28
     // 书写中滚轮：redraw 会把进行中的一笔擦掉，必须连它一起重画
     liveStroke ? renderLiveFully() : redraw()
     animateWheelPan()
-  })
+  }, 16)
 }
 
 function wheelPanBy(delta) {
-  if (wheelTargetY === null) wheelTargetY = scrollY
+  if (wheelTargetY === null) wheelTargetY = panY
   wheelTargetY = Math.min(Math.max(0, wheelTargetY + delta), wheelMaxScroll())
   if (!wheelRafId) animateWheelPan()
 }
 
-defineExpose({ exportPng, redraw, syncSize, panBoard, resetView, wheelPanBy, boardScrolled: () => scrollY > 0 })
+defineExpose({
+  exportPng, redraw, syncSize, panBoard, resetView, wheelPanBy, zoomAt,
+  boardScrolled: () => panY > 0,
+  pinchActive: () => !!pinch,
+  zoomLevel: () => zoom,
+  viewState: () => ({ zoom, panX, panY }),
+})
 </script>
 
 <style scoped>
