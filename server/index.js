@@ -87,6 +87,7 @@ import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
 import { WRONG_GATE_AUTO_SKIP_REASON } from '../src/domain/wrongGateTier.js'
 import { requeueGateSkippedQuestion, sweepGateRequeue, scheduleGateRequeueSweep } from './services/wrongGateRequeue.js'
 import { sweepFigureRecrop, sweepFigureInherit, scheduleFigureRecropSweep } from './services/figureRecropSweep.js'
+import { sweepFigureRelocate, scheduleFigureRelocateSweep } from './services/figureRelocateSweep.js'
 import { isGateAutoSkippedRow } from './utils/wrongGateRequeue.js'
 import { normalizeOptions, formatOptionsForPrompt } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
@@ -3068,6 +3069,21 @@ app.post('/api/wrong-questions/figure-recrop', async (req, res) => {
   }
 })
 
+// 配图「视觉重定位」（B2）：对无框/框不可用的缺图错题，用强视觉模型重新定位配图框
+// （搜本题页±1 治跨页），再走生产同一裁图链（两道闸+像素收紧，判非图形不写）。
+// 有模型成本；dryRun 只预演不写库。
+app.post('/api/wrong-questions/figure-relocate', async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true
+    const limit = Math.max(1, Math.min(200, Number(req.body?.limit) || 30))
+    const result = await sweepFigureRelocate({ limit, dryRun, logTag: dryRun ? 'figure_relocate:dryRun' : 'figure_relocate:manual' })
+    res.json({ success: true, dryRun, ...result })
+  } catch (error) {
+    console.error('配图视觉重定位失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 /**
  * 题目定位框「实测」接口（2026-09-20）。
  *
@@ -4647,6 +4663,15 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       scheduleFigureRecropSweep()
     } catch (err) {
       console.error('配图补裁清扫定时器启动失败:', err.message)
+    }
+
+    // 配图「视觉重定位」清扫（B2，2026-09-27）：对无框/框不可用的新增缺图错题，
+    // 用最强付费视觉（gemini-3.7-flash）重新定位配图框（搜本题页±1 治跨页）再裁。
+    // 频率保守（默认 24h），开关 FIGURE_RELOCATE_SWEEP_ENABLED。
+    try {
+      scheduleFigureRelocateSweep()
+    } catch (err) {
+      console.error('配图视觉重定位定时器启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

@@ -57,7 +57,11 @@ const SKIP = (argOf('--skip-id') || '').split(',').map(x => x.trim()).filter(Boo
 // （geometry_image_url IS NULL + image_type IS NULL + 题干关键词）。用于「模型判了
 // image_type=geometry 但管线没产出裁片」（如 2026-09-21 练习册旧 prompt 批次）的题。
 // 仍保留 deleted_at IS NULL 与 geometry_image_url IS NULL（绝不覆盖已有配图）。
-const FORCE = (argOf('--force-id') || '').split(',').map(x => x.trim()).filter(Boolean)
+// --force-id-file <path>：从文件读逗号/换行分隔的 id 列表（批量重定位时避免命令行超长）。
+const _forceIds = argOf('--force-id') || ''
+const _forceFile = argOf('--force-id-file')
+const _forceFromFile = _forceFile && fs.existsSync(_forceFile) ? fs.readFileSync(_forceFile, 'utf8') : ''
+const FORCE = `${_forceIds},${_forceFromFile}`.split(/[,,\n\r]+/).map(x => x.trim()).filter(Boolean)
 
 const PROMPT = `你是作业图片版面分析助手。用户会指定页码上的某一道题，请只做一件事：
 给出**这道题的配图（图形本身）**在这张作业图上的外接矩形。

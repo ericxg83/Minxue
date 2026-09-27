@@ -25,6 +25,7 @@ import { cropAndUploadGeometryImage, isDegenerateFigureBox, clampImageBboxToBloc
 import { denormalizeBbox } from '../utils/geometryCrop.js'
 import { isCroppableMissingRow, isInheritableMissingRow } from '../utils/figureRecrop.js'
 import { syncQuestionCompleteness } from './questionCompletenessSync.js'
+import { compensateWrongBook } from './wrongBookCompensation.js'
 
 const parseJson = (v) => {
   if (v == null) return null
@@ -78,6 +79,8 @@ export const recropMissingFigure = async (question, pageBuffer) => {
     [question.id, url]
   )
   await syncQuestionCompleteness([question.id])
+  // 闭环：补图后若为真判错未入册题→自动入错题本（经置信度/完整性闸）
+  try { await compensateWrongBook({ studentId: question.student_id, questionIds: [question.id], reason: 'figure_recrop' }) } catch { /* 不阻断补图 */ }
   return { status: 'cropped', url }
 }
 

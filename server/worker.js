@@ -468,9 +468,12 @@ export async function cleanGeometryCrop(buffer) {
  * @param {Buffer} imageBuffer - 原始试卷图片 buffer
  * @param {Object} bbox - {x, y, width, height}
  * @param {string} studentId - 学生ID
+ * @param {Object} [opts] - { skipRefine:boolean } skipRefine=true 跳过像素墨迹收紧闸，
+ *        直接按模型框裁（供「最强视觉重定位」用：像素收紧对数轴/方格/线稿等稀疏图形会误杀，
+ *        而强视觉模型定位的框已过退化/超大两道 JS 闸，可信任）。默认 false=生产原行为。
  * @returns {Promise<string|null>} OSS URL 或 null
  */
-export async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, questionId) {
+export async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, questionId, opts = {}) {
   try {
     if (!bbox || bbox.width <= 0 || bbox.height <= 0) return null
 
@@ -479,7 +482,7 @@ export async function cropAndUploadGeometryImage(imageBuffer, bbox, studentId, q
 
     let left, top, width, height
     let refined = null
-    if (process.env.FIGURE_REFINE !== '0') {
+    if (process.env.FIGURE_REFINE !== '0' && !opts.skipRefine) {
       try {
         refined = await refineFigureBoxOnPage(imageBuffer, bbox, estimatePaperBackground)
       } catch (e) {

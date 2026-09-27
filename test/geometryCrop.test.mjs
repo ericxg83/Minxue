@@ -115,8 +115,11 @@ test('契约：worker.js 两条管线必须共用同一份 cropGeometryFigures�
   // 真实裁剪实现的签名必须是位置参数（曾因对象解构导致静默不裁）
   const m = src.match(/export async function cropAndUploadGeometryImage\(([^)]*)\)/)
   assert.ok(m, '找到 cropAndUploadGeometryImage')
-  assert.equal(m[1].split(',').map(s => s.trim()).join(','),
-    'imageBuffer,bbox,studentId,questionId', '裁剪实现签名不得改动')
+  const params = m[1].split(',').map(s => s.trim())
+  // 前 4 个必须是位置参数（不得改成单一解构对象）；允许尾部追加可选 opts（如 2026-09-27 skipRefine）
+  assert.equal(params.slice(0, 4).join(','),
+    'imageBuffer,bbox,studentId,questionId', '裁剪实现前 4 位置参数签名不得改动')
+  assert.ok(params.length <= 5, '最多一个可选尾参 opts')
 })
 
 test('契约：练习册 prompt 必须采集配图三字段（否则裁剪无输入）', () => {
