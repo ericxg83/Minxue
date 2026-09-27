@@ -56,6 +56,24 @@
           />
         </el-option-group>
       </el-select>
+
+      <!-- 闸1 欠账全局入口（2026-09-27）：跨学生的「缺元素未入册」待补清单。
+           P2 分层不拦卷，但欠账必须常驻可见——补全元素保存即自动入册。 -->
+      <el-tooltip
+        :content="store.pendingGateTotal > 0 ? `${store.pendingGateTotal} 道错题因缺元素未入错题本，点击逐题处理` : '没有待补入错题本的题（缺元素的错题补全保存后会自动入册）'"
+        placement="bottom"
+      >
+        <el-button
+          size="default"
+          plain
+          :type="store.pendingGateTotal > 0 ? 'warning' : 'default'"
+          style="margin-left: 16px"
+          :loading="pendingGateLoading"
+          @click="openPendingGateDialog"
+        >
+          ⚠ 待补入{{ store.pendingGateTotal > 0 ? ` ${store.pendingGateTotal}` : '' }}
+        </el-button>
+      </el-tooltip>
     </div>
 
     <div class="top-bar-right">
@@ -186,10 +204,60 @@
       <el-button type="success" :disabled="!store.paperAutoComplete.canAutoComplete" @click="handleGateComplete">完成复核</el-button>
     </template>
   </el-dialog>
+
+  <!-- 待补入清单（2026-09-27）：闸1 系统侧自动放行且仍未入册的错题，按学生分组。
+       缺元素题点「去补全」直接开编辑面板，保存后后端自动补入；
+       低置信题点「去定位」就地拍板。 -->
+  <el-dialog v-model="pendingGateVisible" title="待补入错题本的题（自动放行留痕）" width="720px">
+    <div class="pending-gate-tip">
+      这些错题被记为「本次不加入」（系统放行，非老师否决）。缺元素的补全并保存后会自动加入错题本；
+      低置信的按口径需老师拍板（标错即强入，标对即翻篇）。点按钮直接定位到题。
+    </div>
+    <div v-if="pendingGateLoading" class="pending-gate-loading">加载中…</div>
+    <template v-else>
+      <div v-for="g in store.pendingGateGroups" :key="g.studentId" class="pending-gate-group">
+        <div class="pending-gate-student">{{ g.studentName }}<span class="pending-gate-count">{{ g.items.length }} 题</span></div>
+        <div v-for="it in g.items" :key="it.questionId" class="pending-gate-item">
+          <div class="pending-gate-info">
+            <span class="pending-gate-no">{{ it.taskName }} · 第 {{ it.questionNumber || '?' }}{{ it.subNo ? `(${it.subNo})` : '' }} 题</span>
+            <span class="pending-gate-codes">{{ gateItemLabel(it) }}</span>
+            <div class="pending-gate-stem">{{ it.content || '（无题干文本）' }}</div>
+          </div>
+          <el-button
+            size="small"
+            :type="it.kind === 'missing_element' ? 'warning' : 'primary'"
+            plain
+            :loading="gateJumpLoading === it.questionId"
+            @click="goGateItem(it)"
+          >{{ it.kind === 'missing_element' ? '去补全' : '去定位' }}</el-button>
+        </div>
+      </div>
+      <el-empty v-if="store.pendingGateTotal === 0" description="没有待补入的题" :image-size="60" />
+    </template>
+    <template #footer>
+      <!-- 有框却无图的缺图题（多因配图框异步补写错过裁图窗口）：先试自动补裁（零模型成本、判非图形自动丢弃） -->
+      <el-button
+        v-if="missingFigureCount > 0"
+        type="primary"
+        plain
+        :loading="recropLoading"
+        @click="handleFigureRecrop"
+      >尝试自动补裁 {{ missingFigureCount }} 道缺图题</el-button>
+      <!-- 元素已齐但尚未入册（多因补图脚本直接写库绕过编辑保存）：一键补入跑后端兜底清扫 -->
+      <el-button
+        v-if="pendingRequeueCount > 0"
+        type="success"
+        :loading="gateSweepLoading"
+        @click="handleGateSweep"
+      >一键补入已补全的 {{ pendingRequeueCount }} 题</el-button>
+      <el-button @click="pendingGateVisible = false">关闭</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup>
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
@@ -199,6 +267,8 @@ import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 
 const store = useReviewStore()
+const route = useRoute()
+const router = useRouter()
 
 // 「改批改方式」：上传时选错批改方式的纠正入口（练习册 / 答案库 / 日常作业 互转）。
 // 2026-09-22 产品拍板开放（P1「一键转日常批改重批」）：
@@ -305,7 +375,7 @@ watch(() => store.autoGateResolved, (info) => {
   const parts = (info.issues || []).map(i => GATE_ISSUE_LABEL[i] || i)
   const detail = parts.length ? `（${parts.join('、')}）` : ''
   ElMessage.warning(
-    `${info.count} 道错题因题目元素缺失${detail}未加入错题本，已自动记录「本次不加入」；补全元素后可到错题本重新加入`
+    `${info.count} 道错题因题目元素缺失${detail}未加入错题本，已自动记录「本次不加入」；本题已标在页面上方「缺元素未入册」，补全后可用顶栏「待补入」清单找回`
   )
   store.clearAutoGateResolved()
 })
@@ -445,6 +515,129 @@ const handleGateComplete = async () => {
   store.wrongGateVisible = false
   await doComplete()
 }
+
+// ── 待补入清单（2026-09-27）：闸1 欠账全局入口 ──
+const pendingGateVisible = ref(false)
+const pendingGateLoading = ref(false)
+const gateJumpLoading = ref('')
+const GATE_CODE_LABEL = {
+  missing_figure: '缺配图',
+  missing_options: '缺选项',
+  missing_answer: '缺答案',
+  invalid_type: '题型未定',
+  stem_only: '疑似题干行',
+}
+const gateCodeLabel = (c) => GATE_CODE_LABEL[c] || c
+// 按欠账类型给描述：缺元素（去补全即自动入册）/ 低置信（需拍板）/
+// 元素已齐待补入（下次保存或重判链路自动入册，也可手动标错立即强入）
+const gateItemLabel = (it) => {
+  if (it.kind === 'missing_element') return (it.missingCodes || []).map(gateCodeLabel).join('、')
+  if (it.kind === 'low_confidence') return `低置信 ${it.confidence ?? '?'} · 需拍板`
+  return '元素已齐 · 待自动补入'
+}
+
+const withGateLoading = async (fn) => {
+  pendingGateLoading.value = true
+  try { await fn() } finally { pendingGateLoading.value = false }
+}
+const openPendingGateDialog = () => {
+  pendingGateVisible.value = true
+  withGateLoading(() => store.loadGatePending())
+}
+
+// 元素已齐、但因补图走脚本写库而绕过 PUT 补入钩子的题 → 一键补入（后端幂等清扫）
+const gateSweepLoading = ref(false)
+const pendingRequeueCount = computed(() =>
+  store.pendingGateGroups.reduce((n, g) =>
+    n + g.items.filter(it => it.kind === 'pending_requeue').length, 0)
+)
+const handleGateSweep = async () => {
+  gateSweepLoading.value = true
+  try {
+    const r = await store.runGateSweep()
+    if (r.added > 0) ElMessage.success(`已补入 ${r.added} 题到错题本`)
+    else if (r.complete > 0) ElMessage.warning(`${r.complete} 题元素已齐但未能自动入册（多为低置信需拍板），请逐题处理`)
+    else ElMessage.info('没有可一键补入的题')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '补入失败，请重试')
+  } finally {
+    gateSweepLoading.value = false
+  }
+}
+
+// 缺图题（有合格框却无图）→ 自动补裁（后端重跑生产裁图，像素收紧判非图形自动丢弃）
+const recropLoading = ref(false)
+const missingFigureCount = computed(() =>
+  store.pendingGateGroups.reduce((n, g) =>
+    n + g.items.filter(it => (it.missingCodes || []).includes('missing_figure')).length, 0)
+)
+const handleFigureRecrop = async () => {
+  recropLoading.value = true
+  try {
+    const r = await store.runFigureRecrop()
+    const rescued = r.cropped + (r.inherited || 0)
+    if (rescued > 0) ElMessage.success(`自动补回 ${r.cropped} 张裁图 + ${r.inherited || 0} 道继承兄弟配图，能入册的已自动入错题本`)
+    else if (r.scanned > 0) ElMessage.warning(`${r.scanned} 道缺图题的框经收紧判定均不是干净图形（多为压在文字/手写上），未补裁以免误导，请人工补图或走视觉重定位`)
+    else ElMessage.info('没有可自动补裁的缺图题')
+  } catch (e) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '补裁失败，请重试')
+  } finally {
+    recropLoading.value = false
+  }
+}
+
+// 点按钮：复用 loadTaskById（反查学生 → 切学生 → 选卷，与 Dashboard 深链同口径）。
+// 题目数据由 selectTask 重拉，gate_auto_skipped 标记随后端返回，不依赖清单旧快照。
+// 缺元素题直接打开编辑面板（补图入口）；低置信/待补入题只定位，由老师就地拍板。
+const goGateItem = async (it) => {
+  gateJumpLoading.value = it.questionId
+  try {
+    const ok = await store.loadTaskById(it.taskId)
+    if (!ok) {
+      ElMessage.error('未找到这份作业（可能已被删除）')
+      return
+    }
+    if (String(store.currentStudent?.id || '') !== String(it.studentId)) {
+      ElMessage.error('作业归属学生与清单不一致，请刷新清单后重试')
+      return
+    }
+    selectedTaskId.value = it.taskId
+    pendingGateVisible.value = false
+    const idx = store.allQuestions.findIndex(q => q.id === it.questionId)
+    if (idx >= 0) {
+      if (it.kind === 'missing_element') {
+        store.focusQuestionForEdit(it.questionId)
+      } else {
+        store.jumpToQuestion(idx)
+      }
+    } else {
+      ElMessage.warning('该题不在当前卷的题目列表中（可能已被删除或排除），请在原卷中确认')
+    }
+  } finally {
+    gateJumpLoading.value = ''
+  }
+}
+
+// 进入工作台即拉一次欠账总数（常驻角标）；切学生后重拉，
+// 保证刚补完的题不从清单里"复活"（补入是后端异步链路，以库为准）。
+// 首页引导深链（2026-09-27）：Dashboard「错题待补入」行带 ?gate=1 进页，
+// 自动打开待补入清单弹窗并回写 URL（刷新不重复弹，不拦常规进卷）。
+onMounted(() => {
+  store.loadGatePending()
+  if (String(route.query.gate || '') === '1') {
+    openPendingGateDialog()
+    router.replace({ query: { ...route.query, gate: undefined } })
+  }
+})
+watch(() => store.currentStudent?.id, () => { store.loadGatePending() })
+
+// 「补全即补入」成功（QuestionDetailPanel 保存后回传）→ 当场告知并刷新清单。
+watch(() => store.gateRequeueNotice, (n) => {
+  if (!n) return
+  ElMessage.success('题目元素已补全，该题已自动加入错题本')
+  store.clearGateRequeueNotice()
+  store.loadGatePending()
+})
 
 // 「📌 留底为答案库」手动按钮：调 save-as-answer-key 把当前 task 的答案沉淀到资源。
 // 与"完成复核"解耦——后者只更新 task.status，前者显式触发答案库覆写。
@@ -612,6 +805,51 @@ const handleRetryTask = async () => {
 }
 
 /* ── 错题拦截清单弹窗 ── */
+/* ── 待补入清单（2026-09-27）：闸1 欠账全局入口弹窗 ── */
+.pending-gate-tip {
+  font-size: 13px;
+  color: var(--wb-text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+.pending-gate-loading {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--wb-text-tertiary);
+}
+.pending-gate-group { margin-bottom: 14px; }
+.pending-gate-student {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--wb-text);
+  padding: 4px 0;
+  border-bottom: 1px solid var(--wb-border, #E5E7EB);
+}
+.pending-gate-count {
+  margin-left: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wb-warning);
+}
+.pending-gate-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 4px;
+}
+.pending-gate-info { min-width: 0; }
+.pending-gate-no { font-size: 12px; font-weight: 600; color: var(--wb-text); }
+.pending-gate-codes { margin-left: 8px; font-size: 12px; font-weight: 600; color: var(--wb-danger, #DC2626); }
+.pending-gate-stem {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .wrong-gate-tip {
   font-size: 13px;
   color: var(--wb-text-secondary);

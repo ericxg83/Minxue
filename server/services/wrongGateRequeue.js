@@ -16,10 +16,13 @@
  */
 import { query, TABLES } from '../config/neon.js'
 import { addWrongQuestions } from './neonService.js'
+import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 import {
   decideGateRequeue,
-  GATE_REQUEUE_CODES
+  GATE_REQUEUE_CODES,
+  isGateAutoSkippedRow,
 } from '../utils/wrongGateRequeue.js'
+import { WRONG_GATE_AUTO_SKIP_REASON } from '../../src/domain/wrongGateTier.js'
 
 /** 结果码 → 给老师看的中文说明（只做展示，不参与判定） */
 const CODE_MESSAGE = Object.freeze({
@@ -147,3 +150,92 @@ export const requeueGateSkippedQuestion = async ({
 }
 
 export default { requeueGateSkippedQuestion }
+
+// ── 「补全即补入」兜底清扫（2026-09-27 修盲区）────────────────────
+//
+// 盲区根因：补入原本只挂在 PUT /api/questions/:id（老师手动编辑保存）上。
+// 但补图/补答案还会经批量脚本（recrop-*/backfill*/repair*）直接 UPDATE
+// questions 写库，绕过 PUT ⇒ 元素已齐却永不入册（实测 3 条 gateAuto 留痕题
+// 元素已完整、仍未入）。逐个脚本去接补入 = 8+ 处调用点，必然漏、必然漂移。
+//
+// 本清扫按「以库现况为准」扫描所有 gateAuto 自动放行、仍未入册、且元素已完整的
+// 题，逐条走 requeueGateSkippedQuestion（内部仍过置信度闸 + 完整性闸 + 幂等）。
+// 与写库通道彻底解耦：无论哪条路径补的元素，都会被它兜住。
+// 红线不破：低置信题被置信度闸挡下（skipped），绝不自动入册。
+const SWEEP_SELECT = `
+  SELECT q.id, q.student_id, q.task_id, q.question_number, q.page_number,
+         q.review_status, q.is_correct, q.answer_source, q.confidence,
+         q.content, q.parent_stem, q.options, q.answer, q.question_type,
+         q.geometry_image_url, q.block_coordinates,
+         gs.skip_reason AS _gate_skip_reason, gs.gate_auto AS _gate_auto,
+         EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id) AS in_wrong_book
+    FROM ${TABLES.QUESTIONS} q
+    LEFT JOIN LATERAL (
+      SELECT metadata->>'skipReason' AS skip_reason,
+             metadata->>'gateAuto'   AS gate_auto
+        FROM ${TABLES.JUDGEMENTS} j
+       WHERE j.question_id = q.id::text
+       ORDER BY j.created_at DESC LIMIT 1
+    ) gs ON TRUE
+   WHERE q.review_status = 'wrong_no_book'
+     AND q.deleted_at IS NULL
+     AND gs.skip_reason = $1
+     AND gs.gate_auto = 'true'
+     AND NOT EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id)
+   LIMIT 500`
+
+let _sweepRunning = false
+
+/**
+ * 执行一次兜底清扫。
+ * @param {{logTag?:string, dryRun?:boolean}} [opts]
+ * @returns {Promise<{scanned:number, complete:number, added:number, skipped:number, ids:string[], skippedRun?:boolean}>}
+ */
+export const sweepGateRequeue = async ({ logTag = 'gate_requeue_sweep', dryRun = false } = {}) => {
+  if (_sweepRunning) return { scanned: 0, complete: 0, added: 0, skipped: 0, ids: [], skippedRun: true }
+  _sweepRunning = true
+  try {
+    const { rows } = await query(SWEEP_SELECT, [WRONG_GATE_AUTO_SKIP_REASON])
+    // 谓词二次校验（与 GET 待补清单同源 isGateAutoSkippedRow），防 SQL 与 JS 判据漂移
+    const gateRows = rows.filter(r => isGateAutoSkippedRow(r))
+    let complete = 0, added = 0, skipped = 0
+    const ids = []
+    for (const row of gateRows) {
+      const { codes } = checkQuestionCompleteness(row)
+      if (codes.length > 0) continue // 元素仍不全：留给下次（不浪费一次入册调用）
+      complete++
+      if (dryRun) { ids.push(row.id); continue }
+      // requeueGateSkippedQuestion 内部再过置信度闸/完整性闸/幂等，绝不绕过红线
+      const res = await requeueGateSkippedQuestion({ question: row, logTag })
+      if (res.status === 'added') { added++; ids.push(row.id) }
+      else skipped++
+    }
+    if (added > 0 || complete > 0) {
+      console.log(`  ♻️ [${logTag}] 兜底清扫：命中 ${gateRows.length} 条自动放行未入册，元素已齐 ${complete}，补入 ${added}，被闸挡 ${skipped}`)
+    }
+    return { scanned: gateRows.length, complete, added, skipped, ids }
+  } finally {
+    _sweepRunning = false
+  }
+}
+
+/**
+ * 排程：启动后先扫一次（补上服务未运行期间脚本写的库），此后每 SWEEP_INTERVAL_HOURS 扫一次。
+ * 开关 GATE_REQUEUE_SWEEP_ENABLED=false 可整体关停（默认开）。
+ */
+export function scheduleGateRequeueSweep() {
+  if (/^(0|false|off)$/i.test(String(process.env.GATE_REQUEUE_SWEEP_ENABLED || ''))) {
+    console.log('♻️ 补入兜底清扫：已通过 GATE_REQUEUE_SWEEP_ENABLED 关闭')
+    return
+  }
+  const hours = Number(process.env.GATE_REQUEUE_SWEEP_INTERVAL_HOURS) || 6
+  const run = async (trigger) => {
+    try { await sweepGateRequeue({ logTag: `gate_requeue_sweep:${trigger}` }) }
+    catch (e) { console.error(`[补入兜底清扫] (${trigger}) 异常:`, e.message) }
+  }
+  // 启动后延迟 90s 扫一次（避开启动迁移/健康检查高峰），随后周期化
+  setTimeout(() => run('startup'), 90_000).unref?.()
+  const timer = setInterval(() => run('interval'), hours * 3600_000)
+  timer.unref?.()
+  console.log(`♻️ 补入兜底清扫：已排程（启动后 90s 首扫，之后每 ${hours}h）`)
+}

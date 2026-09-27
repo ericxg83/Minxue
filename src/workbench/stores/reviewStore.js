@@ -1,8 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes, getGatePendingItems, sweepGatePending, recropFigures } from '../../services/apiService'
 import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
-import { checkQuestionCompleteness } from '../../utils/questionCompleteness.js'
+import { checkQuestionCompleteness, COMPLETENESS_CODES } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
 import {
   RETRY_PAPER_STATE,
@@ -100,6 +100,68 @@ export const useReviewStore = defineStore('review', () => {
 
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
+
+  // ── 闸1 欠账显性化（2026-09-27）────────────────────────
+  // P2 分层把系统侧缺项（缺图/缺选项/缺答案/题型未定）的错题自动记
+  // wrong_no_book 放行、不拦卷，但闭环前提是「有人去补图」。
+  // 此前只有一条瞬时 toast，错过即无人知晓 ⇒ 错题事实上沉底。
+  // 现在：
+  //   ① 卷内常驻标识：gateSkippedQuestions（后端 gate_auto_skipped 标记，
+  //      不依赖错题本快照，已复核卷重进也能看到）；
+  //   ② 全局待补清单：pendingGateGroups（跨学生，后端 gate-pending 端点）。
+  // 两者都不参与拦卷判定（paperAutoComplete 口径不变）。
+  const gateSkippedQuestions = computed(() =>
+    allQuestions.value
+      .map((q, idx) => ({ q, idx }))
+      .filter(({ q }) => q.gate_auto_skipped === true)
+  )
+
+  const pendingGateGroups = ref([]) // [{ studentId, studentName, items:[{questionId,taskId,...}] }]
+  const pendingGateTotal = computed(() =>
+    pendingGateGroups.value.reduce((n, g) => n + g.items.length, 0)
+  )
+  const loadGatePending = async () => {
+    try {
+      const { groups } = await getGatePendingItems()
+      pendingGateGroups.value = groups
+    } catch (e) {
+      // 只读展示性数据：拉取失败不清旧值、不阻断批改（与铁律 #11 不冲突：
+      // 它不承担写入结果，拦卷/入册判据另有同源后端门禁）
+      console.warn('[gatePending] 拉取待补入清单失败:', e?.message || e)
+    }
+  }
+  const removeGatePendingItem = (questionId) => {
+    pendingGateGroups.value = pendingGateGroups.value
+      .map(g => ({ ...g, items: g.items.filter(it => it.questionId !== questionId) }))
+      .filter(g => g.items.length > 0)
+  }
+
+  // 「一键补入」：请后端对「元素已齐但尚未入册」的欠账跑一次兜底清扫（幂等、经置信度闸）。
+  // 补图/补答案的批量脚本直接写库不触发 PUT 补入钩子，靠这个清扫兜底。
+  // 成功后刷新清单 + 当前学生错题本快照（否则界面还问要不要加入）。
+  const runGateSweep = async () => {
+    const r = await sweepGatePending()
+    await loadGatePending()
+    const studentId = currentStudent.value?.id
+    if (studentId) { clearStudentCaches(studentId); await loadWrongQuestions(studentId) }
+    return r
+  }
+
+  // 配图「补裁」：请后端对「有合格框却无图」的题重跑生产裁图（像素收紧、判非图形自动丢弃）。
+  // 裁出图后题会转完整 → 再跑一次补入清扫→自动入错题本。一次完成“补裁+补入”链。
+  const runFigureRecrop = async () => {
+    const r = await recropFigures({ dryRun: false })
+    if (r.cropped > 0 || r.inherited > 0) await sweepGatePending() // 新补/新继承的图可能让题变完整 → 自动补入
+    await loadGatePending()
+    const studentId = currentStudent.value?.id
+    if (studentId) { clearStudentCaches(studentId); await loadWrongQuestions(studentId) }
+    return r
+  }
+
+  // 「补全即补入」成功通知（QuestionDetailPanel 保存后消费后端 gate_requeue 回传）。
+  // 与 wrongBookNotices 同款：store 只收集，弹窗由 UI 层（ReviewTopBar）消费。
+  const gateRequeueNotice = ref(null) // { questionId, at }
+  const clearGateRequeueNotice = () => { gateRequeueNotice.value = null }
 
   // ── 撤销上一笔：仅回退前端内存状态，不反向写库 ──
   // 元素：{ questionId, prevStatus, wqSnapshot }
@@ -1456,6 +1518,12 @@ export const useReviewStore = defineStore('review', () => {
         skipReason: reason || 'other',
         ...extraMeta
       })
+      // 系统自动放行路径（带 gateAuto 标记）：本地同步置位卷内常驻标识，
+      // 让「缺元素未入册」徒章当场出现，不用等重进页面拿后端标记。
+      // 手动「不加入」写不出 gateAuto，永远不置位（红线，见 wrongGateTier.js）。
+      if (extraMeta && extraMeta[WRONG_GATE_AUTO_FLAG] === true) {
+        question.gate_auto_skipped = true
+      }
       return true
     } catch (error) {
       question.review_status = previousStatus
@@ -1581,6 +1649,17 @@ export const useReviewStore = defineStore('review', () => {
     autoGateResolved,
     clearAutoGateResolved,
     pendingEditQuestionId,
+    // 闸1 欠账显性化（2026-09-27）：卷内常驻标识 + 全局待补清单 + 补入成功通知
+    gateSkippedQuestions,
+    COMPLETENESS_CODES,
+    pendingGateGroups,
+    pendingGateTotal,
+    loadGatePending,
+    removeGatePendingItem,
+    runGateSweep,
+    runFigureRecrop,
+    gateRequeueNotice,
+    clearGateRequeueNotice,
     unresolvedWrongQuestions,
     getUnresolvedWrong,
     prepareWrongGate,

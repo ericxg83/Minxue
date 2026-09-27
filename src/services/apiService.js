@@ -419,6 +419,37 @@ export const getQuestionsByIds = async (questionIds, studentId) => {  if (!quest
   return (data.questions || []).map(parseQuestionFields)
 }
 
+// ── 错题「待补入」清单（2026-09-27）──
+// 闸1 分层（2026-09-23 P2）把系统侧缺项（缺图/缺选项/缺答案/题型未定）的错题
+// 自动记「本次不加入」放行、不拦卷。本接口列出这些欠账（按学生分组）：
+// 补全元素后由后端「补全即补入」通道自动入册。免缓存：欠账状态随补图即时变化。
+export const getGatePendingItems = async (studentId = null) => {
+  const qs = studentId ? `?studentId=${encodeURIComponent(studentId)}` : ''
+  const data = await apiRequest(`/wrong-questions/gate-pending${qs}`)
+  return { total: data.total || 0, groups: data.groups || [] }
+}
+
+// 待补入清单「一键补入」：对元素已齐但尚未入册的题跑一次后端兜底清扫（幂等、经置信度闸）。
+export const sweepGatePending = async () => {
+  const data = await apiRequest('/wrong-questions/gate-pending/sweep', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  })
+  return { added: data.added || 0, complete: data.complete || 0, skipped: data.skipped || 0 }
+}
+
+// 配图「补裁」：对「有合格框却无图」的题重跑生产裁图（像素收紧、判非图形自动丢弃）。
+// dryRun 只预演不写库。裁出图后由后端补入清扫自动入错题本。
+export const recropFigures = async ({ dryRun = false, limit = 50 } = {}) => {
+  const data = await apiRequest('/wrong-questions/figure-recrop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dryRun, limit })
+  })
+  return { scanned: data.scanned || 0, cropped: data.cropped || 0, rejected: data.rejected || 0, noPage: data.noPage || 0, inherited: data.inherited || 0 }
+}
+
 export const updateQuestion = async (id, updates) => {
   return apiRequest(`/questions/${id}`, {
     method: 'PUT',

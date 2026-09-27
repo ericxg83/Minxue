@@ -84,7 +84,10 @@ import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAuto
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
 import { computeWrongBookRisks } from './utils/wrongBookRisks.js'
-import { requeueGateSkippedQuestion } from './services/wrongGateRequeue.js'
+import { WRONG_GATE_AUTO_SKIP_REASON } from '../src/domain/wrongGateTier.js'
+import { requeueGateSkippedQuestion, sweepGateRequeue, scheduleGateRequeueSweep } from './services/wrongGateRequeue.js'
+import { sweepFigureRecrop, sweepFigureInherit, scheduleFigureRecropSweep } from './services/figureRecropSweep.js'
+import { isGateAutoSkippedRow } from './utils/wrongGateRequeue.js'
 import { normalizeOptions, formatOptionsForPrompt } from './utils/optionText.js'
 import { computeTaskStats } from './utils/taskStats.js'
 import { summarizeQuestionResults, classifyQuestionResult } from './utils/questionResultCaliber.js'
@@ -2875,7 +2878,9 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
               a.tikz_status,
               a.processed_at AS asset_processed_at,
               a.last_error AS asset_last_error,
-              EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id) AS in_wrong_book
+              EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id) AS in_wrong_book,
+              gs.skip_reason AS _gate_skip_reason,
+              gs.gate_auto   AS _gate_auto
        FROM ${TABLES.QUESTIONS} q
        LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
        LEFT JOIN LATERAL (
@@ -2884,6 +2889,16 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
          WHERE question_id = q.id AND asset_type = 'geometry_image'
          ORDER BY created_at DESC LIMIT 1
        ) a ON TRUE
+       -- 闸1 系统侧自动放行留痕（2026-09-27 待补清单）：最新一条 judgement 的
+       -- skipReason/gateAuto。配合 JS 侧 review_status='wrong_no_book' 判
+       -- 「缺元素被自动放行、尚未入册」，与「补全即补入」判据同源。
+       LEFT JOIN LATERAL (
+         SELECT metadata->>'skipReason' AS skip_reason,
+                metadata->>'gateAuto'   AS gate_auto
+         FROM ${TABLES.JUDGEMENTS} j
+         WHERE j.question_id = q.id::text
+         ORDER BY j.created_at DESC LIMIT 1
+       ) gs ON TRUE
        WHERE q.task_id = $1
          AND (q.review_status IS NULL OR q.review_status != 'exclude')
        -- 小问确定性排序（2026-09-23）：OCR 给同一道大题的所有小问行同一个
@@ -2911,6 +2926,11 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
         ai_tags: q.ai_tags ?? q._cache_ai_tags
       }
       merged_q.wrong_book_risks = computeWrongBookRisks(merged_q, q.in_wrong_book, CONF_THRESHOLD)
+      // 闸1 系统侧自动放行且仍未入册 → 前端常驻「缺元素未入册」标识（待补清单）。
+      // 谓词唯一口径见 utils/wrongGateRequeue.js::isGateAutoSkippedRow（带回归测试）。
+      merged_q.gate_auto_skipped = isGateAutoSkippedRow(q)
+      delete q._gate_skip_reason
+      delete q._gate_auto
       return merged_q
     })
     // 移除 _cache_ 前缀的临时字段
@@ -2926,6 +2946,124 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
     res.json({ success: true, questions: merged })
   } catch (error) {
     console.error('获取任务题目失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// ── 错题「待补入」清单（2026-09-27）──────────────────────────────
+// 闸1 门禁分层（2026-09-23 P2）把系统侧缺项（缺图/缺选项/缺答案/题型未定）的错题
+// 自动记 wrong_no_book 放行、不拦卷；「补全即补入」（wrongGateRequeue）负责补元素后
+// 自动入册。本端点把这条既有闭环的欠账显性化：列出所有「自动放行且仍未入册」的题，
+// 供教师工作台常驻入口按学生分组展示。只读，不改任何判定。
+// 判据与 PUT /api/questions/:id 补入路径同源（wrongGateTier + wrongGateRequeue）：
+//   review_status='wrong_no_book' + 最新 judgement 带 skipReason=recognition_error
+//   且 gateAuto=true（老师手动否决的永不出现）+ 不在 wrong_questions。
+// 两类欠账都返回，用 kind 区分（实测：元素已齐但 conf<阈值被置信度闸拦住的题，
+// 既不进重练也不入册，隐式过滤会让它再次沉底）：
+//   · missing_element —— 缺元素，补全保存即自动入册（去补全）
+//   · low_confidence  —— 元素已齐但低置信，口径要求老师拍板（标错即强入/标对即翻篇）
+app.get('/api/wrong-questions/gate-pending', async (req, res) => {
+  try {
+    // 只收合法 uuid（与 questionCompletenessSync.normalizeIds 同理由：非法值进 ::uuid 会让整条查询报错）
+    const rawStudentId = String(req.query.studentId || '')
+    const studentId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawStudentId)
+      ? rawStudentId : null
+    const { rows } = await query(
+      `SELECT q.id, q.student_id, q.task_id, q.question_number, q.sub_no, q.answer_source,
+              COALESCE(NULLIF(btrim(q.content), ''), qc.content) AS content,
+              q.parent_stem,
+              COALESCE(q.options, qc.options) AS options,
+              COALESCE(NULLIF(btrim(q.answer::text), ''), qc.answer) AS answer,
+              q.question_type, q.geometry_image_url, q.confidence,
+              s.name AS student_name, t.original_name AS task_name,
+              q.updated_at
+       FROM ${TABLES.QUESTIONS} q
+       LEFT JOIN ${TABLES.QUESTION_CACHE} qc ON q.cache_id = qc.id
+       LEFT JOIN ${TABLES.STUDENTS} s ON s.id = q.student_id
+       LEFT JOIN ${TABLES.TASKS} t ON t.id = q.task_id
+       LEFT JOIN LATERAL (
+         SELECT metadata->>'skipReason' AS skip_reason,
+                metadata->>'gateAuto'   AS gate_auto
+         FROM ${TABLES.JUDGEMENTS} j
+         WHERE j.question_id = q.id::text
+         ORDER BY j.created_at DESC LIMIT 1
+       ) gs ON TRUE
+       WHERE q.review_status = 'wrong_no_book'
+         AND q.deleted_at IS NULL
+         AND ($2::uuid IS NULL OR q.student_id = $2::uuid)
+         AND gs.skip_reason = $1
+         AND gs.gate_auto = 'true'
+         AND NOT EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} wq WHERE wq.question_id = q.id)
+       ORDER BY s.name NULLS LAST, q.updated_at DESC
+       LIMIT 500`,
+      [WRONG_GATE_AUTO_SKIP_REASON, studentId]
+    )
+    const items = []
+    const CONF_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
+    for (const row of rows) {
+      const { codes } = checkQuestionCompleteness(row)
+      // blank（未作答）不受置信度闸约束（与 addWrongQuestions 口径同源）
+      const lowConf = codes.length === 0
+        && row.answer_source !== 'blank'
+        && row.confidence != null && Number(row.confidence) < CONF_THRESHOLD
+      items.push({
+        questionId: row.id,
+        studentId: row.student_id,
+        studentName: row.student_name || '未知学生',
+        taskId: row.task_id,
+        taskName: row.task_name || '未命名作业',
+        questionNumber: row.question_number || '',
+        subNo: row.sub_no || '',
+        content: String(row.content || '').slice(0, 80),
+        missingCodes: codes,
+        kind: codes.length > 0 ? 'missing_element' : (lowConf ? 'low_confidence' : 'pending_requeue'),
+        confidence: row.confidence ?? null,
+        updatedAt: row.updated_at,
+      })
+    }
+    const groups = []
+    const byStudent = new Map()
+    for (const it of items) {
+      if (!byStudent.has(it.studentId)) {
+        const g = { studentId: it.studentId, studentName: it.studentName, items: [] }
+        byStudent.set(it.studentId, g)
+        groups.push(g)
+      }
+      byStudent.get(it.studentId).items.push(it)
+    }
+    res.json({ success: true, total: items.length, groups })
+  } catch (error) {
+    console.error('获取待补入清单失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 待补入清单的「一键补入」：对清单里「元素已齐但尚未入册」的题跑一次兜底清扫。
+// 与定时清扫同一函数（幂等、经置信度闸）；dryRun=true 只预演不写库。
+app.post('/api/wrong-questions/gate-pending/sweep', async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true
+    const result = await sweepGateRequeue({ logTag: dryRun ? 'gate_sweep:dryRun' : 'gate_sweep:manual', dryRun })
+    res.json({ success: true, dryRun, ...result })
+  } catch (error) {
+    console.error('待补入一键清扫失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 配图「补裁」：对「有合格框却无图」的题重跑生产同一裁图函数（内部像素收紧，
+// 判非图形自动丢弃、不污染）。裁出图后由补入兜底清扫自动入错题本。dryRun 只预演。
+// 与定时清扫同一函数；上限 50 题/次，避免一次性大量下载页图。
+app.post('/api/wrong-questions/figure-recrop', async (req, res) => {
+  try {
+    const dryRun = req.body?.dryRun === true
+    const limit = Math.max(1, Math.min(500, Number(req.body?.limit) || 50))
+    // 先补裁（真图写库），再继承（同题组无框小问复用兄弟图）
+    const recrop = await sweepFigureRecrop({ limit, dryRun, logTag: dryRun ? 'figure_recrop:dryRun' : 'figure_recrop:manual' })
+    const inherit = await sweepFigureInherit({ dryRun, logTag: dryRun ? 'figure_inherit:dryRun' : 'figure_inherit:manual' })
+    res.json({ success: true, dryRun, ...recrop, inherited: inherit.inherited, inheritScanned: inherit.scanned })
+  } catch (error) {
+    console.error('配图补裁失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
@@ -4491,6 +4629,24 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       scheduleWeeklyMissingFigureCheck()
     } catch (err) {
       console.error('缺图监控定时器启动失败:', err.message)
+    }
+
+    // 错题「补全即补入」兜底清扫（2026-09-27 修盲区）：补图/补答案的批量脚本
+    // 直接写库会绕过 PUT 的补入钩子，故周期扫描「自动放行留痕 + 元素已齐 + 未入册」
+    // 的题统一补入（经置信度闸/完整性闸/幂等，低置信绝不自动入）。
+    try {
+      scheduleGateRequeueSweep()
+    } catch (err) {
+      console.error('补入兜底清扫定时器启动失败:', err.message)
+    }
+
+    // 配图「补裁」兜底清扫（B1，2026-09-27）：配图框常被异步补写，而裁图只在 OCR
+    // 采集时跑一次 → 「有合格框却无图」。周期重跑生产同一裁图函数（像素收紧、
+    // 判非图形自动丢弃），裁出的图再由上面的补入清扫自动入错题本。
+    try {
+      scheduleFigureRecropSweep()
+    } catch (err) {
+      console.error('配图补裁清扫定时器启动失败:', err.message)
     }
 
     console.log(`并发数: ${process.env.CONCURRENCY || 2}`)

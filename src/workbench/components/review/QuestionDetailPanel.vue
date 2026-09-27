@@ -1334,6 +1334,19 @@ const handleSave = async () => {
     Object.assign(question, { content: form.value.content, options: form.value.options, answer: form.value.answer, analysis: form.value.analysis, ai_tags: form.value.tags, geometry_image_url: localImageUrl.value, geometry_manual_override: !!question.geometry_manual_override, question_type: form.value.question_type, subject: form.value.subject })
     // 同步后端算的最新入册风险（⚠ 缺图 / ⚠ 缺选项 / ⚠ 题型缺失 / ⚠ 低置信 tag 实时消失/出现）
     if (Array.isArray(resp?.question?.wrong_book_risks)) question.wrong_book_risks = resp.question.wrong_book_risks
+    // 「补全即补入」（2026-09-27 显性化）：闸1 自动放行的缺元素错题补全后，
+    // 后端 PUT 同链路自动入册并回传 gate_requeue。成功→摘掉卷内常驻标识、
+    // 销全局欠账并通知顶栏弹成功提示；失败→外露（铁律 #11，不能假装补好了）。
+    const requeue = resp?.question?.gate_requeue
+    if (requeue?.status === 'added') {
+      question.gate_auto_skipped = false
+      store.removeGatePendingItem(question.id)
+      store.gateRequeueNotice = { questionId: question.id, at: Date.now() }
+      // 重拉错题本快照：否则门禁/入册状态用旧数据，会问老师「要不要加入」
+      if (store.currentStudent?.id) store.loadWrongQuestions(store.currentStudent.id)
+    } else if (requeue?.status === 'skipped' && question.gate_auto_skipped && requeue.code !== 'manual_skip') {
+      ElMessage.warning(`已保存，但该题暂未自动入错题本：${requeue.message || requeue.code || '未知原因'}`)
+    }
     // 保存后自动重批改
     try {
       const rejudgeResult = await rejudgeQuestion(question.id)

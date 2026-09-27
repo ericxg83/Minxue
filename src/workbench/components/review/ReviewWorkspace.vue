@@ -29,6 +29,38 @@
           title="跳到下一道待确认的题（待复核 / AI未判定 / 处理中）"
           @click="jumpToNextUnconfirmed"
         >还差 {{ store.reviewProgress.unconfirmed }} 题 · 去确认</button>
+        <!-- 闸1 欠账常驻标识（2026-09-27）：缺元素被自动放行、尚未入错题本的题。
+             不拦复核（P2 分层口径不变），但必须让老师随时看得到欠的是哪几题、
+             缺的是什么元素——补全后保存即由后端「补全即补入」通道自动入册。 -->
+        <el-popover
+          v-if="store.gateSkippedQuestions.length > 0"
+          placement="bottom-end"
+          :width="380"
+          trigger="click"
+          popper-class="gate-skip-popover"
+        >
+          <template #reference>
+            <button class="review-progress-gate" type="button"
+              title="这些错题因缺图/缺选项等元素缺失未进错题本，补全后保存即自动入册">
+              ⚠ 缺元素未入册 {{ store.gateSkippedQuestions.length }}
+            </button>
+          </template>
+          <div class="gate-skip-pop">
+            <div class="gate-skip-tip">补全元素并保存后会自动加入错题本；也可在导航栏点「⚠」标签逐题处理。</div>
+            <div
+              v-for="{ q, idx } in store.gateSkippedQuestions"
+              :key="q.id"
+              class="gate-skip-item"
+              @click="jumpToGateSkip(idx)"
+            >
+              <div class="gate-skip-head">
+                <span class="gate-skip-no">第 {{ q._paperLabel || (idx + 1) }} 题</span>
+                <span class="gate-skip-codes">{{ gateIssueLabels(q).join('、') }}</span>
+              </div>
+              <div class="gate-skip-stem">{{ (q.content || q.parent_stem || '').slice(0, 46) || '（无题干文本）' }}</div>
+            </div>
+          </div>
+        </el-popover>
       </div>
       <div class="review-context-actions">
         <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain">
@@ -114,6 +146,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { Check, CircleCheck, Clock, Document, WarningFilled } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getResource } from '../../../services/apiService'
+import { checkQuestionCompleteness } from '../../../utils/questionCompleteness.js'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
 import PaperViewerPanel from './PaperViewerPanel.vue'
@@ -147,6 +180,24 @@ const jumpToNextUnconfirmed = () => {
   const cur = store.currentReviewIndex
   const next = unconfirmedIdxs.find(i => i > cur) ?? unconfirmedIdxs[0]
   store.jumpToQuestion(next)
+}
+
+// ── 闸1 欠账常驻标识（2026-09-27）：缺元素未入册的题 ──
+const GATE_ISSUE_LABELS = {
+  [store.COMPLETENESS_CODES.missing_figure]: '缺配图',
+  [store.COMPLETENESS_CODES.missing_options]: '缺选项',
+  [store.COMPLETENESS_CODES.missing_answer]: '缺答案',
+  [store.COMPLETENESS_CODES.invalid_type]: '题型未定',
+  [store.COMPLETENESS_CODES.stem_only]: '疑似题干行',
+}
+const gateIssueLabels = (q) => {
+  const { codes } = checkQuestionCompleteness(q)
+  return codes.map(c => GATE_ISSUE_LABELS[c] || c)
+}
+// 点清单项 → 跳到该题并直接打开编辑面板（补图入口）
+const jumpToGateSkip = (idx) => {
+  const q = store.allQuestions[idx]
+  if (q) store.focusQuestionForEdit(q.id)
 }
 const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
@@ -427,6 +478,47 @@ onUnmounted(() => {
   transition: filter 0.15s;
 }
 .review-progress-todo:hover { filter: brightness(0.96); }
+/* 闸1 欠账常驻标识（2026-09-27）： danger 配色区别于「还差 N 题」的 warning 语义 */
+.review-progress-gate {
+  padding: 2px 10px;
+  border: 1px solid var(--wb-danger-soft, #FEE2E2);
+  border-radius: 999px;
+  background: var(--wb-danger-soft, #FEE2E2);
+  color: var(--wb-danger, #DC2626);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s;
+}
+.review-progress-gate:hover { filter: brightness(0.96); }
+.gate-skip-pop .gate-skip-tip {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  padding-bottom: 6px;
+}
+.gate-skip-item {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.gate-skip-item:hover { background: var(--wb-bg-hover, #F3F4F6); }
+.gate-skip-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.gate-skip-no { font-weight: 700; color: var(--wb-text); }
+.gate-skip-codes { color: var(--wb-danger, #DC2626); font-weight: 600; }
+.gate-skip-stem {
+  font-size: 12px;
+  color: var(--wb-text-tertiary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* ── 重练答卷覆盖度提示（缺页 / 缺题）──
    注意：正文用 --wb-text 而非 --wb-warning —— #D97706 压在 #FEF3C7 上对比度不足，
    12px 小字会糊。警示语义靠左侧色条 + 数字着色承载。 */

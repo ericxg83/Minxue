@@ -84,6 +84,25 @@
           </span>
           <el-icon class="summary-anomaly__arrow" aria-hidden="true"><ArrowRight /></el-icon>
         </router-link>
+
+        <!-- 错题待补入（2026-09-27）：闸1 自动放行欠账不能只藏在复核页顶栏按钮里，
+             首页常驻引导，点击直达批改复核页并自动打开「待补入」清单弹窗 -->
+        <router-link
+          v-if="gatePendingCount > 0"
+          :to="gatePendingAction.to"
+          class="summary-anomaly is-warning"
+          :aria-label="`${gatePendingAction.title}，${gatePendingCount} ${gatePendingAction.unit}`"
+        >
+          <span class="summary-anomaly__copy">
+            <strong class="summary-anomaly__title">{{ gatePendingAction.title }}</strong>
+            <small class="summary-anomaly__description">{{ gatePendingAction.description }}</small>
+          </span>
+          <span class="summary-anomaly__count">
+            <strong>{{ gatePendingCount }}</strong>
+            <small>{{ gatePendingAction.unit }}</small>
+          </span>
+          <el-icon class="summary-anomaly__arrow" aria-hidden="true"><ArrowRight /></el-icon>
+        </router-link>
       </section>
 
       <!-- 空态：今天没有行动 -->
@@ -298,7 +317,8 @@ import {
   getStudents,
   getDashboardWeakness,
   getDashboardRetryOverview,
-  getDashboardAttentionStudents
+  getDashboardAttentionStudents,
+  getGatePendingItems
 } from '../../services/apiService'
 import { useNotificationStore } from '../stores/notificationStore'
 import ActionButton from '../components/ui/ActionButton.vue'
@@ -316,6 +336,8 @@ const initialLoading = ref(true)
 const dashboardWeakness = ref([])
 const retryOverview = ref({ masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 })
 const attentionStudentsRaw = ref([])
+// 错题待补入欠账总数（GET /wrong-questions/gate-pending，与批改页顶栏「待补入」同源）
+const gatePendingCount = ref(0)
 
 const todayLabel = computed(() =>
   new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())
@@ -375,6 +397,15 @@ const briefingStrip = computed(() => [
     to: { path: '/students', query: { filter: 'retry' } }
   }
 ])
+
+// 待补入引导：>0 才展示（区别于识别异常的固定行——欠账清完就该消失）。
+// gate=1 查询参数由 ReviewTopBar 消费：进入复核页即自动打开待补入清单弹窗。
+const gatePendingAction = computed(() => ({
+  title: '错题待补入错题本',
+  description: '这些错题因缺图/缺选项等元素未入册，补全保存后自动入册；点击逐题处理',
+  unit: '道',
+  to: { path: '/grade/task', query: { source: 'homework', gate: '1' } }
+}))
 
 // 识别异常：单独 row，0 时也展示
 const failedAction = computed(() => ({
@@ -517,11 +548,12 @@ onMounted(async () => {
   notiStore.fetchSummary()
   notiStore.fetchInProgress()
   notiStore.startInProgressPolling()
-  // Dashboard 三个聚合 API 并行加载（失败互不影响）
+  // Dashboard 四个聚合 API 并行加载（失败互不影响）
   Promise.allSettled([
     getDashboardWeakness(5).then((d) => { dashboardWeakness.value = d?.weakness || [] }),
     getDashboardRetryOverview().then((d) => { retryOverview.value = d?.overview || { fullyMasteredRate: 0, basicMasteredRate: 0, masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 } }),
-    getDashboardAttentionStudents(8).then((d) => { attentionStudentsRaw.value = d?.students || [] })
+    getDashboardAttentionStudents(8).then((d) => { attentionStudentsRaw.value = d?.students || [] }),
+    getGatePendingItems().then(({ total }) => { gatePendingCount.value = total || 0 }).catch(() => {}) // 只读引导数据，失败静默不阻断首页
   ]).catch((e) => console.error('[Dashboard] 加载聚合数据失败:', e))
 
   try {
@@ -761,6 +793,8 @@ onBeforeUnmount(() => {
 }
 .summary-anomaly:hover { background: var(--wb-bg-hover); }
 .summary-anomaly.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
+.summary-anomaly.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
+.summary-anomaly.is-warning .summary-anomaly__count strong { color: var(--wb-status-warning-fg); }
 
 .summary-anomaly__copy {
   display: flex;

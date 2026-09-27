@@ -35,7 +35,23 @@ import {
   WRONG_GATE_AUTO_FLAG
 } from '../../src/domain/wrongGateTier.js'
 
+/** 「本次不加入」的状态牌 —— 与 services/wrongGateRequeue.js 判据同源 */
 export const REVIEW_STATUS_WRONG_NO_BOOK = 'wrong_no_book'
+
+/**
+ * 「闸1 系统侧自动放行且仍未入册」谓词 —— 待补清单的唯一口径（2026-09-27）。
+ *
+ * 输入是 GET /api/questions/task/:taskId 的题行附带的最新 judgement 留痕
+ * （_gate_skip_reason / _gate_auto，LATERAL 取最新一条）。
+ * 红线：老师手动点的「本次不加入」写不出 gateAuto，永远不进待补列
+ * （见 src/domain/wrongGateTier.js 的 WRONG_GATE_AUTO_FLAG 注释）。
+ */
+export const isGateAutoSkippedRow = (q) =>
+  q?.review_status === REVIEW_STATUS_WRONG_NO_BOOK
+  && q?.in_wrong_book !== true
+  && q?._gate_skip_reason === WRONG_GATE_AUTO_SKIP_REASON
+  && String(q?._gate_auto) === 'true'
+
 
 /** 判定结果码（稳定标识，调用方/测试按 code 分支，不要按中文文案） */
 export const GATE_REQUEUE_CODES = Object.freeze({
