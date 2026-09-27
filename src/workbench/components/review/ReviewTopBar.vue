@@ -81,38 +81,6 @@
       <el-tag v-if="!store.currentPaperReviewable" type="info" effect="plain" class="blocked-tag">
         该卷{{ blockedPaperHint }}，暂无可复核内容
       </el-tag>
-      <div v-if="store.currentPaperReviewable && store.allQuestions.length > 0" class="status-chips">
-        <span class="status-chip chip-correct">
-          <StatusIcon state="correct" :size="16" />
-          <span class="chip-label">AI判对</span>
-          <span class="chip-count">{{ store.aiStateStats.correct }}</span>
-        </span>
-        <span class="status-chip chip-wrong">
-          <StatusIcon state="wrong" :size="16" />
-          <span class="chip-label">AI判错</span>
-          <span class="chip-count">{{ store.aiStateStats.wrong }}</span>
-        </span>
-        <span class="status-chip chip-pending">
-          <StatusIcon state="pending" :size="16" />
-          <span class="chip-label">待复核</span>
-          <span class="chip-count">{{ store.aiStateStats.pending }}</span>
-        </span>
-        <span class="status-chip chip-exception">
-          <StatusIcon state="exception" :size="16" />
-          <span class="chip-label">AI未判定</span>
-          <span class="chip-count">{{ store.aiStateStats.exception }}</span>
-        </span>
-        <span class="status-chip chip-blank">
-          <StatusIcon state="blank" :size="16" />
-          <span class="chip-label">未作答</span>
-          <span class="chip-count">{{ store.aiStateStats.blank }}</span>
-        </span>
-        <span class="status-chip chip-processing">
-          <StatusIcon state="processing" :size="16" />
-          <span class="chip-label">处理中</span>
-          <span class="chip-count">{{ store.aiStateStats.processing }}</span>
-        </span>
-      </div>
       <!-- 置信阈值全局提示：与左栏 slider 相同一变量（store.confidenceThreshold），
            提升"AI 正确免复核"判定的可见性；不改判定来源 -->
       <template v-if="store.currentPaperReviewable">
@@ -261,7 +229,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
-import StatusIcon from './StatusIcon.vue'
 import ConvertRouteDialog from './ConvertRouteDialog.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
@@ -737,35 +704,6 @@ const handleRetryTask = async () => {
   align-items: center;
   gap: 8px;
 }
-.status-chips {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-.status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: var(--wb-radius-md);
-  font-size: 12px;
-  font-weight: 500;
-  border: 1px solid;
-  white-space: nowrap;
-}
-.chip-label { color: var(--wb-text-secondary); }
-.chip-count { font-weight: 700; }
-.chip-correct { background: var(--wb-success-soft); border-color: var(--wb-success-soft); }
-.chip-correct .chip-count { color: var(--wb-success); }
-.chip-wrong { background: var(--wb-danger-soft); border-color: var(--wb-danger-soft); }
-.chip-wrong .chip-count { color: var(--wb-danger); }
-.chip-pending { background: var(--wb-warning-soft); border-color: var(--wb-warning-soft); }
-.chip-pending .chip-count { color: var(--wb-warning); }
-.chip-exception { background: var(--wb-accent-soft); border-color: var(--wb-accent-soft); }
-.chip-exception .chip-count { color: var(--wb-accent); }
-.chip-processing { background: var(--wb-processing-soft); border-color: var(--wb-processing-soft); }
-.chip-processing .chip-count { color: var(--wb-processing); }
 
 /* 置信阈值全局提示 */
 .threshold-badge {
@@ -923,8 +861,6 @@ const handleRetryTask = async () => {
 .top-bar-left :deep(.el-select:first-child) { width: 150px !important; }
 .top-bar-left :deep(.el-select:nth-child(2)) { width: 260px !important; margin-left: 0 !important; }
 .top-bar-right { gap: 6px; }
-.status-chips { gap: 4px; }
-.status-chip { padding: 3px 7px; border-radius: 5px; font-size: 11px; }
 .threshold-badge { padding: 4px 8px; border-radius: 5px; font-size: 11px; }
 .top-bar-right :deep(.el-button) { min-height: 30px; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
 .top-bar-right :deep(.el-button--success) { color: #fff; background: var(--wb-success); border-color: var(--wb-success); }
@@ -939,7 +875,7 @@ const handleRetryTask = async () => {
   font-size: 12px;
 }
 
-@media (max-width: 1200px) { .status-chips .status-chip:nth-child(n+4), .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
+@media (max-width: 1200px) { .threshold-badge { display: none; } .top-bar-right :deep(.el-button) { padding: 6px 8px; } }
 @media (max-width: 900px) { .top-bar { align-items: flex-start; height: auto; min-height: 58px; flex-direction: column; gap: 8px; padding: 10px 14px; } .top-bar-right { width: 100%; overflow-x: auto; padding-bottom: 2px; } }
 
 /* ── 试卷下拉里的「自动复核」角标 ── */
