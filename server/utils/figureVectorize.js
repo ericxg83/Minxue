@@ -58,13 +58,87 @@ export function otsuThreshold(hist, total) {
 }
 
 /**
- * 二值化：光照校正 + Otsu。
+ * 只保留「细长」连通域：长边 ≥ `minLong`，且 **平均厚度**（面积 / 长边）≤ `maxThickness`。
+ *
+ * 用途：淡线救援的**筛选器**。照片裁片经光照校正后纸面普遍偏灰，宽松阈值会把整片纸纹
+ * 一起纳进来（2026-09-26 实测 69ad87d3：boost40 救回 34.5 万像素 = 图面 56%，产物变成
+ * 一坨黑块）。而真正要救的**淡线**具有稳定特征：**又长又细**。
+ *
+ * ⚠️ 判据必须是「平均厚度」而不是「填充率 area/bboxArea」（2026-09-26 实测踩坑）：
+ * 一条**笔直**的 1px 长横线填充率恒等于 1.0，用填充率上限会把它误杀 —— 而它恰恰是
+ * 数轴横轴线、表格框线、虚线段的典型形态。改成 `area / longSide` 后：细线厚度 1~3、
+ * 成片纸纹/污渍厚度几十 ⇒ 干净可分。
+ *
+ * @param {{minLongRatio?:number, minLongPx?:number, maxThickness?:number}} [opts]
+ * @returns {number} 被剔除的连通域个数
+ */
+export function keepLongThinComponents(mask, w, h, opts = {}) {
+  const { minLongRatio = 0.25, minLongPx = 24, maxThickness = 8 } = opts
+  const n = w * h
+  const seen = new Uint8Array(n)
+  const stack = new Int32Array(n)
+  const minLong = Math.max(minLongPx, Math.round(minLongRatio * Math.min(w, h)))
+  let dropped = 0
+  for (let start = 0; start < n; start++) {
+    if (mask[start] !== INK || seen[start]) continue
+    let sp = 0
+    stack[sp++] = start
+    seen[start] = 1
+    const comp = []
+    let x0 = w, y0 = h, x1 = -1, y1 = -1
+    while (sp > 0) {
+      const p = stack[--sp]
+      comp.push(p)
+      const x = p % w, y = (p - x) / w
+      if (x < x0) x0 = x; if (x > x1) x1 = x
+      if (y < y0) y0 = y; if (y > y1) y1 = y
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue
+          const nx = x + dx
+          if (nx < 0 || nx >= w) continue
+          const q = ny * w + nx
+          if (mask[q] === INK && !seen[q]) { seen[q] = 1; stack[sp++] = q }
+        }
+      }
+    }
+    const bw = x1 - x0 + 1, bh = y1 - y0 + 1
+    const longSide = Math.max(bw, bh)
+    const thickness = comp.length / longSide
+    if (longSide < minLong || thickness > maxThickness) {
+      for (const p of comp) mask[p] = BG
+      dropped++
+    }
+  }
+  return dropped
+}
+
+/**
+ * 二值化：光照校正 + Otsu（+ 淡线救援，见 `faintBoost`）。
+ *
+ * ⚠️ **淡线救援（2026-09-26 ef27a135 数轴事故）**：Otsu 是**全局**阈值，它把直方图切在
+ * 「深色字/线」与「白纸」之间。若某条线（数轴的横轴线、虚线、浅铅笔线）的灰度落在
+ * 这个中间地带，它会被整条判成背景 ⇒ 描摹产物**整条线消失**，而 `verifyVectorTrace`
+ * 只比「产物 vs 掩码」，掩码本身丢了内容它看不见（防错闸对该失效模式是盲的）。
+ * 实测 ef27a135：Otsu=193 时最长横线段只有 11px（应有 ~400px），阈值抬到 223 才有 60px。
+ *
+ * 救援做法：在 `otsu + faintBoost` 的**更宽松阈值**上再取一次墨迹，先按面积去噪，
+ * 再**只保留细长连通域**（`keepLongThinComponents`），最后并入主掩码。
+ * 语义是「只把成线的淡墨认回来，成片的纸纹/污渍仍丢弃」。
+ *
+ * 另有两道保险：救援像素占比 > `maxRescueRatio` 时**整体放弃救援**（说明阈值抬过头，
+ * 拿到的多半是纸面），以及救援结果仍要过调用方的 `maxMismatch` 防错闸。
+ *
  * @param {Buffer} rawGray - 单通道灰度 raw
  * @param {number} w
  * @param {number} h
- * @returns {{mask:Uint8Array, threshold:number, inkRatio:number}}
+ * @param {{faintBoost?:number, faintMinArea?:number, maxRescueRatio?:number}} [opts]
+ * @returns {{mask:Uint8Array, threshold:number, inkRatio:number, rescued:number, rescueAborted?:boolean}}
  */
-export function binarize(rawGray, w, h) {
+export function binarize(rawGray, w, h, opts = {}) {
+  const { faintBoost = 40, faintMinArea = 40, maxRescueRatio = 0.12 } = opts
   const n = w * h
   const hist = new Int32Array(256)
   for (let i = 0; i < n; i++) hist[rawGray[i]]++
@@ -74,7 +148,27 @@ export function binarize(rawGray, w, h) {
   for (let i = 0; i < n; i++) {
     if (rawGray[i] <= t) { mask[i] = INK; ink++ }
   }
-  return { mask, threshold: t, inkRatio: ink / n }
+
+  let rescued = 0
+  let rescueAborted = false
+  if (faintBoost > 0 && faintMinArea > 0) {
+    const t2 = Math.min(250, t + faintBoost)
+    if (t2 > t) {
+      const weak = new Uint8Array(n)
+      let weakCount = 0
+      for (let i = 0; i < n; i++) if (rawGray[i] > t && rawGray[i] <= t2) { weak[i] = INK; weakCount++ }
+      removeSmallComponents(weak, w, h, faintMinArea)
+      keepLongThinComponents(weak, w, h)
+      let kept = 0
+      for (let i = 0; i < n; i++) if (weak[i] === INK) kept++
+      if (kept / n > maxRescueRatio) {
+        rescueAborted = true // 救回来的面积过大 ⇒ 阈值抬过头，整体放弃
+      } else {
+        for (let i = 0; i < n; i++) if (weak[i] === INK && mask[i] !== INK) { mask[i] = INK; ink++; rescued++ }
+      }
+    }
+  }
+  return { mask, threshold: t, inkRatio: ink / n, rescued, rescueAborted }
 }
 
 /**
@@ -293,6 +387,8 @@ export function loopsToPathData(loops) {
  * @param {number} [opts.maxMismatch=0.06] 防错闸：XOR/UNION 面积比上限
  *   （真实裁片实测 0.1%~0.3%，合成 1px 斜线最坏 ~0.06，取 0.06 留足余量）
  * @param {boolean} [opts.verify=true] 是否跑防错闸
+ * @param {number} [opts.faintBoost=40] 淡线救援的第二阈值增量（0 = 关闭救援）
+ * @param {number} [opts.faintMinArea=40] 淡线救援保留的最小连通面积（滤纸面纹理）
  * @returns {Promise<{ok:boolean, svg?:string, reason?:string, stats:Object}>}
  */
 export async function vectorizeFigure(input, opts = {}) {
@@ -325,7 +421,11 @@ export async function vectorizeFigure(input, opts = {}) {
   }
 
   // ② 二值化 + 去噪
-  const { mask, threshold, inkRatio } = binarize(corrected, w, h)
+  const { mask, threshold, inkRatio, rescued, rescueAborted } = binarize(corrected, w, h, {
+    faintBoost: opts.faintBoost ?? 40,
+    faintMinArea: opts.faintMinArea ?? 40,
+    maxRescueRatio: opts.maxRescueRatio ?? 0.12,
+  })
   const removed = removeSmallComponents(mask, w, h, minComponent)
 
   const inkPx = mask.reduce((a, v) => a + v, 0)
@@ -343,6 +443,7 @@ export async function vectorizeFigure(input, opts = {}) {
 
   const stats = {
     width: w, height: h, threshold, inkRatio: Number(inkRatio.toFixed(4)),
+    rescuedPx: rescued, rescueAborted: !!rescueAborted,
     componentsRemoved: removed, loops: loops.length,
     points: loops.reduce((a, l) => a + l.length, 0),
     svgBytes: Buffer.byteLength(svg, 'utf8'),

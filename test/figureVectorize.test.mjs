@@ -13,8 +13,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
 import {
-  otsuThreshold, binarize, removeSmallComponents, traceBoundaries,
-  simplifyLoop, loopsToPathData, vectorizeFigure, verifyVectorTrace,
+  otsuThreshold, binarize, removeSmallComponents, keepLongThinComponents,
+  traceBoundaries, simplifyLoop, loopsToPathData, vectorizeFigure, verifyVectorTrace,
 } from '../server/utils/figureVectorize.js'
 
 test('otsuThreshold：双峰直方图阈值落在两峰之间', () => {
@@ -133,4 +133,71 @@ test('verifyVectorTrace：同构 SVG 通过；空白 SVG 判不合格', async ()
 test('loopsToPathData：闭环以 Z 收尾，坐标保留 1 位小数', () => {
   const d = loopsToPathData([[[0, 0], [10.25, 0], [10.25, 5]]])
   assert.equal(d, 'M0 0L10.3 0L10.3 5Z')
+})
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 淡线救援（2026-09-26 ef27a135 数轴事故）
+ *
+ * 事故：数轴裁片里横轴线是淡灰细线，Otsu 全局阈值把它整条判成背景 ⇒ 描摹产物
+ * **整条数轴消失**；而 verifyVectorTrace 只比「产物 vs 掩码」，掩码自己丢了内容
+ * 它看不见 —— 防错闸对该失效模式是盲的（下面几条测试就是补这个盲区）。
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+test('【回归·淡线】binarize 必须救回「比 Otsu 切点浅一档的长细线」', () => {
+  const w = 220, h = 40
+  const img = Buffer.alloc(w * h, 250)
+  // 深色竖条（模拟刻度/字），只占 13% 且不形成长横段 —— 让 Otsu 切点落在淡线之下
+  for (let k = 0; k < 10; k++) for (let y = 0; y < h; y++) for (let dx = 0; dx < 3; dx++) img[y * w + 12 + k * 20 + dx] = 0
+  for (let x = 8; x < w - 8; x++) img[10 * w + x] = 150 // 淡横轴线（细、浅）
+
+  const t = otsuThreshold((() => { const hh = new Int32Array(256); for (const v of img) hh[v]++; return hh })(), w * h)
+  assert.ok(t < 150, `前置条件不成立：Otsu=${t} 应低于淡线灰度 150（否则本用例没测到救援）`)
+
+  const noRescue = binarize(img, w, h, { faintBoost: 0 })
+  const withRescue = binarize(img, w, h, { faintBoost: 200 })
+  const longestRun = (mask) => {
+    let best = 0
+    for (let y = 0; y < h; y++) {
+      let r = 0
+      for (let x = 0; x < w; x++) { if (mask[y * w + x]) { r++; if (r > best) best = r } else r = 0 }
+    }
+    return best
+  }
+  assert.ok(longestRun(noRescue.mask) < 80, `Otsu 本就不该抓到淡线，实测最长段=${longestRun(noRescue.mask)}`)
+  assert.ok(longestRun(withRescue.mask) >= 150, `救援后应恢复整条横线，实测最长段=${longestRun(withRescue.mask)}`)
+  assert.ok(withRescue.rescued > 0)
+  assert.ok(!withRescue.rescueAborted, '救援面积占比应远低于上限，不该触发整体放弃')
+})
+
+test('【回归·淡线】救援不得把成片纸纹当墨迹（keepLongThinComponents 按「平均厚度」筛）', () => {
+  const w = 200, h = 200
+  const m = new Uint8Array(w * h)
+  for (let x = 10; x < 190; x++) m[60 * w + x] = 1            // 1px 长细线 → 必须保留（填充率恒为 1）
+  for (let y = 120; y < 150; y++) for (let x = 40; x < 70; x++) m[y * w + x] = 1 // 30x30 实心块 → 必须剔除
+  const dropped = keepLongThinComponents(m, w, h)
+  assert.equal(dropped, 1)
+  assert.equal(m[60 * w + 100], 1, '长细线必须保留')
+  assert.equal(m[135 * w + 55], 0, '成片实心块必须剔除')
+})
+
+test('【回归·淡线】救援面积超上限时整体放弃（fail-closed，不给一坨黑块）', () => {
+  const w = 200, h = 200
+  const img = Buffer.alloc(w * h, 250)
+  for (let k = 0; k < 20; k++) for (let y = 0; y < h; y++) for (let dx = 0; dx < 2; dx++) img[y * w + 6 + k * 10 + dx] = 0 // 20% 深色竖条
+  for (let y = 4; y < h; y += 7) for (let x = 0; x < w; x++) img[y * w + x] = 150 // 30% 淡线（细长，会被救）
+  const r = binarize(img, w, h, { faintBoost: 200 })
+  assert.equal(r.rescued, 0, '超上限时必须放弃救援')
+  assert.equal(r.rescueAborted, true)
+})
+
+test('vectorizeFigure：淡线救援后产物仍过防错闸（mismatch 不因救援放大）', async () => {
+  const w = 240, h = 90
+  const img = Buffer.alloc(w * h, 250)
+  for (let k = 0; k < 10; k++) for (let y = 0; y < h; y++) for (let dx = 0; dx < 3; dx++) img[y * w + 14 + k * 22 + dx] = 0
+  for (let x = 6; x < w - 6; x++) img[20 * w + x] = 150
+  const png = await sharp(img, { raw: { width: w, height: h, channels: 1 } }).png().toBuffer()
+  const res = await vectorizeFigure(png, { faintBoost: 200 })
+  assert.equal(res.ok, true, res.reason)
+  assert.ok(res.stats.mismatch <= 0.10, `mismatch=${res.stats.mismatch}`)
+  assert.ok(res.stats.rescuedPx > 0, '应发生淡线救援')
 })
