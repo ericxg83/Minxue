@@ -1,78 +1,13 @@
 <template>
   <div class="review-workspace">
-    <div class="review-identity-bar">
-      <div class="review-identity">
-        <span class="review-kicker">教师工作台</span>
-        <strong>{{ store.reviewConfig.topTitle }}</strong>
-        <span class="review-mode-pill">{{ store.reviewConfig.modeLabel }}</span>
-      </div>
-    </div>
-    <ReviewTopBar />
+    <!-- [header 三合一] 深色 identity 条已整条删除；进度/欠账/归档态已并入 ReviewTopBar 单条 header。 -->
+    <!-- [P0-1 完成引导] 右栏完成态出口转发给顶栏：handleComplete 自带错题门禁，
+         goNextTask 维护试卷下拉选中态——业务留在原处，这里只做事件转发。 -->
+    <ReviewTopBar ref="reviewTopBarRef" />
 
 
-    <div v-if="store.currentTask && store.allQuestions.length > 0" class="review-context-bar">
-      <div class="review-context-main">
-        <span class="review-context-label">当前复核</span>
-        <strong>{{ store.currentTask.original_name || '当前试卷' }}</strong>
-        <span class="review-context-meta">{{ store.currentStudent?.name || '未选择学生' }}</span>
-      </div>
-      <div class="review-progress-summary">
-        <span>已确认 {{ store.reviewProgress.confirmed }} / {{ store.reviewProgress.total }}</span>
-        <el-progress :percentage="reviewProgressPercent" :stroke-width="6" :show-text="false" status="success" style="width: 120px" />
-        <span class="review-progress-percent">{{ reviewProgressPercent }}%</span>
-        <!-- 未确认 > 0 时给出明确入口：口径与 6 态同源后，未确认题 = 待复核/AI未判定/处理中，
-             点击直接跳到下一道（循环），老师不用再在列表里猜「还差的题在哪」 -->
-        <button
-          v-if="store.reviewProgress.unconfirmed > 0"
-          class="review-progress-todo"
-          type="button"
-          title="跳到下一道待确认的题（待复核 / AI未判定 / 处理中）"
-          @click="jumpToNextUnconfirmed"
-        >还差 {{ store.reviewProgress.unconfirmed }} 题 · 去确认</button>
-        <!-- 闸1 欠账常驻标识（2026-09-27）：缺元素被自动放行、尚未入错题本的题。
-             不拦复核（P2 分层口径不变），但必须让老师随时看得到欠的是哪几题、
-             缺的是什么元素——补全后保存即由后端「补全即补入」通道自动入册。 -->
-        <el-popover
-          v-if="store.gateSkippedQuestions.length > 0"
-          placement="bottom-end"
-          :width="380"
-          trigger="click"
-          popper-class="gate-skip-popover"
-        >
-          <template #reference>
-            <button class="review-progress-gate" type="button"
-              title="这些错题因缺图/缺选项等元素缺失未进错题本，补全后保存即自动入册">
-              ⚠ 缺元素未入册 {{ store.gateSkippedQuestions.length }}
-            </button>
-          </template>
-          <div class="gate-skip-pop">
-            <div class="gate-skip-tip">补全元素并保存后会自动加入错题本；也可在导航栏点「⚠」标签逐题处理。</div>
-            <div
-              v-for="{ q, idx } in store.gateSkippedQuestions"
-              :key="q.id"
-              class="gate-skip-item"
-              @click="jumpToGateSkip(idx)"
-            >
-              <div class="gate-skip-head">
-                <span class="gate-skip-no">第 {{ q._paperLabel || (idx + 1) }} 题</span>
-                <span class="gate-skip-codes">{{ gateIssueLabels(q).join('、') }}</span>
-              </div>
-              <div class="gate-skip-stem">{{ (q.content || q.parent_stem || '').slice(0, 46) || '（无题干文本）' }}</div>
-            </div>
-          </div>
-        </el-popover>
-      </div>
-      <div class="review-context-actions">
-        <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain">
-          <el-icon><Check /></el-icon>
-          <span style="margin-left: 4px">已发布到答案库</span>
-        </el-tag>
-        <el-tag v-else-if="archiveState === 'draft'" type="warning" size="small" effect="plain">
-          <el-icon><Document /></el-icon>
-          <span style="margin-left: 4px">草稿（完成复核后自动发布）</span>
-        </el-tag>
-      </div>
-    </div>
+    <!-- [header 三合一] 原上下文条（当前复核标题/进度/还差N题/缺元素/归档态）已整条删除：
+         标题与顶栏下拉重复→去重；进度/欠账/归档态→已并入 ReviewTopBar 单条 header。 -->
     <!-- 重练答卷覆盖度提示（缺页 / 缺题）。
          答卷图上找不到记录的题会落成「AI 未判定」（exception，老师必须逐题处理），
          但界面上过去没有任何线索说明"为什么这几题没判定"——左栏页标已在
@@ -135,23 +70,54 @@
     <div v-else class="three-panel">
       <QuestionNavPanel />
       <PaperViewerPanel />
-      <QuestionDetailPanel />
+      <QuestionDetailPanel
+        @complete-review="reviewTopBarRef?.handleComplete?.()"
+        @next-task="reviewTopBarRef?.goNextTask?.()"
+        @prev-task="reviewTopBarRef?.goPrevTask?.()"
+      />
     </div>
+
+    <!-- [④ 撤销 snackbar] 判定后底部持久提示：点「撤销」或按 ⌘Z/Ctrl+Z 回退上一笔（仅本页内存） -->
+    <div v-if="store.undoHint" class="undo-snackbar" role="status" aria-live="polite">
+      <span class="undo-snackbar__text">{{ store.undoHint.text }}</span>
+      <button type="button" class="undo-snackbar__btn" :disabled="!store.canUndo" @click="handleUndoHint">撤销</button>
+      <button type="button" class="undo-snackbar__close" aria-label="关闭提示" @click="store.undoHint = null">×</button>
+    </div>
+
+    <!-- [⑤ ⌘K 命令面板] 完成复核带错题门禁，逻辑在 ReviewTopBar，这里 emit 转发 -->
+    <ReviewCommandPalette @run-complete="reviewTopBarRef?.handleComplete?.()" />
+
+    <!-- [B2-3 快捷键速查] ? 键与顶栏「更多 → 快捷键速查」打开同一浮层 -->
+    <el-dialog v-model="store.shortcutsVisible" title="快捷键速查" width="440px" append-to-body>
+      <table class="shortcut-table">
+        <tbody>
+          <tr><td><kbd>Space</kbd></td><td>标对（判定后自动到下一未确认题）</td></tr>
+          <tr><td><kbd>X</kbd></td><td>标错（判定后自动到下一未确认题）</td></tr>
+          <tr><td><kbd>Shift</kbd>+<kbd>X</kbd></td><td>删除本题（需二次确认，不可在本页找回）</td></tr>
+          <tr><td><kbd>E</kbd></td><td>编辑本题（编辑态内：<kbd>S</kbd> 保存，<kbd>Esc</kbd> 取消）</td></tr>
+          <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>上一题 / 下一题（仅导航，不判定）</td></tr>
+          <tr><td><kbd>Enter</kbd></td><td>完成复核（全卷确认后可用）</td></tr>
+          <tr><td><kbd>T</kbd> / <kbd>Shift</kbd>+<kbd>T</kbd></td><td>下一份 / 上一份待复核试卷</td></tr>
+          <tr><td><kbd>?</kbd></td><td>打开本速查</td></tr>
+        </tbody>
+      </table>
+      <div class="shortcut-tip">判定后自动跳下一题可在顶栏「⋯ 更多」中关闭。</div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Check, CircleCheck, Clock, Document, WarningFilled } from '@element-plus/icons-vue'
+import { CircleCheck, Clock, WarningFilled } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getResource } from '../../../services/apiService'
-import { checkQuestionCompleteness } from '../../../utils/questionCompleteness.js'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
 import PaperViewerPanel from './PaperViewerPanel.vue'
 import QuestionDetailPanel from './QuestionDetailPanel.vue'
 import RetryPaperPreview from './RetryPaperPreview.vue'
+import ReviewCommandPalette from './ReviewCommandPalette.vue'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 
 const props = defineProps({
@@ -162,43 +128,8 @@ const props = defineProps({
 const store = useReviewStore()
 const route = useRoute()
 const router = useRouter()
-const reviewProgressPercent = computed(() => {
-  const total = Number(store.reviewProgress.total) || 0
-  const count = Number(store.reviewProgress.confirmed) || 0
-  return total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0
-})
-
-// 「还差 N 题 · 去确认」：跳到当前题之后的下一道未确认题（循环兜回头部）。
-// 未确认口径与 questionConfirmationMap（6 态同源）一致，跳转目标一定能在
-// 左侧列表里看到对应状态（待复核 / AI未判定 / 处理中）。
-const jumpToNextUnconfirmed = () => {
-  const unconfirmedIdxs = []
-  store.allQuestions.forEach((q, i) => {
-    if (store.questionConfirmationMap[q.id] === false) unconfirmedIdxs.push(i)
-  })
-  if (unconfirmedIdxs.length === 0) return
-  const cur = store.currentReviewIndex
-  const next = unconfirmedIdxs.find(i => i > cur) ?? unconfirmedIdxs[0]
-  store.jumpToQuestion(next)
-}
-
-// ── 闸1 欠账常驻标识（2026-09-27）：缺元素未入册的题 ──
-const GATE_ISSUE_LABELS = {
-  [store.COMPLETENESS_CODES.missing_figure]: '缺配图',
-  [store.COMPLETENESS_CODES.missing_options]: '缺选项',
-  [store.COMPLETENESS_CODES.missing_answer]: '缺答案',
-  [store.COMPLETENESS_CODES.invalid_type]: '题型未定',
-  [store.COMPLETENESS_CODES.stem_only]: '疑似题干行',
-}
-const gateIssueLabels = (q) => {
-  const { codes } = checkQuestionCompleteness(q)
-  return codes.map(c => GATE_ISSUE_LABELS[c] || c)
-}
-// 点清单项 → 跳到该题并直接打开编辑面板（补图入口）
-const jumpToGateSkip = (idx) => {
-  const q = store.allQuestions[idx]
-  if (q) store.focusQuestionForEdit(q.id)
-}
+// [P0-1 完成引导] 右栏完成态按钮经由这里转发到顶栏的 handleComplete / goNextTask
+const reviewTopBarRef = ref(null)
 const goToTodo = () => router.push('/todo')
 const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
 const goToStudents = () => router.push('/students')
@@ -340,7 +271,28 @@ onMounted(async () => {
   }
 })
 
+// [④ 撤销 snackbar] 撤销动作 + 全局 ⌘Z / Ctrl+Z（输入焦点让位原生文本撤销）
+const handleUndoHint = () => { store.undoLastReview() }
+const isEditableTarget = (el) =>
+  !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+const onUndoKey = (e) => {
+  // [⑤ ⌘K] 命令面板开关（输入框内也允许，⌘K 非原生文本操作）
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault()
+    store.commandPaletteVisible = !store.commandPaletteVisible
+    return
+  }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    if (isEditableTarget(e.target)) return
+    if (!store.canUndo) return
+    e.preventDefault()
+    store.undoLastReview()
+  }
+}
+onMounted(() => window.addEventListener('keydown', onUndoKey))
+
 onUnmounted(() => {
+  window.removeEventListener('keydown', onUndoKey)
   // 退出时重置场景模式，避免污染后续入口
   store.resetReviewMode()
 })
@@ -453,72 +405,9 @@ onUnmounted(() => {
 .stat-value--danger { color: var(--wb-danger); }
 
 
-.review-identity-bar { display: flex; align-items: center; justify-content: space-between; min-height: 40px; padding: 0 20px; background: #172033; color: #fff; }
-.review-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.review-kicker { color: #AAB4C5; font-size: 11px; }
-.review-identity strong { font-size: 14px; font-weight: 650; }
-.review-mode-pill { padding: 3px 8px; border: 1px solid rgba(255,255,255,.2); border-radius: 999px; color: #DCE3F1; font-size: 11px; }
-.review-context-bar { display: flex; align-items: center; justify-content: space-between; min-height: 54px; padding: 0 20px; background: var(--wb-bg-card); border-bottom: 1px solid var(--wb-border); }
-.review-context-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.review-context-label { color: var(--wb-text-tertiary); font-size: 11px; }
-.review-context-main strong { overflow: hidden; color: var(--wb-text); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.review-context-meta { color: var(--wb-text-secondary); font-size: 12px; }
-.review-progress-summary { display: flex; align-items: center; gap: 10px; color: var(--wb-text-secondary); font-size: 12px; }
-.review-progress-percent { color: var(--wb-text); font-weight: 650; font-variant-numeric: tabular-nums; }
-.review-progress-todo {
-  padding: 2px 10px;
-  border: 1px solid var(--wb-warning-soft);
-  border-radius: 999px;
-  background: var(--wb-warning-soft);
-  color: var(--wb-warning);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: filter 0.15s;
-}
-.review-progress-todo:hover { filter: brightness(0.96); }
-/* 闸1 欠账常驻标识（2026-09-27）： danger 配色区别于「还差 N 题」的 warning 语义 */
-.review-progress-gate {
-  padding: 2px 10px;
-  border: 1px solid var(--wb-danger-soft, #FEE2E2);
-  border-radius: 999px;
-  background: var(--wb-danger-soft, #FEE2E2);
-  color: var(--wb-danger, #DC2626);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: filter 0.15s;
-}
-.review-progress-gate:hover { filter: brightness(0.96); }
-.gate-skip-pop .gate-skip-tip {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  padding-bottom: 6px;
-}
-.gate-skip-item {
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.gate-skip-item:hover { background: var(--wb-bg-hover, #F3F4F6); }
-.gate-skip-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-}
-.gate-skip-no { font-weight: 700; color: var(--wb-text); }
-.gate-skip-codes { color: var(--wb-danger, #DC2626); font-weight: 600; }
-.gate-skip-stem {
-  font-size: 12px;
-  color: var(--wb-text-tertiary);
-  margin-top: 2px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/* [header 三合一] identity 条与上下文条已删除，其专属样式（review-identity / review-context / review-progress / gate-skip 系列）同步移除；
+   进度/欠账/归档样式已随功能迁至 ReviewTopBar。 */
+
 /* ── 重练答卷覆盖度提示（缺页 / 缺题）──
    注意：正文用 --wb-text 而非 --wb-warning —— #D97706 压在 #FEF3C7 上对比度不足，
    12px 小字会糊。警示语义靠左侧色条 + 数字着色承载。 */
@@ -547,12 +436,58 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .review-coverage-notice .coverage-hint { color: var(--wb-text-secondary); }
-.review-progress-alert { padding-left: 10px; border-left: 1px solid var(--wb-border); color: var(--wb-warning); font-size: 12px; }
-.review-context-actions { display: flex; align-items: center; gap: 8px; margin-left: 12px; flex-shrink: 0; }
-.review-context-actions :deep(.el-button) { display: inline-flex; align-items: center; gap: 4px; }
 .three-panel { min-height: 0; }
-@media (max-width: 1100px) { .review-identity-bar { padding: 0 14px; } .review-context-bar { padding: 0 14px; } .review-coverage-notice { padding: 7px 14px; } }
-@media (max-width: 720px) { .review-context-bar { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 14px; } .review-progress-summary { width: 100%; } }
+@media (max-width: 1100px) { .review-coverage-notice { padding: 7px 14px; } }
+
+/* [B2-3 快捷键速查] 浮层内键位表（append-to-body 渲染，走 :deep 无必要——
+   dialog 内容仍在本组件作用域内编译） */
+.shortcut-table { width: 100%; border-collapse: collapse; }
+.shortcut-table td { padding: 7px 10px; border-bottom: 1px solid var(--wb-border); font-size: 13px; color: var(--wb-text-primary); }
+.shortcut-table td:first-child { width: 130px; white-space: nowrap; }
+.shortcut-table kbd {
+  display: inline-block; min-width: 20px; padding: 1px 6px;
+  border: 1px solid var(--wb-border); border-radius: 4px;
+  background: var(--wb-bg-secondary, #f5f7fa);
+  font-family: inherit; font-size: 12px; text-align: center;
+}
+.shortcut-tip { margin-top: 10px; font-size: 12px; color: var(--wb-text-tertiary); }
+
+/* [④ 撤销 snackbar] 底部居中持久提示（复用现有色与 token，不新增视觉变量） */
+.undo-snackbar {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 16px;
+  background: #172033;
+  color: #fff;
+  border-radius: var(--wb-radius-md);
+  box-shadow: var(--wb-elev-modal);
+  font-size: 13px;
+}
+.undo-snackbar__text { white-space: nowrap; }
+.undo-snackbar__btn {
+  padding: 4px 12px;
+  border: 1px solid rgba(255, 255, 255, .28);
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+.undo-snackbar__btn:hover:not(:disabled) { background: rgba(255, 255, 255, .12); }
+.undo-snackbar__btn:disabled { opacity: .45; cursor: not-allowed; }
+.undo-snackbar__close {
+  width: 26px; height: 26px;
+  border: 0; border-radius: var(--wb-radius-sm);
+  background: transparent; color: rgba(255, 255, 255, .7);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.undo-snackbar__close:hover { background: rgba(255, 255, 255, .12); color: #fff; }
 </style>
 
 

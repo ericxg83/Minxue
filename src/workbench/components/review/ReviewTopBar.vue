@@ -58,9 +58,11 @@
       </el-select>
 
       <!-- 闸1 欠账全局入口（2026-09-27）：跨学生的「缺元素未入册」待补清单。
-           P2 分层不拦卷，但欠账必须常驻可见——补全元素保存即自动入册。 -->
+           P2 分层不拦卷，但欠账必须常驻可见——补全元素保存即自动入册。
+           [2026-09-28 待补入上顶栏] 常驻可点（零欠账=确认无欠账的窗口，不再收进「更多」置灰），
+           有欠账时 warning 高亮 + 计数，驱动老师逐题处理。 -->
       <el-tooltip
-        :content="store.pendingGateTotal > 0 ? `${store.pendingGateTotal} 道错题因缺元素未入错题本，点击逐题处理` : '没有待补入错题本的题（缺元素的错题补全保存后会自动入册）'"
+        :content="pendingGateTip"
         placement="bottom"
       >
         <el-button
@@ -71,9 +73,41 @@
           :loading="pendingGateLoading"
           @click="openPendingGateDialog"
         >
-          ⚠ 待补入{{ store.pendingGateTotal > 0 ? ` ${store.pendingGateTotal}` : '' }}
+          {{ store.pendingGateTotal > 0 ? `⚠ 待补入 ${store.pendingGateTotal}` : '待补入 0' }}
         </el-button>
       </el-tooltip>
+    </div>
+
+    <!-- [header 三合一] 中部：进度 + 本卷缺元素欠账 + 归档态（原上下文条，去重后并入本行） -->
+    <div v-if="store.currentTask && store.allQuestions.length > 0 && store.currentPaperReviewable" class="top-bar-center">
+      <span class="tb-progress">
+        <span class="tb-progress__text">已确认 {{ store.reviewProgress.confirmed }}/{{ store.reviewProgress.total }}</span>
+        <el-progress :percentage="reviewProgressPercent" :stroke-width="6" :show-text="false" status="success" class="tb-progress__bar" />
+        <span class="tb-progress__pct">{{ reviewProgressPercent }}%</span>
+      </span>
+      <button v-if="store.reviewProgress.unconfirmed > 0" class="tb-todo" type="button"
+        title="切到左栏「待处理」并跳到第一道未确认题" @click="store.jumpToFirstUnconfirmed()">还差 {{ store.reviewProgress.unconfirmed }} 题</button>
+      <el-popover v-if="store.gateSkippedQuestions.length > 0" placement="bottom" :width="380" trigger="click" popper-class="gate-skip-popover">
+        <template #reference>
+          <button class="tb-gate" type="button" title="这些错题因缺图/缺选项等未入册，补全后保存即自动入册">⚠ 缺元素 {{ store.gateSkippedQuestions.length }}</button>
+        </template>
+        <div class="gate-skip-pop">
+          <div class="gate-skip-tip">补全元素并保存后会自动加入错题本；也可在左栏点「⚠」标签逐题处理。</div>
+          <div v-for="{ q, idx } in store.gateSkippedQuestions" :key="q.id" class="gate-skip-item" @click="jumpToGateSkip(idx)">
+            <div class="gate-skip-head">
+              <span class="gate-skip-no">第 {{ q._paperLabel || (idx + 1) }} 题</span>
+              <span class="gate-skip-codes">{{ gateIssueLabels(q).join('、') }}</span>
+            </div>
+            <div class="gate-skip-stem">{{ (q.content || q.parent_stem || '').slice(0, 46) || '（无题干文本）' }}</div>
+          </div>
+        </div>
+      </el-popover>
+      <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain" class="tb-archive">
+        <el-icon><Check /></el-icon><span style="margin-left:4px">已发布</span>
+      </el-tag>
+      <el-tag v-else-if="archiveState === 'draft'" type="warning" size="small" effect="plain" class="tb-archive">
+        <el-icon><Document /></el-icon><span style="margin-left:4px">草稿</span>
+      </el-tag>
     </div>
 
     <div class="top-bar-right">
@@ -81,10 +115,11 @@
       <el-tag v-if="!store.currentPaperReviewable" type="info" effect="plain" class="blocked-tag">
         该卷{{ blockedPaperHint }}，暂无可复核内容
       </el-tag>
-      <!-- [2026-09-27 视觉降噪] 低频动作（撤销 / 改批改方式 / 重新处理 / 留底）收进「更多」，
-           顶栏只留三个按钮：更多 / 完成复核 / 下一份 —— 主按钮唯一（下一份），
-           终态动作保留实体（完成复核）。原「AI置信 ≥ N% 免复核」chip 删除：
-           阈值语义与左栏 slider 完全同源，常驻 chip 只是重复小字。 -->
+      <!-- [2026-09-27 视觉降噪] 低频动作（撤销 / 改批改方式 / 重新处理 / 留底）收进「更多」。
+           [2026-09-28 菜单瘦身] 待补入清单已上顶栏常驻，「更多」只剩三类：会话开关 / 沉淀归档 / 低频改卷动作。
+           [P0-2 主按钮矩阵 2026-09-27] 页面唯一 primary 随场景切换：
+           批改进行中 → primary 是右栏判定区，「完成复核」降为 plain 次要（带 n/m）、「下一份」降为 tertiary；
+           全卷已确认 → 「完成复核」升级为唯一 primary（success 实心），「下一份」升为 plain secondary。 -->
       <template v-if="store.currentPaperReviewable">
         <el-dropdown trigger="click" @command="handleMoreCommand">
           <el-button size="default" :disabled="moreBusy">
@@ -92,19 +127,38 @@
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
-              <el-dropdown-item command="undo" :disabled="!store.canUndo">撤销上一笔</el-dropdown-item>
-              <el-dropdown-item v-if="canConvertRoute" command="convert">改批改方式</el-dropdown-item>
-              <el-dropdown-item command="retry" :disabled="!store.currentTask || retryLoading">重新处理</el-dropdown-item>
+              <!-- [P0-1 判定即过] 会话级开关（默认开）：判定落库后自动跳下一未确认题，出问题可即时关闭退回手动模式 -->
+              <el-dropdown-item command="toggle-auto-advance">
+                {{ store.autoAdvanceEnabled ? '✓ ' : '' }}判定后自动跳下一题
+              </el-dropdown-item>
+              <!-- [B2-3 快捷键速查] 与 ? 键打开同一浮层 -->
+              <el-dropdown-item command="shortcuts" divided>快捷键速查（?）</el-dropdown-item>
               <el-dropdown-item command="archive" divided :disabled="!canArchive || archiveLoading">留底为答案库</el-dropdown-item>
+              <!-- [P0-4 撤销诚实化] 文案必须如实：只回退本页显示，不反向写库。
+                   换卷时撤销栈已由 store.selectTask 清空，不存在跨卷误回退。 -->
+              <el-dropdown-item command="undo" :disabled="!store.canUndo">回退上次判定（仅本页显示）</el-dropdown-item>
+              <el-dropdown-item v-if="canConvertRoute" command="convert" divided>改批改方式</el-dropdown-item>
+              <el-dropdown-item command="retry" :disabled="!store.currentTask || retryLoading">重新处理</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
-        <el-button size="default" type="success"
-          :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
-          @click="handleComplete">
-          ✓ {{ store.reviewConfig.completeLabel }}
-        </el-button>
-        <el-button size="default" type="primary" :disabled="!canNextTask" @click="goNextTask">
+        <!-- [B2-5] disabled 时解释差哪几题，老师不用去左栏数 -->
+        <el-tooltip :content="completeDisabledReason" placement="bottom" :disabled="!completeDisabledReason">
+          <span style="display: inline-flex">
+            <el-button size="default"
+              :type="allConfirmed ? 'success' : 'default'"
+              :plain="!allConfirmed"
+              :disabled="store.reviewProgress.confirmed !== store.reviewProgress.total || store.reviewProgress.total === 0"
+              @click="handleComplete">
+              ✓ {{ completeButtonLabel }}
+            </el-button>
+          </span>
+        </el-tooltip>
+        <el-button size="default"
+          :type="allConfirmed ? 'primary' : 'default'"
+          plain
+          :disabled="!canNextTask"
+          @click="goNextTask">
           ▶ 下一份
         </el-button>
       </template>
@@ -208,12 +262,13 @@
 import { ref, computed, watch, inject, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Check, Document } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
 import ConvertRouteDialog from './ConvertRouteDialog.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
+import { checkQuestionCompleteness } from '../../../utils/questionCompleteness.js'
 
 const store = useReviewStore()
 const route = useRoute()
@@ -266,6 +321,28 @@ const handleRouteConverted = async () => {
 //   draft → 首次复核（resource 还是 draft），点"完成复核"会触发留底确认
 //   published → 已留底，直接提交
 const archiveState = inject('archiveState', ref('hidden'))
+
+// [header 三合一] 进度 + 本卷缺元素欠账（原 ReviewWorkspace 上下文条，并入单条 header）
+const reviewProgressPercent = computed(() => {
+  const total = Number(store.reviewProgress.total) || 0
+  const count = Number(store.reviewProgress.confirmed) || 0
+  return total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0
+})
+const GATE_ISSUE_LABELS = {
+  [store.COMPLETENESS_CODES.missing_figure]: '缺配图',
+  [store.COMPLETENESS_CODES.missing_options]: '缺选项',
+  [store.COMPLETENESS_CODES.missing_answer]: '缺答案',
+  [store.COMPLETENESS_CODES.invalid_type]: '题型未定',
+  [store.COMPLETENESS_CODES.stem_only]: '疑似题干行',
+}
+const gateIssueLabels = (q) => {
+  const { codes } = checkQuestionCompleteness(q)
+  return codes.map(c => GATE_ISSUE_LABELS[c] || c)
+}
+const jumpToGateSkip = (idx) => {
+  const q = store.allQuestions[idx]
+  if (q) store.focusQuestionForEdit(q.id)
+}
 
 const selectedStudentId = ref('')
 const selectedTaskId = ref('')
@@ -346,12 +423,55 @@ const canNextTask = computed(() => {
 
 // 「更多」下拉：命令分发到原有 handler，动作本身零改动
 const moreBusy = computed(() => retryLoading.value || archiveLoading.value)
+
+// [P0-2 主按钮矩阵 2026-09-27] 全卷已确认 = 派生态（口径与 questionConfirmationMap 同源），
+// 驱动顶栏「完成复核 / 下一份」的主次切换；右栏完成态用的是同一口径（QuestionDetailPanel.allConfirmed）。
+const allConfirmed = computed(() =>
+  store.reviewProgress.total > 0 &&
+  store.reviewProgress.confirmed === store.reviewProgress.total
+)
+const completeButtonLabel = computed(() => {
+  const label = store.reviewConfig.completeLabel
+  return allConfirmed.value
+    ? `${label} · 就绪`
+    : `${label} (${store.reviewProgress.confirmed}/${store.reviewProgress.total})`
+})
+
+// [B2-5] 完成复核 disabled 的原因：还差几题、差的是前几道（最多列 3 道，其余用 …）
+const completeDisabledReason = computed(() => {
+  const { confirmed, total, unconfirmed } = store.reviewProgress
+  if (total === 0 || confirmed === total) return ''
+  const missing = []
+  store.allQuestions.forEach((q, i) => {
+    if (missing.length < 3 && store.questionConfirmationMap[q.id] === false) {
+      missing.push(i + 1)
+    }
+  })
+  return `还差 ${unconfirmed} 题（第 ${missing.join('、')}${unconfirmed > missing.length ? '…' : ''} 题），逐题确认后即可完成`
+})
+
 const handleMoreCommand = (cmd) => {
   if (cmd === 'undo') handleUndoLast()
+  else if (cmd === 'toggle-auto-advance') {
+    // [P0-1 判定即过] 会话级开关（默认开）：判定落库后自动跳下一未确认题，出问题可即时关闭退回手动模式
+    store.autoAdvanceEnabled = !store.autoAdvanceEnabled
+    ElMessage.info(store.autoAdvanceEnabled
+      ? '已开启：判定后自动跳到下一道待确认题'
+      : '已关闭：判定后停留当前题，用「下一题」或 → 手动前进')
+  }
   else if (cmd === 'convert') openConvertRoute()
   else if (cmd === 'retry') handleRetryTask()
   else if (cmd === 'archive') handleArchive()
+  // [B2-3] 快捷键速查浮层（与 ? 键同源）
+  else if (cmd === 'shortcuts') store.shortcutsVisible = true
 }
+
+// [2026-09-28 待补入上顶栏] 常驻按钮 tooltip：有欠账报数量，零欠账说明是确认窗口
+const pendingGateTip = computed(() =>
+  store.pendingGateTotal > 0
+    ? `${store.pendingGateTotal} 道错题因缺元素/低置信未入错题本，点击逐题处理`
+    : '当前无待补入错题（点击查看跨学生清单，需先选择学生）'
+)
 
 // 重练卷不可复核时顶栏的提示文案（与 ReviewWorkspace 的空态说明保持一致）
 const blockedPaperHint = computed(() =>
@@ -391,6 +511,17 @@ const goNextTask = async () => {
   }
 }
 
+// [B2-1] 上一份（Shift+T / 完成态按钮的对称导航）：与 goNextTask 同口径反向
+const goPrevTask = async () => {
+  const prev = store.prevTask()
+  if (prev) {
+    selectedTaskId.value = prev.id
+    await store.selectTask(prev)
+  } else {
+    ElMessage.info('这已经是第一份待复核试卷')
+  }
+}
+
 // 完成批改
 const handleComplete = async () => {
   // 门禁 → 完成复核 → 自动跳下一份
@@ -420,6 +551,10 @@ const doComplete = async () => {
     ElMessage.error(detail ? `保存失败：${detail}` : '保存失败，请重试')
   }
 }
+
+// [P0-1 完成引导 2026-09-27] 右栏完成态按钮经 ReviewWorkspace 转发到这里：
+// 复用同一 handleComplete（含错题门禁）与 goNextTask（维护下拉选中态），不复制业务逻辑。
+defineExpose({ handleComplete, goNextTask, goPrevTask })
 
 // 错题清单弹窗中「加入错题本」
 const handleAddToBook = async (item) => {
@@ -638,11 +773,12 @@ const handleArchive = async () => {
   }
 }
 
-// 撤销最近一次人工判定（仅回退前端状态，不反向写库）
+// 回退最近一次人工判定（仅回退前端内存状态，不反向写库）
+// [P0-4 撤销诚实化] toast 明示「数据库记录未变」，避免老师误以为错题本等已落库事实被回退。
 const handleUndoLast = () => {
   const prev = store.undoLastReview()
   if (prev) {
-    ElMessage({ type: 'info', message: '已撤销上一笔判定（当前页面状态已回退，不影响已保存记录）', duration: 2200 })
+    ElMessage({ type: 'info', message: '已回退显示；该题在数据库中的记录未变，重新判定会覆盖', duration: 2600 })
   }
 }
 
@@ -832,6 +968,30 @@ const handleRetryTask = async () => {
 .top-bar-right :deep(.el-button--success) { color: #fff; background: var(--wb-success); border-color: var(--wb-success); }
 .top-bar-right :deep(.el-button--primary) { color: #fff; background: var(--wb-primary); border-color: var(--wb-primary); }
 .top-bar-right :deep(.el-button--warning) { color: var(--wb-warning); background: var(--wb-warning-soft); border-color: var(--wb-warning-soft); }
+/* ── [header 三合一] 中部进度/欠账/归档（复用现有 token，不新增视觉变量） ── */
+.top-bar-center { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tb-progress { display: flex; align-items: center; gap: 8px; color: var(--wb-text-secondary); font-size: 12px; }
+.tb-progress__bar { width: 120px; }
+.tb-progress__pct { color: var(--wb-text); font-weight: 650; font-variant-numeric: tabular-nums; }
+.tb-todo {
+  padding: 2px 10px; border: 1px solid var(--wb-warning-soft); border-radius: 999px;
+  background: var(--wb-warning-soft); color: var(--wb-warning); font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.tb-gate {
+  padding: 2px 10px; border: 1px solid var(--wb-danger-soft, #FEE2E2); border-radius: 999px;
+  background: var(--wb-danger-soft, #FEE2E2); color: var(--wb-danger, #DC2626); font-size: 12px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.tb-archive { display: inline-flex; align-items: center; }
+.gate-skip-pop .gate-skip-tip { font-size: 12px; color: var(--wb-text-tertiary); padding-bottom: 6px; }
+.gate-skip-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.gate-skip-item:hover { background: var(--wb-bg-hover, #F3F4F6); }
+.gate-skip-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.gate-skip-no { font-weight: 700; color: var(--wb-text); }
+.gate-skip-codes { color: var(--wb-danger, #DC2626); font-weight: 600; }
+.gate-skip-stem { font-size: 12px; color: var(--wb-text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1280px) { .tb-progress__bar { display: none; } }
 /* ── 重练卷不可复核时的顶栏提示 ──
    替代原复核动作按钮：这批卷没有学生答卷，任何「完成批改 / 留底」都没有可信数据可写 */
 .blocked-tag {

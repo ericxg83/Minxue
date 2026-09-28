@@ -316,26 +316,37 @@
             :closable="false"
             class="ops-geom-hint"
           />
-          <div class="ops-buttons-primary">
+          <!-- [P0-1 完成引导 2026-09-27] 全卷已确认时判定区切换为完成态：
+               「过」的尽头直接给出收尾出口，复用顶栏 handleComplete 的错题门禁流程。
+               改判仍可用 ← 回看 + Space/X 重判（store 的重判路径不经过这里）。 -->
+          <div v-if="allConfirmed" class="ops-buttons-primary ops-complete-state">
+            <span class="ops-complete-text">本卷 {{ store.reviewProgress.total }} 题已全部确认</span>
+            <el-button size="default" type="success" @click="emit('complete-review')">
+              {{ store.reviewConfig.completeLabel }} <span class="ops-el-kbd">Enter</span>
+            </el-button>
+            <el-button size="default" @click="emit('next-task')">下一份</el-button>
+          </div>
+          <div v-else class="ops-buttons-primary">
             <button class="ops-btn ops-btn-correct"
               :class="{ 'ops-btn-active': q.review_status === 'correct', 'animate': animatingBtn === 'correct' }"
-              @click="handleReview('correct')">
+              @click="judgeClick('correct', $event)">
               <span class="ops-btn-icon">✓</span>
               <span>{{ store.reviewConfig.buttons.correct }}</span>
               <span class="ops-btn-kbd">Space</span>
             </button>
             <button class="ops-btn ops-btn-wrong"
               :class="{ 'ops-btn-active': q.review_status === 'wrong', 'animate': animatingBtn === 'wrong' }"
-              @click="handleReview('wrong')">
+              @click="judgeClick('wrong', $event)">
               <span class="ops-btn-icon">✗</span>
               <span>{{ store.reviewConfig.buttons.wrong }}</span>
               <span class="ops-btn-kbd">X</span>
             </button>
             <button v-if="store.reviewConfig.showExclude" class="ops-btn ops-btn-exclude"
               :class="{ 'ops-btn-active': q.review_status === 'exclude', 'animate': animatingBtn === 'exclude' }"
-              @click="handleReview('exclude')">
+              @click="judgeClick('exclude', $event)">
               <span class="ops-btn-icon">✕</span>
               <span>删除</span>
+              <span class="ops-btn-kbd">Shift+X</span>
             </button>
           </div>
           <div class="ops-buttons-secondary">
@@ -343,11 +354,11 @@
               <el-icon><ArrowLeft /></el-icon> 上一题 <span class="ops-el-kbd">←</span>
             </el-button>
             <el-button size="default" @click="handleEnterEdit">
-              <el-icon><EditPen /></el-icon> 编辑
+              <el-icon><EditPen /></el-icon> 编辑 <span class="ops-el-kbd">E</span>
             </el-button>
-            <!-- 唯一主按钮（2026-09-27 交互重构）：连续批改的主线动作只有「下一题」，
-                 编辑/AI重解析/上一题全部退为次级样式，眼睛只追一个高亮目标 -->
-            <el-button size="default" type="primary" @click="nextQ" :disabled="store.currentReviewIndex >= store.allQuestions.length - 1">
+            <!-- [P0-2 主按钮矩阵] 批改进行中的 primary 是左侧判定按钮组：
+                 「下一题」退为默认样式（翻题是导航不是决策），消除一页三个 primary 抢视线 -->
+            <el-button size="default" @click="nextQ" :disabled="store.currentReviewIndex >= store.allQuestions.length - 1">
               下一题 <span class="ops-el-kbd">→</span> <el-icon><ArrowRight /></el-icon>
             </el-button>
           </div>
@@ -486,7 +497,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted, h } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { updateQuestion, rejudgeQuestion, recomputeQuestionAnswer, retryGeometry, clearStudentCaches, uploadImage, getQuestionAssets } from '../../../services/apiService'
 import { recognizeAnswer, recognizeQuestion } from '../../../api/answerOCR'
@@ -499,7 +510,7 @@ import { normalizeOptions } from '../../../utils/optionText'
 // 多小问（题组）共享题干展示口径：与错题卡片、重练卷共用同一套实现
 import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
 import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText, getReferenceAnswerOrigin } from '../../../utils/reviewDecision'
-import { ElMessage, ElMessageBox, ElLoading } from 'element-plus'
+import { ElMessage, ElMessageBox, ElLoading, ElCheckbox } from 'element-plus'
 // bbox 判据统一走共享实现（2026-09-18）：本文件原先自带一份 parseBbox/unionBbox，
 // 是**有意**不拒绝越界框的 —— 因为这里解析出的框只用于「原卷裁剪弹窗的自动预选」，
 // 下游 cropImageLoaded 会把框夹紧到图片可见区内（Math.min(rect.width - x, ...)），
@@ -517,6 +528,18 @@ import AnalysisSource from './AnalysisSource.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
+
+// [P0-1 完成引导 2026-09-27] 完成态出口 → ReviewWorkspace 转发给 ReviewTopBar 的
+// handleComplete / goNextTask（错题门禁弹窗与换卷状态都留在顶栏，不复制业务逻辑）。
+const emit = defineEmits(['complete-review', 'next-task', 'prev-task'])
+const allConfirmed = computed(() =>
+  store.reviewProgress.total > 0 && store.reviewProgress.unconfirmed === 0
+)
+
+// [P0-3 归因免打扰 2026-09-27] 会话级开关（组件存续期间有效，刷新页面恢复询问）：
+// 勾选「本次批改不再询问」后，本会话内 wrong→correct 一律静默落库，misjudgeType 留空
+// （后端统计归 unset，与「跳过」同口径，无数据结构变化）。
+const misjudgeAskThisSession = ref(true)
 
 // 多小问（题组）共享题干展示口径（2026-09-23 修复）：
 // 模板 ops-q-stem 那一行用的是 parentStem，但脚本里**从未定义过**（只 import 了
@@ -1349,6 +1372,13 @@ const handleSave = async () => {
   }
 }
 
+// [B1-7] 判定后主动 blur：鼠标判定后焦点若留在按钮上，之后按 Enter 会重复判定。
+// blur 之后 Enter 只在全卷确认时触发完成复核（见 onPanelKeydown）。
+const judgeClick = (result, e) => {
+  e?.currentTarget?.blur?.()
+  handleReview(result)
+}
+
 const handleReview = async (result) => {
   const question = q.value
   if (!question) return
@@ -1397,29 +1427,45 @@ const handleReview = async (result) => {
   } else {
     // wrong→correct 时弹"误判类型"下拉，便于事后统计 AI 误判归因（2026-09-01 上线问题 6）
     // 老师可跳过；跳过则 misjudgeType 留空，admin 统计归为 'unset'。
+    // [P0-3 归因免打扰 2026-09-27] 弹窗内提供「本次批改不再询问」——勾选后本会话静默，
+    // 消除连续批改时每次标对翻案都被模态框打断的节奏税。
     if (result === 'correct' && question.is_correct === false) {
-      try {
-        const { value } = await ElMessageBox({
-          title: '这是什么类型的误判？',
-          message: 'AI 把这题判错了。请选择原因（帮助我们改进判题规则）：',
-          showInput: true,
-          inputOptions: [
-            { value: 'equivalent_form', label: '等价形式（如 x²、分数顺序、约分）' },
-            { value: 'parse_error', label: 'AI 提取学生答案错误' },
-            { value: 'typo', label: '学生笔误/小计算错误' },
-            { value: 'wrong_rule', label: '判题规则本身有误' },
-            { value: 'other', label: '其他' }
-          ],
-          inputPlaceholder: '请选择',
-          showCancelButton: true,
-          confirmButtonText: '确定',
-          cancelButtonText: '跳过',
-          inputValidator: (val) => !!val || '请选择一项'
-        })
-        store.reviewQuestion(question.id, result, { misjudgeType: value })
-      } catch {
-        // 老师跳过，照常标 correct
+      if (!misjudgeAskThisSession.value) {
         store.reviewQuestion(question.id, result)
+      } else {
+        const skipMisjudgeAsk = ref(false)
+        try {
+          const { value } = await ElMessageBox({
+            title: '这是什么类型的误判？',
+            message: h('div', null, [
+              h('p', { style: 'margin:0' }, 'AI 把这题判错了。请选择原因（帮助我们改进判题规则）：'),
+              h(ElCheckbox, {
+                modelValue: skipMisjudgeAsk.value,
+                'onUpdate:modelValue': (v) => { skipMisjudgeAsk.value = v },
+                style: 'margin-top:10px',
+              }, () => '本次批改不再询问'),
+            ]),
+            showInput: true,
+            inputOptions: [
+              { value: 'equivalent_form', label: '等价形式（如 x²、分数顺序、约分）' },
+              { value: 'parse_error', label: 'AI 提取学生答案错误' },
+              { value: 'typo', label: '学生笔误/小计算错误' },
+              { value: 'wrong_rule', label: '判题规则本身有误' },
+              { value: 'other', label: '其他' }
+            ],
+            inputPlaceholder: '请选择',
+            showCancelButton: true,
+            confirmButtonText: '确定',
+            cancelButtonText: '跳过',
+            inputValidator: (val) => !!val || '请选择一项'
+          })
+          if (skipMisjudgeAsk.value) misjudgeAskThisSession.value = false
+          store.reviewQuestion(question.id, result, { misjudgeType: value })
+        } catch {
+          // 老师跳过，照常标 correct（若同时勾选了不再询问，同样生效）
+          if (skipMisjudgeAsk.value) misjudgeAskThisSession.value = false
+          store.reviewQuestion(question.id, result)
+        }
       }
     } else {
       store.reviewQuestion(question.id, result)
@@ -1428,21 +1474,27 @@ const handleReview = async (result) => {
   // 按钮动画反馈
   animatingBtn.value = result
   setTimeout(() => { animatingBtn.value = '' }, 400)
-  ElMessage.success(resultText[result])
+  // [④ 撤销 snackbar] 判定成功 → 底部持久可撤销提示（替代一闪而过的 toast）；
+  // 点「撤销」或按 ⌘Z/Ctrl+Z 回退上一笔（仅本页内存，不反向写库）。
+  store.undoHint = { text: resultText[result], questionId: question.id }
 }
 const nextQ = () => { store.nextQuestion() }
 const prevQ = () => { store.prevQuestion() }
 
-// ── 连续批改快捷键（2026-09-27 交互重构）──
-// Space=正确 / X=错误 / →=下一题 / ←=上一题。
-// 只接键不改任何业务动作：全部复用 handleReview / nextQ / prevQ，
+// ── 连续批改快捷键（2026-09-27 交互重构；2026-09-28 B2 扩展）──
+// Space=正确 / X=错误 / Shift+X=删除 / E=编辑 / →=下一题 / ←=上一题 /
+// Enter=完成复核（仅全卷确认后）/ T=下一份 / Shift+T=上一份 / ?=快捷键速查；
+// 编辑态内 S=保存、Esc=取消编辑。
+// 只接键不改任何业务动作：全部复用现有 handler，
 // 触发路径与鼠标点击完全一致（含误判归因弹窗、完整性门禁、删除确认）。
 // 守卫（按序）：
-//   ① 编辑态整体禁用 —— 翻题会丢弃未保存的表单内容；
-//   ② 焦点在输入类元素（input/textarea/select/contenteditable）时让位给打字；
+//   ① 编辑态只响应保存/取消 —— 翻题/判定会丢弃未保存的表单内容或落在过期题上；
+//      任何弹窗打开时让位（Esc 应先关弹窗而不是退出编辑）；
+//   ② 焦点在输入类元素（input/textarea/select/contenteditable）时让位给打字
+//     （编辑态的 S 同样让位，Esc 例外——编辑态任意焦点下都应能退出编辑）；
 //   ③ 任何 el-dialog / ElMessageBox 打开时让位 —— 否则弹窗里按 X/Space 会
 //      穿透到底下的「标错/标对」，这是快捷键最危险的翻车点；
-//   ④ 修饰键组合（Ctrl+X 剪切等）不劫持。
+//   ④ Ctrl/Meta/Alt 组合不劫持（Shift 用于 Shift+X / Shift+T 复合键）。
 const isEditableTarget = (el) => {
   if (!el) return false
   const tag = el.tagName
@@ -1450,8 +1502,20 @@ const isEditableTarget = (el) => {
 }
 const hasOpenOverlay = () => !!document.querySelector('.el-overlay:not([style*="display: none"])')
 const onPanelKeydown = (e) => {
-  if (editing.value || !q.value) return
+  if (!q.value) return
   if (!store.currentPaperReviewable) return
+  if (editing.value) {
+    if (hasOpenOverlay()) return
+    if (e.metaKey || e.ctrlKey || e.altKey) return
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      handleCancelEdit()
+    } else if ((e.key === 's' || e.key === 'S') && !isEditableTarget(e.target)) {
+      e.preventDefault()
+      handleSave()
+    }
+    return
+  }
   if (isEditableTarget(e.target)) return
   if (hasOpenOverlay()) return
   if (e.metaKey || e.ctrlKey || e.altKey) return
@@ -1459,15 +1523,40 @@ const onPanelKeydown = (e) => {
     // Space 默认滚动页面 / 激活聚焦按钮，批改场景里它只属于「正确」
     e.preventDefault()
     handleReview('correct')
-  } else if (e.key === 'x' || e.key === 'X') {
+  } else if (e.code === 'KeyX' && e.shiftKey) {
+    // Shift+X = 删除（二次确认在 handleReview 内）。用 code+shiftKey 判断而非 e.key，
+    // 避免大写锁定时按 X 被当成 Shift+X 误触删除。
+    e.preventDefault()
+    handleReview('exclude')
+  } else if (e.code === 'KeyX') {
     e.preventDefault()
     handleReview('wrong')
+  } else if (e.code === 'KeyE') {
+    e.preventDefault()
+    handleEnterEdit()
+  } else if (e.code === 'KeyT' && e.shiftKey) {
+    // Shift+T = 上一份（经 ReviewWorkspace 转发到顶栏 goPrevTask，维护下拉选中态）
+    e.preventDefault()
+    emit('prev-task')
+  } else if (e.code === 'KeyT') {
+    e.preventDefault()
+    emit('next-task')
+  } else if (e.key === '?') {
+    e.preventDefault()
+    store.shortcutsVisible = true
   } else if (e.key === 'ArrowRight') {
     e.preventDefault()
     nextQ()
   } else if (e.key === 'ArrowLeft') {
     e.preventDefault()
     prevQ()
+  } else if (e.key === 'Enter') {
+    // [P0-1 完成引导] 全卷已确认时 Enter = 完成复核（与完成态按钮同一出口）。
+    // 未全确认时不拦 Enter，让焦点按钮的默认激活行为保持原样。
+    if (allConfirmed.value) {
+      e.preventDefault()
+      emit('complete-review')
+    }
   }
 }
 onMounted(() => { window.addEventListener('keydown', onPanelKeydown) })
@@ -1928,6 +2017,17 @@ const handleRetryGeometry = async () => {
 .ops-buttons-primary {
   display: flex;
   gap: 8px;
+}
+/* [P0-1 完成引导] 全卷确认后的收尾条：文字 + 完成复核 + 下一份 */
+.ops-complete-state {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.ops-complete-state .ops-complete-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--wb-text-secondary);
 }
 .ops-buttons-secondary {
   display: flex;

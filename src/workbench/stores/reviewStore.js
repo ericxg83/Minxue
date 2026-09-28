@@ -168,6 +168,31 @@ export const useReviewStore = defineStore('review', () => {
   const reviewUndoStack = ref([])
   const canUndo = computed(() => reviewUndoStack.value.length > 0)
 
+  // ── [P0-1 判定即过 2026-09-27] 判定后自动前进的会话级开关（默认开）──
+  // 关闭后判定只落库，不自动跳题、不自动完成复核（退回手动模式，作为即时回滚开关）。
+  const autoAdvanceEnabled = ref(true)
+
+  // ── [B2-7 已删除留痕] 本次会话对当前卷执行「删除本题」的次数 ──
+  // 只读标注用（左栏「已删除 N」），不做业务判断；换卷清零，历史会话的删除不计入。
+  const sessionExcludedCount = ref(0)
+
+  // ── [B2-3 快捷键速查] 速查浮层显隐（UI 状态与 wrongGateVisible 同放 store，便于
+  // QuestionDetailPanel 的 ? 键与 ReviewTopBar 的「更多」菜单跨组件触发同一浮层）──
+  const shortcutsVisible = ref(false)
+
+  // ── [④ 撤销 snackbar] 判定后底部可撤销提示（UI 状态，与 shortcutsVisible 同放 store）──
+  // 形如 { text, questionId }：判定成功时设置，撤销 / 换卷 / 手动关闭时清空。
+  // 「撤销」按钮、⌘Z/Ctrl+Z、以及提示条本体都读它；不改变任何落库事实。
+  const undoHint = ref(null)
+
+  // ── [⑤ ⌘K 命令面板] 显隐（UI 状态，与 shortcutsVisible 同放 store，便于跨组件触发）──
+  const commandPaletteVisible = ref(false)
+
+  // ── [B1-4] 左栏状态过滤页签状态入 store ──
+  // 上下文条「还差 N 题」的跳转必须与左栏页签同源：点击 = 切「待处理」+ 跳第一道
+  // 未确认题。默认仍是「全部」（状态过滤只能由老师主动触发，不能当默认遮罩）。
+  const navFilter = ref('all')
+
   // 撤销最近一次人工判定（正确/错误/排除）
   // - 恢复该题的 review_status（原为空则清空）
   // - 恢复该题对应错题记录的上一生命周期状态
@@ -190,6 +215,7 @@ export const useReviewStore = defineStore('review', () => {
       const created = wrongQuestions.value.findIndex(w => w.question_id === last.questionId)
       if (created >= 0) wrongQuestions.value.splice(created, 1)
     }
+    undoHint.value = null
     return true
   }
 
@@ -617,12 +643,41 @@ export const useReviewStore = defineStore('review', () => {
     return false
   }
 
+  // [P0-1 判定即过 2026-09-27] 前进到下一个未确认题（纸面题号顺序，环绕一圈）。
+  // 与 nextQuestion 的盲进 index+1 不同：回看/改判后判定不会把老师带到已确认的题上。
+  // exclude 会把当前题移出列表、currentReviewIndex 已指向补位的下一题 → 从当前索引起找；
+  // 其余判定从下一索引起找（刚判过的题此时必为已确认态，即使被环回到也会被跳过）。
+  // 全卷已确认 → 停留原地返回 false，由调用方触发完成流程。
+  const advanceToNextUnconfirmed = (excludeRemovedCurrent = false) => {
+    const len = allQuestions.value.length
+    if (len === 0) return false
+    const start = excludeRemovedCurrent ? currentReviewIndex.value : currentReviewIndex.value + 1
+    for (let step = 0; step < len; step++) {
+      const idx = ((start + step) % len + len) % len
+      const candidate = allQuestions.value[idx]
+      if (!candidate || questionConfirmationMap.value[candidate.id]) continue
+      currentReviewIndex.value = idx
+      syncPageForCurrentQuestion()
+      return true
+    }
+    return false
+  }
+
   // 跳转到指定题目
   const jumpToQuestion = (idx) => {
     if (idx >= 0 && idx < allQuestions.value.length) {
       currentReviewIndex.value = idx
       syncPageForCurrentQuestion()
     }
+  }
+
+  // [B1-4] 上下文条「还差 N 题」单一入口：切左栏「待处理」页签（同源口径）+ 跳第一道未确认题。
+  // 与 advanceToNextUnconfirmed 的区别：那是判定流的"过"（从当前题往下找），
+  // 这是主动导航（永远从卷首找第一道未确认题）。
+  const jumpToFirstUnconfirmed = () => {
+    navFilter.value = 'todo'
+    const idx = allQuestions.value.findIndex(q => !questionConfirmationMap.value[q.id])
+    if (idx >= 0) jumpToQuestion(idx)
   }
 
   // 题目切换时同步页面索引：使 PaperViewerPanel 显示当前题目所在页的图片
@@ -692,6 +747,7 @@ export const useReviewStore = defineStore('review', () => {
     // 后端 getQuestionsByTask 也会过滤掉，下一次进入该任务这题不再出现。
     // review_status 仍写库为 'exclude'，作为软删除标记并让 taskStats 不计入总数。
     if (result === REVIEW_STATUS.EXCLUDE) {
+      sessionExcludedCount.value++
       const idx = allQuestions.value.findIndex(q => q.id === questionId)
       if (idx >= 0) {
         allQuestions.value.splice(idx, 1)
@@ -743,9 +799,11 @@ export const useReviewStore = defineStore('review', () => {
         )
     )
 
-    // 自动进入下一题
-    if (!nextQuestion()) {
-      // 最后一道题已复核 → 自动完成复核 + 进入下一份
+    // [P0-1 判定即过 2026-09-27] 判定落库成功后自动前进到下一个未确认题（环绕一圈）。
+    // 开关关闭时退回手动模式：只落库，不跳题、不触发完成流程。
+    if (!autoAdvanceEnabled.value) return
+    if (!advanceToNextUnconfirmed(result === REVIEW_STATUS.EXCLUDE)) {
+      // 全卷已确认 → 自动完成复核 + 进入下一份（内部先走 prepareWrongGate 错题门禁）
       reviewStatus.value = 'completed'
       // 延迟触发自动保存和跳转，让 UI 先更新
       setTimeout(() => autoCompleteAndAdvance(), 300)
@@ -1039,6 +1097,14 @@ export const useReviewStore = defineStore('review', () => {
     reviewStatus.value = 'reviewing'
     reviewAllDone.value = false
     questionToTaskMap.value = {}
+    // [P0-4 撤销诚实化 2026-09-27] 撤销栈只对当前卷的内存状态有意义：换卷即清空，
+    // 避免上一卷的判定快照在跨卷后仍可"撤销"——那会回退到错误题甚至错误学生的数据。
+    reviewUndoStack.value = []
+    undoHint.value = null
+    // [B2-7 已删除留痕] 删除计数随换卷清零
+    sessionExcludedCount.value = 0
+    // [B1-4] 页签状态随换卷回默认「全部」（默认口径不能当遮罩，见 QuestionNavPanel 注释）
+    navFilter.value = 'all'
 
     // paper 模式：学生还没交卷（或 AI 还在跑）→ **不拉题目**。
     // 这批题目的 is_correct / confidence / review_status 全部属于**原始作业**，
@@ -1250,6 +1316,17 @@ export const useReviewStore = defineStore('review', () => {
       return pendingTasks.value[idx + 1]
     }
     return null // 已经是最后一份
+  }
+
+  // [B2-1 快捷键 T/Shift+T] 跳到上一份待复核试卷：与 nextTask 完全同口径的反向导航，
+  // 回看上一份不必再回到顶栏下拉重选。
+  const prevTask = () => {
+    if (!currentTask.value || pendingTasks.value.length === 0) return null
+    const idx = pendingTasks.value.findIndex(t => t.id === currentTask.value.id)
+    if (idx > 0) {
+      return pendingTasks.value[idx - 1]
+    }
+    return null // 已经是第一份
   }
 
   // 持久化「完成复核」：按数据来源分支落库
@@ -1606,7 +1683,11 @@ export const useReviewStore = defineStore('review', () => {
     setCurrentStudent,
     nextQuestion,
     prevQuestion,
+    advanceToNextUnconfirmed,
+    autoAdvanceEnabled,
     jumpToQuestion,
+    jumpToFirstUnconfirmed,
+    navFilter,
     reviewQuestion,
     getManualReviewProgress,
     getQuestionReviewStatus,
@@ -1626,6 +1707,7 @@ export const useReviewStore = defineStore('review', () => {
     loadTaskById,
     autoSelectPendingTask,
     nextTask,
+    prevTask,
     completeTaskReview,
     autoCompleteAndAdvance,
     otherPendingPages,
@@ -1697,6 +1779,12 @@ export const useReviewStore = defineStore('review', () => {
     // 撤销上一笔（仅回退前端内存状态，不反向写库）
     canUndo,
     undoLastReview,
+    // [B2] 判定即过开关 / 已删除留痕 / 快捷键速查浮层
+    autoAdvanceEnabled,
+    sessionExcludedCount,
+    shortcutsVisible,
+    undoHint,
+    commandPaletteVisible,
     // 多试卷聚合映射（左栏卷标签使用；当前由 selectTask 清空置空）
     questionToTaskMap
   }
