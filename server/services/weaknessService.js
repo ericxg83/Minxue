@@ -175,7 +175,7 @@ export async function getDashboardClassWeakness(opts = {}) {
  *   - 进行中 N：已批改待教师处理的重练卷数（generated_exams 关联的 task 仍在批改/批改完未读）
  *   - 待重练学生 M：lifecycle_status IN ('new', 'review_1') 的去重学生数
  *
- * @returns {Promise<{fullyMasteredRate: number, basicMasteredRate: number, masteryRate: number, inProgress: number, awaitingRetryStudents: number}>}
+ * @returns {Promise<{fullyMasteredRate: number, basicMasteredRate: number, masteryRate: number, inProgress: number, awaitingRetryStudents: number, total: number, fullyMastered: number, basicMastered: number, undigested: number}>}
  */
 export async function getRetryOverview() {
   const [{ rows: masteryRows }, { rows: inProgressRows }, { rows: awaitingRows }] = await Promise.all([
@@ -212,7 +212,12 @@ export async function getRetryOverview() {
     // 现收敛为「完全掌握率」，前端已切换到新字段，留作过渡避免消费方 undefined。
     masteryRate: pct(fullyMastered),
     inProgress: inProgressRows[0]?.n ?? 0,
-    awaitingRetryStudents: awaitingRows[0]?.n ?? 0
+    awaitingRetryStudents: awaitingRows[0]?.n ?? 0,
+    // 首页消化进度环需要绝对数（仅追加，不改变已有字段语义）
+    total,
+    fullyMastered,
+    basicMastered,
+    undigested: Math.max(total - fullyMastered - basicMastered, 0)
   }
 }
 

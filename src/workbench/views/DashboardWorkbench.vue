@@ -1,7 +1,6 @@
 <template>
   <div class="dashboard wb-page">
-    <!-- 移动端 sticky 主操作（桌面隐藏） · 通用入口，永远跳到批改中心。
-         0 状态下不隐藏也不禁用，给教师一条直达工作区的路。 -->
+    <!-- 移动端 sticky 主操作（桌面隐藏） · 通用入口，永远跳到批改中心 -->
     <div class="dashboard__sticky-cta">
       <ActionButton variant="primary" @click="go('/grade')">
         <el-icon><ArrowRight /></el-icon>
@@ -10,469 +9,393 @@
     </div>
 
     <div class="wb-page__inner">
+      <!-- 页头：按时段问候 + 一句话状态 + 全页唯一主操作 -->
       <PageHeader
         :eyebrow="todayLabel"
-        title="早上好，老师"
+        :title="`${greeting}，老师`"
         :description="briefHeadline"
-      />
+      >
+        <template #actions>
+          <ActionButton variant="primary" @click="go('/grade')">
+            开始批改
+            <el-icon><ArrowRight /></el-icon>
+          </ActionButton>
+        </template>
+      </PageHeader>
 
-      <!-- 摘要加载失败：行级提示，不抢主视觉 -->
+      <!-- 学生规模摘要：低频信息收敛为一行灰字（替代原三列 MiniStat 卡片） -->
+      <p v-if="!initialLoading && hasStudents" class="roster-line">
+        在读 {{ activeCount }} 人 · 停课 {{ pausedCount }} 人 · 近 {{ INACTIVE_DAYS }} 天未交作业 {{ inactiveCount }} 人
+        <router-link to="/students" class="roster-line__link">管理</router-link>
+      </p>
+
+      <!-- 摘要加载失败：行级提示 -->
       <div v-if="notiStore.error && !hasAnyData" class="dashboard-note" role="status">
         <span>摘要加载失败</span>
         <button class="dashboard-note__retry" type="button" @click="notiStore.fetchSummary()">重试</button>
       </div>
 
-      <!-- Briefing 加载骨架：与最终 summary-strip 形状一致，避免 layout shift -->
-      <section v-if="initialLoading" class="briefing" aria-busy="true" aria-label="加载今日待办">
-        <div class="summary-strip" aria-hidden="true">
-          <div v-for="i in 3" :key="i" class="summary-cell">
-            <span class="summary-cell__copy">
-              <span class="summary-skeleton summary-skeleton--title" />
-              <span class="summary-skeleton summary-skeleton--description" />
-            </span>
-            <span class="summary-skeleton summary-skeleton--count" />
+      <!-- 加载骨架 -->
+      <div v-if="initialLoading" class="cockpit" aria-busy="true" aria-label="加载工作台">
+        <div class="cockpit__main">
+          <div class="skeleton-strip">
+            <span v-for="i in 3" :key="i" class="skeleton-block skeleton-block--kpi" />
           </div>
+          <span class="skeleton-block skeleton-block--chart" />
         </div>
-        <div class="summary-anomaly" aria-hidden="true">
-          <span class="summary-anomaly__copy">
-            <span class="summary-skeleton summary-skeleton--title" />
-            <span class="summary-skeleton summary-skeleton--description" />
-          </span>
-          <span class="summary-skeleton summary-skeleton--count summary-skeleton--count--anomaly" />
+        <div class="cockpit__side">
+          <span class="skeleton-block skeleton-block--panel" />
+          <span class="skeleton-block skeleton-block--panel" />
         </div>
-      </section>
+      </div>
 
-      <!-- Briefing：今日行动流（Layer 1）—— 3 列 summary-strip + 识别异常行 -->
-      <section v-if="!initialLoading && (briefingStrip.length || failedAction)" class="briefing" aria-label="今日待办">
-        <!-- 顶部 3 列固定槽位（待复核 / 今日新增错题 / 待重练），0 值也展示 -->
-        <div v-if="briefingStrip.length" class="summary-strip">
-          <router-link
-            v-for="cell in briefingStrip"
-            :key="cell.key"
-            :to="cell.to"
-            class="summary-cell"
-            :class="`is-${cell.tone}`"
-            :aria-label="`${cell.title}，${cell.count} ${cell.unit}`"
-          >
-            <span class="summary-cell__copy">
-              <strong class="summary-cell__title">{{ cell.title }}</strong>
-              <small class="summary-cell__description">{{ cell.description }}</small>
-            </span>
-            <span class="summary-cell__count">
-              <strong>{{ cell.count }}</strong>
-              <small>{{ cell.unit }}</small>
-            </span>
-            <el-icon class="summary-cell__arrow" aria-hidden="true"><ArrowRight /></el-icon>
-          </router-link>
-        </div>
-
-        <!-- 识别异常：单独 row（0 值也展示，方便老师看到状态） -->
-        <router-link
-          v-if="failedAction"
-          :to="failedAction.to"
-          class="summary-anomaly"
-          :class="{ 'is-danger': failedCount > 0 }"
-          :aria-label="`${failedAction.title}，${failedCount} ${failedAction.unit}`"
-        >
-          <span class="summary-anomaly__copy">
-            <strong class="summary-anomaly__title">{{ failedAction.title }}</strong>
-            <small class="summary-anomaly__description">{{ failedAction.description }}</small>
-          </span>
-          <span class="summary-anomaly__count">
-            <strong>{{ failedCount }}</strong>
-            <small>{{ failedAction.unit }}</small>
-          </span>
-          <el-icon class="summary-anomaly__arrow" aria-hidden="true"><ArrowRight /></el-icon>
-        </router-link>
-
-        <!-- 错题待补入（2026-09-27）：闸1 自动放行欠账不能只藏在复核页顶栏按钮里，
-             首页常驻引导，点击直达批改复核页并自动打开「待补入」清单弹窗 -->
-        <router-link
-          v-if="gatePendingCount > 0"
-          :to="gatePendingAction.to"
-          class="summary-anomaly is-warning"
-          :aria-label="`${gatePendingAction.title}，${gatePendingCount} ${gatePendingAction.unit}`"
-        >
-          <span class="summary-anomaly__copy">
-            <strong class="summary-anomaly__title">{{ gatePendingAction.title }}</strong>
-            <small class="summary-anomaly__description">{{ gatePendingAction.description }}</small>
-          </span>
-          <span class="summary-anomaly__count">
-            <strong>{{ gatePendingCount }}</strong>
-            <small>{{ gatePendingAction.unit }}</small>
-          </span>
-          <el-icon class="summary-anomaly__arrow" aria-hidden="true"><ArrowRight /></el-icon>
-        </router-link>
-      </section>
-
-      <!-- 空态：今天没有行动 -->
-      <EmptyState
-        v-else
-        role="status"
-        title="今天没有待处理事项"
-        description="新上传的作业和重练任务出现后，会自动列在这里。"
-      />
-
-      <!-- Layer 1.5 · 批改中看板：有 processing 任务时显示，让老师看到实时批改进度
-        数据源：notiStore.inProgressTasks（15s 轮询），卡死标红 -->
-      <section
-        v-if="!initialLoading && notiStore.hasInProgress"
-        class="in-progress"
-        aria-label="批改中"
-      >
-        <header class="section-header">
-          <h2 class="section-header__title">批改中</h2>
-          <span class="in-progress__count">
-            <strong>{{ notiStore.inProgressCount }}</strong>
-            <small>份正在批改</small>
-          </span>
-        </header>
-        <ul class="activity-list">
-          <li v-for="t in notiStore.inProgressTasks.slice(0, 5)" :key="t.id">
-            <ListRow
-              variant="generic"
-              :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
-              :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
-              :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
-              @click="goInProgress(t)"
+      <!-- 两栏驾驶舱：左=行动与趋势，右=实时与提醒 -->
+      <div v-else class="cockpit">
+        <!-- ───── 左列：主工作流 ───── -->
+        <div class="cockpit__main">
+          <!-- ① KPI 三卡：单位统一（份/道/道），去描述文案，脚注给可核对的衍生指标 -->
+          <div class="kpi-strip">
+            <router-link
+              v-for="k in kpiCards"
+              :key="k.key"
+              :to="k.to"
+              class="kpi-card"
+              :class="`is-${k.tone}`"
+              :aria-label="`${k.title}，${k.count} ${k.unit}`"
             >
-              <template #leading>
-                <span class="activity-avatar is-primary">
-                  <el-icon v-if="!t.isStalled" :size="16" class="is-spinning"><Loading /></el-icon>
-                  <el-icon v-else :size="16"><WarningFilled /></el-icon>
+              <span class="kpi-card__title">{{ k.title }}</span>
+              <span class="kpi-card__value">
+                <strong>{{ k.count }}</strong>
+                <small>{{ k.unit }}</small>
+              </span>
+              <span class="kpi-card__foot">
+                <span
+                  v-if="k.delta != null"
+                  class="kpi-card__delta"
+                  :class="k.delta > 0 ? 'is-up-bad' : k.delta < 0 ? 'is-down-good' : 'is-flat'"
+                >
+                  {{ k.delta > 0 ? '▲' : k.delta < 0 ? '▼' : '—' }} {{ Math.abs(k.delta) }}
                 </span>
-              </template>
-              <template #trailing>
-                <StatusTag
-                  :tone="t.isStalled ? 'danger' : 'info'"
-                  :label="t.isStalled ? '已卡 5 分钟' : '批改中'"
-                />
-              </template>
-            </ListRow>
-          </li>
-        </ul>
-      </section>
-
-      <!-- Layer 2 · 待复核作业：教师未读 done 任务，与上方 briefing "作业等待复核" 同口径
-        入口直达具体 task 复核页（/grade/task?taskId=...） -->
-      <section
-        v-if="!initialLoading && pendingActivities.length"
-        class="recent-activity"
-        aria-label="待复核作业"
-      >
-        <header class="section-header">
-          <h2 class="section-header__title">待复核作业</h2>
-          <router-link to="/grade" class="section-header__link">
-            去批改中心
-            <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-          </router-link>
-        </header>
-        <ul class="activity-list">
-          <li v-for="act in pendingActivities.slice(0, 5)" :key="act.id">
-            <ListRow
-              variant="generic"
-              :title="`${act.studentName} · ${act.shortName}`"
-              :description="`${act.wrongCount ? `${act.wrongCount} 道错题` : '无错题'} · ${act.timeLabel}`"
-              :aria-label="`${act.studentName} 的 ${act.shortName} · 待复核 · ${act.timeLabel}`"
-              @click="goActivity(act)"
-            >
-              <template #leading>
-                <span class="activity-avatar is-primary">{{ act.studentName.slice(0, 1) }}</span>
-              </template>
-              <template #trailing>
-                <StatusTag tone="info" label="待复核" />
-              </template>
-            </ListRow>
-          </li>
-        </ul>
-      </section>
-
-      <!-- Layer 2.5 · 诊断与训练：班级薄弱知识点 + 本周重练效果（与 briefing 同屏互补） -->
-      <section
-        v-if="!initialLoading"
-        class="diagnostic-training"
-        aria-label="诊断与训练"
-      >
-        <header class="section-header">
-          <h2 class="section-header__title">诊断与训练</h2>
-        </header>
-
-        <!-- 班级薄弱知识点 Top 5：按未掌握人数排，每行带「跨 N 个年级」标签 -->
-        <div class="diagnostic-training__card">
-          <header class="diagnostic-training__card-head">
-            <h3 class="diagnostic-training__card-title">班级薄弱知识点</h3>
-            <router-link to="/question-bank" class="section-header__link">
-              去知识中心
-              <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+                {{ k.foot }}
+              </span>
             </router-link>
-          </header>
-          <ul v-if="dashboardWeakness.length" class="activity-list">
-            <li v-for="kp in dashboardWeakness.slice(0, 5)" :key="kp.kpId">
-              <ListRow
-                variant="generic"
-                :title="kp.name"
-                :description="weaknessDescription(kp)"
-                :aria-label="`${kp.name} · ${weaknessDescription(kp)} · 待讲解`"
-                @click="goWeakness(kp)"
-              >
-                <template #leading>
-                  <span class="knowledge-avatar">{{ kp.subject?.slice(0, 1) || '知' }}</span>
-                </template>
-                <template #trailing>
-                  <StatusTag
-                    :tone="kp.gradeSpan > 1 ? 'primary' : 'default'"
-                    :label="kp.gradeSpan > 1 ? `跨 ${kp.gradeSpan} 个年级` : '单一学段'"
-                  />
-                </template>
-              </ListRow>
-            </li>
-          </ul>
-          <EmptyState
-            v-else
-            title="班级目前没有明显薄弱知识点"
-            description="继续观察，错题与掌握度数据沉淀后会逐步出现。"
-          />
-        </div>
-
-        <!-- 本周重练效果：3 个 MiniStat（通过率 / 进行中 / 待重练） -->
-        <div class="diagnostic-training__card">
-          <header class="diagnostic-training__card-head">
-            <h3 class="diagnostic-training__card-title">本周重练效果</h3>
-            <router-link to="/students?filter=retry" class="section-header__link">
-              去重练中心
-              <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-            </router-link>
-          </header>
-          <div class="retry-overview">
-            <MiniStat label="完全掌握率" :value="retryOverview.fullyMasteredRate" unit="%" description="累计答对 2 次完成验证的错题占比" />
-            <MiniStat label="基本掌握率" :value="retryOverview.basicMasteredRate" unit="%" description="答对 1 次、待周回顾二次验证的错题占比" />
-            <MiniStat label="进行中" :value="retryOverview.inProgress" unit="份" description="重练卷已批改待处理" />
-            <MiniStat label="待重练学生" :value="retryOverview.awaitingRetryStudents" unit="人" description="有错题还在错题池里" />
           </div>
+
+          <!-- ② 近 7 日趋势：柱=作业量，线=新增错题（双轴） -->
+          <section class="panel" aria-label="近 7 日趋势">
+            <header class="panel__head">
+              <h2 class="panel__title">近 7 日趋势</h2>
+              <span class="panel__legend">
+                <span class="legend-dot is-bar" />作业量
+                <span class="legend-dot is-line" />新增错题
+              </span>
+            </header>
+            <div v-if="hasTrend" ref="trendChartRef" class="chart chart--trend" />
+            <EmptyState
+              v-else
+              compact
+              title="近 7 日暂无批改记录"
+              description="开始批改作业后，这里会显示每日作业量与新增错题的走势。"
+            />
+          </section>
+
+          <!-- ③ 错题消化：进度环 + 班级薄弱知识点 Top5 横向条 -->
+          <section class="panel" aria-label="错题消化与薄弱点">
+            <header class="panel__head">
+              <h2 class="panel__title">错题消化</h2>
+              <router-link to="/wrongbook" class="panel__link">
+                错题中心 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+              </router-link>
+            </header>
+            <div class="digest">
+              <div v-if="digestTotal > 0" class="digest__donut">
+                <div ref="digestChartRef" class="chart chart--donut" />
+              </div>
+              <div v-else class="digest__donut digest__donut--empty">
+                <EmptyState compact title="暂无错题数据" description="批改产生的错题会在这里汇总消化进度。" />
+              </div>
+
+              <div class="digest__weak">
+                <div class="digest__weak-head">
+                  <span class="digest__weak-title">班级薄弱知识点 Top 5</span>
+                  <router-link to="/question-bank" class="panel__link">知识中心</router-link>
+                </div>
+                <ul v-if="weakBars.length" class="weak-list">
+                  <li v-for="kp in weakBars" :key="kp.kpId" class="weak-row" @click="goWeakness(kp)">
+                    <span class="weak-row__name">{{ kp.name }}</span>
+                    <span class="weak-row__track">
+                      <span class="weak-row__fill" :style="{ width: kp.pct + '%' }" />
+                    </span>
+                    <span class="weak-row__count">{{ kp.studentCount }} 人</span>
+                  </li>
+                </ul>
+                <EmptyState v-else compact title="无明显薄弱点" description="继续观察，数据沉淀后会逐步出现。" />
+              </div>
+            </div>
+          </section>
         </div>
-      </section>
 
-      <!-- Layer 3 · 班级：学生档案总览 + 待关注学生（合并为一段，避免堆 Section） -->
-      <section
-        v-if="!initialLoading && hasStudents"
-        class="attention"
-        aria-label="班级"
-      >
-        <header class="section-header">
-          <h2 class="section-header__title">班级</h2>
-          <router-link to="/students" class="section-header__link">
-            查看全部 {{ students.length }} 名学生
-            <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-          </router-link>
-        </header>
+        <!-- ───── 右列：实时 + 提醒 + 待关注 ───── -->
+        <div class="cockpit__side">
+          <!-- ④ 系统提醒带：识别异常 + 待补入 合并，0/0 时整卡消失 -->
+          <section v-if="reminderRows.length" class="panel panel--warn" aria-label="系统提醒">
+            <header class="panel__head">
+              <h2 class="panel__title">需要处理</h2>
+              <span class="panel__badge">{{ reminderTotal }}</span>
+            </header>
+            <ul class="remind-list">
+              <li v-for="r in reminderRows" :key="r.key">
+                <ListRow
+                  variant="generic"
+                  :title="r.title"
+                  :description="r.description"
+                  :aria-label="`${r.title}，${r.count} ${r.unit}`"
+                  @click="go(r.to)"
+                >
+                  <template #leading>
+                    <span class="remind-icon" :class="`is-${r.tone}`">
+                      <el-icon :size="15"><WarningFilled /></el-icon>
+                    </span>
+                  </template>
+                  <template #trailing>
+                    <span class="remind-count" :class="`is-${r.tone}`">{{ r.count }}{{ r.unit }}</span>
+                  </template>
+                </ListRow>
+              </li>
+            </ul>
+          </section>
 
-        <!-- 学生档案总览：三列 MiniStat，整行可点击跳学生管理；克制用 MiniStat，全 default tone -->
-        <div
-          class="student-overview"
-          role="button"
-          tabindex="0"
-          :aria-label="`在读 ${activeCount} 人，停课 ${pausedCount} 人，未活跃 ${inactiveCount} 人 · 查看学生管理`"
-          @click="go('/students')"
-          @keydown.enter.prevent="go('/students')"
-          @keydown.space.prevent="go('/students')"
-        >
-          <MiniStat label="在读" :value="activeCount" unit="人" />
-          <MiniStat label="停课" :value="pausedCount" unit="人" />
-          <MiniStat label="未活跃" :value="inactiveCount" unit="人" description="近 7 天未交作业" />
+          <!-- ⑤ 批改中：轮询实时进度，无任务时整卡消失 -->
+          <section v-if="notiStore.hasInProgress" class="panel" aria-label="批改中">
+            <header class="panel__head">
+              <h2 class="panel__title">批改中</h2>
+              <span class="panel__live"><span class="live-dot" />{{ notiStore.inProgressCount }} 份</span>
+            </header>
+            <ul class="mini-list">
+              <li v-for="t in notiStore.inProgressTasks.slice(0, 5)" :key="t.id">
+                <ListRow
+                  variant="generic"
+                  :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
+                  :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
+                  :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} 正在批改`"
+                  @click="go('/grade')"
+                >
+                  <template #leading>
+                    <span class="mini-avatar is-primary">
+                      <el-icon v-if="!t.isStalled" :size="15" class="is-spinning"><Loading /></el-icon>
+                      <el-icon v-else :size="15"><WarningFilled /></el-icon>
+                    </span>
+                  </template>
+                  <template #trailing>
+                    <StatusTag :tone="t.isStalled ? 'danger' : 'info'" :label="t.isStalled ? '卡住' : '批改中'" />
+                  </template>
+                </ListRow>
+              </li>
+            </ul>
+          </section>
+
+          <!-- ⑥ 待关注学生 Top3 -->
+          <section class="panel" aria-label="待关注学生">
+            <header class="panel__head">
+              <h2 class="panel__title">待关注学生</h2>
+              <router-link to="/students" class="panel__link">全部</router-link>
+            </header>
+            <ul v-if="attentionStudents.length" class="mini-list">
+              <li v-for="s in attentionStudents" :key="s.id">
+                <ListRow
+                  variant="student"
+                  :title="s.name"
+                  :description="s.summary"
+                  :aria-label="`${s.name} · ${s.summary} · ${s.label}`"
+                  @click="goAttentionStudent(s)"
+                >
+                  <template #leading>
+                    <span class="mini-avatar is-student">{{ s.name.slice(0, 1) }}</span>
+                  </template>
+                  <template #trailing>
+                    <StatusTag v-if="s.tone && s.tone !== 'default'" :tone="s.tone" :label="s.label" />
+                  </template>
+                </ListRow>
+              </li>
+            </ul>
+            <EmptyState v-else compact title="暂无需要特别关注的学生" description="出现反复错题或长期未掌握时会列在这里。" />
+          </section>
         </div>
-
-        <!-- 待关注学生：top 3，升级为 actionable 类型（补漏/预警/清理/反复错） -->
-        <ul v-if="attentionStudents.length" class="attention-list">
-          <li v-for="s in attentionStudents.slice(0, 3)" :key="s.id">
-            <ListRow
-              variant="student"
-              :title="s.name"
-              :description="s.summary"
-              :aria-label="`${s.name} · ${s.summary} · ${s.label}`"
-              @click="goAttentionStudent(s)"
-            >
-              <template #leading>
-                <span class="student-avatar">{{ s.name.slice(0, 1) }}</span>
-              </template>
-              <template #trailing>
-                <StatusTag
-                  v-if="s.tone && s.tone !== 'default'"
-                  :tone="s.tone"
-                  :label="s.label"
-                />
-              </template>
-            </ListRow>
-          </li>
-        </ul>
-      </section>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, nextTick, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight, Loading, WarningFilled } from '@element-plus/icons-vue'
+import * as echarts from 'echarts/core'
+import { BarChart, LineChart, PieChart as EChartsPieChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import { LinearGradient } from 'echarts/lib/util/graphic'
 import {
   getStudents,
   getDashboardWeakness,
   getDashboardRetryOverview,
   getDashboardAttentionStudents,
+  getDashboardDailyTrend,
   getGatePendingItems
 } from '../../services/apiService'
 import { useNotificationStore } from '../stores/notificationStore'
 import ActionButton from '../components/ui/ActionButton.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import ListRow from '../components/ui/ListRow.vue'
-import MiniStat from '../components/ui/MiniStat.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 
+echarts.use([BarChart, LineChart, EChartsPieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
+
 const router = useRouter()
+// 图表入场动画尊重系统「减弱动效」偏好（与 CSS 动画降级一致）
+const reduceMotion =
+  typeof window !== 'undefined' && window.matchMedia &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const notiStore = useNotificationStore()
+
 const students = ref([])
 const initialLoading = ref(true)
-// Dashboard 聚合：薄弱知识点 + 本周重练 + actionable 学生
 const dashboardWeakness = ref([])
-const retryOverview = ref({ masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 })
+const retryOverview = ref({ fullyMasteredRate: 0, basicMasteredRate: 0, masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0, total: 0, fullyMastered: 0, basicMastered: 0, undigested: 0 })
 const attentionStudentsRaw = ref([])
-// 错题待补入欠账总数（GET /wrong-questions/gate-pending，与批改页顶栏「待补入」同源）
 const gatePendingCount = ref(0)
+const trend = ref([])
 
+// ── 图表实例与容器 ──
+const trendChartRef = ref(null)
+const digestChartRef = ref(null)
+let trendChart = null
+let digestChart = null
+
+// ── 基础聚合 ──
 const todayLabel = computed(() =>
   new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date())
 )
 
+const greeting = computed(() => {
+  const h = new Date().getHours()
+  if (h < 6) return '凌晨好'
+  if (h < 11) return '早上好'
+  if (h < 13) return '中午好'
+  if (h < 18) return '下午好'
+  return '晚上好'
+})
+
 const pendingCount = computed(() => notiStore.summary.pendingReview || 0)
 const failedCount = computed(() => notiStore.summary.failedTasks || 0)
 const wrongCount = computed(() => notiStore.summary.todayNewWrongQuestions || 0)
-const retryCount = computed(() => retryOverview.value?.awaitingRetryStudents || 0)
+const undigestedCount = computed(() => retryOverview.value?.undigested || 0)
 
-// 总"件事"：以"行"为单位（>0 才算 1 件），不再把数字叠加，避免「5 件事」和「5 道错题」混淆
+// 近 7 日趋势派生：今/昨对比，供 KPI 脚注和环比使用
+const hasTrend = computed(() => trend.value.some(d => (d.tasksDone || 0) + (d.newWrong || 0) > 0))
+const todayCell = computed(() => trend.value[trend.value.length - 1] || { tasksDone: 0, newWrong: 0 })
+const ydayCell = computed(() => trend.value[trend.value.length - 2] || { tasksDone: 0, newWrong: 0 })
+const wrongDelta = computed(() => {
+  if (!trend.value.length) return null
+  return (todayCell.value.newWrong || 0) - (ydayCell.value.newWrong || 0)
+})
+
+// 总"件事"（以行为单位，避免与"多少道"混淆）
 const totalCount = computed(() =>
   (pendingCount.value > 0 ? 1 : 0) +
   (failedCount.value > 0 ? 1 : 0) +
   (wrongCount.value > 0 ? 1 : 0) +
-  (retryCount.value > 0 ? 1 : 0)
+  (undigestedCount.value > 0 ? 1 : 0)
+)
+const briefHeadline = computed(() =>
+  totalCount.value === 0 ? '今天没有待处理事项' : `今日 ${totalCount.value} 件事需要处理`
 )
 
-const briefHeadline = computed(() => {
-  if (totalCount.value === 0) return '今天没有待处理事项'
-  return `今日 ${totalCount.value} 件事需要处理`
-})
-
-// 顶部 3 列固定 summary-strip（待复核 / 今日新增错题 / 待重练），0 值也展示，0 时降为 default tone
-const briefingStrip = computed(() => [
+// ① KPI 三卡：单位统一 份/道/道，脚注是可核对的衍生指标（非固定营销文案）
+const kpiCards = computed(() => [
   {
     key: 'pending',
+    title: '待复核',
     count: pendingCount.value,
     unit: '份',
-    title: '待复核',
-    description: pendingCount.value > 0
-      ? 'AI 批改完成，等待老师确认正误与判分。'
-      : '今日没有待复核的作业。',
+    foot: `今日已批改 ${todayCell.value.tasksDone || 0} 份`,
+    delta: null,
     tone: pendingCount.value > 0 ? 'primary' : 'default',
     to: '/grade'
   },
   {
     key: 'wrong',
+    title: '今日新增错题',
     count: wrongCount.value,
     unit: '道',
-    title: '今日新增错题',
-    description: wrongCount.value > 0
-      ? '来自近期学生作业，进入错题中心安排重练与掌握验证。'
-      : '今日暂无新增错题。',
+    foot: '较昨日',
+    delta: wrongDelta.value,
     tone: wrongCount.value > 0 ? 'warning' : 'default',
     to: '/wrongbook'
   },
   {
-    key: 'retry',
-    count: retryCount.value,
-    unit: '人',
-    title: '待重练',
-    description: retryCount.value > 0
-      ? '错题在错题池里尚未消化，可组卷下发让学生重练。'
-      : '今天没有需要安排的重练任务。',
-    tone: retryCount.value > 0 ? 'success' : 'default',
+    key: 'undigested',
+    title: '待消化错题',
+    count: undigestedCount.value,
+    unit: '道',
+    foot: `已完全掌握 ${retryOverview.value.fullyMasteredRate || 0}%`,
+    delta: null,
+    tone: undigestedCount.value > 0 ? 'success' : 'default',
     to: { path: '/students', query: { filter: 'retry' } }
   }
 ])
 
-// 待补入引导：>0 才展示（区别于识别异常的固定行——欠账清完就该消失）。
-// gate=1 查询参数由 ReviewTopBar 消费：进入复核页即自动打开待补入清单弹窗。
-const gatePendingAction = computed(() => ({
-  title: '错题待补入错题本',
-  description: '这些错题因缺图/缺选项等元素未入册，补全保存后自动入册；点击逐题处理',
-  unit: '道',
-  to: { path: '/grade/task', query: { source: 'homework', gate: '1' } }
-}))
+// ③ 消化进度环数据
+const digestTotal = computed(() => retryOverview.value?.total || 0)
+const digestData = computed(() => [
+  { name: '完全掌握', value: retryOverview.value.fullyMastered || 0 },
+  { name: '基本掌握', value: retryOverview.value.basicMastered || 0 },
+  { name: '未消化', value: retryOverview.value.undigested || 0 }
+])
 
-// 识别异常：单独 row，0 时也展示
-const failedAction = computed(() => ({
-  key: 'failed',
-  count: failedCount.value,
-  unit: '份',
-  title: '识别异常',
-  description: failedCount.value > 0
-    ? 'AI 识别失败，可进入批改中心重新处理或查看原图。'
-    : '今日没有识别异常的作业。',
-  tone: failedCount.value > 0 ? 'danger' : 'default',
-  to: { path: '/grade', query: { status: 'failed' } }
-}))
-
-const hasAnyData = computed(() =>
-  briefingStrip.value.length > 0 || !!failedAction.value || pendingActivities.value.length > 0 || students.value.length > 0
-)
-
-const formatRelativeTime = (iso) => {
-  if (!iso) return ''
-  const t = new Date(iso)
-  if (Number.isNaN(t.getTime())) return ''
-  const diffMs = Date.now() - t.getTime()
-  const minutes = Math.floor(diffMs / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
-  const days = Math.floor(hours / 24)
-  if (days < 7) return `${days} 天前`
-  return `${t.getMonth() + 1}月${t.getDate()}日`
-}
-
-// Layer 2 数据源：未读 done 任务（与 briefing "作业等待复核" 同口径）
-// 点击直达 /grade/task?taskId=... 复核页；老师打开复核页后该任务会被标记为已读，
-// 下次刷新时自动从 pendingActivities 消失（迁移到 recentTasks 桶）
-const pendingActivities = computed(() => {
-  const list = notiStore.summary.pendingTasks || []
-  return list.map((t) => ({
-    id: t.id,
-    studentId: null,
-    studentName: t.studentName || '学生',
-    shortName: (t.originalName || '未命名作业').replace(/\.(jpg|jpeg|png|pdf)$/i, ''),
-    wrongCount: t.wrongCount || 0,
-    timeLabel: formatRelativeTime(t.updatedAt || t.createdAt)
+// ③ 薄弱知识点 Top5 横向条（按未掌握人数归一化）
+const weakBars = computed(() => {
+  const list = dashboardWeakness.value.slice(0, 5)
+  const max = list.reduce((m, k) => Math.max(m, k.studentCount || 0), 0)
+  return list.map(k => ({
+    ...k,
+    pct: max > 0 ? Math.round(((k.studentCount || 0) / max) * 100) : 0
   }))
 })
 
+// ④ 系统提醒带：识别异常（>0）+ 待补入（>0）合并
+const reminderRows = computed(() => {
+  const rows = []
+  if (failedCount.value > 0) {
+    rows.push({ key: 'failed', title: '识别异常', description: 'AI 识别失败，可重新处理或查看原图', count: failedCount.value, unit: '份', tone: 'danger', to: { path: '/grade', query: { status: 'failed' } } })
+  }
+  if (gatePendingCount.value > 0) {
+    rows.push({ key: 'gate', title: '错题待补入错题本', description: '因缺图/缺选项未入册，补全后自动入册', count: gatePendingCount.value, unit: '道', tone: 'warning', to: { path: '/grade/task', query: { source: 'homework', gate: '1' } } })
+  }
+  return rows
+})
+const reminderTotal = computed(() => reminderRows.value.reduce((s, r) => s + r.count, 0))
+
+const hasAnyData = computed(() =>
+  pendingCount.value > 0 || failedCount.value > 0 || wrongCount.value > 0 ||
+  undigestedCount.value > 0 || notiStore.hasInProgress || students.value.length > 0
+)
+
 // ── Layer 3 学生聚合 ──
 const hasStudents = computed(() => students.value.length > 0)
-
-const activeCount = computed(() => students.value.filter((s) => s.enrollment_status !== 'paused').length)
-const pausedCount = computed(() => students.value.filter((s) => s.enrollment_status === 'paused').length)
-
-// 未活跃：在读 + (last_task_at 为空 OR 距今 > 7 天)
+const activeCount = computed(() => students.value.filter(s => s.enrollment_status !== 'paused').length)
+const pausedCount = computed(() => students.value.filter(s => s.enrollment_status === 'paused').length)
 const INACTIVE_DAYS = 7
 const inactiveCount = computed(() => {
   const cutoff = Date.now() - INACTIVE_DAYS * 24 * 60 * 60 * 1000
-  return students.value.filter((s) => {
+  return students.value.filter(s => {
     if (s.enrollment_status === 'paused') return false
     if (!s.last_task_at) return true
     return new Date(s.last_task_at).getTime() < cutoff
   }).length
 })
 
-// 待关注学生：升级为 actionable 类型（补漏/预警/清理/反复错）
-// 数据源：/api/dashboard/attention-students（一次性聚合 weak/repeat/recent 三个计数）
 const attentionStudents = computed(() => {
   const list = []
   for (const s of attentionStudentsRaw.value) {
@@ -480,61 +403,19 @@ const attentionStudents = computed(() => {
     let summary = ''
     let tone = 'default'
     let label = ''
-
-    if (s.weakCount >= 3) {
-      actionableType = 'weak'
-      summary = `${s.weakCount} 个长期未掌握知识点`
-      tone = 'primary'
-      label = '补漏'
-    } else if (s.repeatCount >= 1) {
-      actionableType = 'cleanup'
-      summary = `同一题反复错 ${s.repeatCount} 次`
-      tone = 'warning'
-      label = '清理'
-    } else if (s.recentWrongCount >= 5) {
-      actionableType = 'declining'
-      summary = `近 7 天新增 ${s.recentWrongCount} 道错题`
-      tone = 'danger'
-      label = '预警'
-    } else if (s.totalErrorCount >= 2 || s.recentWrongCount >= 3) {
-      actionableType = 'frequent'
-      summary = `累计错误 ${s.totalErrorCount} 次`
-      tone = 'warning'
-      label = '反复错'
-    }
-
-    if (actionableType) {
-      list.push({
-        id: s.id,
-        name: s.name,
-        grade: s.grade,
-        actionableType,
-        summary,
-        tone,
-        label
-      })
-    }
+    if (s.weakCount >= 3) { actionableType = 'weak'; summary = `${s.weakCount} 个长期未掌握知识点`; tone = 'primary'; label = '补漏' }
+    else if (s.repeatCount >= 1) { actionableType = 'cleanup'; summary = `同一题反复错 ${s.repeatCount} 次`; tone = 'warning'; label = '清理' }
+    else if (s.recentWrongCount >= 5) { actionableType = 'declining'; summary = `近 7 天新增 ${s.recentWrongCount} 道错题`; tone = 'danger'; label = '预警' }
+    else if (s.totalErrorCount >= 2 || s.recentWrongCount >= 3) { actionableType = 'frequent'; summary = `累计错误 ${s.totalErrorCount} 次`; tone = 'warning'; label = '反复错' }
+    if (actionableType) list.push({ id: s.id, name: s.name, grade: s.grade, actionableType, summary, tone, label })
   }
   return list.slice(0, 3)
 })
 
+// ── 交互 ──
 const go = (path) => router.push(path)
-const goActivity = (act) => {
-  if (!act.id) return
-  router.push({ path: '/grade/task', query: { taskId: act.id, source: 'homework' } })
-}
-const goStudent = (id) => router.push({ path: `/students/${id}` })
 const goAttentionStudent = (s) => router.push({ path: `/students/${s.id}` })
 const goWeakness = (kp) => router.push({ path: '/question-bank', query: { kpId: kp.kpId } })
-const goInProgress = (t) => {
-  // 批改中任务点进去直接跳批改中心（无 taskId 直达，列表里找）
-  router.push({ path: '/grade' })
-}
-const weaknessDescription = (kp) => {
-  const span = kp.gradeSpan > 1 ? `跨 ${kp.gradeSpan} 个年级` : '单一学段'
-  return `${kp.studentCount} 人未掌握 · ${span}`
-}
-
 const formatElapsed = (sec) => {
   const s = Number(sec) || 0
   if (s < 60) return `已耗时 ${s} 秒`
@@ -544,17 +425,160 @@ const formatElapsed = (sec) => {
   return `已耗时 ${h} 小时 ${m % 60} 分`
 }
 
+// ── 图表配色：运行时读取 design token，不写死品牌色 ──
+const cssVar = (name, fallback) => {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || fallback
+}
+
+const shortDay = (iso) => {
+  // "2026-09-28" -> "9/28"
+  const parts = String(iso).split('-')
+  if (parts.length !== 3) return iso
+  return `${Number(parts[1])}/${Number(parts[2])}`
+}
+
+const renderTrend = () => {
+  if (!trendChartRef.value || !hasTrend.value) return
+  if (trendChart) trendChart.dispose()
+  trendChart = echarts.init(trendChartRef.value)
+  const primary = cssVar('--wb-primary', '#6366F1')
+  const warn = cssVar('--wb-status-warning-fg', '#D97706')
+  const text2 = cssVar('--wb-text-secondary', '#64748B')
+  const border = cssVar('--wb-border-light', '#F1F5F9')
+  trendChart.setOption({
+    animation: !reduceMotion,
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: border,
+      borderWidth: 1,
+      textStyle: { color: cssVar('--wb-text', '#1E293B') }
+    },
+    grid: { left: 36, right: 36, top: 18, bottom: 26 },
+    xAxis: {
+      type: 'category',
+      data: trend.value.map(d => shortDay(d.date)),
+      axisLine: { lineStyle: { color: border } },
+      axisTick: { show: false },
+      axisLabel: { color: text2, fontSize: 11 }
+    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '份',
+        nameTextStyle: { color: text2, fontSize: 10 },
+        minInterval: 1,
+        axisLabel: { color: text2, fontSize: 11 },
+        splitLine: { lineStyle: { color: border } },
+        axisLine: { show: false },
+        axisTick: { show: false }
+      },
+      {
+        type: 'value',
+        name: '道',
+        nameTextStyle: { color: text2, fontSize: 10 },
+        minInterval: 1,
+        axisLabel: { color: text2, fontSize: 11 },
+        splitLine: { show: false },
+        axisLine: { show: false },
+        axisTick: { show: false }
+      }
+    ],
+    series: [
+      {
+        name: '作业量',
+        type: 'bar',
+        yAxisIndex: 0,
+        barWidth: 16,
+        data: trend.value.map(d => d.tasksDone || 0),
+        itemStyle: { color: primary, borderRadius: [4, 4, 0, 0], opacity: 0.9 }
+      },
+      {
+        name: '新增错题',
+        type: 'line',
+        yAxisIndex: 1,
+        smooth: true,
+        symbol: 'circle',
+        symbolSize: 7,
+        data: trend.value.map(d => d.newWrong || 0),
+        lineStyle: { color: warn, width: 2 },
+        itemStyle: { color: warn },
+        areaStyle: {
+          color: new LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: 'rgba(217, 119, 6, 0.16)' },
+            { offset: 1, color: 'rgba(217, 119, 6, 0.01)' }
+          ])
+        }
+      }
+    ]
+  })
+}
+
+const renderDigest = () => {
+  if (!digestChartRef.value || digestTotal.value <= 0) return
+  if (digestChart) digestChart.dispose()
+  digestChart = echarts.init(digestChartRef.value)
+  const success = cssVar('--wb-status-success-fg', '#16A34A')
+  const info = cssVar('--wb-status-info-fg', '#2563EB')
+  const warn = cssVar('--wb-status-warning-fg', '#D97706')
+  const text = cssVar('--wb-text', '#1E293B')
+  digestChart.setOption({
+    animation: !reduceMotion,
+    tooltip: { trigger: 'item', formatter: '{b}：{c} 道（{d}%）' },
+    legend: {
+      orient: 'vertical',
+      right: 4,
+      top: 'center',
+      itemWidth: 10,
+      itemHeight: 10,
+      textStyle: { color: cssVar('--wb-text-secondary', '#64748B'), fontSize: 12 }
+    },
+    series: [
+      {
+        name: '错题消化',
+        type: 'pie',
+        radius: ['58%', '80%'],
+        center: ['33%', '50%'],
+        avoidLabelOverlap: false,
+        label: {
+          show: true,
+          position: 'center',
+          formatter: () => `{v|${digestTotal.value}}\n{t|错题总数}`,
+          rich: {
+            v: { color: text, fontSize: 26, fontWeight: 700, lineHeight: 32 },
+            t: { color: cssVar('--wb-text-tertiary', '#94A3B8'), fontSize: 12 }
+          }
+        },
+        emphasis: { scale: false },
+        labelLine: { show: false },
+        data: [
+          { name: '完全掌握', value: digestData.value[0].value, itemStyle: { color: success } },
+          { name: '基本掌握', value: digestData.value[1].value, itemStyle: { color: info } },
+          { name: '未消化', value: digestData.value[2].value, itemStyle: { color: warn } }
+        ]
+      }
+    ]
+  })
+}
+
+const resizeCharts = () => {
+  trendChart && trendChart.resize()
+  digestChart && digestChart.resize()
+}
+
 onMounted(async () => {
   notiStore.fetchSummary()
   notiStore.fetchInProgress()
   notiStore.startInProgressPolling()
-  // Dashboard 四个聚合 API 并行加载（失败互不影响）
+
   Promise.allSettled([
-    getDashboardWeakness(5).then((d) => { dashboardWeakness.value = d?.weakness || [] }),
-    getDashboardRetryOverview().then((d) => { retryOverview.value = d?.overview || { fullyMasteredRate: 0, basicMasteredRate: 0, masteryRate: 0, inProgress: 0, awaitingRetryStudents: 0 } }),
-    getDashboardAttentionStudents(8).then((d) => { attentionStudentsRaw.value = d?.students || [] }),
-    getGatePendingItems().then(({ total }) => { gatePendingCount.value = total || 0 }).catch(() => {}) // 只读引导数据，失败静默不阻断首页
-  ]).catch((e) => console.error('[Dashboard] 加载聚合数据失败:', e))
+    getDashboardWeakness(5).then(d => { dashboardWeakness.value = d?.weakness || [] }),
+    getDashboardRetryOverview().then(d => { if (d?.overview) retryOverview.value = d.overview }),
+    getDashboardAttentionStudents(8).then(d => { attentionStudentsRaw.value = d?.students || [] }),
+    getDashboardDailyTrend(7).then(d => { trend.value = Array.isArray(d?.series) ? d.series : [] }),
+    getGatePendingItems().then(({ total }) => { gatePendingCount.value = total || 0 }).catch(() => {})
+  ]).catch(e => console.error('[Dashboard] 加载聚合数据失败:', e))
 
   try {
     const result = await getStudents(false)
@@ -565,10 +589,19 @@ onMounted(async () => {
     students.value = []
   } finally {
     initialLoading.value = false
+    await nextTick()
+    renderTrend()
+    renderDigest()
+    window.addEventListener('resize', resizeCharts)
   }
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('resize', resizeCharts)
+  trendChart && trendChart.dispose()
+  digestChart && digestChart.dispose()
+  trendChart = null
+  digestChart = null
   notiStore.stopInProgressPolling()
 })
 </script>
@@ -576,64 +609,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .dashboard { color: var(--wb-text); }
 
-/* ── Layer 2.5 · 诊断与训练（班级薄弱知识点 + 本周重练） ── */
-.diagnostic-training { margin-bottom: var(--wb-space-5); }
-
-.diagnostic-training__card {
-  margin-bottom: var(--wb-space-3);
-  padding: var(--wb-space-3) var(--wb-space-4);
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-}
-.diagnostic-training__card:last-child { margin-bottom: 0; }
-
-.diagnostic-training__card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wb-space-3);
-  margin-bottom: var(--wb-space-2);
-}
-.diagnostic-training__card-title {
-  margin: 0;
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  font-weight: var(--wb-fw-semibold);
-  line-height: var(--wb-lh-tight);
-}
-
-.retry-overview {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--wb-space-3);
-}
-@media (max-width: 960px) {
-  .retry-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
-@media (max-width: 640px) {
-  .retry-overview { grid-template-columns: 1fr; }
-}
-
-.knowledge-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  color: var(--wb-status-warning-fg);
-  font-size: var(--wb-fs-meta);
-  font-weight: var(--wb-fw-semibold);
-  background: var(--wb-status-warning-bg);
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.diagnostic-training__card :deep(.ds-list-row) {
-  padding: var(--wb-space-2) 0;
-}
-
-/* ── 移动端 sticky 主操作 ── */
+/* ── 移动端 sticky ── */
 .dashboard__sticky-cta { display: none; }
 @media (max-width: 640px) {
   .dashboard__sticky-cta {
@@ -646,7 +622,20 @@ onBeforeUnmount(() => {
   }
 }
 
-/* ── 摘要失败行级提示（替代 InlineAlert，克制） ── */
+/* ── 学生规模摘要行 ── */
+.roster-line {
+  margin: -8px 0 var(--wb-space-5);
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
+}
+.roster-line__link {
+  margin-left: var(--wb-space-2);
+  color: var(--wb-primary);
+  text-decoration: none;
+}
+.roster-line__link:hover { color: var(--wb-primary-hover); }
+
+/* ── 摘要失败行级提示 ── */
 .dashboard-note {
   display: flex;
   align-items: center;
@@ -670,11 +659,26 @@ onBeforeUnmount(() => {
 }
 .dashboard-note__retry:hover { color: var(--wb-text); }
 
-/* ── Briefing 列表：3 列 summary-strip + 识别异常行（Layer 1 · 已有） ── */
-.briefing { margin-bottom: var(--wb-space-5); }
+/* ── 两栏驾驶舱 ── */
+.cockpit {
+  display: grid;
+  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
+  gap: var(--wb-space-5);
+  align-items: start;
+}
+.cockpit__main,
+.cockpit__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wb-space-5);
+  min-width: 0;
+}
+@media (max-width: 1080px) {
+  .cockpit { grid-template-columns: 1fr; }
+}
 
-/* 顶部 3 列固定槽位（待复核 / 今日新增错题 / 待重练），0 值也展示 */
-.summary-strip {
+/* ── ① KPI 三卡 ── */
+.kpi-strip {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1px;
@@ -682,208 +686,92 @@ onBeforeUnmount(() => {
   border: 1px solid var(--wb-border-light);
   border-radius: var(--wb-radius-md);
   overflow: hidden;
+  box-shadow: var(--wb-elev-card);
 }
-
-.summary-cell {
+.kpi-card {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--wb-space-2);
-  min-height: 96px;
-  padding: var(--wb-space-3) var(--wb-space-4);
+  min-height: 116px;
+  padding: var(--wb-space-4) var(--wb-space-5);
   color: inherit;
   text-decoration: none;
   background: var(--wb-bg-card);
   box-shadow: inset 3px 0 0 transparent;
   transition: background var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.summary-cell:hover { background: var(--wb-bg-hover); }
-.summary-cell:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: -2px;
-  z-index: 1;
-}
-.summary-cell.is-primary { box-shadow: inset 3px 0 0 var(--wb-primary); }
-.summary-cell.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
-.summary-cell.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
-.summary-cell.is-success { box-shadow: inset 3px 0 0 var(--wb-status-success-fg); }
-.summary-cell.is-default { box-shadow: inset 3px 0 0 transparent; }
+.kpi-card:hover { background: var(--wb-bg-hover); }
+.kpi-card:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; z-index: 1; }
+.kpi-card.is-primary { box-shadow: inset 3px 0 0 var(--wb-primary); }
+.kpi-card.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
+.kpi-card.is-success { box-shadow: inset 3px 0 0 var(--wb-status-success-fg); }
+.kpi-card.is-default { box-shadow: inset 3px 0 0 transparent; }
 
-.summary-cell__copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--wb-space-1);
-  padding-right: 24px;
-}
-.summary-cell__title {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-card-title);
-  font-weight: var(--wb-fw-semibold);
-  line-height: var(--wb-lh-tight);
-}
-.summary-cell__description {
-  overflow: hidden;
+.kpi-card__title {
   color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
-  line-height: var(--wb-lh-normal);
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: normal;
+  font-weight: var(--wb-fw-medium);
 }
-
-.summary-cell__count {
+.kpi-card__value {
   display: flex;
   align-items: baseline;
   gap: var(--wb-space-1);
-  min-width: 0;
   margin-top: auto;
   font-variant-numeric: tabular-nums;
 }
-.summary-cell__count strong {
+.kpi-card__value strong {
   color: var(--wb-text);
   font-size: var(--wb-fs-stat);
   font-weight: var(--wb-fw-bold);
   line-height: var(--wb-lh-tight);
   letter-spacing: -0.01em;
 }
-.summary-cell__count small {
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-meta);
-  font-weight: var(--wb-fw-regular);
-}
-.summary-cell.is-primary .summary-cell__count strong { color: var(--wb-primary); }
-.summary-cell.is-warning .summary-cell__count strong { color: var(--wb-status-warning-fg); }
-.summary-cell.is-danger .summary-cell__count strong { color: var(--wb-status-danger-fg); }
-.summary-cell.is-success .summary-cell__count strong { color: var(--wb-status-success-fg); }
-.summary-cell.is-default .summary-cell__count strong { color: var(--wb-text-tertiary); }
+.kpi-card__value small { color: var(--wb-text-tertiary); font-size: var(--wb-fs-meta); }
+.kpi-card.is-primary .kpi-card__value strong { color: var(--wb-primary); }
+.kpi-card.is-warning .kpi-card__value strong { color: var(--wb-status-warning-fg); }
+.kpi-card.is-success .kpi-card__value strong { color: var(--wb-status-success-fg); }
+.kpi-card.is-default .kpi-card__value strong { color: var(--wb-text-tertiary); }
 
-.summary-cell__arrow {
-  position: absolute;
-  top: var(--wb-space-3);
-  right: var(--wb-space-4);
-  color: var(--wb-text-tertiary);
-  font-size: 16px;
-  transition: transform var(--wb-motion-fast) var(--wb-motion-ease),
-              color var(--wb-motion-fast) var(--wb-motion-ease);
-}
-.summary-cell:hover .summary-cell__arrow {
-  color: var(--wb-primary);
-  transform: translateX(2px);
-}
-
-/* 识别异常：单独一整行（0 值也展示，让老师能看到状态） */
-.summary-anomaly {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 20px;
+.kpi-card__foot {
+  display: flex;
   align-items: center;
-  gap: var(--wb-space-4);
-  min-height: 72px;
-  margin-top: var(--wb-space-3);
-  padding: var(--wb-space-3) var(--wb-space-4);
-  color: inherit;
-  text-decoration: none;
+  gap: var(--wb-space-1);
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-caption);
+}
+.kpi-card__delta { font-weight: var(--wb-fw-semibold); font-variant-numeric: tabular-nums; }
+.kpi-card__delta.is-up-bad { color: var(--wb-status-danger-fg); }
+.kpi-card__delta.is-down-good { color: var(--wb-status-success-fg); }
+.kpi-card__delta.is-flat { color: var(--wb-text-tertiary); }
+@media (max-width: 720px) {
+  .kpi-strip { grid-template-columns: 1fr; }
+}
+
+/* ── 通用面板 ── */
+.panel {
+  padding: var(--wb-space-5) var(--wb-space-6);
   background: var(--wb-bg-card);
   border: 1px solid var(--wb-border-light);
   border-radius: var(--wb-radius-md);
-  box-shadow: inset 3px 0 0 transparent;
-  transition: background var(--wb-motion-fast) var(--wb-motion-ease);
+  box-shadow: var(--wb-elev-card);
 }
-.summary-anomaly:hover { background: var(--wb-bg-hover); }
-.summary-anomaly.is-danger { box-shadow: inset 3px 0 0 var(--wb-status-danger-fg); }
-.summary-anomaly.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
-.summary-anomaly.is-warning .summary-anomaly__count strong { color: var(--wb-status-warning-fg); }
-
-.summary-anomaly__copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--wb-space-1);
-}
-.summary-anomaly__title {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-card-title);
-  font-weight: var(--wb-fw-semibold);
-  line-height: var(--wb-lh-tight);
-}
-.summary-anomaly__description {
-  overflow: hidden;
-  color: var(--wb-text-secondary);
-  font-size: var(--wb-fs-meta);
-  line-height: var(--wb-lh-normal);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summary-anomaly__count {
-  display: flex;
-  align-items: baseline;
-  gap: var(--wb-space-1);
-  min-width: 0;
-  font-variant-numeric: tabular-nums;
-}
-.summary-anomaly__count strong {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-stat);
-  font-weight: var(--wb-fw-bold);
-  line-height: var(--wb-lh-tight);
-}
-.summary-anomaly.is-danger .summary-anomaly__count strong { color: var(--wb-status-danger-fg); }
-.summary-anomaly__count small {
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-meta);
-}
-
-.summary-anomaly__arrow {
-  color: var(--wb-text-tertiary);
-  font-size: 16px;
-  transition: transform var(--wb-motion-fast) var(--wb-motion-ease),
-              color var(--wb-motion-fast) var(--wb-motion-ease);
-}
-.summary-anomaly:hover .summary-anomaly__arrow {
-  color: var(--wb-primary);
-  transform: translateX(2px);
-}
-
-@media (max-width: 720px) {
-  .summary-strip { grid-template-columns: 1fr; }
-}
-
-/* ── Briefing 骨架：summary-strip / summary-anomaly 形状的骨架，避免 layout shift ── */
-@keyframes briefing-skeleton-shimmer {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-.summary-skeleton {
-  display: block;
-  background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
-  background-size: 200% 100%;
-  animation: briefing-skeleton-shimmer 1.4s linear infinite;
-  border-radius: var(--wb-radius-sm);
-}
-.summary-skeleton--title { width: 32%; height: 14px; }
-.summary-skeleton--description { width: 70%; height: 12px; margin-top: 6px; }
-.summary-skeleton--count { width: 56px; height: 24px; margin-top: auto; }
-.summary-skeleton--count--anomaly { width: 48px; height: 22px; }
-
-/* ── Section Header：4 层结构统一节奏，--wb-fs-card-title + semibold ── */
-.section-header {
+.panel--warn { border-left: 3px solid var(--wb-status-danger-fg); }
+.panel__head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--wb-space-3);
-  margin-bottom: var(--wb-space-3);
+  margin-bottom: var(--wb-space-4);
 }
-.section-header__title {
+.panel__title {
   margin: 0;
   color: var(--wb-text);
   font-size: var(--wb-fs-card-title);
   font-weight: var(--wb-fw-semibold);
   line-height: var(--wb-lh-tight);
 }
-.section-header__link {
+.panel__link {
   display: inline-flex;
   align-items: center;
   gap: var(--wb-space-1);
@@ -891,168 +779,183 @@ onBeforeUnmount(() => {
   font-size: var(--wb-fs-meta);
   font-weight: var(--wb-fw-medium);
   text-decoration: none;
-  transition: color var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.section-header__link:hover { color: var(--wb-primary-hover); }
-.section-header__link:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: 2px;
-  border-radius: var(--wb-radius-sm);
-}
-
-/* ── Layer 1.5 · 批改中看板 ── */
-.in-progress {
-  margin-bottom: var(--wb-space-5);
-  padding: var(--wb-space-3) var(--wb-space-4);
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-left: 3px solid var(--wb-primary);
-  border-radius: var(--wb-radius-md);
-}
-.in-progress__count {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--wb-space-1);
-  color: var(--wb-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.in-progress__count strong {
-  color: var(--wb-primary);
-  font-size: var(--wb-fs-card-title);
+.panel__link:hover { color: var(--wb-primary-hover); }
+.panel__badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  color: #fff;
+  font-size: var(--wb-fs-caption);
   font-weight: var(--wb-fw-semibold);
+  line-height: 22px;
+  text-align: center;
+  background: var(--wb-status-danger-fg);
+  border-radius: 11px;
 }
-.in-progress__count small {
-  color: var(--wb-text-tertiary);
+.panel__live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-space-2);
+  color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
 }
-.is-spinning {
-  animation: in-progress-spin 1.4s linear infinite;
+.live-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--wb-primary);
+  border-radius: 50%;
+  animation: cockpit-pulse 1.4s ease-in-out infinite;
 }
-@keyframes in-progress-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .is-spinning { animation: none; }
-}
-
-/* ── Layer 2 · 最近批改完成 ── */
-.recent-activity {
-  margin-bottom: var(--wb-space-5);
-  padding: var(--wb-space-3) var(--wb-space-4);
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
+@keyframes cockpit-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
 }
 
-.activity-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.activity-list li {
-  border-top: 1px solid var(--wb-border-light);
-}
-.activity-list li:first-child {
-  border-top: 0;
-}
-.activity-list :deep(.ds-list-row) {
-  padding: var(--wb-space-2) 0;
-}
-
-/* Layer 2 avatar：32px，比批改中心 task-item 38px 略小（工作台密度高） */
-.activity-avatar {
+/* ── ② 趋势图 ── */
+.panel__legend {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  font-weight: var(--wb-fw-semibold);
-  background: var(--wb-bg-hover);
-  border-radius: 50%;
-  flex-shrink: 0;
+  gap: var(--wb-space-1);
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-caption);
 }
-.activity-avatar.is-danger {
-  color: var(--wb-status-danger-fg);
-  background: var(--wb-status-danger-bg);
-}
-.activity-avatar.is-success {
-  color: var(--wb-status-success-fg);
-  background: var(--wb-status-success-bg);
-}
+.legend-dot { display: inline-block; width: 10px; height: 10px; margin-left: var(--wb-space-3); border-radius: 3px; }
+.legend-dot.is-bar { background: var(--wb-primary); margin-left: 0; }
+.legend-dot.is-line { background: var(--wb-status-warning-fg); border-radius: 50%; }
+.chart--trend { width: 100%; height: 220px; }
 
-/* ── Layer 3 · 班级（合并段：学生总览 + 待关注） ── */
-.attention {
-  margin-bottom: var(--wb-space-5);
-}
-
-.student-overview {
+/* ── ③ 消化环 + 薄弱条 ── */
+.digest {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: var(--wb-space-6);
+  align-items: center;
+}
+@media (max-width: 900px) {
+  .digest { grid-template-columns: 1fr; }
+}
+.chart--donut { width: 100%; height: 200px; }
+.digest__donut--empty { display: flex; align-items: center; justify-content: center; min-height: 160px; }
+
+.digest__weak { min-width: 0; }
+.digest__weak-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--wb-space-3);
+}
+.digest__weak-title {
+  color: var(--wb-text-secondary);
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-medium);
+}
+.weak-list { margin: 0; padding: 0; list-style: none; }
+.weak-row {
+  display: grid;
+  grid-template-columns: minmax(0, 96px) minmax(0, 1fr) 42px;
+  align-items: center;
   gap: var(--wb-space-3);
-  padding: var(--wb-space-3) var(--wb-space-4);
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
+  padding: var(--wb-space-2) 0;
   cursor: pointer;
-  transition: background var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.student-overview:hover { background: var(--wb-bg-hover); }
-.student-overview:focus-visible {
-  outline: 2px solid var(--wb-primary);
-  outline-offset: 2px;
+.weak-row__name {
+  overflow: hidden;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.weak-row__track {
+  height: 8px;
+  background: var(--wb-bg-hover);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.weak-row__fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--wb-primary-soft), var(--wb-primary));
+  border-radius: 4px;
+  transition: width var(--wb-motion-slow) var(--wb-motion-ease);
+}
+.weak-row__count {
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-caption);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.weak-row:hover .weak-row__name { color: var(--wb-primary); }
 
-/* MiniStat 三列在 < 640px 改 1 列堆叠 */
-@media (max-width: 640px) {
-  .student-overview { grid-template-columns: 1fr; }
-}
-
-.attention-list {
-  margin: var(--wb-space-3) 0 0;
-  padding: 0;
-  list-style: none;
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-}
-.attention-list li {
-  border-top: 1px solid var(--wb-border-light);
-}
-.attention-list li:first-child {
-  border-top: 0;
-}
-
-/* Layer 3 student avatar：32px，统一工作台密度 */
-.student-avatar {
+/* ── ④ 提醒带 ── */
+.remind-list { margin: 0; padding: 0; list-style: none; }
+.remind-list li { border-top: 1px solid var(--wb-border-light); }
+.remind-list li:first-child { border-top: 0; }
+.remind-list :deep(.ds-list-row) { padding: var(--wb-space-3) 0; }
+.remind-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  color: var(--wb-primary);
-  font-size: var(--wb-fs-body);
-  font-weight: var(--wb-fw-semibold);
-  background: var(--wb-primary-soft);
-  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   flex-shrink: 0;
 }
+.remind-icon.is-danger { color: var(--wb-status-danger-fg); background: var(--wb-status-danger-bg); }
+.remind-icon.is-warning { color: var(--wb-status-warning-fg); background: var(--wb-status-warning-bg); }
+.remind-count { font-size: var(--wb-fs-body); font-weight: var(--wb-fw-bold); font-variant-numeric: tabular-nums; }
+.remind-count.is-danger { color: var(--wb-status-danger-fg); }
+.remind-count.is-warning { color: var(--wb-status-warning-fg); }
 
-/* ── 响应式 ── */
-@media (max-width: 720px) {
-  .summary-strip { grid-template-columns: 1fr; }
+/* ── ⑤⑥ 迷你列表 ── */
+.mini-list { margin: 0; padding: 0; list-style: none; }
+.mini-list li { border-top: 1px solid var(--wb-border-light); }
+.mini-list li:first-child { border-top: 0; }
+.mini-list :deep(.ds-list-row) { padding: var(--wb-space-3) 0; }
+.mini-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-semibold);
 }
+.mini-avatar.is-primary { color: var(--wb-primary); background: var(--wb-primary-soft); }
+.mini-avatar.is-student { color: var(--wb-primary); background: var(--wb-primary-soft); }
+.is-spinning { animation: cockpit-spin 1.4s linear infinite; }
+@keyframes cockpit-spin { to { transform: rotate(360deg); } }
 
-/* ── reduced-motion ── */
+/* ── 骨架 ── */
+@keyframes cockpit-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+.skeleton-block {
+  display: block;
+  background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
+  background-size: 200% 100%;
+  animation: cockpit-shimmer 1.4s linear infinite;
+  border-radius: var(--wb-radius-md);
+}
+.skeleton-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; }
+.skeleton-block--kpi { height: 116px; }
+.skeleton-block--chart { height: 300px; margin-top: var(--wb-space-5); }
+.skeleton-block--panel { height: 220px; }
+
+/* ── 错峰入场 + reduced-motion ── */
+.kpi-strip {
+  animation: wb-fade-up 0.42s var(--wb-motion-ease-out) both;
+}
+.cockpit__main > .panel,
+.cockpit__side > .panel { animation: wb-fade-up 0.42s var(--wb-motion-ease-out) both; }
+.cockpit__main > .panel:nth-child(2) { animation-delay: 0.18s; }
+.cockpit__main > .panel:nth-child(3) { animation-delay: 0.26s; }
+.cockpit__side > .panel:nth-child(1) { animation-delay: 0.20s; }
+.cockpit__side > .panel:nth-child(2) { animation-delay: 0.28s; }
+.cockpit__side > .panel:nth-child(3) { animation-delay: 0.36s; }
 @media (prefers-reduced-motion: reduce) {
-  .summary-cell,
-  .summary-cell__arrow,
-  .summary-anomaly,
-  .summary-anomaly__arrow,
-  .summary-skeleton { transition: none !important; animation: none !important; }
-  .summary-cell:hover .summary-cell__arrow,
-  .summary-anomaly:hover .summary-anomaly__arrow { transform: none; }
+  .live-dot, .is-spinning { animation: none; }
+  .kpi-strip,
+  .cockpit__main > .panel, .cockpit__side > .panel, .skeleton-block { animation: none !important; }
 }
 </style>

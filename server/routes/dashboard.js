@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getDashboardClassWeakness, getRetryOverview } from '../services/weaknessService.js'
-import { getAttentionStudents } from '../services/dashboardService.js'
+import { getAttentionStudents, getDailyTrend } from '../services/dashboardService.js'
 
 const router = Router()
 
@@ -49,6 +49,22 @@ router.get('/attention-students', async (req, res) => {
     res.json({ success: true, students: rows })
   } catch (error) {
     console.error('[dashboard/attention-students] 获取 actionable 学生失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+/**
+ * GET /api/dashboard/daily-trend
+ * Dashboard 专用：近 N 日作业量 + 新增错题双序列（首页趋势图）
+ * Query: days（默认 7，上限 30）
+ */
+router.get('/daily-trend', async (req, res) => {
+  try {
+    const { days } = req.query
+    const series = await getDailyTrend(days ? parseInt(days, 10) : 7)
+    res.json({ success: true, series })
+  } catch (error) {
+    console.error('[dashboard/daily-trend] 获取日趋势失败:', error)
     res.status(500).json({ error: error.message })
   }
 })

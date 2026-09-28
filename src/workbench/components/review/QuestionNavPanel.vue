@@ -4,6 +4,12 @@
       <span class="nav-title">题目列表</span>
       <span class="nav-stats">
         <span class="stat-attention">需处理 {{ store.needsAttentionCount }}</span>
+        <!-- [B2-7 已删除留痕] 只读标注：本次会话在本卷删过几题，复盘时不再信息黑洞 -->
+        <span
+          v-if="store.sessionExcludedCount > 0"
+          class="stat-excluded"
+          title="本次会话在本卷「删除本题」的数量（换卷清零，历史会话的删除不计入）"
+        >已删除 {{ store.sessionExcludedCount }}</span>
       </span>
     </div>
 
@@ -13,26 +19,48 @@
          全部保持原卷顺序，业务逻辑零改动。 -->
     <div class="nav-filter" role="tablist">
       <button type="button" role="tab" class="nav-filter-tab"
-        :class="{ active: filter === 'todo', danger: todoCount > 0 }"
-        :aria-selected="filter === 'todo'"
-        @click="filter = 'todo'">
+        :class="{ active: store.navFilter === 'todo', danger: todoCount > 0 }"
+        :aria-selected="store.navFilter === 'todo'"
+        @click="store.navFilter = 'todo'">
         待处理 <span class="nav-filter-count">{{ todoCount }}</span>
       </button>
       <button type="button" role="tab" class="nav-filter-tab"
-        :class="{ active: filter === 'done' }"
-        :aria-selected="filter === 'done'"
-        @click="filter = 'done'">
+        :class="{ active: store.navFilter === 'done' }"
+        :aria-selected="store.navFilter === 'done'"
+        @click="store.navFilter = 'done'">
         已确认 <span class="nav-filter-count">{{ doneCount }}</span>
       </button>
       <button type="button" role="tab" class="nav-filter-tab"
-        :class="{ active: filter === 'all' }"
-        :aria-selected="filter === 'all'"
-        @click="filter = 'all'">
+        :class="{ active: store.navFilter === 'all' }"
+        :aria-selected="store.navFilter === 'all'"
+        @click="store.navFilter = 'all'">
         全部 <span class="nav-filter-count">{{ store.allQuestions.length }}</span>
       </button>
+      <!-- [B2-6 置信阈值收纳] 低频高级参数从常驻 footer 收进「筛选」popover，
+           左栏底部空间还给题队列 -->
+      <el-popover placement="bottom-end" :width="230" trigger="click">
+        <template #reference>
+          <button type="button" class="nav-filter-gear" title="筛选与置信阈值">⚙</button>
+        </template>
+        <div class="nav-filter-pop">
+          <div class="nav-filter-row">
+            <span class="threshold-label">置信阈值</span>
+            <span class="threshold-value">{{ threshold.toFixed(2) }}</span>
+          </div>
+          <el-slider
+            v-model="threshold"
+            :min="0.5"
+            :max="1.0"
+            :step="0.05"
+            size="small"
+            @input="onThresholdChange"
+          />
+          <div class="nav-filter-hint">低于阈值的 AI 判定按「待处理」口径，需人工确认。</div>
+        </div>
+      </el-popover>
     </div>
 
-    <div class="nav-list" v-if="store.allQuestions.length > 0">
+    <div class="nav-list" ref="listEl" v-if="store.allQuestions.length > 0">
       <template v-if="visibleItems.length > 0">
       <div
         v-for="{ q, idx } in visibleItems"
@@ -81,33 +109,19 @@
       </div>
       </template>
       <div v-else class="nav-filtered-empty">
-        <template v-if="filter === 'todo'">没有待处理的题<br /><span>切「全部」可回看整卷</span></template>
-        <template v-else-if="filter === 'done'">还没有已确认的题</template>
+        <template v-if="store.navFilter === 'todo'">没有待处理的题<br /><span>切「全部」可回看整卷</span></template>
+        <template v-else-if="store.navFilter === 'done'">还没有已确认的题</template>
       </div>
     </div>
 
     <div class="nav-empty" v-else>
       <span>请选择学生和试卷</span>
     </div>
-
-    <div class="nav-footer">
-      <span class="threshold-label">置信阈值</span>
-      <el-slider
-        v-model="threshold"
-        :min="0.5"
-        :max="1.0"
-        :step="0.05"
-        size="small"
-        style="width: 140px"
-        @input="onThresholdChange"
-      />
-      <span class="threshold-value">{{ threshold.toFixed(2) }}</span>
-    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import StatusIcon from './StatusIcon.vue'
 import { getReviewStateLabel } from '../../../utils/reviewDecision'
@@ -120,19 +134,18 @@ const threshold = ref(store.confidenceThreshold)
 // ── 状态优先导航（2026-09-27 交互重构）──
 // 三个页签：待处理 / 已确认 / 全部，计数与 reviewStore.questionConfirmationMap
 // （6 态同源口径）完全一致 —— 「待处理」= pending/exception/processing，
-// 与顶栏「还差 N 题」、needsAttentionCount 是同一个数，不会出现两个口径打架。
-// [2026-09-27 修正] 默认页签必须是「全部」：状态过滤只能由老师主动点击触发，
-// 不能当默认遮罩 —— 否则打开一份已复核完的卷（待处理 0），列表就是空的，
-// 老师第一反应是"题没了"而不是"我过滤了"。
+// 与上下文条「还差 N 题」、needsAttentionCount 是同一个数，不会出现两个口径打架。
+// [B1-4] 页签状态已入 store（store.navFilter）：上下文条「还差 N 题」的跳转与这里
+// 的页签同源，不再是两套语义。默认仍为「全部」——状态过滤只能由老师主动点击触发，
+// 不能当默认遮罩（打开已复核完的卷时列表不能是空的）。
 // 只过滤显示、不重排数组：idx 仍是 store.allQuestions 的真实下标，
 // jumpToQuestion / 卷标 / 页标 / paper-start 分隔全部原样生效。
-const filter = ref('all')
 const todoCount = computed(() => store.reviewProgress.unconfirmed)
 const doneCount = computed(() => store.reviewProgress.confirmed)
 const visibleItems = computed(() => {
   const all = store.allQuestions
-  if (filter.value === 'all') return all.map((q, idx) => ({ q, idx }))
-  const wantConfirmed = filter.value === 'done'
+  if (store.navFilter === 'all') return all.map((q, idx) => ({ q, idx }))
+  const wantConfirmed = store.navFilter === 'done'
   const map = store.questionConfirmationMap
   const items = []
   all.forEach((q, idx) => {
@@ -140,6 +153,18 @@ const visibleItems = computed(() => {
   })
   return items
 })
+
+// [B1-6] 判定自动前进 / 翻题 / 页签切换后，当前题行滚动到可视区：
+// 连续批改时队列位置在推进，老师不用在长列表里找"我现在改到哪了"。
+const listEl = ref(null)
+watch(
+  () => [store.currentReviewIndex, store.navFilter],
+  async () => {
+    await nextTick()
+    listEl.value?.querySelector('.nav-item.active')?.scrollIntoView({ block: 'nearest' })
+  },
+  { immediate: true }
+)
 
 // 状态文案走同源函数：exception 桶里"学生未作答"与"AI 判不出"是两回事，
 // 旧版一律写死「未识别答案」，会让答案明明已识别的题看着像 OCR 故障。
@@ -447,16 +472,7 @@ const onThresholdChange = (val) => {
   color: var(--wb-text-tertiary);
   font-size: 13px;
 }
-.nav-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--wb-border);
-  flex-shrink: 0;
-}
-
-/* ── 置信阈值 ── */
+/* ── 置信阈值（[B2-6] 收进筛选 popover）── */
 .threshold-label {
   font-size: 12px;
   color: var(--wb-text-tertiary);
@@ -467,5 +483,26 @@ const onThresholdChange = (val) => {
   color: var(--wb-text-secondary);
   min-width: 36px;
   text-align: right;
+}
+.nav-filter-gear {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  color: var(--wb-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.nav-filter-gear:hover { background: var(--wb-bg); color: var(--wb-text-secondary); }
+.nav-filter-pop { display: flex; flex-direction: column; gap: 8px; }
+.nav-filter-row { display: flex; justify-content: space-between; align-items: center; }
+.nav-filter-hint { font-size: 12px; color: var(--wb-text-tertiary); }
+/* [B2-7 已删除留痕] */
+.stat-excluded {
+  color: var(--wb-text-tertiary);
+  margin-left: 8px;
+  white-space: nowrap;
 }
 </style>

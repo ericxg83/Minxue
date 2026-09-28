@@ -256,6 +256,16 @@ export const getDashboardAttentionStudents = async (limit = 5) => {
   return data
 }
 
+// Dashboard 聚合：近 N 日作业量 + 新增错题双序列（首页趋势图）
+export const getDashboardDailyTrend = async (days = 7) => {
+  const cacheKey = `dashboard_daily_trend_cache_${days}`
+  const cached = readCache(cacheKey, 90 * 1000)
+  if (cached) return cached
+  const data = await apiRequest(`/dashboard/daily-trend?days=${days}`)
+  if (data?.success) writeCache(cacheKey, data)
+  return data
+}
+
 export const getExamsByStudent = async (studentId, useCache = true) => {
   const cacheKey = `exams_cache_${studentId}`
 
