@@ -115,6 +115,7 @@ import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
 import wrongQuestionsExportRouter from './routes/wrongQuestionsExport.js'
 import dashboardRouter from './routes/dashboard.js'
+import quotaRouter from './routes/quota.js'
 import weekendHandoutRouter from './routes/weekendHandout.js'
 import teachingMarksRouter from './routes/teachingMarks.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
@@ -4465,6 +4466,8 @@ app.use('/api/teaching-question-types', teachingQuestionTypesRouter)
 app.use('/api/weakness', weaknessRouter)
 app.use('/api/exam-pdf', examPdfRouter)
 app.use('/api/dashboard', dashboardRouter)
+// 配额哨兵（提案 1）：GET /api/quota/status，供工作台顶栏降级横幅与夜间巡检读取
+app.use('/api/quota', quotaRouter)
 // weekendHandout 路由内部已写完整路径（/api/weekend-ppt/*），直接挂载避免双重前缀
 app.use(weekendHandoutRouter)
 // teachingMarks 同理（内部为 /api/teaching-marks）—— 白板讲题状态的写入侧
