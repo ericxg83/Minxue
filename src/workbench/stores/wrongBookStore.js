@@ -344,11 +344,14 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
 
   // 批量更新掌握状态（带乐观更新）
   const batchUpdateStatus = async (wqIds, status) => {
+    // previousStates 必须声明在 try 之外：catch 分支的回滚逻辑要读它。
+    // 曾声明在 try 内，接口失败时回滚语句自身抛 ReferenceError，乐观更新永不回退
+    // （2026-09-29 巡检发现，回归锁 test/wrongBookRollbackScope.test.mjs）
+    const previousStates = new Map()
     try {
       if (!currentStudent.value) return false
 
       // 乐观更新：立即更新本地状态
-      const previousStates = new Map()
       for (const wqId of wqIds) {
         const wq = wrongQuestions.value.find(w => w.id === wqId)
         if (wq) {
