@@ -14,13 +14,12 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getTasksByStudent, getWrongQuestionsByStudent, getQuestionsByTask, getKnowledgeMastery } from '../../services/apiService'
-import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
+import { getTasksByStudent, getWrongQuestionsByStudent, getQuestionsByIds, getKnowledgeMastery } from '../../services/apiService'
+import { LIFECYCLE_STATUS } from './lifecycleStore'
 import { dedupeWrongQuestions } from '../../domain/questionIdentity'
 import dayjs from 'dayjs'
 
 export const useGrowthStore = defineStore('growth', () => {
-  const lifecycleStore = useLifecycleStore()
   const currentStudentId = ref(null)
 
   // 原始数据

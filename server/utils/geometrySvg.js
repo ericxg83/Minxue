@@ -584,7 +584,9 @@ function resolvablePolygon(pg, segKeys, findCoord) {
 /**
  * 圆弧的 SVG path d 串。数学坐标下从 from 逆时针扫到 to。
  *
- * SVG 的 y 轴向下，所以数学逆时针 = SVG 顺时针，sweep-flag 固定为 1；
+ * 坐标映射时已对 y 取反，所以数学逆时针在屏幕上仍是视觉逆时针，sweep-flag 固定为 0；
+ * 曾误写 1（认为“SVG y 向下→数学逆时针=SVG 顺时针”），那个推理漏算了映射阶段的
+ * y 取反，实际会把圆心镜像到弦的另一侧。方向结论以函数尾部注释为准。
  * 是否走优弧由数学坐标下 from→to 的逆时针夹角是否超过 π 决定。
  *
  * @param {object} arc - { center, from, to }，三者均为 points 里的 label

@@ -171,6 +171,9 @@ dist_verify/
 dist_verify2/
 dist_tmcheck/
 dist_tmcheck2/
+# 夜间巡检的校验构建产物（巡检写死到独立目录，不碰 dist/）
+dist_nightly_*/
+__nightly_lint.json
 # 排障临时目录（含下载的 PDF、环境密钥清单等，绝不入库）
 tmp/
 # 学生作业截图（隐私）
@@ -181,3 +184,7 @@ server/backups/
 # deliverables/ 为课件/讲义等生成产物输出目录（含数百 MB pptx），非源码，整目录忽略。（2026-09-20 加入，修复 Minxue Deploy 自动提交守护进程 git add 长期持锁阻塞手动提交）
 # 若需保留某份交付物，请单独 git add -f 该文件，勿放开整目录。
 deliverables/
+
+# 巡检排查目录：构建快照与外带 agent 技能库，不入库（2026-09-30 提案4）
+dist_gatefix/
+external/

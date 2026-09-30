@@ -72,7 +72,10 @@ export default defineConfig(({ mode }) => ({
   build: {
     // App 构建输出到独立目录，避免与 Web 构建产物互相覆盖；
     // capacitor.config.json 的 webDir 指向此目录。
-    outDir: isAppBuild ? 'dist-app' : 'dist',
+    // BUILD_OUTDIR：仅供夜间巡检等校验场景把产物引到临时目录，
+    // 因为 dist/ 是发布生效链路，不能让无人值守的构建去覆盖它。
+    // 未设置时行为与改动前完全一致。
+    outDir: isAppBuild ? 'dist-app' : process.env.BUILD_OUTDIR || 'dist',
     rollupOptions: {
       input: isAppBuild
         ? { main: resolve(__dirname, 'index.html') }

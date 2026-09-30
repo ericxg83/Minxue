@@ -79,8 +79,11 @@ test('圆弧：逆时针扫角小于 180° → large-arc-flag = 0', () => {
   const svg = renderGeometrySvg({ ...SECTOR, arcs: [{ center: 'O', from: 'A', to: 'B' }] })
   const d = firstPathD(svg)
   assert.ok(d, '应输出 path')
-  // d 形如 M x y A r r 0 <largeArc> 1 x y
-  assert.match(d, /^M [\d.-]+ [\d.-]+ A [\d.-]+ [\d.-]+ 0 0 1 [\d.-]+ [\d.-]+$/)
+  // d 形如 M x y A r r 0 <largeArc> 0 x y
+  // sweep=0：坐标映射时已对 y 取反，数学逆时针在屏幕上仍是视觉逆时针，对应 SVG sweep=0。
+  // 2026-09-27 提交 5c2ae7f「弧镜像修复」由 1 改为 0（写 1 会把圆心镜像到弦另一侧），
+  // 行为由 test/geometryArcSweep.test.mjs 用圆心距强锁。本用例只断言 flag 本身。
+  assert.match(d, /^M [\d.-]+ [\d.-]+ A [\d.-]+ [\d.-]+ 0 0 0 [\d.-]+ [\d.-]+$/)
 })
 
 test('圆弧：逆时针扫角大于 180° → large-arc-flag = 1（优弧）', () => {
@@ -96,7 +99,7 @@ test('圆弧：逆时针扫角大于 180° → large-arc-flag = 1（优弧）', 
     arcs: [{ center: 'O', from: 'A', to: 'B' }]
   }
   const d = firstPathD(renderGeometrySvg(structure))
-  assert.match(d, /^M [\d.-]+ [\d.-]+ A [\d.-]+ [\d.-]+ 0 1 1 [\d.-]+ [\d.-]+$/)
+  assert.match(d, /^M [\d.-]+ [\d.-]+ A [\d.-]+ [\d.-]+ 0 1 0 [\d.-]+ [\d.-]+$/)
 })
 
 test('圆弧：center 或端点不存在 → 不输出 path', () => {

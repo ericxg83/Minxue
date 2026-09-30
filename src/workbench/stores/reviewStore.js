@@ -1779,8 +1779,8 @@ export const useReviewStore = defineStore('review', () => {
     // 撤销上一笔（仅回退前端内存状态，不反向写库）
     canUndo,
     undoLastReview,
-    // [B2] 判定即过开关 / 已删除留痕 / 快捷键速查浮层
-    autoAdvanceEnabled,
+    // [B2] 已删除留痕 / 快捷键速查浮层
+    // （autoAdvanceEnabled 已在本返回对象上方导出过，此处的重复键于 2026-09-30 移除）
     sessionExcludedCount,
     shortcutsVisible,
     undoHint,
