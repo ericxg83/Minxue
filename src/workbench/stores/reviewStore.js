@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes, getGatePendingItems, sweepGatePending, recropFigures } from '../../services/apiService'
-import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
+import { LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness, COMPLETENESS_CODES } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
 import {
@@ -24,8 +24,6 @@ import { resolvePaperAutoComplete } from '../../domain/paperReviewDecision.js'
 import { buildRetryPaperOrder } from '../../utils/retryPaperOrder'
 
 export const useReviewStore = defineStore('review', () => {
-  const lifecycleStore = useLifecycleStore()
-  
   // 学生列表
   const students = ref([])
   const currentStudent = ref(null)
@@ -90,7 +88,6 @@ export const useReviewStore = defineStore('review', () => {
   // store 延迟自动 completeTaskReview 并记录本次是自动完成，UI 层（ReviewTopBar）
   // 消费后弹轻提示。老师仍可翻看刚复核完的卷面、留底或跳下一份。
   const autoReviewNotice = ref(null) // { taskName, at }
-  let autoReviewTimer = null
 
   // P2 门禁分层（2026-09-23）：系统侧缺项被自动记为 wrong_no_book 的次数汇总，
   // 供 UI 弹一条轻提示（「N 道题因题目元素缺失未入错题本，已自动记录」），
@@ -1020,8 +1017,6 @@ export const useReviewStore = defineStore('review', () => {
     return raw
   }
   const readAutoReviewed = (t) => parseResultObject(t?.result).autoReviewed === true
-  const isAutoReviewedTask = (t) =>
-    t?._isPaper ? (t._pageTasks || []).some(readAutoReviewed) : readAutoReviewed(t)
 
   // 本地把卷标为「已复核」。
   // paper 模式的权威字段是 _reviewState，status 只是派生镜像；两处必须一起改，

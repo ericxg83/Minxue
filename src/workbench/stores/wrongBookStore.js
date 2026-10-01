@@ -1,16 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getWrongQuestionsByStudent, deleteWrongQuestion, updateWrongQuestionStatus, batchUpsertWrongQuestionStatus } from '../../services/apiService'
-import { useLifecycleStore, LIFECYCLE_STATUS } from './lifecycleStore'
+import { LIFECYCLE_STATUS } from './lifecycleStore'
 import { dedupeWrongQuestions } from '../../domain/questionIdentity'
 import { debounce } from '../utils/performance'
 import dayjs from 'dayjs'
 
-// 使用真实API数据
-const USE_MOCK_DATA = false
-
 export const useWrongBookStore = defineStore('wrongBook', () => {
-  const lifecycleStore = useLifecycleStore()
 
   // 状态
   const wrongQuestions = ref([])
