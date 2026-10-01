@@ -3,6 +3,7 @@
     <AppSidebar />
     <div class="app-main">
       <AppHeader />
+      <QuotaBanner />
       <main class="workbench-content"><router-view /></main>
     </div>
     <div v-if="showDesktopNotice" class="desktop-notice" role="status">
@@ -26,6 +27,7 @@ onMounted(() => { updateViewportNotice(); window.addEventListener("resize", upda
 onUnmounted(() => window.removeEventListener("resize", updateViewportNotice))
 import AppHeader from './components/layout/AppHeader.vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
+import QuotaBanner from './components/layout/QuotaBanner.vue'
 </script>
 
 <style>
