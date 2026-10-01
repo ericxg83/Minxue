@@ -30,10 +30,10 @@ defineProps({
 .image-wrapper {
   display: inline-block;
   max-width: 100%;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: var(--wb-radius-xs);
   overflow: hidden;
-  background: #f9fafb;
+  background: #f8fafc;
 }
 
 .image-content {
@@ -51,7 +51,7 @@ defineProps({
   justify-content: center;
   gap: 8px;
   color: #9ca3af;
-  border: 2px dashed #e5e7eb;
+  border: 2px dashed #e2e8f0;
   border-radius: var(--wb-radius-xs);
 }
 

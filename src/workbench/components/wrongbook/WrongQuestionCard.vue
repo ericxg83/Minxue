@@ -409,7 +409,7 @@ async function handleGenerateVariants() {
   line-height: 1.6;
   margin-bottom: 6px;
   padding-left: 8px;
-  border-left: 3px solid var(--wb-border, #e5e6eb);
+  border-left: 3px solid var(--wb-border, #e2e8f0);
 }
 
 .question-content {
@@ -511,7 +511,7 @@ async function handleGenerateVariants() {
 .variants-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1D2129;
+  color: #1e293b;
 }
 .variants-empty {
   font-size: 12px;
@@ -525,7 +525,7 @@ async function handleGenerateVariants() {
 }
 .variant-item {
   background: #fff;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 10px 12px;
 }
@@ -541,7 +541,7 @@ async function handleGenerateVariants() {
 .variant-content {
   font-size: 13px;
   line-height: 1.6;
-  color: #1D2129;
+  color: #1e293b;
   margin-bottom: 6px;
 }
 .variant-options {

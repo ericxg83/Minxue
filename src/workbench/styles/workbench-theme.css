@@ -19,7 +19,7 @@
   --el-color-primary-light-7: #E0E7FF;
   --el-color-primary-light-8: #EEF2FF;
   --el-color-primary-light-9: #F5F6FF;
-  --el-color-primary-dark-2: #4F46E5;
+  --el-color-primary-dark-2: #6366f1;
 
   /* 成功/警告/危险 与移动端语义色一致 */
   --el-color-success: #16A34A;
@@ -189,7 +189,7 @@
   --wb-bg-mist: #F8FAFC;
 
   --wb-primary: #6366F1;
-  --wb-primary-hover: #4F46E5;
+  --wb-primary-hover: #6366f1;
   --wb-primary-soft: #E0E7FF;
   --wb-primary-mist: #EEF2FF;
   --wb-primary-light-7: #E0E7FF;

@@ -21,7 +21,7 @@ defineEmits(['edit'])
 .section-block {
   margin: 16px 0 8px;
   padding: 8px;
-  background: #f9fafb;
+  background: #f8fafc;
   border-radius: var(--wb-radius-xs);
   border-left: 3px solid var(--wb-primary);
 }

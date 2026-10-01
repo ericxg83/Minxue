@@ -865,7 +865,7 @@ const handleRetryTask = async () => {
   font-weight: 700;
   color: var(--wb-text);
   padding: 4px 0;
-  border-bottom: 1px solid var(--wb-border, #E5E7EB);
+  border-bottom: 1px solid var(--wb-border, #e2e8f0);
 }
 .pending-gate-count {
   margin-left: 8px;

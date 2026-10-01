@@ -44,7 +44,7 @@ defineEmits(['edit'])
 }
 
 .question-block:hover {
-  background: #f9fafb;
+  background: #f8fafc;
 }
 
 .question-block.low-conf {

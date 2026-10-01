@@ -1429,7 +1429,7 @@ async function loadFromDiagnosis() {
   justify-content: space-between;
   padding: 12px 24px;
   background: #fff;
-  border-bottom: 1px solid #E5E6EB;
+  border-bottom: 1px solid #e2e8f0;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -1443,7 +1443,7 @@ async function loadFromDiagnosis() {
 .toolbar-title {
   font-size: 16px;
   font-weight: 600;
-  color: #1D2129;
+  color: #1e293b;
 }
 .toolbar-right {
   display: flex;
@@ -1455,7 +1455,7 @@ async function loadFromDiagnosis() {
   font-size: 13px;
   color: #86909C;
   background: #F7F8FA;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 10px 12px;
   margin-bottom: 12px;
@@ -1464,7 +1464,7 @@ async function loadFromDiagnosis() {
 .knowledge-tree-wrap {
   max-height: 420px;
   overflow-y: auto;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #e2e8f0;
   border-radius: 6px;
   padding: 8px;
 }
@@ -1480,7 +1480,7 @@ async function loadFromDiagnosis() {
 }
 .template-option-label {
   font-size: 13px;
-  color: #1D2129;
+  color: #1e293b;
   font-weight: 500;
 }
 .template-option-desc {
@@ -1530,7 +1530,7 @@ async function loadFromDiagnosis() {
   min-height: 500px;
   text-align: center;
   background: #fff;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
   padding: 60px 48px;
   position: relative;
@@ -1548,7 +1548,7 @@ async function loadFromDiagnosis() {
 .cover-title {
   font-size: 32px;
   font-weight: 700;
-  color: #1D2129;
+  color: #1e293b;
   margin: 0 0 24px;
   line-height: 1.4;
 }
@@ -1583,8 +1583,8 @@ async function loadFromDiagnosis() {
   gap: 12px;
   padding: 12px 0;
   font-size: 15px;
-  color: #1D2129;
-  border-bottom: 1px dashed #E5E6EB;
+  color: #1e293b;
+  border-bottom: 1px dashed #e2e8f0;
 }
 .toc-dot {
   width: 6px;
@@ -1634,7 +1634,7 @@ async function loadFromDiagnosis() {
 .block-kp-overview-en {
   font-family: 'Georgia', 'Times New Roman', serif;
   background: #EEF2FF;
-  border-left: 3px solid #4F46E5;
+  border-left: 3px solid #6366f1;
   line-height: 1.9;
 }
 
@@ -1647,7 +1647,7 @@ async function loadFromDiagnosis() {
   padding: 18px 8px;
   background: #FFFFFF;
   border-radius: 10px;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   transition: transform 0.15s ease;
 }
@@ -1677,7 +1677,7 @@ async function loadFromDiagnosis() {
   display: inline-block;
   padding: 4px 12px;
   background: #EEF2FF;
-  color: #4F46E5;
+  color: #6366f1;
   border: 1px solid #C7D2FE;
   border-radius: 14px;
   font-size: 12px;
@@ -1703,7 +1703,7 @@ async function loadFromDiagnosis() {
 .block-type-section {
   font-size: 20px;
   font-weight: 700;
-  color: #4F46E5;
+  color: #6366f1;
   margin: 20px 0 12px;
   padding: 10px 16px;
   background: linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 100%);
@@ -1721,8 +1721,8 @@ async function loadFromDiagnosis() {
 }
 .type-summary-empty {
   padding: 16px;
-  background: #F9FAFB;
-  border: 1px dashed #E5E7EB;
+  background: #f8fafc;
+  border: 1px dashed #e2e8f0;
   border-radius: 6px;
   color: #9CA3AF;
   font-size: 13px;
@@ -1783,7 +1783,7 @@ async function loadFromDiagnosis() {
 .block-question {
   padding: 16px 20px;
   background: #FFFFFF;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   margin-bottom: 12px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -1804,7 +1804,7 @@ async function loadFromDiagnosis() {
 }
 .question-content {
   font-size: 18px;
-  color: #1D2129;
+  color: #1e293b;
   line-height: 1.8;
   margin-bottom: 8px;
 }
@@ -1818,7 +1818,7 @@ async function loadFromDiagnosis() {
   max-width: 200px;
   max-height: 200px;
   border-radius: 4px;
-  border: 1px solid #E5E6EB;
+  border: 1px solid #e2e8f0;
 }
 .image-error {
   display: flex;
@@ -1854,7 +1854,7 @@ async function loadFromDiagnosis() {
   margin-bottom: 6px;
 }
 .answer-label { color: #FA8C16; }
-.answer-value { color: #1D2129; }
+.answer-value { color: #1e293b; }
 .answer-correct {
   color: #52C41A;
   margin-left: auto;
@@ -1889,7 +1889,7 @@ async function loadFromDiagnosis() {
   background: #F0F9FF;
   border-radius: 6px;
   font-size: 13px;
-  color: #1D2129;
+  color: #1e293b;
   margin: 8px 0;
 }
 .related-kp-label {
@@ -1943,7 +1943,7 @@ async function loadFromDiagnosis() {
   font-family: inherit;
   resize: vertical;
   background: #FFFBEB;
-  color: #1D2129;
+  color: #1e293b;
 }
 .note-textarea:focus {
   outline: none;
@@ -1993,7 +1993,7 @@ async function loadFromDiagnosis() {
 .script-step-title {
   font-size: 15px;
   font-weight: 600;
-  color: #1D2129;
+  color: #1e293b;
 }
 .script-step-detail {
   font-size: 13px;
@@ -2008,7 +2008,7 @@ async function loadFromDiagnosis() {
 }
 .script-step-points li {
   font-size: 13px;
-  color: #1D2129;
+  color: #1e293b;
   line-height: 1.7;
   margin-bottom: 2px;
 }
@@ -2047,7 +2047,7 @@ async function loadFromDiagnosis() {
 .page-header {
   padding: 10px 0;
   margin-bottom: 20px;
-  border-bottom: 1px solid #E5E7EB;
+  border-bottom: 1px solid #e2e8f0;
   font-size: 13px;
   color: #9CA3AF;
   display: flex;
@@ -2061,7 +2061,7 @@ async function loadFromDiagnosis() {
 .page-footer {
   padding: 12px 0;
   margin-top: 24px;
-  border-top: 1px solid #E5E7EB;
+  border-top: 1px solid #e2e8f0;
   font-size: 12px;
   color: #9CA3AF;
   text-align: center;
@@ -2077,7 +2077,7 @@ async function loadFromDiagnosis() {
   gap: 0;
   border-radius: 10px;
   overflow: hidden;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .compare-side {
@@ -2110,7 +2110,7 @@ async function loadFromDiagnosis() {
   font-size: 14px;
   font-weight: 800;
   color: #9CA3AF;
-  background: #F9FAFB;
+  background: #f8fafc;
   writing-mode: vertical-lr;
   letter-spacing: 2px;
 }
@@ -2122,8 +2122,8 @@ async function loadFromDiagnosis() {
   gap: 10px;
   padding: 10px 18px;
   margin-bottom: 20px;
-  background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
-  border: 1px solid #E5E7EB;
+  background: linear-gradient(135deg, #f8fafc 0%, #F3F4F6 100%);
+  border: 1px solid #e2e8f0;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 500;
@@ -2222,8 +2222,8 @@ async function loadFromDiagnosis() {
   background: #6366F1;
   border-radius: 2px;
 }
-.kp-label-key { color: #4F46E5; }
-.kp-label-key::before { background: #4F46E5; }
+.kp-label-key { color: #6366f1; }
+.kp-label-key::before { background: #6366f1; }
 .kp-label-difficult { color: #D97706; }
 .kp-label-difficult::before { background: #F59E0B; }
 .kp-label-mistake { color: #DC2626; }
@@ -2309,14 +2309,14 @@ async function loadFromDiagnosis() {
   margin: 20px 0;
   padding: 24px 28px;
   background: #FFFFFF;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   border-radius: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 .solution-title {
   font-size: 16px;
   font-weight: 700;
-  color: #4F46E5;
+  color: #6366f1;
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 2px solid #EEF2FF;
@@ -2357,9 +2357,9 @@ async function loadFromDiagnosis() {
 .solution-step-formula {
   margin-top: 8px;
   padding: 10px 16px;
-  background: #F9FAFB;
+  background: #f8fafc;
   border-radius: 6px;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   font-size: 16px;
   overflow-x: auto;
 }
@@ -2393,16 +2393,16 @@ async function loadFromDiagnosis() {
   gap: 12px;
   padding: 14px 18px;
   margin: 10px 0;
-  background: #F9FAFB;
+  background: #f8fafc;
   border-radius: 8px;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #e2e8f0;
   font-size: 18px;
   line-height: 1.8;
   color: #1F2937;
 }
 .type-example-label {
   font-weight: 700;
-  color: #4F46E5;
+  color: #6366f1;
   flex-shrink: 0;
   background: #EEF2FF;
   padding: 2px 10px;
@@ -2461,7 +2461,7 @@ async function loadFromDiagnosis() {
 }
 .present-kp {
   font-size: 15px;
-  color: #E5E7EB;
+  color: #e2e8f0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2581,14 +2581,14 @@ async function loadFromDiagnosis() {
   align-items: center;
   justify-content: center;
   background: #EEF2FF;
-  color: #4F46E5;
+  color: #6366f1;
   border-radius: 50%;
   font-weight: 700;
   flex-shrink: 0;
 }
 .present-script-panel {
   position: absolute; right: 24px; top: 70px; bottom: 78px; width: 320px; overflow: auto;
-  padding: 16px; background: rgba(15, 23, 42, 0.96); color: #E5E7EB;
+  padding: 16px; background: rgba(15, 23, 42, 0.96); color: #e2e8f0;
   border: 1px solid #334155; border-radius: 10px; z-index: 2;
 }
 .present-script-title { font-size: 16px; font-weight: 700; color: #A5B4FC; margin-bottom: 14px; }

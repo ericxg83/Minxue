@@ -44,7 +44,7 @@
               </el-select>
             </div>
             <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudent?.name || ''" />
-            <el-button type="primary" size="default" class="export-btn">
+            <el-button type="primary" size="default" class="export-btn" :loading="exportingReport" @click="exportWeeklyReport">
               <el-icon><Download /></el-icon>
               导出报告
             </el-button>
@@ -309,6 +309,8 @@ import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
 import { getRecommendedTopics } from '../../services/apiService'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
+import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
+import { saveAs } from 'file-saver'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart, PieChart as EChartsPieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
@@ -329,6 +331,36 @@ const loading = ref(false)
 const currentStudent = computed(() => {
   return students.value.find(s => s.id === selectedStudentId.value)
 })
+
+// 导出报告（2026-10-01 接线）：原按钮无点击事件，现接上周报 PDF 生成器（复用学习诊断页同款能力）
+const exportingReport = ref(false)
+const exportWeeklyReport = async () => {
+  if (!selectedStudentId.value) {
+    ElMessage.warning('请先选择学生')
+    return
+  }
+  exportingReport.value = true
+  try {
+    const result = await generateWeeklyReport(selectedStudentId.value, { mode: 'week', offset: 0 })
+    if (!result) {
+      ElMessage.warning('该时段暂无学习数据')
+      return
+    }
+    if (result.mode === 'print') {
+      ElMessage.success(result.message || '请在打印对话框另存为 PDF')
+    } else if (result.mode === 'download' && result.pdfBlob) {
+      const name = currentStudent.value?.name || '学生'
+      saveAs(result.pdfBlob, `${name}_周学习诊断报告_${dayjs().format('YYYYMMDD')}.pdf`)
+      ElMessage.success('报告已生成')
+    } else {
+      ElMessage.error('生成失败：未拿到 PDF')
+    }
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e?.message || '未知错误'))
+  } finally {
+    exportingReport.value = false
+  }
+}
 
 const handleStudentChange = (studentId) => {
   loading.value = true
@@ -459,15 +491,15 @@ const initCharts = () => {
         trigger: 'axis',
         formatter: '{b}<br/>{c}%',
         backgroundColor: '#fff',
-        borderColor: '#E5E6EB',
+        borderColor: '#e2e8f0',
         borderWidth: 1,
-        textStyle: { color: '#1D2129' },
+        textStyle: { color: '#1e293b' },
       },
       grid: { left: 40, right: 20, top: 20, bottom: 30 },
       xAxis: {
         type: 'category',
         data: trendData.map(d => d.date),
-        axisLine: { lineStyle: { color: '#E5E6EB' } },
+        axisLine: { lineStyle: { color: '#e2e8f0' } },
         axisLabel: { color: '#86909C', fontSize: 11 },
         axisTick: { show: false },
       },
@@ -520,15 +552,15 @@ const initCharts = () => {
         trigger: 'axis',
         formatter: '{b}<br/>错题数：{c} 题',
         backgroundColor: '#fff',
-        borderColor: '#E5E6EB',
+        borderColor: '#e2e8f0',
         borderWidth: 1,
-        textStyle: { color: '#1D2129' },
+        textStyle: { color: '#1e293b' },
       },
       grid: { left: 40, right: 20, top: 20, bottom: 30 },
       xAxis: {
         type: 'category',
         data: wrongTrend.map(d => d.date),
-        axisLine: { lineStyle: { color: '#E5E6EB' } },
+        axisLine: { lineStyle: { color: '#e2e8f0' } },
         axisLabel: { color: '#86909C', fontSize: 11 },
         axisTick: { show: false },
       },
@@ -561,9 +593,9 @@ const initCharts = () => {
         trigger: 'item',
         formatter: '{b}: {c} ({d}%)',
         backgroundColor: '#fff',
-        borderColor: '#E5E6EB',
+        borderColor: '#e2e8f0',
         borderWidth: 1,
-        textStyle: { color: '#1D2129' },
+        textStyle: { color: '#1e293b' },
       },
       series: [{
         type: 'pie',

@@ -1918,7 +1918,7 @@ const handleRetryGeometry = async () => {
   white-space: pre-wrap;
   word-break: break-word;
   padding-left: 8px;
-  border-left: 3px solid var(--wb-border, #e5e6eb);
+  border-left: 3px solid var(--wb-border, #e2e8f0);
   margin-bottom: 4px;
 }
 

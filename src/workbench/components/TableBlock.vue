@@ -34,11 +34,11 @@ defineEmits(['edit'])
 
 .content-table td {
   padding: 8px 12px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   text-align: center;
 }
 
 .content-table tr:nth-child(even) {
-  background: #f9fafb;
+  background: #f8fafc;
 }
 </style>

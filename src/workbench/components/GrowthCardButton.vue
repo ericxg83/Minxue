@@ -106,7 +106,7 @@ async function exportPng() {
   width: 400px;
   margin: 0 auto;
   padding: 24px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   border-radius: 16px;
   background: linear-gradient(180deg, #eef2ff 0%, #ffffff 34%);
 }
@@ -121,7 +121,7 @@ async function exportPng() {
 .growth-card__grid { display: flex; gap: 10px; margin: 18px 0 14px; }
 .growth-card__cell {
   flex: 1; text-align: center; padding: 14px 4px;
-  background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
 }
 .growth-card__cell--good { background: #f0fdf4; border-color: #bbf7d0; }
 .growth-card__num { font-size: 26px; font-weight: 700; color: #1e293b; }
@@ -130,11 +130,11 @@ async function exportPng() {
 .growth-card__row {
   display: flex; justify-content: space-between; align-items: center;
   padding: 10px 12px; border-radius: 10px;
-  background: #f8fafc; border: 1px solid #e5e7eb;
+  background: #f8fafc; border: 1px solid #e2e8f0;
   font-size: 13px; color: #1e293b;
 }
 .growth-card__foot {
-  margin-top: 16px; padding-top: 12px; border-top: 1px dashed #e5e7eb;
+  margin-top: 16px; padding-top: 12px; border-top: 1px dashed #e2e8f0;
   font-size: 11px; color: #94a3b8; text-align: center;
 }
 </style>
