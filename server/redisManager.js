@@ -1,4 +1,5 @@
 import Redis from 'ioredis'
+import { recordDegraded } from './services/quotaSentinel.js'
 
 // Upstash 业务级错误关键字（ping 不会触发，只在实际命令时返回）
 const QUOTA_EXHAUSTED_PATTERNS = [
@@ -200,6 +201,8 @@ class RedisManager {
         // 命中后立即标记该实例为不可用，下次 getAvailableClient 跳过它走 backup
         if (isQuotaExhaustedError(msg)) {
           this.markQuotaExhausted(poolItem.id, msg)
+          // 配额哨兵（提案 1）：复用既有熔断判断上报水位，只记录、不改熔断语义
+          recordDegraded('redis', { kind: 'quota', detail: `[${poolItem.id}] ${String(msg).slice(0, 200)}` })
         }
         // Auto-reconnect is handled by ioredis retryStrategy
       })

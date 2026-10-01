@@ -1,5 +1,6 @@
 import { Pool } from 'pg'
 import dns from 'node:dns'
+import { recordDegraded } from '../services/quotaSentinel.js'
 
 let _pool = null
 
@@ -79,6 +80,10 @@ export const query = async (text, params) => {
     return result
   } catch (error) {
     console.error('数据库查询错误:', error)
+    // 配额哨兵（提案 1）：额度类错误上报水位（如 53000 exceeded the quota），只记录、不改重试语义
+    if (/quota|exceed|53000|too many|429|limit/i.test(error?.message || '')) {
+      recordDegraded('neon', { kind: 'quota', detail: String(error?.message || 'database error').slice(0, 200) })
+    }
     throw error
   }
 }
