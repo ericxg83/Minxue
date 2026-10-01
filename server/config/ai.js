@@ -1,5 +1,18 @@
 import axios from 'axios'
 import { createRateLimiter } from '../utils/aiRateLimiter.js'
+import { recordDegraded } from '../services/quotaSentinel.js'
+
+// 从 axios 实例的 baseURL 推断供应商名（供配额哨兵归因；未知域名回退为主机名）
+function supplierFromClient(client) {
+  const host = String(client?.defaults?.baseURL || '').toLowerCase()
+  if (host.includes('modelscope')) return 'modelscope'
+  if (host.includes('sensenova')) return 'sensenova'
+  if (host.includes('googleapis')) return 'gemini'
+  if (host.includes('dashscope') || host.includes('bailian') || host.includes('aliyun')) return 'bailian'
+  if (host.includes('moonshot') || host.includes('kimi')) return 'kimi'
+  if (host.includes('volces') || host.includes('ark.')) return 'doubao'
+  return host.replace(/^https?:\/\//, '').split('/')[0] || 'ai-provider'
+}
 
 // 全局禁用 HTTPS_PROXY/HTTP_PROXY 等系统代理：环境里若设置了不可达的代理（如沙箱代理），
 // axios 默认会走它，导致 AI 请求出现 "400 The plain HTTP request was sent to HTTPS port"
@@ -274,6 +287,12 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
       if (status === 429 && isQuotaExhaustedError(err)) {
         const auth = String(axiosOptions?.headers?.Authorization || '').replace(/^Bearer\s+/i, '')
         markModelExhausted(auth, body?.model, exhaustedTtlMs ?? msUntilEndOfDayUtc())
+        // 配额哨兵（提案 1）：真·额度耗尽上报水位，只记录、不改「换 Key×模型组合」的既有语义。
+        // 瞬时限流分支刻意不接——几秒即恢复的限流不值得挂 6 小时横幅。
+        recordDegraded(supplierFromClient(client), {
+          kind: 'quota-exhausted',
+          detail: `model=${body?.model || '(unknown)'} key=…${String(auth).slice(-6)} ${String(err?.response?.data?.error?.message || err?.message || '').slice(0, 160)}`
+        })
         throw err
       }
       if (status === 429) notifyAiRateLimited()
