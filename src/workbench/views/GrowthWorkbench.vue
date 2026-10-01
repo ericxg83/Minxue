@@ -43,6 +43,7 @@
                 <el-option label="化学" value="化学" />
               </el-select>
             </div>
+            <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudent?.name || ''" />
             <el-button type="primary" size="default" class="export-btn">
               <el-icon><Download /></el-icon>
               导出报告
@@ -307,6 +308,7 @@ import {
 import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
 import { getRecommendedTopics } from '../../services/apiService'
+import GrowthCardButton from '../components/GrowthCardButton.vue'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart, PieChart as EChartsPieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
