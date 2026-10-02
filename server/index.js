@@ -4360,7 +4360,7 @@ async function runDiagnosisBackfill({ limit = 10, trigger = 'manual', chain = fa
   diagnosisProgress = { total: 0, blank: 0, updated: 0, skipped: 0, done: false, detail: '' }
   try {
     diagnosisProgress.detail = '扫描待分析错题...'
-    const result = await runErrorDiagnosis({ limit, trigger, chain: false })
+    const result = await runErrorDiagnosis({ limit, trigger })
     if (result.total > 0) {
       diagnosisProgress.total = result.total
       diagnosisProgress.blank = result.blank || 0

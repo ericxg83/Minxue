@@ -215,9 +215,12 @@ export async function analyzeErrorWithLLM({ content, studentAnswer, correctAnswe
  *   3. 本地判不了 → LLM 约束式分析
  *   4. 全失败 → 保持 NULL，留待下次回填
  *
- * @param {{ limit?: number, trigger?: string, chain?: boolean }} opts
+ * @param {{ limit?: number, trigger?: string }} opts
  */
-export async function runErrorDiagnosis({ limit = 20, trigger = 'manual', chain = false } = {}) {
+// 注：本函数不接手「链式接力」。小批量自链重试在调用方 runDiagnosisBackfill
+// （server/index.js）里做，那里才是 chain 开关唯一真实生效的地方；
+// 以前这里挂过一个 `chain = false` 参数但函数内从不读，2026-10-02 负责人裁决删除。
+export async function runErrorDiagnosis({ limit = 20, trigger = 'manual' } = {}) {
   const { rows: rows } = await query(
     `SELECT wq.id, wq.student_answer AS wq_answer, wq.is_blank,
             wq.content AS wq_content, wq.correct_answer AS wq_correct,

@@ -48,7 +48,10 @@
 
 ## 2026-10-02 20:45 负责人裁决批次（第 40-48 轮汇报后的 7 问 7 答；已勾选即指令）
 
-- [x] **① 上传魔数校验启用**（`uploadValidator.js` 的 `MAGIC_BYTES` 从未被调用，实际只校 MIME/扩展名/大小）。**执行口径：分两步**——先接成「只记录不拦截」（命中伪图打日志/计数，不拒），跑几天确认不误伤真实手机照片后，再由负责人一句话打开拦截。**未确认前不得开启拦截。**
+- [x] **① 上传魔数校验启用 —— 负责人裁决后，AI 复核发现该结论是误报，无需执行。**
+  - 复核结果（2026-10-02 21:0x）：`validateFile()` 第 162 行一直在调 `validateFileHeader()`，用 `file-type` 读真实文件头、拒掉 MIME/后缀与内容不符者；调用方 `uploadRetryManager.js:138/163`，且有 `server/tests/uploadValidatorHeic.test.mjs` 断言守着。
+  - 第 48 轮删掉的 `MAGIC_BYTES` 只是被 `file-type` 取代后留下的重复表，**删它是对的**；当时由“这张表没人用”推“整个魔数校验没生效”是错的（没往上追一层）。
+  - **本项无需任何代码改动。**
 - [x] **② 抹掉 `runErrorDiagnosis` 的 `chain` 死开关**（函数内不读、全仓无人传 true）。删参数与调用处的 `chain: false`，不补功能。
 - [ ] **③ 几何重绘目录的 5 个整行死 import：负责人明确「先不动」**（`checkFigureReference` / `FIGURE_GATE_MESSAGE` / `buildFunctionGraphSvg` / `renderGeometrySvg` / `publishCleanGeometryUrl`）。任何轮次不得自行清理，等负责人再开口。
 - [x] **④ 移动端要「下拉刷新」**：现场改完作业不该干等 30s 轮询。实现参照已归档的 `handleRefresh`（5 路缓存失效 + 重算已批改任务统计，见 `D:\Minxue_Archive\auto-20261002\` 与 git 历史 31c8d26 之前版本），接成下拉手势或顶栏按钮；属新增交互，已获负责人明确同意。
