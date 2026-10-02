@@ -1029,7 +1029,6 @@ export default function App() {
             onClose={() => setShowUploadOptions(false)}
             onStartHomework={() => { setShowUploadOptions(false); openStaging('homework') }}
             onStartRegular={() => { setShowUploadOptions(false); setPendingFlow(null); setSelectedWorksheetId(null); openStaging('regular') }}
-            onStartWrongRetry={() => { setShowUploadOptions(false); setPendingFlow(null); setSelectedWorksheetId(null); openStaging('wrong_retry') }}
           />
         )}
 

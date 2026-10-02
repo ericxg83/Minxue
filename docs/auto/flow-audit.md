@@ -51,7 +51,7 @@
 
 在案（新增于第 40 轮）：
 
-5. **上传主流程弹层偏深**：从首页到相机要过 UploadOptionsModal → StagingModal（中途还可能插 WorksheetPicker）。最常走的那一条若能一键直达，每天几十次操作各少一步（B 级方案见「与你讨论」）。
+5. **上传主流程弹层偏深**：从首页到相机要过 UploadOptionsModal → StagingModal（中途还可能插 WorksheetPicker）。最常走的那一条若能一键直达，每天几十操作各少一步（B 级方案见「与你讨论」）。→ **第 46 轮已减一层**：弹层从三卡减为两卡（只留负责人每天用的「日常作业」与「普通试卷」），删掉的「错题重练」卡经逐行核实**不删任何能力**——它走的其实就是「普通试卷」同一条通用上传分支，而重练卷靠卷面二维码定位，从任何支路进来都会被 QR 检测拦下归位；负责人真正的习惯（组卷历史里选卷上传答卷，`retry_bound`）完全未动。
 6. **`server/index.js:4740` createServer 用 async Promise executor**：`getTaskQueue()` 抛错时外层 promise 永不 settle——启动期依赖故障表现为**无声挂死**（不报错、不退出、端口不监听）。属启动失败语义变更，未擅自修，见提案 7。
 7. **V2 命名残留**：`ExamPageV2` / `ProcessingPageV2` / `WrongBookPageV2` 的 V1 均已不在（第 40 轮归档最后一个），后缀已无对照对象，读代码时要多绕一层。纯改名整理，见提案 8。
 8. **移动端切页重复请求**：浏览器实测单次切 tab，`/api/tasks/summary`、`/api/generated-exams/*`、`/api/wrong-questions/*` 会出现 2-3 次重复 fetch（均 304 缓存命中，不致错但耗流量与时间）。需先分清楚哪些是「缓存优先 + 后台刷新」的有意双加载（第 28 轮已证实错题中心属此类），剩下的才是真重复，故只记录不擅改。
@@ -246,7 +246,23 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 - `ExamResourcePicker/`（133 行）与 `Skeleton/`（5 文件 136 行）已归档，孤儿锁豁免表清空。
 - 试卷库 `paperBankShowFilters`（永远为 false 的筛选面板开关）已删：状态与 hook 返回字段一并去，没人读过它。
 - server 三处过时注释（`index.js:1415`、`routes/resources.js:17`、`worker.js:8024`）已改口为在用组件 `ExamChoiceModal`。
-- 共 **-305 行**。验收：1453 单测全绿、lint warning 218→217、隔离构建通过（构建能过本身就证明没有漏网的引用），无头浏览器实测四个 tab 正常、首页上传三卡弹层照常打开、控制台 0 error。
+- 共 **-305 行**。验收：1453 单测全绿、lint warning 218→217、隔离构建通过（构建能过本身就证明没有漏网的引用），无头浏览器实测四个 tab 正常、首页上传弹层照常打开、控制台 0 error。
+
+## 二十、第 46 轮：首页上传弹层三卡减两卡（裁决 ⑥）
+
+负责人口述使用习惯：「每天用 日常作业 和 普通试卷；错题重练习惯在组卷历史那个位置上传对应试卷」。
+
+逐行核实后动手（关键：先确认删卡不删能力）：
+
+- 被删的「错题重练」卡只做一件事：`openStaging('wrong_retry')`；而 `handleSubmitStaging` 里根本没有 `wrong_retry` 分支——它一路落到末尾的通用上传（与「普通试卷」同一条路），**所以这张卡本身就是一个伪选项**；
+- 重练卷定位靠卷面二维码，`handleFileSelect` 里的 QR 检测对**任何**支路都生效（多份卷还会提醒分开上传），删卡不影响识别；
+- 负责人的真实重练入口（组卷历史→上传答卷→`retry_bound`）与 `uploadRetryPaperGroup` 的两个调用方全部保留。
+
+改动：`UploadOptionsModal.jsx` 删卡片3 与 `onStartWrongRetry` prop（并清掉变死的 `RefreshCw` import，文件头写明为何只剩两卡）；`App.jsx` 删对应回调；`StagingModal.jsx` 删已无入口的 `wrong_retry` 标题分支；`useUploadFlow.js` 的 `stagingType` 取值注释同步为真实在用的三种。
+
+验收：1453 单测全绿、lint 14 errors / 217 warnings（与第 45 轮持平，零新增）、隔离构建 `dist_nightly_20261002j` 通过；无头浏览器实测弹层卡片 `日常作业 ✓ / 普通试卷 ✓ / 错题重练卡 ✗`、「取消」能关掉、四个 tab 正常、控制台 0 error。截图 `deliverables/r46_upload_two_cards.png`。
+
+回滚方式（如果负责人其实还想从首页直接发重练卷）：把卡片与 `onStartWrongRetry` 加回即可，一行回调、无数据变动（git 历史 d3febe3 之后的那一次提交）。
 
 ### 下一轮候选（仍是死变量）
 

@@ -1,11 +1,20 @@
-import { BookOpen, FileText, RefreshCw } from 'lucide-react'
+import { BookOpen, FileText } from 'lucide-react'
 import { motion } from 'motion/react'
 
+/**
+ * 首页「新建批改任务」弹层。
+ *
+ * 第 46 轮（2026-10-02）从三卡减为两卡：原来的「错题重练」卡走的是
+ * `openStaging('wrong_retry')` → 最末尾的通用上传分支（与「普通试卷」同一条路），
+ * 它本身并不做任何重练专属处理；而重练卷的定位靠卷面二维码，
+ * 从**任何**一条上传支路进来都会被 `handleFileSelect` 里的 QR 检测拦下归位（useUploadFlow.js:462-466）。
+ * 负责人实际习惯也是在「组卷历史」里选卷上传答卷（stagingType='retry_bound'），
+ * 所以这张卡只会多一步、多一个误选，删卡不删能力。
+ */
 export default function UploadOptionsModal({
   onClose,
   onStartHomework,
-  onStartRegular,
-  onStartWrongRetry
+  onStartRegular
 }) {
   return (
     <div className="absolute inset-0 z-[25000] flex items-end justify-center">
@@ -43,10 +52,10 @@ export default function UploadOptionsModal({
             </div>
           </button>
 
-          {/* 卡片2: 普通试卷 */}
+          {/* 卡片2: 普通试卷（最后一张，不再加底部外边距）*/}
           <button
             onClick={onStartRegular}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale mb-3"
+            className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
             style={{ background: 'var(--primary-soft)' }}
           >
             <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'var(--primary)' }}>
@@ -55,21 +64,6 @@ export default function UploadOptionsModal({
             <div className="text-left">
               <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>普通试卷</span>
               <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>考试卷/临时卷，AI智能批改</span>
-            </div>
-          </button>
-
-          {/* 卡片3: 错题重练 — 拍照上传，自动识别照片中的二维码并定位重练卷 */}
-          <button
-            onClick={onStartWrongRetry}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
-            style={{ background: 'var(--bg-secondary)' }}
-          >
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: '#8B5CF6' }}>
-              <RefreshCw size={28} className="text-white" />
-            </div>
-            <div className="text-left">
-              <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>错题重练</span>
-              <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>拍照上传，自动识别卷上二维码批改</span>
             </div>
           </button>
 
