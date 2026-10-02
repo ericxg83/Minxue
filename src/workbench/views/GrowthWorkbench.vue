@@ -25,14 +25,6 @@
               </el-select>
             </div>
             <div class="selector-item">
-              <span class="selector-label">时间范围</span>
-              <el-select v-model="timeRange" style="width: 180px;">
-                <el-option label="最近7天（05-12 ~ 05-18）" value="7d" />
-                <el-option label="最近30天" value="30d" />
-                <el-option label="最近90天" value="90d" />
-              </el-select>
-            </div>
-            <div class="selector-item">
               <span class="selector-label">科目</span>
               <el-select v-model="subjectFilter" placeholder="全部科目" style="width: 130px;">
                 <el-option label="全部科目" value="all" />
@@ -378,7 +370,7 @@ const handleStudentChange = (studentId) => {
 }
 
 // ===== 筛选 =====
-const timeRange = ref('7d')
+// （时间范围控件已于 2026-10-02 移除：原控件未接任何数据，选择不产生效果，属谎报 UI）
 const subjectFilter = ref('all')
 
 // ===== KPI 数据 =====
@@ -474,17 +466,10 @@ const initCharts = () => {
     if (accuracyChart) accuracyChart.dispose()
     accuracyChart = echarts.init(accuracyChartRef.value)
 
+    // 真实趋势为空时老实留空（2026-10-02 移除 5 月假数据后备——图表宁可空也不说谎）
     const trendData = growthStore.masteryRateTrend.length > 0
       ? growthStore.masteryRateTrend
-      : [
-          { date: '05-12', rate: 60 },
-          { date: '05-13', rate: 65 },
-          { date: '05-14', rate: 55 },
-          { date: '05-15', rate: 62 },
-          { date: '05-16', rate: 58 },
-          { date: '05-17', rate: 52 },
-          { date: '05-18', rate: 72 },
-        ]
+      : []
 
     accuracyChart.setOption({
       tooltip: {
@@ -537,15 +522,7 @@ const initCharts = () => {
 
     const wrongTrend = growthStore.wrongQuestionTrend.length > 0
       ? growthStore.wrongQuestionTrend
-      : [
-          { date: '05-12', count: 50 },
-          { date: '05-13', count: 32 },
-          { date: '05-14', count: 22 },
-          { date: '05-15', count: 35 },
-          { date: '05-16', count: 25 },
-          { date: '05-17', count: 18 },
-          { date: '05-18', count: 12 },
-        ]
+      : []
 
     wrongCountChart.setOption({
       tooltip: {
