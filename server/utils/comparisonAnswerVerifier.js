@@ -19,7 +19,6 @@
 
 // ── 受限数值求值：支持 数字、+ - * / ( ) ^ √ π、上标指数，浮点近似 ──
 const SUP_DIGITS = '⁰¹²³⁴⁵⁶⁷⁸⁹'
-const SUP_SIGNS = { '⁻': '-', '⁺': '+' }
 
 function safeEval(expr) {
   if (!expr || typeof expr !== 'string') return null

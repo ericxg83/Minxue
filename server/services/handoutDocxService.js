@@ -4,7 +4,6 @@ import {
   Paragraph,
   TextRun,
   AlignmentType,
-  HeadingLevel,
   PageBreak,
   ImageRun,
   ShadingType,
@@ -144,10 +143,6 @@ function buildBlockParagraphs(block) {
     case 'kp-stats': {
       // 错题概况：4 列一行
       const c = block.content || {}
-      const cell = (label, value, color = '1D2129') => [
-        new TextRun({ text: `${label}\n`, size: 18, color: '86909C', font: FONT_SONG }),
-        new TextRun({ text: `${value || 0}`, size: 36, bold: true, color, font: FONT_HEI }),
-      ]
       paragraphs.push(
         new Paragraph({
           alignment: AlignmentType.CENTER,

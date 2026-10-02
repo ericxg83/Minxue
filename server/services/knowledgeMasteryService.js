@@ -1,5 +1,5 @@
 import { query, TABLES } from '../config/neon.js'
-import { normalizeQuestionTags, assignQuestionKnowledge, assignQuestionsKnowledgeBulk } from './knowledgeService.js'
+import { normalizeQuestionTags, assignQuestionsKnowledgeBulk } from './knowledgeService.js'
 
 // ============================================================
 // 知识点掌握度服务（knowledgeMasteryService）

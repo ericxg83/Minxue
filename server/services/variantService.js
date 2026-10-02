@@ -1,6 +1,6 @@
 import { query, TABLES } from '../config/neon.js'
 import { callTextCompletion } from '../config/ai.js'
-import { detectEnglishQuestionType, ENGLISH_QUESTION_TYPE_LABELS } from './englishAnalyzer.js'
+import { detectEnglishQuestionType } from './englishAnalyzer.js'
 import { normalizeOptions, formatOptionsForPrompt } from '../utils/optionText.js'
 
 // ============================================================

@@ -140,11 +140,6 @@ function parseScriptResponse(raw) {
 function buildFallbackScript({ kpName, sampleQuestions = [], minutes = 15 }) {
   const blankCount = sampleQuestions.filter(q => q.isBlank).length
   const total = sampleQuestions.length
-  const timeForBlock = (i, n) => {
-    const start = Math.round((minutes * i) / n)
-    const end = Math.round((minutes * (i + 1)) / n)
-    return `${pad2(start)}-${pad2(end)}`
-  }
   const pad2 = (n) => String(n).padStart(2, '0')
   const blocks = []
 

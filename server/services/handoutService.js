@@ -1,5 +1,4 @@
 import { callTextCompletion } from '../config/ai.js'
-import { getQuestionKnowledge } from './knowledgeService.js'
 import { getTemplate, pickTemplateBySubject, listTemplates } from './handoutTemplates/index.js'
 
 // ============================================================

@@ -3,18 +3,6 @@ import { fileTypeFromBuffer } from 'file-type'
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const HEIC_PASSTHROUGH_TYPES = new Set(['image/heic', 'image/heif'])
 const ALLOWED_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'])
-const MAGIC_BYTES = {
-  jpg: [
-    { offset: 0, bytes: [0xFF, 0xD8, 0xFF] },
-  ],
-  png: [
-    { offset: 0, bytes: [0x89, 0x50, 0x4E, 0x47] },
-  ],
-  webp: [
-    { offset: 0, bytes: [0x52, 0x49, 0x46, 0x46] },
-  ],
-}
-
 export const VALIDATION_CONFIG = {
   MAX_FILE_SIZE: 20 * 1024 * 1024,
   MIN_FILE_SIZE: 1024,

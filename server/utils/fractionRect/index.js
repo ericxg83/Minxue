@@ -16,16 +16,6 @@
  * @module utils/fractionRect
  */
 
-/** 解析 \frac{a}{b}（支持 $...$ / \(...\) 包裹），返回 [a,b] 或 null */
-function parseFrac(s) {
-  const m = /\\frac\s*\{(\d{1,3})\}\s*\{(\d{1,3})\}/.exec(s)
-  if (!m) return null
-  const num = Number(m[1])
-  const den = Number(m[2])
-  if (!Number.isInteger(num) || !Number.isInteger(den) || den === 0 || num === 0) return null
-  return [num, den]
-}
-
 /**
  * 题干 → 分数长方形 SVG。
  * @returns {{ svg: string, spec: { f1:[number,number], f2:[number,number] } }|null}

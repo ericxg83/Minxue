@@ -1,4 +1,4 @@
-import { ossClient, generateOSSPath, getCDNUrl, OSS_CONFIG } from '../config/oss.js'
+import { ossClient, generateOSSPath, getCDNUrl } from '../config/oss.js'
 
 export const uploadFile = async (fileBuffer, ext, type, studentId) => {
   const ossPath = generateOSSPath(type, studentId, ext)

@@ -1,4 +1,4 @@
-import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, PageBreak, ShadingType } from 'docx'
+import { Document, Packer, Paragraph, TextRun, AlignmentType, PageBreak } from 'docx'
 
 /**
  * 周末讲题错题卷 Word 生成器（wrongPaperDocxService）

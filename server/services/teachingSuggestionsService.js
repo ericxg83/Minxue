@@ -70,26 +70,9 @@ export async function aggregateKnowledgeSuggestions({ studentIds, periodStart, p
   const suggestions = []
   for (const r of rows.slice(0, MAX_KP_PER_SUGGESTION)) {
     const kpName = r.tag
-    const errorDistRows = await query(
-      `SELECT
-         COALESCE(wq.error_type, '未标注') AS error_type,
-         COUNT(*)::int AS count
-       FROM ${TABLES.WRONG_QUESTIONS} wq
-       JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
-         AND EXISTS (
-           SELECT 1 FROM jsonb_array_elements_text(
-             CASE WHEN jsonb_typeof(q.ai_tags::jsonb) = 'array' THEN q.ai_tags::jsonb ELSE '[]'::jsonb END
-           ) t WHERE t = $1
-         )
-       WHERE wq.student_id = ANY(${studentList})
-         AND wq.added_at >= $2 AND wq.added_at < $3
-         AND (wq.is_blank IS NOT TRUE)
-       GROUP BY COALESCE(wq.error_type, '未标注')
-       ORDER BY count DESC`,
-      [kpName, periodStart, periodEnd, ...studentIds.slice(0, 1)] // studentIds 已展开在 ANY，重复传第一个仅占位
-    )
-
-    // 上面把 studentIds 放在 params 第4位起更稳；这里改回正确写法 ↓
+    // 错因分布统一走 fetchErrorDistribution（它把 studentIds 放在 params 第 4 位，与 SQL 的 ANY(...) 对齐）。
+    // 此处曾留着一段同机构的内联 SELECT，结果从未被读却每个知识点都多打一趟数据库（在循环里），
+    // 第 48 轮删除；教学建议的错因分布取数只保留一个来源。
     const dist = await fetchErrorDistribution({ studentIds, kpName, periodStart, periodEnd })
     const totalErrors = dist.reduce((s, x) => s + x.count, 0)
     const topError = dist[0]

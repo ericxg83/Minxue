@@ -155,8 +155,7 @@ export function binarize(rawGray, w, h, opts = {}) {
     const t2 = Math.min(250, t + faintBoost)
     if (t2 > t) {
       const weak = new Uint8Array(n)
-      let weakCount = 0
-      for (let i = 0; i < n; i++) if (rawGray[i] > t && rawGray[i] <= t2) { weak[i] = INK; weakCount++ }
+      for (let i = 0; i < n; i++) if (rawGray[i] > t && rawGray[i] <= t2) { weak[i] = INK }
       removeSmallComponents(weak, w, h, faintMinArea)
       keepLongThinComponents(weak, w, h)
       let kept = 0

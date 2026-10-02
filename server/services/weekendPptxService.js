@@ -300,7 +300,7 @@ function buildQuestion(pptx, q, seq, figMap) {
         spaceBefore: (!parent && i === 0) ? 0 : 6 },
     })
   })
-  const tb = s.addText(paras, {
+  s.addText(paras, {
     x: stemX, y: STEM_TOP, w: stemW, h: boxH,
     fontSize: stemSize, color: C_TEXT, fontFace: FONT,
     lineSpacingMultiple: 1.25, valign: 'top', margin: 0, isTextBox: true,
@@ -334,7 +334,7 @@ function buildQuestion(pptx, q, seq, figMap) {
   if (ansTop + ansH > PAGE_BOTTOM) ansH = PAGE_BOTTOM - ansTop
   addBox(s, MARGIN, ansTop, PAGE_W - 2 * MARGIN, ansH, { fill: C_PRIMARY_MIST })
   addBox(s, MARGIN, ansTop, 0.07, ansH, { fill: C_PRIMARY })
-  const ansCard = s.addText(`参考答案${ansSource ? ' · ' + ansSource : ''}`, {
+  s.addText(`参考答案${ansSource ? ' · ' + ansSource : ''}`, {
     x: MARGIN + 0.25, y: ansTop + 0.1, w: 6, h: 0.28,
     fontSize: 10.5, bold: true, color: C_PRIMARY, fontFace: FONT,
     margin: 0, isTextBox: true,

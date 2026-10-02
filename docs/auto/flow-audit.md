@@ -307,3 +307,29 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 ### 下一轮候选（仍是死变量）
 
 `server/services/*` 剩 ~10 条死 import 与死局部声明（`answerParseService` 锚点变量已在第 47 轮解决）；`server/worker.js` 剩几何相关死 import（需负责人对零回归纪律松口才动）。
+
+## 二十二、第 48 轮：server 活代码死变量批次（warning 215→197）
+
+15 个文件 +10/-64，1453 单测全绿，error 仍 14，本轮未动前端→按规则不重建产物。
+
+### 一个差点把功能改没的坑（重要）
+
+`weekendPptxService.js` 里 `const tb = s.addText(...)` 和 `const ansCard = s.addText(...)` 被 lint 报「变量未使用」。按死代码处理直接删行 = **课件上的题干文本框和「参考答案」标题会凭空消失**——因为 `addText()` 本身在往幻灯片上画东西，没人用的只是它的返回值。所以只删绑定、保留调用（`s.addText(...)`）。
+
+同类：`figureVectorize.js` 的 `weakCount++` 在 `for (...) { weak[i] = INK; weakCount++ }` 里——`weak[i] = INK` 是真干活，只删计数器。判据：**删之前先看右边有没有副作用**，不看变量名。
+
+### 省下来的真东西：一条在循环里白跑的数据库查询
+
+`teachingSuggestionsService.js` 每个知识点都 `await query(一条带 JOIN + jsonb 展开的 SELECT)`，结果 `errorDistRows` **从未被读**——因为改用 `fetchErrorDistribution()` 后忘了删旧的那段。在 `MAX_KP_PER_SUGGESTION` 循环里，等于每次生成教学建议多打 N 道无用 Neon 查询（本项目 Neon 配额是硬约束）。已删，并把那句已无所指的注释改成实话。
+
+### 其余清理（均为可证无副作用）
+
+- 6 处死 import（docx 的 `HeadingLevel`/`ShadingType`、`OSS_CONFIG`、`ENGLISH_QUESTION_TYPE_LABELS`、`assignQuestionKnowledge`）；`handoutService` 的整行 `getQuestionKnowledge` 删除前已逐行确认 `knowledgeService.js` 顶层零可执行语句；
+- 死常量/死函数：`MAGIC_BYTES`、`SUP_SIGNS`、`PAD_RATIO`、`EPS`、`parseFrac`、`cell`、`timeForBlock`、`weakCount`；
+- 工具坑记录：`uploadValidator.js` 与 `figureVectorize.js` 是 **CRLF** 行尾，带 `\n` 的匹配串找不到——批量改脚本必须行级处理，不能靠字符串尾换行。本轮两处未命中就是此因，已改用 CRLF 安全版重跑，每处都校验命中数，不猜。
+
+### 发现但未本身修（需口径决定，不本身动）
+
+1. **`MAGIC_BYTES` 从来没用过 → 上传文件的「魔数校验」实际上从来没生效过**（现在只校 MIME / 扩展名 / 大小）。启用它是安全加固，会拒掉伪装的图片，属行为变更 → 待定。
+2. `runErrorDiagnosis({ chain })` 参数全仓无人传 true 且函数内不读 → 一个没接线的开关（诊断链功可能只做了一半）。
+3. `renderExamPDF({ filename })` 渲染器不读它——已核实不是 bug，文件名在 `routes/examPdf.js:46` 的 Content-Disposition 生效，属多余透传参数，未动。
