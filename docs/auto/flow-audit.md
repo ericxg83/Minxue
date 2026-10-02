@@ -57,3 +57,7 @@
 - 工具化：`scripts/auditStoreContract.mjs`（npx node scripts/auditStoreContract.mjs 随时可跑）——扫描全部 views/components 对 store 未暴露字段的读取。
 - 首轮结果：**0 处同类哑弹**（成长炸弹系孤例）。残留风险由全局 errorHandler 兜底（任何渲染抛错现在都会弹窗可见）。
 - 粗糙点 #4 正式关闭。
+
+## 八、错题中心双加载待审项关闭（2026-10-02 17:00 轮）
+
+- WrongBookCenterRedesign.vue 两处 getStudents 为**互斥分支**（嵌入模式 return / 独立模式），非重复请求；watch 兜底嵌入态切换；失败有可见报错。**判定：健康，无需改动。**
