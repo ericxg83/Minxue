@@ -491,6 +491,8 @@ export {
   isMathChar,
   isMathInnerSpace,
   TRAILING_SENTENCE_PUNCT,
+  SUP_BASE,
+  SUB_BASE,
   renderContent,
   auditLoopDotRendering,
 }

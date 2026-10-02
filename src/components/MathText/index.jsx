@@ -22,6 +22,9 @@
 
 import { useMemo } from 'react'
 import katex from 'katex'
+// 复用打印链路的纯函数与符号表，不再重复定义一份：本组件是 utils/mathText.js 的 fork，
+// 第 40 轮「裸源码上屏」缺陷就是两份实现漂移造成的——能共用的必须共用。
+import { convertSqrt, SUP_BASE, SUB_BASE } from '../../utils/mathText.js'
 
 // ── 智能 plain-text → LaTeX 转换器 ──
 
@@ -77,6 +80,8 @@ function preprocessMath(text) {
     '←': '\\leftarrow',
     '⇒': '\\Rightarrow',
     '⇔': '\\Leftrightarrow',
+    // 乘点：与 utils/mathText.js SYMBOL_MAP 同源。不转则它落在文本段、把数学段切断（实测 307 条错题里 21 条含它）
+    '·': '\\cdot ',
   }
 
   let result = text
@@ -96,6 +101,23 @@ function preprocessMath(text) {
   // KaTeX 报「Expected group after '_'」并把整段 LaTeX 源码原样吐回屏幕（红色乱码）。
   result = result.replace(/_{2,}/g, '\\underline{\\quad}')
 
+  // === -0.4 Unicode 上标整体合并：²⁰²¹ → ^{2021}（与 utils/mathText.js 步骤 0.5 同源，共用 SUP_BASE）===
+  // 不转的话 ² 不在本组件 isMathChar 白名单里 → 数学段被撕成「a」+「²」两块，
+  // 屏幕上半截数学体半截正文字体，而同一题的 PDF 是整体指数。
+  // 实测（第 41 轮只读探测 8 个学生 307 条错题）：含 Unicode 上下标的题干 110 条（36%）。
+  result = result.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻ᵐⁿ⁽⁾]+/g, (run) => {
+    let inner = ''
+    for (const ch of run) inner += SUP_BASE[ch] || ch
+    return '^{' + inner + '}'
+  })
+
+  // === -0.35 Unicode 下标整体合并：y₀ → y_{0}（与 utils/mathText.js 步骤 0.55 同源，共用 SUB_BASE）===
+  result = result.replace(/[₀₁₂₃₄₅₆₇₈₉₊₋ₐₑₒₓₕₖₗₘₙₚₛₜ]+/g, (run) => {
+    let inner = ''
+    for (const ch of run) inner += SUB_BASE[ch] || ch
+    return '_{' + inner + '}'
+  })
+
   // === 0. 循环小数标记：组合上点 U+0307 / 组合上划线 U+0305 → \dot{} / \bar{} ===
   // 与 src/utils/mathText.js 步骤 0.7 同源同码（两份渲染实现必须同步，见
   // test/mathTextRender.test.mjs 的「两份渲染实现同构」用例）。
@@ -106,6 +128,12 @@ function preprocessMath(text) {
   result = result.replace(/([0-9A-Za-z])([\u0305\u0307])/g, (_m, base, mark) =>
     mark === '\u0307' ? `\\dot{${base}}` : `\\bar{${base}}`
   )
+
+  // === 0.5 根号：√x / √(x) / √17(a²+b²) → \sqrt{...}（直接复用打印链路的 convertSqrt）===
+  // 本组件 isMathChar 不认 √：不转则根号留在文本段（正文字体、没有上面那条横线），
+  // 根号下的式子还会被撕成独立数学段。实测 307 条错题里 50 条（16%）是裸 √ 写法，
+  // 而同一题的 PDF 走 utils/mathText.js 早已转成 \sqrt —— 屏幕与卷面不是同一份东西。
+  result = convertSqrt(result)
 
   // === 0. 核心修复: 将不规范的 LaTeX 命令直接替换为 Unicode 符号 ===
   // 数据库中存储的题干包含 \leq 等命令但没有 $ 包裹，

@@ -20,9 +20,13 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { preprocessMath, splitToSegments, renderContent } from '../src/utils/mathText.js'
 
+/** 两份渲染实现的源码（屏幕 fork 与打印原本） */
+const SHARED = readFileSync(new URL('../src/utils/mathText.js', import.meta.url), 'utf8')
+const MOBILE = readFileSync(new URL('../src/components/MathText/index.jsx', import.meta.url), 'utf8')
+
 const FILES = [
-  ['src/utils/mathText.js', readFileSync(new URL('../src/utils/mathText.js', import.meta.url), 'utf8')],
-  ['src/components/MathText/index.jsx', readFileSync(new URL('../src/components/MathText/index.jsx', import.meta.url), 'utf8')],
+  ['src/utils/mathText.js', SHARED],
+  ['src/components/MathText/index.jsx', MOBILE],
 ]
 
 /** 必须逐字同构的三行原码（少一行、或被注释掉，即红） */
@@ -90,4 +94,51 @@ test('纯文本题干不受影响：剥离与转换不得吞掉普通字符', ()
   assert.ok(preprocessMath(plain).includes('甲、乙两地'), '中文应原样保留')
   // 单个下划线仍留给下标语义（x_1 → x_{1}），不能被填空线规则误吞
   assert.ok(preprocessMath('x_1 + x_2 = 5').includes('x_{1}'), 'x_1 应规范为下标 x_{1}')
+})
+
+// ── 第二批同构漂移（第 41 轮，只读探测 8 个学生 307 条错题定量）──
+// 裸根号 √ 命中 50 条（16%）、Unicode 上下标命中 110 条（36%）、乘点 · 命中 21 条（7%）。
+// 这三类打印链路（utils/mathText.js）早就规范化了，屏幕链路没做——同一道题两个样。
+
+/** 抽出源码里所有 `.replace(/[字符集]+/g` 的字符集（只算活代码，注释里的不算） */
+function scriptClasses(src) {
+  return src.split(/\r?\n/)
+    .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*'))
+    .map((l) => l.match(/\.replace\(\/\[([^\]]+)\]\+\/g/))
+    .filter(Boolean)
+    .map((m) => m[1])
+}
+
+test('Unicode 上标/下标字符集必须与打印链路逐字相同（少一个字符即红）', () => {
+  const utilClasses = scriptClasses(SHARED)
+  const compClasses = scriptClasses(MOBILE)
+  assert.ok(utilClasses.length >= 2, `打印链路应至少扫到上标与下标两条，实际 ${utilClasses.length}`)
+  for (const cls of utilClasses) {
+    assert.ok(
+      compClasses.includes(cls),
+      `屏幕链路缺少整条字符集 [${cls}]（含码位 ${[...cls].map((c) => c.codePointAt(0).toString(16)).join(' ')}）——` +
+      '屏幕会把数学段撕成两半，与同一题的 PDF 不一致'
+    )
+  }
+})
+
+test('屏幕链路必须复用打印链路的 convertSqrt（裸 √ 不得留在文本段）', () => {
+  assert.ok(SHARED.includes('function convertSqrt'), '打印链路应定义 convertSqrt')
+  assert.ok(/export \{[\s\S]*convertSqrt/.test(SHARED), 'convertSqrt 必须具名导出供屏幕链路复用')
+  // 必须用活代码断言：写成注释也算过的话，这道锁就是假的（本轮 red-check 实测拓出来的）
+  assertLiveCodeLine(MOBILE, 'result = convertSqrt(result)', '屏幕链路（convertSqrt 调用）')
+})
+
+test('乘点 · 两边都要转 backslash-cdot（实测 21/307 条错题含它）', () => {
+  assert.ok(SHARED.includes(String.raw`'·': '\\cdot '`), '打印链路缺乘点映射')
+  assert.ok(MOBILE.includes(String.raw`'·': '\\cdot '`), '屏幕链路缺乘点映射，数学段会被 · 切断')
+})
+
+test('行为锁：裸根号与上标经打印链路规范化后不留裸符号', () => {
+  const stem = '下列说法错误的是：a²+2a+4 是最简二次根式，√2 是二次根式'
+  const processed = preprocessMath(stem)
+  assert.ok(processed.includes('\\sqrt{2}'), `√2 应转成 \\sqrt{2}：${processed}`)
+  assert.ok(processed.includes('a^{2}'), `a² 应转成 a^{2}：${processed}`)
+  assert.ok(!processed.includes('√'), `不应残留裸根号：${processed}`)
+  assert.ok(!/\u00B2/.test(processed), '不应残留 Unicode 上标')
 })
