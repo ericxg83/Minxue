@@ -47,11 +47,6 @@
               <div class="kpi-card__left">
                 <div class="kpi-card__label">错题总数</div>
                 <div class="kpi-card__value">{{ kpiData.totalWrong }} <span class="kpi-card__unit">题</span></div>
-                <div class="kpi-card__trend" :class="kpiData.totalWrongTrend > 0 ? 'trend-down' : 'trend-up'">
-                  较上周
-                  <span v-if="kpiData.totalWrongTrend > 0">-{{ kpiData.totalWrongTrend }} 题 ↓</span>
-                  <span v-else>+{{ Math.abs(kpiData.totalWrongTrend) }} 题 ↑</span>
-                </div>
               </div>
               <div class="kpi-card__icon kpi-card__icon--blue">
                 <el-icon><Document /></el-icon>
@@ -59,11 +54,9 @@
             </div>
             <div class="kpi-card">
               <div class="kpi-card__left">
-                <div class="kpi-card__label">正确率</div>
+                <div class="kpi-card__label">错题已掌握率</div>
                 <div class="kpi-card__value">{{ kpiData.accuracy }}%</div>
-                <div class="kpi-card__trend trend-up">
-                  较上周 <span>+{{ kpiData.accuracyTrend }}% ↑</span>
-                </div>
+                <div class="kpi-card__trend-hint">{{ kpiData.totalWrong }} 题中已掌握 {{ kpiData.accuracy }}%（按错题生命周期）</div>
               </div>
               <div class="kpi-card__icon kpi-card__icon--green">
                 <el-icon><TrendCharts /></el-icon>
@@ -73,24 +66,10 @@
               <div class="kpi-card__left">
                 <div class="kpi-card__label">知识点掌握率</div>
                 <div class="kpi-card__value">{{ kpiData.masteryRate }}%</div>
-                <div class="kpi-card__trend trend-up">
-                  较上周 <span>+{{ kpiData.masteryTrend }}% ↑</span>
-                </div>
+                <div class="kpi-card__trend-hint">按知识点掌握度表平均</div>
               </div>
               <div class="kpi-card__icon kpi-card__icon--purple">
                 <el-icon><PieChart /></el-icon>
-              </div>
-            </div>
-            <div class="kpi-card">
-              <div class="kpi-card__left">
-                <div class="kpi-card__label">学习时长</div>
-                <div class="kpi-card__value">{{ kpiData.studyHours }} <span class="kpi-card__unit">小时</span></div>
-                <div class="kpi-card__trend trend-up">
-                  较上周 <span>+{{ kpiData.studyHoursTrend }} 小时 ↑</span>
-                </div>
-              </div>
-              <div class="kpi-card__icon kpi-card__icon--orange">
-                <el-icon><Clock /></el-icon>
               </div>
             </div>
           </div>
@@ -292,7 +271,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   ArrowDown, Document, TrendCharts,
-  PieChart, Clock, Top, Bottom
+  PieChart, Top, Bottom
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
@@ -342,13 +321,9 @@ const kpiData = computed(() => {
   const masteryRate = growthStore.averageMasteryRate || growthStore.masteryRate || 0
   return {
     totalWrong: growthStore.totalWrongQuestions || 0,
-    totalWrongTrend: 0,
+    // accuracy 实为「错题已掌握率」（已掌握错题/错题总数），非答题正确率——卡片标签已同步更正
     accuracy: growthStore.masteryRate || 0,
-    accuracyTrend: 0,
     masteryRate,
-    masteryTrend: 0,
-    studyHours: 0,
-    studyHoursTrend: 0,
   }
 })
 
@@ -786,6 +761,13 @@ onUnmounted(() => {
 
 .kpi-card__trend {
   font-size: 12px;
+  color: var(--wb-text-tertiary);
+  margin-top: 6px;
+}
+
+/* 口径说明（2026-10-02）：KPI 卡片不再展示假趋势箭头，改为一行口径说明 */
+.kpi-card__trend-hint {
+  font-size: 11px;
   color: var(--wb-text-tertiary);
   margin-top: 6px;
 }
