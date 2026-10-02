@@ -685,6 +685,11 @@ const loadStudents = async (retried = false) => {
       selectedStudentId.value = students.value[0].id
       growthStore.setCurrentStudent(selectedStudentId.value)
       await growthStore.loadData(selectedStudentId.value)
+      // 渲染保险（2026-10-02 浏览器实测）：mount 首屏偶发跳过下拉选项渲染
+      // （组件内 21 个学生、下拉 0 选项、显示占位符），nextTick 后重赋数组
+      // 强制 v-for 重建，浏览器实测选项立即恢复
+      await nextTick()
+      students.value = [...students.value]
     } else if (!retried) {
       // 后端刚启动的窗口期内请求可能失败——表现为空列表而非报错，延迟自动重试一次
       setTimeout(() => loadStudents(true), 2000)
