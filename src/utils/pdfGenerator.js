@@ -58,7 +58,7 @@ export async function preloadKatexFonts(targetDocument = document) {
       if (fonts.ready && typeof fonts.ready.then === 'function') {
         await fonts.ready
       }
-    } catch (e) {}
+    } catch { /* 内层预载失败由外层统一告警 */ }
   } catch (e) {
     console.warn('[pdfGenerator] KaTeX 字体预加载失败:', e)
   }

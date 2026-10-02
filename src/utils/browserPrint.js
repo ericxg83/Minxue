@@ -84,7 +84,7 @@ async function _triggerIframePrint({ html, container, renderMath = true, qrConte
 
     // 注入二维码（如果需要且文档支持）
     if (qrContent) {
-      try { applyQRToContainer(idoc, qrContent) } catch (e) {}
+      try { applyQRToContainer(idoc, qrContent) } catch { /* 二维码注入失败不阻断打印 */ }
     }
 
     // KaTeX auto-render 解析 $...$ / $$...$$
@@ -96,7 +96,7 @@ async function _triggerIframePrint({ html, container, renderMath = true, qrConte
 
     // 预加载 KaTeX 字体
     if (renderMath) {
-      try { await preloadKatexFonts(idoc) } catch (e) {}
+      try { await preloadKatexFonts(idoc) } catch { /* 字体预载失败不阻断打印 */ }
     }
 
     // 等 KaTeX 完成所有度量：2 帧 + 兜底 400ms

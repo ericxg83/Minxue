@@ -34,7 +34,7 @@ export const showConfirm = (options = {}) => {
   return new Promise((resolve) => {
     // 替换旧弹窗：先关掉旧的（resolve false）
     if (moduleState.visible && moduleState.resolve) {
-      try { moduleState.resolve(false) } catch {}
+      try { moduleState.resolve(false) } catch { /* 重复关闭弹窗：promise 已决，resolve 抛错属预期 */ }
     }
     moduleState = {
       visible: true,
@@ -76,7 +76,7 @@ function ConfirmDialogHost() {
 
   const close = useCallback((ok) => {
     if (state.resolve) {
-      try { state.resolve(ok) } catch {}
+      try { state.resolve(ok) } catch { /* 重复 resolve 无害 */ }
     }
     setState((s) => ({ ...s, visible: false, resolve: null }))
   }, [state.resolve])

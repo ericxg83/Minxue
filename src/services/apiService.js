@@ -43,7 +43,7 @@ export const clearCache = (key) => {
   try {
     localStorage.removeItem(key)
     localStorage.removeItem(key + '_ts')
-  } catch (e) {}
+  } catch { /* 隐私模式等场景 localStorage 不可用属预期 */ }
 }
 
 // 无视 TTL 直接读取缓存（用于「先展示旧数据、后台再刷新」的秒开策略）
@@ -51,7 +51,7 @@ export const peekCache = (key) => {
   try {
     const cached = localStorage.getItem(key)
     if (cached) return JSON.parse(cached)
-  } catch (e) {}
+  } catch { /* 缓存损坏按未命中处理 */ }
   return null
 }
 
@@ -70,7 +70,7 @@ const checkCacheVersion = () => {
         })
       })
       localStorage.setItem('cache_version', CACHE_VERSION)
-    } catch (e) {}
+    } catch { /* 版本迁移尽力而为 */ }
   }
 }
 
