@@ -81,6 +81,21 @@ function preprocessMath(text) {
 
   let result = text
 
+  // === -1. 定界符剥离（与 src/utils/mathText.js preprocessMath 步骤 0 同源同码）===
+  // $...$ / $$...$$ / \(...\) 只是「这一段是公式」的记号，不是内容。本组件自己判定
+  // 哪一段是数学（splitToSegments），所以记号必须消失；不剥就会作为普通字符落进
+  // 文本段，屏幕上露出裸 $ —— 2026-10-02 实测错题本列表题干「已知 $
+  // \sqrt{x+2y-7}+|x-1|=0$」同屏一半公式体一半源码。
+  // 打印/PDF 链路（utils/mathText.js）早就剥了，两条链路不一致就是这里漂的。
+  result = result.replace(/\$\$?/g, '')
+  result = result.replace(/\\\(/g, '').replace(/\\\)/g, '')
+
+  // === -0.5 填空线：连续下划线 ____ → \underline{\quad}（与 utils/mathText.js 步骤 0.6 同源同码）===
+  // 单个 _ 保留（可能用于下标，如 x_1；x_1 会在步骤 3 转 x_{1}）。
+  // 不转的话 `\sqrt{1-\frac{19}{100}}=____` 里的 ____ 会落进数学段，
+  // KaTeX 报「Expected group after '_'」并把整段 LaTeX 源码原样吐回屏幕（红色乱码）。
+  result = result.replace(/_{2,}/g, '\\underline{\\quad}')
+
   // === 0. 循环小数标记：组合上点 U+0307 / 组合上划线 U+0305 → \dot{} / \bar{} ===
   // 与 src/utils/mathText.js 步骤 0.7 同源同码（两份渲染实现必须同步，见
   // test/mathTextRender.test.mjs 的「两份渲染实现同构」用例）。
