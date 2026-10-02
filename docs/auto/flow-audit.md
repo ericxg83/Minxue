@@ -51,3 +51,9 @@
 - 影响：移动端 lint 信号被噪声污染（595 警告中相当比例是假的），真死代码反而被淹没。
 - 方案：eslint.config.js 补一条规则 `'react/jsx-uses-vars': 'error'`（这是**让 linter 更准确**，不是放宽门禁；误报消除后真死代码才浮得出水面）。属修改 eslint 配置 = C 级禁区，故必须负责人批准。
 - 批准后执行：改配置 + 重跑全量 lint + 重新生成真实死变量清单（提案 5 同轮可做真实清理）。
+
+## 七、store 契约审计（2026-10-02 16:30 轮）
+
+- 工具化：`scripts/auditStoreContract.mjs`（npx node scripts/auditStoreContract.mjs 随时可跑）——扫描全部 views/components 对 store 未暴露字段的读取。
+- 首轮结果：**0 处同类哑弹**（成长炸弹系孤例）。残留风险由全局 errorHandler 兜底（任何渲染抛错现在都会弹窗可见）。
+- 粗糙点 #4 正式关闭。
