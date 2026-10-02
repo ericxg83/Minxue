@@ -11,10 +11,6 @@ export default function ImagePreview({ src }) {
   const lastTapRef = useRef(0)
   const containerRef = useRef(null)
 
-  const toggleZoom = useCallback(() => {
-    setScale(s => (s === 1 ? 2.5 : 1))
-  }, [])
-
   const handleDoubleTap = useCallback(() => {
     setScale(s => (s === 1 ? 2.5 : 1))
   }, [])

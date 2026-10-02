@@ -2,11 +2,10 @@ import { useState, useRef, useEffect } from 'react'
 import { AnimatePresence } from 'motion/react'
 import { Printer, FileDown, Loader2 } from 'lucide-react'
 import { Toast } from 'antd-mobile'
-import { useStudentStore, useWrongQuestionStore, useUIStore, useExamStore } from '../../store'
+import { useStudentStore, useWrongQuestionStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import dayjs from 'dayjs'
-import { saveFileToDevice } from '../../utils/nativeDownload'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { triggerBrowserPrint } from '../../utils/browserPrint'
 import { printHtmlOnDevice, isNativePrintAvailable } from '../../utils/nativePrint'
@@ -17,16 +16,11 @@ import {
   applyQRToContainer,
   preloadKatexFonts,
 } from '../../utils/pdfGenerator'
-import { normalizeOptions } from '../../utils/optionText'
 // 本地卷面 HTML 渲染（KaTeX 已展开、字体 data-URL 内联），供原生打印使用
 import { renderFullHTML } from '../../utils/serverPdfExporter'
-// 多小问（题组）共享题干展示口径：与错题卡片、pdfGenerator 共用同一套实现
-import { resolveQuestionDisplayStem } from '../../utils/questionStem'
 import { KATEX_CSS_WITH_FONTS as katexCss } from '../../utils/katexCssWithFonts'
 
 const USE_MOCK_DATA = false
-
-const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
 const generatePaperId = () => {
   return 'paper_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
@@ -51,19 +45,15 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             : []));
 
   const [previewQuestions, setPreviewQuestions] = useState(initQuestions)
-  const [currentPage, setCurrentPage] = useState(1)
-  const [paperId, setPaperId] = useState('')
+  // paperId / pdfBlob 的写入方仍在（赋值会触发重渲染，不拆），但读方已无人使用：
+  // 按 eslint 口径加 _ 前缀标明「故意不读」，而不是假装它是个有效状态。
+  const [_paperId, setPaperId] = useState('')
   const [qrContent, setQrContent] = useState('')
   const [showGradingModal, setShowGradingModal] = useState(false)
-  const [gradingData, setGradingData] = useState(null)
-  const [studentAnswers, setStudentAnswers] = useState({})
-  const [gradingResults, setGradingResults] = useState({})
-  const printRef = useRef(null)
   const examRecorded = useRef(false)
   const [pdfBlobUrl, setPdfBlobUrl] = useState('')
   const [generatingPdf, setGeneratingPdf] = useState(false)
-  const [pdfBlob, setPdfBlob] = useState(null)
-  const [pdfDownloading, setPdfDownloading] = useState(false)
+  const [_pdfBlob, setPdfBlob] = useState(null)
   const [pdfStage, setPdfStage] = useState('') // 下载/打印过程中的阶段文案，消除"以为卡住"
   const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
   const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
@@ -266,93 +256,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     return `${baseName}-${seq}`
   }
 
-  const generatePrintContent = () => {
-    const examName = getExamName()
-    return `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>${currentStudent?.name || '学生'} - ${examName}</title>
-        <style>
-          @page { size: A4; margin: 20mm; }
-          body { font-family: 'Microsoft YaHei', 'SimSun', sans-serif; line-height: 1.8; font-size: 12pt; }
-          .paper { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 20mm; box-sizing: border-box; background: white; }
-          .header { text-align: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #333; position: relative; }
-          .title { font-size: 18pt; font-weight: bold; margin-bottom: 10px; }
-          .subtitle { font-size: 10pt; color: #666; display: flex; justify-content: center; gap: 30px; }
-          .info-bar { display: flex; justify-content: flex-start; align-items: center; margin-bottom: 20px; font-size: 10pt; border-bottom: 1px solid #ddd; padding-bottom: 10px; gap: 40px; }
-          .question { margin-bottom: 20px; page-break-inside: avoid; }
-          .question-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
-          .question-number { font-weight: bold; min-width: 30px; }
-          .question-type { font-size: 9pt; color: #999; }
-          .question-content { margin-bottom: 8px; line-height: 1.6; }
-          .question-parent-stem { margin-bottom: 6px; line-height: 1.6; }
-          .options { margin-left: 30px; margin-top: 8px; }
-          .options-inline { display: flex; flex-wrap: wrap; gap: 32px; }
-          .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-          .option { font-size: 11pt; white-space: nowrap; }
-          .answer-area { margin-top: 15px; padding: 12px; border: 1px solid #ddd; border-radius: 4px; min-height: 40px; }
-          .footer { margin-top: 40px; text-align: center; font-size: 9pt; color: #999; border-top: 1px solid #ddd; padding-top: 15px; }
-          @media print { body { background: white; } .paper { box-shadow: none; margin: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="paper">
-          <div class="header">
-            <div class="title">${currentStudent?.name || '学生'} - ${examName}</div>
-            <div class="subtitle">
-              <span>总题数：${previewQuestions.length}题</span>
-              <span>满分：100分</span>
-              <span>限时：60分钟</span>
-            </div>
-          </div>
-          <div class="info-bar">
-            <span>姓名：______________</span>
-            <span>日期：____年____月____日</span>
-          </div>
-          ${previewQuestions.map((q, index) => {
-            const isShortOptions = q.options && q.options.every(opt => opt.length <= 10)
-            let content = q.content || '无内容'
-            if (q.question_type === 'fill') {
-              content = content.replace(/_____/g, '<span style="display:inline-block;min-width:80px;border-bottom:1px solid #333;margin:0 4px;">&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>')
-            }
-            // 多小问大题：补回被拆行丢掉的公共题干，否则这道题在卷面上没有条件
-            const parentStem = resolveQuestionDisplayStem(q).parentStem
-            return `
-              <div class="question">
-                <div class="question-header">
-                  <span class="question-number">${index + 1}.</span>
-                  <span class="question-type">(${q.question_type === 'choice' ? '选择题' : q.question_type === 'fill' ? '填空题' : q.question_type === 'judge' ? '判断题' : '解答题'})</span>
-                </div>
-                ${parentStem ? `<div class="question-parent-stem">${parentStem}</div>` : ''}
-                <div class="question-content">${content}</div>
-                ${q.image_url ? `<div style="text-align:center;margin-bottom:8px;"><img src="${q.image_url}" alt="配图" style="max-width:100%;max-height:200px;object-fit:contain;border-radius:4px;" /></div>` : ''}
-                ${q.options && q.options.length > 0 ? `
-                  <div class="options ${isShortOptions ? 'options-inline' : 'options-grid'}">
-                    ${normalizeOptions(q.options).map((opt, i) => {
-                      const formatted = String.fromCharCode(65 + i) + '. ' + opt
-                      return `<div class="option"><span style="display:inline-block;width:14px;height:14px;border:1px solid #999;border-radius:50%;margin-right:6px;vertical-align:middle;"></span>${formatted}</div>`
-                    }).join('')}
-                  </div>
-                ` : ''}
-                ${q.question_type === 'answer' ? `<div class="answer-area">答：</div>` : ''}
-              </div>
-            `
-          }).join('')}</div>
-          <div class="footer">敏学错题本 - 智能学习助手</div>
-        </div>
-        <script>
-          setTimeout(function() { window.print(); }, 300);
-        </script>
-      </body>
-      </html>
-    `
-  }
-
-  const handlePrint = async () => {
-    await handleExportPDF()
-  }
-
   // 只负责"渲染并返回 blob"，加载态与错误提示由调用方统一编排（保证从点击第一刻就有反馈）
   const generatePDF = async (questionsOverride) => {
     setPdfBlobUrl('')
@@ -443,8 +346,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       const result = await generatePDF(questions)
       if (result && result.pdfBlob) {
         setPdfStage('正在保存到文件…')
-        const examName = getExamName()
-        const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
         Toast.show({ icon: 'success', content: saved ? '已下载，并存入组卷历史' : '已下载到设备文件', duration: 2600 })
       } else {
         throw new Error('PDF 生成结果为空')
@@ -491,7 +392,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   }
 
   const handleDirectPrint = async () => {
-    if (generatingPdf || pdfDownloading) return
+    if (generatingPdf) return
     setGeneratingPdf(true)
     setPdfStage('正在整理题目…')
     let saved = false

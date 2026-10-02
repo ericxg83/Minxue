@@ -10,7 +10,6 @@ import { formatQuestionLabel } from '../utils/questionStem'
 
 // 两级掌握文案（2026-09-13 队列分层）：new 待复习 → review_1 基本掌握（周回顾验证）→ mastered 完全掌握。
 // review_2 是历史残留枚举，按 review_1 语义展示。
-const labels = { new: '待复习', review_1: '基本掌握', review_2: '基本掌握', mastered: '完全掌握' }
 const lifecycle = i => i.lifecycle_status || i.status || 'new'
 const text = i => (i.question || i).content || i.content || '题目内容暂不可用'
 const qOf = i => i.question || i

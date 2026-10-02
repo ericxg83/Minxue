@@ -788,7 +788,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
       const result = await recognizeQuestions(compressedImage)
 
       if (result.questions && result.questions.length > 0) {
-        const questions = result.questions.map((q, idx) => ({
+        const questions = result.questions.map((q) => ({
           task_id: task.id,
           student_id: currentStudent.id,
           content: q.content,

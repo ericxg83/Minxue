@@ -78,7 +78,9 @@ export function usePaperBank() {
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
   const [paperBankFilterSubject, setPaperBankFilterSubject] = useState('all')
   const [paperBankSearchKeyword, setPaperBankSearchKeyword] = useState('')
-  const [paperBankShowFilters, setPaperBankShowFilters] = useState(false)
+  // 筛选面板开关：setter 全仓无调用方，这个值永远为 false（第 680 行仍按原契约对外返回）。
+  // 换句话说试卷库的「筛选面板」现在是一条接不上的死 UI，已记入 flow-audit 待确认是否拆掉。
+  const [paperBankShowFilters] = useState(false)
   const [paperBankPreviewPaper, setPaperBankPreviewPaper] = useState(null)
 
   useEffect(() => {
@@ -340,8 +342,6 @@ export function usePaperBank() {
                     key={optIdx}
                     className="cursor-pointer rounded px-1 py-0.5 hover:bg-[var(--primary-mist)]/50"
                     onClick={() => {
-                      const newOptions = [...block.options]
-                      const newContent = newOptions[optIdx]
                       setEditingBlock({ pageNo, blockIndex, optionIndex: optIdx })
                     }}
                   >
@@ -600,7 +600,6 @@ export function usePaperBank() {
           },
         })
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.92)
         const A4_W = 210
         const A4_H = 297
         const pageH = (794 / A4_W) * A4_H

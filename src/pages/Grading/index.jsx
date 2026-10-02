@@ -6,7 +6,6 @@ import { useStudentStore } from '../../store'
 import { normalizeOptions } from '../../utils/optionText'
 import { getReferenceAnswerOrigin } from '../../utils/reviewDecision'
 import MathText from '../../components/MathText'
-import dayjs from 'dayjs'
 
 const formatOption = (opt, index) => `${String.fromCharCode(65 + index)}. ${opt}`
 
@@ -70,7 +69,6 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
     setError(null)
     try {
       const targetStudentId = studentId || (students[0]?.id)
-      const student = students.find(s => s.id === targetStudentId) || students[0]
 
       if (!questionIds || questionIds.length === 0) {
         setError('二维码中未包含题目信息')
@@ -387,7 +385,7 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: 'var(--fs-12)', color: COLORS.textSecondary, whiteSpace: 'nowrap' }}>掌握度：</span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            {LIFECYCLE_ORDER.slice(0, 3).map((step, idx) => {
+            {LIFECYCLE_ORDER.slice(0, 3).map((step) => {
               const currentLifecycle = currentResult?.newLifecycle || currentQuestion?.lifecycle_status || 'new'
               const isActive = LIFECYCLE_ORDER.indexOf(currentLifecycle) >= LIFECYCLE_ORDER.indexOf(step)
               return (

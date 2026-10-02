@@ -137,7 +137,6 @@ export default function WeeklyReport() {
   const stats = reportData?.stats
   const subjectDiagnosis = reportData?.subjectDiagnosis || []
   const knowledgeDiagnosis = reportData?.knowledgeDiagnosis || []
-  const dailyTrend = reportData?.dailyTrend || []
 
   // 高频薄弱点（按错误次数排序取前 3，与 PC 端一致）
   const topWeakTags = [...knowledgeDiagnosis]

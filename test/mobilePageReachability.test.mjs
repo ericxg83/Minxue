@@ -113,3 +113,76 @@ test('锁健壮性：入口与页面清单必须解析到内容（防止闸门�
   const reachable = reachableFrom(ENTRY)
   assert.ok(reachable.size >= 20, `入口可达文件应不少于 20 个，实际 ${reachable.size}（解析器可能失效）`)
 })
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * src/components 孤儿锁（第 42 轮加）
+ *
+ * 为什么需要：第 42 轮误把已孤儿化的 src/components/HomeDashboard.jsx 当成在用页面来读，
+ * 据此得出「首页三个按钮是死的」并去接线；验证时才发现真用的是 HomeDashboardV2，
+ * 接的是空 props。孤儿文件不光占地方，还会误导判断。页面锁管不到 components，补一道。
+ *
+ * 口径（宁可漏报不误伤）：不可达于移动端入口、且全仓（含 workbench 与 .vue）没有任何
+ * import 指向它 ⇒ 孤儿。只卡「新增孤儿」；ALLOWED_ORPHANS 里的存量被删掉不算错。
+ * ───────────────────────────────────────────────────────────────────────── */
+const COMPONENTS = path.join(SRC, 'components')
+
+/** 存量孤儿：已记入 flow-audit 可删候选，等负责人点头（不是"永久豁免"） */
+const ALLOWED_ORPHANS = new Set([
+  'src/components/ExamResourcePicker/index.jsx', // 已被 ExamChoiceModal 取代，但 server 注释仍指向它
+  'src/components/Skeleton/index.jsx', // PLAN.md 规划过的骨架库，从未接线
+  'src/components/Skeleton/ExamCardSkeleton.jsx',
+  'src/components/Skeleton/FilterTabsSkeleton.jsx',
+  'src/components/Skeleton/QuestionCardSkeleton.jsx',
+  'src/components/Skeleton/TaskCardSkeleton.jsx',
+])
+
+function walkAny(dir, acc = []) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) walkAny(full, acc)
+    else if (/\.(js|jsx|vue)$/.test(entry.name) && !/\.bak/.test(entry.name)) acc.push(full)
+  }
+  return acc
+}
+
+/** 比页面锁多支持 .vue，避免把工作台在用的组件误判成孤儿 */
+function resolveAny(spec, fromFile) {
+  let base = null
+  if (spec.startsWith('@/')) base = path.join(SRC, spec.slice(2))
+  else if (spec.startsWith('.')) base = path.resolve(path.dirname(fromFile), spec)
+  if (!base) return null
+  const exts = ['.jsx', '.js', '.vue']
+  const cands = [base, ...exts.map((e) => base + e), ...exts.map((e) => path.join(base, 'index' + e))]
+  for (const c of cands) {
+    try { if (fs.statSync(c).isFile()) return c } catch { /* 候选不存在，看下一个 */ }
+  }
+  return null
+}
+
+test('src/components 不得出现新的孤儿文件（存量见 ALLOWED_ORPHANS，删掉一个算好消息）', () => {
+  const reachable = reachableFrom(ENTRY)
+  const referenced = new Set()
+  for (const file of walkAny(SRC)) {
+    let src = ''
+    try { src = fs.readFileSync(file, 'utf8') } catch { continue }
+    for (const spec of collectSpecifiers(src)) {
+      const r = resolveAny(spec, file)
+      if (r && r !== file) referenced.add(r)
+    }
+  }
+  const listComponentFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name)
+    if (e.isDirectory()) return listComponentFiles(full)
+    return /\.(js|jsx)$/.test(e.name) && !/\.bak/.test(e.name) ? [full] : []
+  })
+  const orphans = listComponentFiles(COMPONENTS)
+    .filter((f) => !reachable.has(f) && !referenced.has(f))
+    .map((f) => path.relative(ROOT, f).split(path.sep).join('/'))
+    .filter((f) => !ALLOWED_ORPHANS.has(f))
+  assert.deepEqual(
+    orphans,
+    [],
+    `\n发现 ${orphans.length} 个新的孤儿组件：\n` + orphans.map((f) => `  - ${f}`).join('\n') +
+    '\n孤儿文件会让人误判「哪个组件在用」（第 42 轮就这么踩空过一次）。要么接回入口，要么归档移出仓库。'
+  )
+})

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useToast } from '../components/ToastProvider'
 import {
-  updateQuestion, addWrongQuestions, deleteWrongQuestion, updateWrongQuestionStatus,
+  updateQuestion, addWrongQuestions, deleteWrongQuestion,
   getQuestionsByTask, getWrongQuestionsByStudent, invalidateCache, recalculateTaskStats,
   updateTaskStatus
 } from '../services/apiService'
