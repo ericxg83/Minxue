@@ -352,7 +352,7 @@ class RedisManager {
       try {
         await client.quit()
         console.log(`[Redis:${id}] 已关闭`)
-      } catch (e) {}
+      } catch { /* 关机阶段 quit 失败无意义可救，继续关下一个连接 */ }
     }
     this.clients.clear()
     this.initialized = false

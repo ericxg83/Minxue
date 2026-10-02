@@ -127,7 +127,8 @@ function parseScriptResponse(raw) {
     // 尝试找第一段 [...] 数组
     const m = s.match(/\[[\s\S]*\]/)
     if (m) {
-      try { return JSON.parse(m[0]) } catch {}
+      // 二次抢救也失败时返回 null，由调用方走本地兜底脚本，不让解析异常卡住讲义主流程
+      try { return JSON.parse(m[0]) } catch { /* 交给 buildFallbackScript */ }
     }
     return null
   }

@@ -52,7 +52,7 @@ function safeEval(expr) {
   // 白名单：只放行数值运算字符。Math.sqrt / Math.PI 归一后只剩 M a t h s q r t P I 字母。
   if (!/^[\d+\-*/().**MathsqrtPI]*$/.test(code)) return null
   try {
-    // eslint-disable-next-line no-new-func
+    // 上行已用字符白名单收紧 code，能拼出的标识符只有 Math/PI 一类，不依赖作用域变量
     const v = Function('return (' + code + ')')()
     if (typeof v !== 'number' || !isFinite(v)) return null
     return v

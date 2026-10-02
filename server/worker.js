@@ -4577,7 +4577,6 @@ function titleMatches(a, b) {
 
 // 兼容旧调用：pickAnswerSection 已废弃。业务已切到 pickAnswerUnit + getWorksheetAnswersBySection 的 3D 结构。
 // 保留仅为防止外部 import 报错；返回 null 等同"无匹配"，调用方应改用 pickAnswerUnit。
-// eslint-disable-next-line no-unused-vars
 export function pickAnswerSection(_answersBySection, _pageTitle, _questions) {
   if (typeof console !== 'undefined') {
     console.warn('[worker] pickAnswerSection 已废弃，请改用 pickAnswerUnit(3D Map)')

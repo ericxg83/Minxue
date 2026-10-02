@@ -97,7 +97,7 @@ async function fixExistingAnswers() {
               `UPDATE questions SET analysis = $1, updated_at = NOW() WHERE id = $2`,
               [result.analysis, q.id]
             )
-          } catch (_) {}
+          } catch { /* 分析文本只是顺带保存，失败也要继续标异常并推进批次 */ }
           await markAnswerException(q.id, validation.reason)
           failCount++
           console.log(`⚠️ 无法生成答案 (${validation.reason})，已保存分析文本`)

@@ -225,7 +225,7 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
       if (Buffer.from(decoded, 'utf8').toString('utf8') === decoded) {
         file.originalname = decoded
       }
-    } catch {}
+    } catch { /* 文件名解码属尽力而为：失败就沿用 multer 原样名字，不阻断上传 */ }
 
     const studentId = req.body.studentId || 'unknown'
     const url = await uploadImage(file.buffer, file.originalname, studentId)

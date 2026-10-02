@@ -190,7 +190,7 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
       try { localStorage.removeItem(`grading_temp_${studentId}`) } catch { /* 清理失败无碍 */ }
 
       const stats = calcStats()
-      onComplete && onComplete({
+      onComplete?.({
         masteredCount: stats.mastered,
         notMasteredCount: stats.reset,
         totalQuestions: questions.length,

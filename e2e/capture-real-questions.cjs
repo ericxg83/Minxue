@@ -71,7 +71,8 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
     console.log('   ⚠️ 全选按钮不可点，尝试逐题勾选 checkbox');
     const checks = page.locator('button.flex-shrink-0.mt-0.5');
     const n = await checks.count();
-    for (let i = 0; i < n; i++) { try { await checks.nth(i).click(); } catch (e) {} }
+    // 逐个勾选是兜底路径：单个 checkbox 点不动（被遮挡/已选中）不应中断整批，静默跳过
+    for (let i = 0; i < n; i++) { try { await checks.nth(i).click(); } catch { /* 尽力而为 */ } }
     console.log(`   已勾选 ${n} 个 checkbox`);
   }
   await sleep(800);

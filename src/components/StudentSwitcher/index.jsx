@@ -181,7 +181,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                           // 直接切换，无需确认框：数据按学生隔离缓存，
                           // 切换后各页面会「先展示缓存、后台刷新」，交互丝滑
                           setCurrentStudent(student)
-                          onSelectStudent && onSelectStudent(student)
+                          onSelectStudent?.(student)
                           onClose()
                         }}
                         className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer active:opacity-80 ${
