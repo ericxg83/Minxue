@@ -225,7 +225,7 @@ app.post('/api/upload', upload.single('files'), async (req, res) => {
       if (Buffer.from(decoded, 'utf8').toString('utf8') === decoded) {
         file.originalname = decoded
       }
-    } catch (e) {}
+    } catch {}
 
     const studentId = req.body.studentId || 'unknown'
     const url = await uploadImage(file.buffer, file.originalname, studentId)
@@ -1651,7 +1651,7 @@ app.get('/api/diagnostics/worker-status', async (req, res) => {
           failedAt: j.finishedOn ? new Date(j.finishedOn).toISOString() : null,
           attempts: j.attemptsMade
         }))
-      } catch (e) {}
+      } catch (e) { console.warn('[状态接口] Redis 队列查询失败（降级为空列表）:', e?.message) }
 
       try {
         const activeJobs = await queue.getJobs(['active'], 0, 4)
@@ -1661,7 +1661,7 @@ app.get('/api/diagnostics/worker-status', async (req, res) => {
           progress: j.progress,
           startedAt: j.processedOn ? new Date(j.processedOn).toISOString() : null
         }))
-      } catch (e) {}
+      } catch (e) { console.warn('[状态接口] Redis 队列查询失败（降级为空列表）:', e?.message) }
     }
 
     // Check OSS config
