@@ -64,6 +64,10 @@
 2. **试卷答案库 / 我的题型库**：使用频率待负责人确认，低频则考虑收纳进二级入口
 3. **移动端页面使用频率**：现确认底部只有 4 个 tab（首页/作业/错题本/组卷历史），其余 8 个视图均为弹层或深链。**待确认**：组卷历史 tab、周报弹层、上传三卡中的「普通」支路实际使用频率——低频则收纳或删（见提案 9）。
 4. **上传选册两套 flow 并存**：`App.jsx:1140-1160` 同一个 `onSelect` 里按 `homeworkChoiceRef` 长度分叉成新旧两条链，读与改都容易错。待确认哪条已死，死则删（提案 10）。
+5. **两个存量孤儿组件（第 42 轮实测，已进闸门豁免表）**：
+   - `src/components/ExamResourcePicker/`（133 行）——已被 `ExamChoiceModal.jsx` 取代，全仓零引用；但 `server/index.js:1415`、`server/routes/resources.js:17`、`server/worker.js:8023` **三处注释仍把它当成在用组件**写。删组件得同步改这三处注释，故只提名。
+   - `src/components/Skeleton/`（5 个文件共 136 行）——PLAN.md 里规划过的骨架屏库，**从未接线**；docs/SYSTEM_ARCHITECTURE.md 目录树仍列着它。
+   - 同轮已归档真正的孤儿：`src/components/HomeDashboard.jsx`（首页 V1，零引用）→ `D:\Minxue_Archive\auto-20261002\components\`。
 
 ## 四、已完成的顺手化/美化
 
@@ -138,7 +142,7 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | `test/wrongBookRollbackScope` | 错题批量回滚作用域 |
 | `test/answerOcrGuard` | 答案 OCR 三层防线 |
 | `scripts/auditStoreContract.mjs` | store 契约读取审计（随时可跑） |
-| `test/mobilePageReachability.test.mjs` | **新增（第 40 轮）**：src/pages 里从入口 import 链到不了的文件即红（根除 V1 孤儿页回流） |
+| `test/mobilePageReachability.test.mjs` | **新增（第 40 轮）+ 扩充（第 42 轮）**：src/pages 与 src/components 里从入口 import 链到不了、且全仓（含工作台 .vue）无人引用的文件即红（存量孤儿进豁免表） |
 | `test/mathTextSourceLeakLock.test.mjs` | **新增（第 40 轮）+ 扩充（第 41 轮）**：屏幕与打印两份数学渲染实现必须同构（定界符/填空线/根号/上下标/乘点，共 14 例，字符集逐字比对） |
 
 ## 十三、第 40 轮重大修复：屏幕露裸 LaTeX 源码（同构漂移）
@@ -187,3 +191,25 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 - **提案 13（错题弹窗答案行接数学渲染）**：`WrongQuestionDetailModal.jsx:156` 把 `{q.answer}` 换成 `<MathText content={q.answer} />` 即与题干/选项/解析口径一致。本轮已改过、又主动回滚：字母答案（"A"）会变斜体数学体，属肉眼取舍，且验证用的浏览器标签页被自动化脚本的死循环卡死、拿不到截图。一句话说清你要哪边，下轮直接上。
 - **提案 14（立方根 `∛` U+221B 两边都不认）**：`convertSqrt` 只识别 `√`，所以 `∛27` 在屏幕与 PDF 里都是正文字体。修它要改共享纯函数（影响 PDF 产物），属硬禁区口径，只提案。
 - **提案 15（试卷入库校对页未接数学渲染）**：`src/features/PaperBank/index.jsx:290` 的 `<span>{block.content}</span>` 是纯文本，校对时看到的是裸 LaTeX。低频页面，待你确认值不值得改。
+
+## 十六、第 42 轮：死变量批次 + 一次错判被验证拦下
+
+### 错判与自纠（过程纪实，不遮）
+
+读 `src/components/HomeDashboard.jsx` 时发现它用了 `onOpenWrongBook` / `onOpenReview`，而 `App.jsx` 没传 → 判定「首页三个入口是死按钮」并接线。**无头浏览器验证直接拆穿**：首页实际渲染的是 `HomeDashboardV2`（`App.jsx:33` 把 `HomeDashboard` 这个局部名指向了 V2 文件），V1 全仓零引用——我接的是空 props，对着的是一个根本不上屏的文件。已回滚那两行，并把 V1 归档。
+
+教训：**孤儿文件最大的危害不是占地方，是误导判断**——它看起来像「在用的代码」，于是基于它得出的每个结论都是错的。因此本轮把可达性锁从 src/pages 扩到 src/components（带存量豁免表，只卡新增），并把「验证」放在提交前而不是后。
+
+### 本轮实际落地（全部验证通过）
+
+- **PrintPreview 死代码清除**：652 → 553 行（-99）。删的是旧版整页 HTML 打印模板 `generatePrintContent`（82 行）、`handlePrint` 空壳、`isMobile`、`printRef`、四个双侧全死的 useState、`filename`（算了文件名却没人用）、以及随之变死的 4 个 import。按钮实际走的是 `handleExportPDF` / `handleDirectPrint`，**没删任何在用功能**。
+- **永远为 false 的死守卫**：`pdfDownloading` 的 setter 全仓无调用 → `if (generatingPdf || pdfDownloading)` 后半段永远不成立。已删该状态并简化条件（行为完全一致）。
+- **试卷库死 UI 证据**：`paperBankShowFilters` 同样 setter 无调用方——**试卷库的「筛选面板」是一条接不上的死分支**（已在代码里注释说明，列入待确认）。
+- **删了一个浪费的全页 JPEG 编码**：`const imgData = canvas.toDataURL('image/jpeg', 0.92)` 算完没人用（下面分页直接从 canvas 切），每次导出白编一次大图。
+- 其他：`Grading` 死 dayjs import 与死 `student` 查找、`useExamReview` 死 import、`ImagePreview` 与 `handleDoubleTap` 完全同体的死 `toggleZoom`、`WrongBookPageV2` 死 `labels`、`WeeklyReport` 死 `dailyTrend`、两处未用 `idx` 形参。
+- lint warning **271 → 241**（-30），errors 仍 15（未动禁区），单测 1451 全绿，隔离构建通过。
+
+### 没删但已报备
+
+- `src/hooks/useUploadFlow.js:754` `uploadViaFrontend`（「前端上传兜底」）无任何调用方。删代码很容易，但**删掉一条兜底路径属于口径变更**，等你确认是有意弃用还是漏接线。
+- `src/features/PaperBank/index.jsx:290` 校对页裸文本（提案 15）。
