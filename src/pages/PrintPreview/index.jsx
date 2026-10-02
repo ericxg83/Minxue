@@ -34,8 +34,7 @@ const generatePaperId = () => {
 
 export default function PrintPreview({ onClose, questions: propQuestions, existingExamId, examName }) {
   const { currentStudent } = useStudentStore()
-  const { selectedQuestions, clearSelection } = useWrongQuestionStore()
-  const { setLoading } = useUIStore()
+  const { selectedQuestions } = useWrongQuestionStore()
   const { addGeneratedExam, generatedExams } = useExamStore()
 
   // 仅当 existingExamId 是合法 UUID（服务端真实组卷ID）时才复用；
@@ -448,7 +447,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         setPdfStage('正在保存到文件…')
         const examName = getExamName()
         const filename = `${currentStudent?.name || 'student'}_${examName}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
-        const { savedTo } = await saveFileToDevice(result.pdfBlob, filename)
         Toast.show({ icon: 'success', content: saved ? '已下载，并存入组卷历史' : '已下载到设备文件', duration: 2600 })
       } else {
         throw new Error('PDF 生成结果为空')

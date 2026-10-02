@@ -128,9 +128,9 @@ export default function App() {
 
   // Store hooks
   const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
-  const { tasks, setTasks, addTask, updateTaskStatus: updateTaskInStore } = useTaskStore()
-  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestion, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
-  const { exams, setExams, generatedExams, setGeneratedExams } = useExamStore()
+  const { tasks, setTasks, updateTaskStatus: updateTaskInStore } = useTaskStore()
+  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
+  const { exams, generatedExams, setGeneratedExams } = useExamStore()
 
   // 错题重练任务入口：hash 路由命中 /retry-task/:id 时全屏渲染 RetryTask（站内扫码 navigate 进入）
   // 外部二维码直达 /retry-task/{id}（无 hash，服务器 SPA fallback 返回 index.html）时 pathname 也是该形式，

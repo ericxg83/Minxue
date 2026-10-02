@@ -4,7 +4,7 @@ import { useState, useRef, useCallback } from 'react'
  * 全屏图片预览：支持单击放大、双击复位、双指捏合缩放、滚轮缩放。
  * 触摸手势基于原生 touch 事件计算 pinch 距离，无第三方依赖。
  */
-export default function ImagePreview({ src, onClose }) {
+export default function ImagePreview({ src }) {
   const [scale, setScale] = useState(1)
   const baseScaleRef = useRef(1)
   const pinchStartRef = useRef(null)

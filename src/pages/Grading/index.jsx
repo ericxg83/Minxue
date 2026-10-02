@@ -53,7 +53,7 @@ const COLORS = {
   border: '#E5E5EA'
 }
 
-export default function Grading({ paperId, studentId, questionIds, onClose, onComplete, generatedExamId }) {
+export default function Grading({ studentId, questionIds, onClose, onComplete, generatedExamId }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [questions, setQuestions] = useState([])
   const [gradingResults, setGradingResults] = useState({})
