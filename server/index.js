@@ -1412,7 +1412,7 @@ app.post('/api/tasks/:taskId/save-as-answer-key', async (req, res) => {
     }
     // 任务类型不限：原本只允许 exam（P1 二次复核），现在 manual 留底也覆盖 workbook / general，
     // 让老师对任何已复核任务都能"留底为答案库"，复用给后续学生。
-    // resource_type 固定 'exam'：保持 ExamResourcePicker 单一查询面；task_type 与 resource_type
+    // resource_type 固定 'exam'：保持 ExamChoiceModal 单一查询面；task_type 与 resource_type
     // 解耦不污染 picker 列表（picker 只看 resource_type=exam）。
 
     // 拉题目（含 ai_answer 用于判断"是否被老师改过"）

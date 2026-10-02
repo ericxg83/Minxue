@@ -14,7 +14,7 @@ import { findDirtyAnswers } from '../services/judgeService.js'
 const router = Router()
 
 // 资源列表
-// v4 增 status 过滤：移动端 ExamResourcePicker 只看 published 资源
+// v4 增 status 过滤：移动端 ExamChoiceModal 只看 published 资源
 router.get('/', async (req, res) => {
   try {
     const { type, subject, status } = req.query

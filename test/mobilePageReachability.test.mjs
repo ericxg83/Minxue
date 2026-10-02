@@ -126,14 +126,12 @@ test('锁健壮性：入口与页面清单必须解析到内容（防止闸门�
  * ───────────────────────────────────────────────────────────────────────── */
 const COMPONENTS = path.join(SRC, 'components')
 
-/** 存量孤儿：已记入 flow-audit 可删候选，等负责人点头（不是"永久豁免"） */
+/**
+ * 存量孤儿豁免表。第 45 轮把当时仅有的两批（ExamResourcePicker 133 行、Skeleton 骨架屏库 5 文件 136 行）
+ * 全部归档进了 D:\Minxue_Archive\auto-20261002\components\，所以现在是空的。
+ * 往里加东西 = 承认新增了一个没人用的文件，必须同时写清为什么不能直接删。
+ */
 const ALLOWED_ORPHANS = new Set([
-  'src/components/ExamResourcePicker/index.jsx', // 已被 ExamChoiceModal 取代，但 server 注释仍指向它
-  'src/components/Skeleton/index.jsx', // PLAN.md 规划过的骨架库，从未接线
-  'src/components/Skeleton/ExamCardSkeleton.jsx',
-  'src/components/Skeleton/FilterTabsSkeleton.jsx',
-  'src/components/Skeleton/QuestionCardSkeleton.jsx',
-  'src/components/Skeleton/TaskCardSkeleton.jsx',
 ])
 
 function walkAny(dir, acc = []) {

@@ -78,9 +78,9 @@ export function usePaperBank() {
   const [paperBankFilterGrade, setPaperBankFilterGrade] = useState('all')
   const [paperBankFilterSubject, setPaperBankFilterSubject] = useState('all')
   const [paperBankSearchKeyword, setPaperBankSearchKeyword] = useState('')
-  // 筛选面板开关：setter 全仓无调用方，这个值永远为 false（第 680 行仍按原契约对外返回）。
-  // 换句话说试卷库的「筛选面板」现在是一条接不上的死 UI，已记入 flow-audit 待确认是否拆掉。
-  const [paperBankShowFilters] = useState(false)
+  // 原「筛选面板开关」`paperBankShowFilters` 已于 2026-10-02 删除：
+  // 它的 setter 全仓无调用方，值永远为 false，对应的「筛选面板」是一条按不动的死 UI。
+  // 筛选本身（年级/科目/关键词）仍由上面三个状态驱动，未受影响。
   const [paperBankPreviewPaper, setPaperBankPreviewPaper] = useState(null)
 
   useEffect(() => {
@@ -679,7 +679,6 @@ export function usePaperBank() {
     paperBankFilterGrade,
     paperBankFilterSubject,
     paperBankSearchKeyword,
-    paperBankShowFilters,
     paperBankPreviewPaper,
     paperBankGrades,
     paperBankSubjects,

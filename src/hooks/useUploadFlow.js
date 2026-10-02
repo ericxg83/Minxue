@@ -7,7 +7,7 @@ import { recognizeQuestions, compressImage, saveRecognitionResult } from '../ser
 import { detectQRCode, parseRetryExamId } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
 import { dataURLtoFile, rotateImageByUrl } from '../utils/imageOptimizer'
-import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
+import { apiRequest, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
 import {   resetNetworkHealth   } from '../services/httpCore'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
@@ -750,33 +750,10 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
     }
   }
 
-  // Upload via frontend (fallback)
-  const uploadViaFrontend = async (files) => {
-    for (const file of files) {
-      try {
-        setUploading(true)
-        const uploadToast = Toast.show({ message: '正在上传...', type: 'loading', duration: 0 })
-
-        const imageUrl = await uploadImage(file, 'homework')
-        const task = await createTask({
-          student_id: currentStudent.id,
-          image_url: imageUrl,
-          original_name: file.name || `照片_${dayjs().format('YYYY-MM-DD_HH-mm-ss')}.jpg`,
-          task_type: 'homework',
-          status: 'pending'
-        })
-
-        addTask(task)
-        uploadToast.dismiss()
-        processTask(task)
-      } catch (error) {
-        console.error('上传失败:', error)
-        Toast.show({ message: '上传失败，请重试', type: 'error' })
-      } finally {
-        setUploading(false)
-      }
-    }
-  }
+  // 原「Upload via frontend (fallback)」`uploadViaFrontend`（第 753-779 行）已于 2026-10-02 删除：
+  // 它原本逐张走「前端直传 + 建任务 + 本地识别」的兜底链，但全仓没有任何调用方——
+  // 真正在用的是服务端批量上传那一条。保留一份没人调用的上传路径只会误导改动，
+  // 真要恢复兜底请看 git 历史（那里一行不少）。
 
   // Process task (AI recognition)
   const processTask = async (task) => {

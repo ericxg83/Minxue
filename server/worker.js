@@ -8021,7 +8021,7 @@ await job.updateProgress(80)
 // 后续：
 //   - 老师 PC 复核改题 → syncDraftAnswerBank（server/index.js:1351）按 v2 矩阵升级
 //   - 老师点"完成复核" → server completeTaskReview 自动推 resources.status='published'
-//   - 已发布才被 PC 答案库列表、移动端 ExamResourcePicker、其他学生 AnswerBank 管线复用
+//   - 已发布才被 PC 答案库列表、移动端 ExamChoiceModal、其他学生 AnswerBank 管线复用
 try {
   const { rows: taskMetaRows } = await query(
     `SELECT task_type, resource_id, subject FROM ${TABLES.TASKS} WHERE id = $1`,

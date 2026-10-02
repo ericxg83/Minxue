@@ -64,10 +64,7 @@
 2. **试卷答案库 / 我的题型库**：使用频率待负责人确认，低频则考虑收纳进二级入口
 3. **移动端页面使用频率**：现确认底部只有 4 个 tab（首页/作业/错题本/组卷历史），其余 8 个视图均为弹层或深链。**待确认**：组卷历史 tab、周报弹层、上传三卡中的「普通」支路实际使用频率——低频则收纳或删（见提案 9）。
 4. **上传选册两套 flow 并存**：`App.jsx:1140-1160` 同一个 `onSelect` 里按 `homeworkChoiceRef` 长度分叉成新旧两条链，读与改都容易错。待确认哪条已死，死则删（提案 10）。
-5. **两个存量孤儿组件（第 42 轮实测，已进闸门豁免表）**：
-   - `src/components/ExamResourcePicker/`（133 行）——已被 `ExamChoiceModal.jsx` 取代，全仓零引用；但 `server/index.js:1415`、`server/routes/resources.js:17`、`server/worker.js:8023` **三处注释仍把它当成在用组件**写。删组件得同步改这三处注释，故只提名。
-   - `src/components/Skeleton/`（5 个文件共 136 行）——PLAN.md 里规划过的骨架屏库，**从未接线**；docs/SYSTEM_ARCHITECTURE.md 目录树仍列着它。
-   - 同轮已归档真正的孤儿：`src/components/HomeDashboard.jsx`（首页 V1，零引用）→ `D:\Minxue_Archive\auto-20261002\components\`。
+5. ~~**两个存量孤儿组件**~~ —— **第 45 轮已全部归档**（负责人批准「清」）：`ExamResourcePicker/`（133 行）与 `Skeleton/`（5 文件 136 行）已移到 `D:\Minxue_Archive\auto-20261002\components\`，孤儿锁豁免表已清空；server 三处把它当在用组件写的注释已改口为 `ExamChoiceModal`。另：`HomeDashboard.jsx`（首页 V1）已于第 44 轮归档。
 
 ## 四、已完成的顺手化/美化
 
@@ -242,6 +239,14 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | `worker.js:208-225` 几何相关死 import（`hasFigureReference` 已删，`checkFigureReference`/`FIGURE_GATE_MESSAGE`/`buildFunctionGraphSvg`/`renderGeometrySvg`/`publishCleanGeometryUrl` 未删） | 后五个是**整行唯一名字的 import**，删了模块就不加载；几何重绘按零回归纪律只统计不动 |
 | `worker.js:2138` `questions.filter(q => true)` | 逐字看过上下文：函数头注释写明「参考答案永远对全部题重算」，`filter(q => true)` 是**故意表达 ALL**，不是漏写条件。可简化但不改行为，不抢批改主流程的改 |
 | `server/utils/geom/**`、`server/scripts/**`、`server/tests/**`、迁移文件 | 保护区 / 一次性脚本 / 测试 / 硬禁区，本轮全部只统计 |
+
+### 裁决 ④：死兜底与死组件批次（第 45 轮已清）
+
+- `useUploadFlow.js` 的 `uploadViaFrontend`（26 行「前端直传兜底」，全仓零调用）已删，原地留注释说明它是什么、恢复看 git 历史；连带清掉因此变死的 `uploadImage` / `createTask` 两个 import。
+- `ExamResourcePicker/`（133 行）与 `Skeleton/`（5 文件 136 行）已归档，孤儿锁豁免表清空。
+- 试卷库 `paperBankShowFilters`（永远为 false 的筛选面板开关）已删：状态与 hook 返回字段一并去，没人读过它。
+- server 三处过时注释（`index.js:1415`、`routes/resources.js:17`、`worker.js:8024`）已改口为在用组件 `ExamChoiceModal`。
+- 共 **-305 行**。验收：1453 单测全绿、lint warning 218→217、隔离构建通过（构建能过本身就证明没有漏网的引用），无头浏览器实测四个 tab 正常、首页上传三卡弹层照常打开、控制台 0 error。
 
 ### 下一轮候选（仍是死变量）
 
