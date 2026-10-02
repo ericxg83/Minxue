@@ -147,6 +147,10 @@ export default [
 
       // ── React：只开会造成运行时错误或渲染错误的双子 ────────────────
       'react/jsx-key': 'error',
+      // jsx-uses-vars（2026-10-02 提案6，负责人批准）：JSX 中使用的导入计入"已使用"。
+      // 缺它会导致移动端 265 处假阳性（Suspense 判死但 JSX 用了 14 次），
+      // 真死代码被假警报淹没——此规则让 linter 更准，不是放宽门禁。
+      'react/jsx-uses-vars': 'error',
       'react/no-unescaped-entities': 'off',
       'react/prop-types': 'off',
       'react-hooks/rules-of-hooks': 'error',

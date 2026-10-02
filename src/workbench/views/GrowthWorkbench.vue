@@ -36,10 +36,7 @@
               </el-select>
             </div>
             <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudent?.name || ''" />
-            <el-button type="primary" size="default" class="export-btn" :loading="exportingReport" @click="exportWeeklyReport">
-              <el-icon><Download /></el-icon>
-              导出报告
-            </el-button>
+            <!-- 「导出报告」按钮已于 2026-10-02 移除（提案5：与学习诊断页的周报 PDF 同源重复，入口归一） -->
           </div>
         </div>
 
@@ -294,15 +291,13 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
-  ArrowDown, Download, Document, TrendCharts,
+  ArrowDown, Document, TrendCharts,
   PieChart, Clock, Top, Bottom
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
 import { getStudents } from '../../services/apiService'
 import { getRecommendedTopics } from '../../services/apiService'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
-import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
-import { saveAs } from 'file-saver'
 import * as echarts from 'echarts/core'
 import { LineChart, BarChart, PieChart as EChartsPieChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, TitleComponent } from 'echarts/components'
@@ -323,37 +318,6 @@ const loading = ref(false)
 const currentStudent = computed(() => {
   return students.value.find(s => s.id === selectedStudentId.value)
 })
-
-// 导出报告（2026-10-01 接线）：原按钮无点击事件，现接上周报 PDF 生成器（复用学习诊断页同款能力）
-const exportingReport = ref(false)
-const exportWeeklyReport = async () => {
-  if (!selectedStudentId.value) {
-    ElMessage.warning('请先选择学生')
-    return
-  }
-  exportingReport.value = true
-  try {
-    const result = await generateWeeklyReport(selectedStudentId.value, { mode: 'week', offset: 0 })
-    if (!result) {
-      ElMessage.warning('该时段暂无学习数据')
-      return
-    }
-    if (result.mode === 'print') {
-      ElMessage.success(result.message || '请在打印对话框另存为 PDF')
-    } else if (result.mode === 'download' && result.pdfBlob) {
-      const name = currentStudent.value?.name || '学生'
-      saveAs(result.pdfBlob, `${name}_周学习诊断报告_${dayjs().format('YYYYMMDD')}.pdf`)
-      ElMessage.success('报告已生成')
-    } else {
-      ElMessage.error('生成失败：未拿到 PDF')
-    }
-  } catch (e) {
-    ElMessage.error('导出失败：' + (e?.message || '未知错误'))
-  } finally {
-    exportingReport.value = false
-  }
-}
-
 const handleStudentChange = (studentId) => {
   loading.value = true
   growthStore.setCurrentStudent(studentId)
