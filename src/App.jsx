@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { PullToRefresh } from 'antd-mobile'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
 import {     apiRequest,     getStudents,     getTasksByStudent,     getGeneratedExamsByStudent,     generatedExamsCacheKey,     getGeneratedExamById,     invalidateCache,     getQuestionsByIds,     deleteTask,     deleteGeneratedExam,     deleteWrongQuestion,     recalculateTaskStats,     peekCache,     writeCache,     fetchWrongQuestionsPage,     getTasksSummary,     markNotificationsRead,     getTaskById     } from './services/apiService'
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
@@ -809,6 +810,32 @@ export default function App() {
     }
   }
 
+  // ④ 下拉刷新（2026-10-02 负责人裁决：现场改完作业不该干等 30s 轮询）。
+  // 逻辑取自第 40 轮清掉的旧 handleRefresh（顶栏按钮时代留下的死代码），三点差别：
+  //   1. 加载态交给 PullToRefresh 自己显示，不再养一个 refreshing state；
+  //   2. 已批改任务列表直接用当前 state 筛（不再多打一次 getTasksByStudent）；
+  //   3. 重算统计封顶 10 道，防止极端情况下一次下拉打出 N 十次写接口。
+  const handlePullRefresh = async () => {
+    if (!currentStudent) {
+      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
+      return
+    }
+    invalidateCache('tasks', currentStudent.id)
+    invalidateCache('wrong', currentStudent.id)
+    invalidateCache('generated', currentStudent.id)
+    invalidateCache('exams', currentStudent.id)
+
+    // 已批改任务的统计可能因 PC 端复核而变：先重算再拉列表，否则刷完看到的还是旧数字
+    const doneTasks = (Array.isArray(tasks) ? tasks : [])
+      .filter(t => t.student_id === currentStudent.id && isTaskCompleted(t))
+      .slice(0, 10)
+    await Promise.allSettled(doneTasks.map(t => recalculateTaskStats(t.id)))
+
+    await loadTasks(false)
+    if (currentPage === 'wrongbook') await loadWrongBookData()
+    else if (currentPage === 'exam') await loadGeneratedExams(false)
+  }
+
   // Render
   const appContent = (
     <>
@@ -850,6 +877,13 @@ export default function App() {
             </div>
           )}
 
+          {/* 下拉刷新包裹层：顶部两个 sticky 提示条不参与，避免排队横幅把拉拽手势顶掉 */}
+          <PullToRefresh
+            onRefresh={handlePullRefresh}
+            pullingText="下拉刷新"
+            canReleaseText="松开立即刷新"
+            completeText="已更新"
+          >
           <AnimatePresence>
             {currentPage === 'processing' && (
               <HomeDashboard key='page-processing'
@@ -938,6 +972,7 @@ export default function App() {
             )}
 
           </AnimatePresence>
+          </PullToRefresh>
         </main>
 
         {/* Bottom Navigation — Claude Style */}
