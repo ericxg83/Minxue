@@ -4736,20 +4736,8 @@ app.post('/api/knowledge/cache/clear', async (req, res) => {
 
 export { app }
 
-export const createServer = (port = PORT) => {
-  return new Promise(async (resolve) => {
-    // 启动时初始化队列
-    await getTaskQueue()
-
-    // 启动 Pending 任务恢复扫描器
-    try {
-      pendingTaskRecovery.start()
-    } catch (err) {
-      console.error('Pending 任务恢复扫描器启动失败:', err.message)
-    }
-
-    const server = app.listen(port, () => {
-      resolve(server)
-    })
-  })
-}
+// 原 `export const createServer`（第 4739 行）已于 2026-10-02 删除：
+// 1) 全仓零调用，真正的启动路径是上面 `if (process.argv[1] === __filename)` 里的 app.listen；
+// 2) 它用 `new Promise(async (resolve) => ...)` 写，getTaskQueue() 一抛错外层 promise 永不 settle，
+//    等于埋了一个「谁调用谁挂死且不报错」的陷阱出口。
+// 真要多实例启动时，参照上面的写法：先 listen，再在回调里 try/catch 初始化队列（失败可见）。

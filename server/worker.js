@@ -6992,7 +6992,9 @@ const processAnswerBankGrading = async (job) => {
               if (parsed.length >= 1) {
                 subBreakdown = []
                 let refParts = []
-                let allCorrect = true
+                // 这里原本还有一句 `let allCorrect = true`：它只被写、全函数从未读，
+                // 是个被放弃的「小问全对→整题全对」聚合标记。死写已于 2026-10-02 删除；
+                // 若将来要恢复这个语义，可参考同位置历史实现（git log -p server/worker.js）。
                 let anyMatched = false
                 // 按 sub 数字匹配（OCR 可能漏读 sub 编号）：把 parsed 按 sub 数字查 subRows
                 for (const { sub, val } of parsed) {
@@ -7014,7 +7016,6 @@ const processAnswerBankGrading = async (job) => {
                   subBreakdown.push({ sub, row: sr.row, studentPart: val, refPart: sr.row.answer, correct, sim })
                   refParts.push(sr.row.answer)
                   anyMatched = true
-                  if (correct === false) allCorrect = false
                 }
                 if (anyMatched) {
                   // 合成 answerRow（用第 1 个 sub 的元数据 + 合并 ref），主循环后续按聚合处理
@@ -7230,7 +7231,6 @@ const processAnswerBankGrading = async (job) => {
           const qd = savedQuestions[idx]
           if (!qd) continue
 
-          const oldRef = qd.answer
           const newRef = found.row.answer
           const newQKey = found.qKey
           const newScore = found.score
