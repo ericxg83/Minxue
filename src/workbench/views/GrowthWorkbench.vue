@@ -675,7 +675,7 @@ const handleResize = () => {
 }
 
 // ===== 初始化 =====
-onMounted(async () => {
+const loadStudents = async (retried = false) => {
   try {
     const result = await getStudents(false)
     const list = result.data || result || []
@@ -685,10 +685,24 @@ onMounted(async () => {
       selectedStudentId.value = students.value[0].id
       growthStore.setCurrentStudent(selectedStudentId.value)
       await growthStore.loadData(selectedStudentId.value)
+    } else if (!retried) {
+      // 后端刚启动的窗口期内请求可能失败——表现为空列表而非报错，延迟自动重试一次
+      setTimeout(() => loadStudents(true), 2000)
     }
   } catch (e) {
     console.error('加载学生列表失败:', e)
+    // 失败必须有声：静默吞掉会让「空下拉」看起来像没有学生（2026-10-02 负责人实测踩坑）
+    if (!retried) {
+      ElMessage.error('学生列表加载失败，正在自动重试…')
+      setTimeout(() => loadStudents(true), 2000)
+    } else {
+      ElMessage.error('学生列表加载失败，请刷新页面重试')
+    }
   }
+}
+
+onMounted(async () => {
+  await loadStudents()
 
   // 加载薄弱知识点推荐
   loadRecommend()
