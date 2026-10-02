@@ -107,7 +107,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 打开即补齐，保证预览页就能看到选项 / 几何图，与 PDF 一致
   useEffect(() => {
     ensureEnriched()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 预热渲染服务：Render 免费实例会休眠、Chromium 冷启动需数秒。进预览页即后台打一次
@@ -164,7 +163,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     } catch (err) {
       console.warn('试卷预览渲染失败:', err)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewQuestions, qrContent, generatedExamId])
 
   // 二维码内容：错题重练任务入口 URL（/retry-task/{id}），任意相机可扫

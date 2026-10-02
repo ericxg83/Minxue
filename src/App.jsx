@@ -362,7 +362,6 @@ export default function App() {
       if (cleanupPolling) cleanupPolling()
       if (cleanupTap) cleanupTap()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // 系统通知点击发生在 mount 之后很久，effect 里捕获的闭包会停留在首次渲染

@@ -86,7 +86,6 @@ export default function RetryTask({ taskId, onBack }) {
 
   useEffect(() => {
     loadTask()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId])
 
   const status = task?.status && STATUS_META[task.status] ? task.status : 'ungraded'
