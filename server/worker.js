@@ -15,8 +15,8 @@ import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, getAIHeaders, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentTextModel, getCurrentVLModel, rotateTextModel, rotateVLModel, TEXT_MODELS, VL_MODELS, callTextCompletion, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, createQuestionAsset, updateQuestionDenormalizedSvg, lookupWorksheetAnswer, getWorksheetAnswersBySection, deleteQuestionsByTaskId, bulkLookupResourceAnswers, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
+import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
 // cropAndUploadQuestionRegion 已于 2026-09-21 下线（整题裁片下线），不再 import。
@@ -24,9 +24,10 @@ import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
 import { refineFigureBoxOnPage } from './utils/figureRegionRefiner.js'
 // 几何配图「资产行 + 重绘入队」编排（两管线共享，2026-09-21 抽自 processTask 内联版）
 import { registerGeometryAssets, settleGeometryQueue } from './utils/geometryAssetQueue.js'
-import { generateTextFingerprint, generatePHash, PARSER_VERSION, TEXT_SIMILARITY_THRESHOLD } from './utils/questionFingerprint.js'
-import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
-import { judgeAnswer, normalizeQuestionType, normalizeChoiceAnswer, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, describeUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
+import { generateTextFingerprint, generatePHash, PARSER_VERSION } from './utils/questionFingerprint.js'
+// 上一行原先还导了 TEXT_SIMILARITY_THRESHOLD（worker 内零引用，已删）：
+// 当前产品口径是「错题按身份键精确匹配」，相似度阈值不得用于自动合并错题。
+import { judgeAnswer, normalizeQuestionType, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, describeUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, mergeCrossPageContinuation, buildCrossPageHint } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
@@ -205,7 +206,7 @@ import { computeTaskStats } from './utils/taskStats.js'
 // 卷面标题 → 任务名的唯一口径（校名页眉剥离）。详见 utils/taskTitle.js 头注释。
 import { deriveTaskTitle, isAutoTaskName } from './utils/taskTitle.js'
 import { rationalizeAnswer } from './utils/radicalSimplify.js'
-import { resolveEffectiveQuestionType, hasFigureReference, checkQuestionCompleteness } from './utils/questionCompleteness.js'
+import { resolveEffectiveQuestionType, checkQuestionCompleteness } from './utils/questionCompleteness.js'
 import { shouldSkipForMissingFigure } from './utils/figureRequirementGuard.js'
 import { isConstructionQuestion, CONSTRUCTION_MANUAL_REASON } from './utils/constructionQuestionGuard.js'
 // 配图裁剪编排 + 配图框归属判据（2026-09-21 从本文件抽出，与练习册管线共用同一份实现）。
@@ -1327,7 +1328,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
 
     normalizeBlockBoxSemantics(questionsArray)
 
-    const questions = questionsArray.map((q, index) => {
+    const questions = questionsArray.map((q) => {
       // 模型对多解题会把 student_answer 输出成数组，原样传给 pg 会被序列化成
       // PG 数组字面量 {"x₁ = -1/2","x₂ = 5/2"} 存进 text 列 → 页面乱码 + 判题拿错串比对。
       const rawStudentAnswer = coerceAIText(q.student_answer)
@@ -2692,7 +2693,7 @@ const SUBJECTIVE_TYPES = new Set(['answer', 'essay', 'proof', 'drawing', 'compos
 // 导出：供离线重跑脚本（_rerun_retry_slim.mjs）绕开共享 Redis 队列直接调用，
 // 保证重跑一定走本机修复后的对位逻辑，不被线上旧 worker 抢走。
 export const processSlimGrading = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, originalName, generatedExamId } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, generatedExamId } = job.data
   const startTime = Date.now()
 
   const resolveImageUrl = (raw) => {
@@ -3115,7 +3116,7 @@ export const processSlimGrading = async (job) => {
     return { taskId, examId: generatedExamId, autoCount, manualCount, allAuto }
   } catch (error) {
     const duration = startTime ? Date.now() - startTime : 0
-    console.error(`\n💥💥 [Slim] 精简批改失败: taskId=${taskId}, ${error.message}`)
+    console.error(`\n💥💥 [Slim] 精简批改失败: taskId=${taskId}, 已耗时 ${duration}ms, ${error.message}`)
     await updateTaskStatus(taskId, TASK_STATUS.FAILED, { error: error.message, last_error: error.message, failedAt: new Date().toISOString() }).catch(() => {})
     throw error
   }
@@ -5584,7 +5585,7 @@ export const processWorkbookGrading = async (job) => {
     }
   }
 
-  for (const { pageTitle, sectionTitle, imageUrl, questions, pageNumber, chapterHint } of pageDataList) {
+  for (const { pageTitle, sectionTitle, questions, pageNumber } of pageDataList) {
     if (questions.length === 0) continue
     // 页级可疑标记：单元匹配经分组兜底（group-fallback）或同号多单元打平（groupTie），
     // 说明本页归属置信度低，写 is_suspicious 供 PC 端展示，避免错挂静默无感。
@@ -6272,7 +6273,7 @@ export const processWorkbookGrading = async (job) => {
 // (unitKey → sectionKey → qNo|subNo → row) + pickAnswerUnit 选单元，按 (unit, section, qNo) 精确定位。
 
 const processAnswerBankGrading = async (job) => {
-  const { taskId, studentId, imageUrl: rawImageUrl, originalName, resourceId: _resourceId } = job.data
+  const { taskId, studentId, imageUrl: rawImageUrl, resourceId: _resourceId } = job.data
   // resource_id 仅在夜间解析答案库时被设置；普通 workbook 任务只有 worksheet_id。
   // 降级兜底：resourceId 为空时回退到 worksheetId（两者对答案库批改管线等价）
   const resourceId = _resourceId || job.data.worksheetId || null
@@ -7542,7 +7543,7 @@ export const processTask = async (job) => {
     let totalOcrDuration = 0
     let ocrTruncatedPages = 0 // 靠截断抢救才出结果的页数，用于在任务结果里标记"可能缺题"
 
-    const pageTasks = pages.map(async (page, pageIdx) => {
+    const pageTasks = pages.map(async (page) => {
       const pageLabel = pages.length > 1 ? `第 ${page.pageNumber}/${pages.length} 页 ` : ''
 
       console.log(`📊 [Step 2/6] ${pageLabel}从 OSS 下载图片...`)

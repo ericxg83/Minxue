@@ -213,3 +213,33 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 
 - `src/hooks/useUploadFlow.js:754` `uploadViaFrontend`（「前端上传兜底」）无任何调用方。删代码很容易，但**删掉一条兜底路径属于口径变更**，等你确认是有意弃用还是漏接线。
 - `src/features/PaperBank/index.jsx:290` 校对页裸文本（提案 15）。
+
+## 十七、第 43 轮：后端活代码死变量批次（worker.js 为主）
+
+只动「可证无引用且不可能改变模块加载」的那一类，**lint warning 241 → 220**（errors 仍 15），1451 单测全绿，`node --check server/worker.js` 通过。本轮未改前端文件，按规则不重建产物（上轮构建距本轮仅 20 分钟）。
+
+### 安全判定先做足（因为 `worker.js` 是批改主流程）
+
+删命名 import 唯一可能的风险是「整个模块不再被加载 → 丢顶层副作用」。逐个查过：
+
+- `config/ai.js`（6 个死名）、`neonService.js`（4 个）、`questionFingerprint.js`（1 个）、`judgeService.js`（1 个）、`questionCompleteness.js`（1 个）——**import 语句本身都保留**（同模块其他名字在用），模块加载不变，零风险；
+- `uploadRetryManager.js` 是整行死 import。先确认该模块顶层**只有常量定义与函数声明、零副作用**（逐行看过），才删整行。
+
+### 删了什么
+
+- 13 个死命名 import（上面那 6 个模块）；
+- 3 处死解构字段（`originalName` ×2、`imageUrl` + `chapterHint`）与 3 个末尾死形参（`index`、`pageIdx`）；
+- **修了一个算出来却丢掉的耗时指标**：`processSlimGrading` 的 catch 里 `duration` 算完没人用，现在补回错误日志（`已耗时 Nms`）——批改失败时终于能看到卡了多久。
+
+### 故意没碰（重要，不是遗漏）
+
+| 位置 | 为什么不动 |
+|---|---|
+| `worker.js:7017` `allCorrect` 只写不读、`:7233` `oldRef` 死读 | 都在**判题聚合路径**上。`allCorrect` 看着像一个被放弃的「全对」聚合标记，删掉技术上安全但属批改口径，只报备 |
+| `worker.js:208-225` 几何相关死 import（`hasFigureReference` 已删，`checkFigureReference`/`FIGURE_GATE_MESSAGE`/`buildFunctionGraphSvg`/`renderGeometrySvg`/`publishCleanGeometryUrl` 未删） | 后五个是**整行唯一名字的 import**，删了模块就不加载；几何重绘按零回归纪律只统计不动 |
+| `worker.js:2138` `questions.filter(q => true)` | 逐字看过上下文：函数头注释写明「参考答案永远对全部题重算」，`filter(q => true)` 是**故意表达 ALL**，不是漏写条件。可简化但不改行为，不抢批改主流程的改 |
+| `server/utils/geom/**`、`server/scripts/**`、`server/tests/**`、迁移文件 | 保护区 / 一次性脚本 / 测试 / 硬禁区，本轮全部只统计 |
+
+### 下一轮候选（仍是死变量）
+
+`server/services/*` 剩 12 条（多为死 import 与死局部函数，包括 `answerParseService.js` 两个只写不读的锚点变量——那个要先看是不是「上一题锚点」语义，归入待确认）。
