@@ -273,6 +273,10 @@ export const useGrowthStore = defineStore('growth', () => {
     loading,
     setCurrentStudent,
     loadData,
+    // 原始数据（2026-10-02 补暴露：成长中心 recentWrongRecords/饼图按学生读取，此前未导出导致 undefined.filter 渲染炸弹）
+    wrongQuestions,
+    tasks,
+    questions,
     // 基础统计
     totalQuestions,
     totalWrongQuestions,

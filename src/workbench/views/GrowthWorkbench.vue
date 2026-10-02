@@ -430,7 +430,7 @@ const pieLegendData = computed(() => {
 
 // ===== 最近错题记录（真实 wrong_questions 数据） =====
 const recentWrongRecords = computed(() => {
-  const list = growthStore.wrongQuestions
+  const list = (growthStore.wrongQuestions || [])
     .filter(wq => wq.student_id === growthStore.currentStudentId)
     .slice(0, 12)
   return list.map(wq => {
