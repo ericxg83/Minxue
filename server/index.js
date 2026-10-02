@@ -69,10 +69,10 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
-import { query, TABLES, TASK_STATUS, QUESTION_STATUS } from './config/neon.js'
+import { query, TABLES, TASK_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, createResource, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, markAiAnswerRisk, updateQuestionDenormalizedSvg, updateQuestionAssetCleanData } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, updateQuestionDenormalizedSvg, updateQuestionAssetCleanData } from './services/neonService.js'
 // [人工兜底重绘] 教师手改几何结构 → 服务端确定性渲 SVG → 发布干净图 URL
 import { renderGeometrySvg } from './utils/geometrySvg.js'
 import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
@@ -102,7 +102,7 @@ import { processTask, generateAnswerForQuestion, extractAnswerFromAnalysis, norm
 // 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
 // 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
-import { AI_CONFIG, getAIHeaders, buildTaggingPrompt, resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN, isDegradedAnswerEngine } from './config/ai.js'
+import { resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN, isDegradedAnswerEngine } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'

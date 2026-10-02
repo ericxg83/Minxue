@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
-import { getQuestionKnowledge } from '../services/knowledgeService.js'
-import { generateKnowledgeExplanation, buildHandout, buildKnowledgeSection, listHandoutTemplates } from '../services/handoutService.js'
+import { generateKnowledgeExplanation, buildHandout, listHandoutTemplates } from '../services/handoutService.js'
 import { buildHandoutDocx } from '../services/handoutDocxService.js'
 import { buildWrongPaperDocx } from '../services/wrongPaperDocxService.js'
 import { aggregateWrongPaper } from '../services/wrongPaperService.js'

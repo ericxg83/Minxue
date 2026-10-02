@@ -1,6 +1,5 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
-import { getQuestionKnowledge, loadKnowledgePoints } from '../services/knowledgeService.js'
 import { generateVariantsForQuestion, getVariantsForQuestion, getVariantsGrouped, STRATEGY_LABELS } from '../services/variantService.js'
 
 const router = Router()

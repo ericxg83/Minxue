@@ -17,7 +17,6 @@
  *   3. 合并走归一化题干精确匹配（normalizeStem），禁止相似度阈值合并
  *   4. 配图默认只用图形裁片（clean_geometry_image_url/geometry_image_url）
  */
-import pg from 'pg'
 import { normalizeStem } from '../utils/stemNormalize.js'
 import { ocrStemKey } from '../utils/ocrStemKey.js'
 // blockBoxTrust 的三道闸原先只服务于 resolveWbImage（整题裁片的展示护栏）。
