@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Plus, CheckCircle2, ChevronRight, UserPlus, User, Trash2, Pencil } from 'lucide-react'
+import {    X,    Plus,    CheckCircle2,    Trash2,    Pencil    } from 'lucide-react'
 import { useStudentStore } from '../../store'
 import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/apiService'
 import { mockStudents } from '../../data/mockData'

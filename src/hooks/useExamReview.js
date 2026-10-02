@@ -6,7 +6,7 @@ import {
   updateTaskStatus
 } from '../services/apiService'
 import { getStatusInfo } from '../pages/ExamReview/status.jsx'
-import { REVIEW_STATUS, getReviewState, WRONG_BOOK_LIFECYCLE } from '../utils/reviewDecision'
+import {  REVIEW_STATUS,  getReviewState } from '../utils/reviewDecision'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 // 复审核心逻辑：题目数据加载、人工评判 edits 管理、保存

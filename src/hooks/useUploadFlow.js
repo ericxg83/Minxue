@@ -9,7 +9,7 @@ import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUt
 import { dataURLtoFile, rotateImageByUrl } from '../utils/imageOptimizer'
 import { apiRequest, uploadImage, createTask, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
-import { warmUpConnection, getNetworkHealth, resetNetworkHealth } from '../services/httpCore'
+import {   resetNetworkHealth   } from '../services/httpCore'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
 
 export function useUploadFlow({ loadTasks, isInitializing }) {

@@ -12,7 +12,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import { apiRequest, getStudents, getTasksByStudent, getQuestionsByTask, getExamsByStudent, getGeneratedExamsByStudent, generatedExamsCacheKey, getGeneratedExamById, updateTaskStatus, updateQuestion, updateQuestionTags, invalidateCache, createStudent, getQuestionsByIds, deleteTask, deleteGeneratedExam, deleteWrongQuestion, recalculateTaskStats, clearStudentCaches, peekCache, writeCache, fetchWrongQuestionsPage, getTasksSummary, markNotificationsRead, getTaskById } from './services/apiService'
+import {     apiRequest,     getStudents,     getTasksByStudent,     getGeneratedExamsByStudent,     generatedExamsCacheKey,     getGeneratedExamById,     updateTaskStatus,     updateQuestionTags,     invalidateCache,     createStudent,     getQuestionsByIds,     deleteTask,     deleteGeneratedExam,     deleteWrongQuestion,     recalculateTaskStats,     peekCache,     writeCache,     fetchWrongQuestionsPage,     getTasksSummary,     markNotificationsRead,     getTaskById     } from './services/apiService'
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { taskService } from './services/taskService'

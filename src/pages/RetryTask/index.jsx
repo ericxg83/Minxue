@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'motion/react'
-import { ArrowLeft, Camera, Image as ImageIcon, Loader2, Upload, ClipboardList, CheckCircle2, Clock } from 'lucide-react'
+import {  Camera,  Image as ImageIcon,  Loader2,  Upload,  ClipboardList,  CheckCircle2,  Clock  } from 'lucide-react'
 import { Toast } from 'antd-mobile'
 import { apiRequest, getRetryTask } from '../../services/apiService'
 

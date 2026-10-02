@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Search, BookOpen, Check, X, Star } from 'lucide-react'
+import {   Search,   BookOpen,   Star   } from 'lucide-react'
 import { getWorksheets, getStudentWorksheetSetting, upsertStudentWorksheetSetting } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import EmptyState from '../EmptyState'
