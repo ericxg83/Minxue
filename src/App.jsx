@@ -5,17 +5,14 @@ import {
   LayoutGrid,
   FileText,
   Upload,
-  X,
-  Tag,
-  Download
+  X
 } from 'lucide-react'
-import { motion, AnimatePresence } from 'motion/react'
+import { AnimatePresence } from 'motion/react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useStudentStore, useTaskStore, useWrongQuestionStore, useExamStore } from './store'
-import {     apiRequest,     getStudents,     getTasksByStudent,     getGeneratedExamsByStudent,     generatedExamsCacheKey,     getGeneratedExamById,     updateTaskStatus,     updateQuestionTags,     invalidateCache,     createStudent,     getQuestionsByIds,     deleteTask,     deleteGeneratedExam,     deleteWrongQuestion,     recalculateTaskStats,     peekCache,     writeCache,     fetchWrongQuestionsPage,     getTasksSummary,     markNotificationsRead,     getTaskById     } from './services/apiService'
+import {     apiRequest,     getStudents,     getTasksByStudent,     getGeneratedExamsByStudent,     generatedExamsCacheKey,     getGeneratedExamById,     invalidateCache,     getQuestionsByIds,     deleteTask,     deleteGeneratedExam,     deleteWrongQuestion,     recalculateTaskStats,     peekCache,     writeCache,     fetchWrongQuestionsPage,     getTasksSummary,     markNotificationsRead,     getTaskById     } from './services/apiService'
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
-import { taskService } from './services/taskService'
 import { dedupeWrongQuestions } from './domain/questionIdentity'
 import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
@@ -127,10 +124,10 @@ export default function App() {
   const setCurrentPage = (page) => navigate('/' + page)
 
   // Store hooks
-  const { students, currentStudent, setCurrentStudent, setStudents, addStudent } = useStudentStore()
-  const { tasks, setTasks, updateTaskStatus: updateTaskInStore } = useTaskStore()
-  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection, addWrongQuestions: addMultipleToStore } = useWrongQuestionStore()
-  const { exams, generatedExams, setGeneratedExams } = useExamStore()
+  const { students, currentStudent, setCurrentStudent, setStudents } = useStudentStore()
+  const { tasks, setTasks } = useTaskStore()
+  const { wrongQuestions, setWrongQuestions, selectedQuestions, setSelectedQuestions, clearSelection } = useWrongQuestionStore()
+  const { generatedExams, setGeneratedExams } = useExamStore()
 
   // 错题重练任务入口：hash 路由命中 /retry-task/:id 时全屏渲染 RetryTask（站内扫码 navigate 进入）
   // 外部二维码直达 /retry-task/{id}（无 hash，服务器 SPA fallback 返回 index.html）时 pathname 也是该形式，
@@ -139,12 +136,8 @@ export default function App() {
 
   // Processing Page State
   const [processingFilter, setProcessingFilter] = useState('all')
-  const [previewImage, setPreviewImage] = useState(null)
 
   // Bank Page State — 筛选面板已随移动端重构移除，错题本只保留生命周期 Tab + 优选组卷
-  const [showQRCode, setShowQRCode] = useState(false)
-  const [printMode, setPrintMode] = useState('all')
-  const [printSize, setPrintSize] = useState('a4')
   const [showGrading, setShowGrading] = useState(false)
   const [showReprint, setShowReprint] = useState(false)
   const [reprintExam, setReprintExam] = useState(null)
@@ -156,25 +149,9 @@ export default function App() {
 
   // UI State
   const [showStudentSwitcher, setShowStudentSwitcher] = useState(false)
-  const [showAddStudent, setShowAddStudent] = useState(false)
-  const [showImagePreview, setShowImagePreview] = useState(false)
-  const [previewImageUrl, setPreviewImageUrl] = useState(null)
-  const [refreshing, setRefreshing] = useState(false)
-  const [showTagManager, setShowTagManager] = useState(false)
-  const [managingTagsQuestion, setManagingTagsQuestion] = useState(null)
-  const [showAddTag, setShowAddTag] = useState(false)
-  const [newTagInput, setNewTagInput] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
-  const [showBatchActions, setShowBatchActions] = useState(false)
-  const [showGenerateExam, setShowGenerateExam] = useState(false)
-  const [generatedExamPreview, setGeneratedExamPreview] = useState(null)
-  const [showStudentQR, setShowStudentQR] = useState(false)
-  const [studentQRData, setStudentQRData] = useState(null)
   const [showPrintPreview, setShowPrintPreview] = useState(false)
-  const [printPreviewData, setPrintPreviewData] = useState(null)
-  const [showPrintModal, setShowPrintModal] = useState(false)
-  const [printTarget, setPrintTarget] = useState(null)
   const [selectedImage, setSelectedImage] = useState(null)
   const [showImageViewer, setShowImageViewer] = useState(false)
   const [wrongBookDetail, setWrongBookDetail] = useState(null) // 错题详情弹窗数据
@@ -190,9 +167,6 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false)
   const [showLearningReport, setShowLearningReport] = useState(false)
   const [notifSummary, setNotifSummary] = useState(null) // 通知摘要（铃铛红点）
-
-  // QR Detection State
-  const [qrDetectionResults, setQrDetectionResults] = useState({})
 
   // 初始化状态
   const [isInitializing, setIsInitializing] = useState(true)
@@ -479,17 +453,14 @@ export default function App() {
 
   // 上传流程（自包含 hook：上传队列/多图暂存/练习册/答案库/QR 识别/后台批量上传）
   const {
-    pendingFlow, setPendingFlow,
-    selectedWorksheetId, setSelectedWorksheetId,
-    selectedExamResourceId, setSelectedExamResourceId,
+    setPendingFlow,
+    setSelectedWorksheetId,
+    setSelectedExamResourceId,
     flowSubject, setFlowSubject,
-    clearPendingUploadFlow,
     showUploadOptions, setShowUploadOptions,
     showWorksheetPicker, setShowWorksheetPicker,
-    triggerUpload,
     handleFileSelect,
     retryTempUpload,
-    uploading, uploadingTasks,
     uploadQueue, isUploading,
     showStaging, stagingFiles, stagingType, stagingUploading,
     cameraInputRef, albumInputRef,
@@ -497,7 +468,7 @@ export default function App() {
     handleStagingSelectFiles, removeStagingFile, applyStagingCrop, applyStagingRotate,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
-    homeworkChoiceFiles, homeworkChoiceRef,
+    homeworkChoiceRef,
     handleUploadAsWorkbook, handleUploadAsRegular,
     showExamChoice, setShowExamChoice,
     examChoiceFiles, setExamChoiceFiles,
@@ -643,20 +614,6 @@ export default function App() {
   const studentExams = useMemo(() => (Array.isArray(generatedExams) ? generatedExams : []).filter(e => e.student_id === currentStudent?.id),
     [generatedExams, currentStudent?.id])
 
-  // Add student
-  const handleAddStudent = async (studentData) => {
-    try {
-      const newStudent = await createStudent(studentData)
-      addStudent(newStudent)
-      setCurrentStudent(newStudent)
-      setShowAddStudent(false)
-      Toast.show({ message: '添加学生成功', type: 'success' })
-    } catch (error) {
-      console.error('添加学生失败:', error)
-      Toast.show({ message: '添加学生失败', type: 'error' })
-    }
-  }
-
   // Delete task
   const handleDeleteTask = async (taskId) => {
     try {
@@ -677,21 +634,6 @@ export default function App() {
     }
   }
 
-  // Duplicate exam
-  const handleDuplicateExam = (exam) => {
-    const newName = `${exam.name} (副本)`
-    const newExam = {
-      ...exam,
-      id: `gen-${Date.now()}`,
-      name: newName,
-      created_at: new Date().toISOString(),
-      printed: false,
-      status: 'pending'
-    }
-    setGeneratedExams([newExam, ...(Array.isArray(generatedExams) ? generatedExams : [])])
-    Toast.show({ message: '已复制生成新卷', type: 'success' })
-  }
-
   const handleScanSuccess = (scanData) => {
     setShowScanQR(false)
     // 新格式：扫码内容含 /retry-task/{id} → 进入「任务入口页」（二维码只定位 task，不进批改页）
@@ -704,7 +646,7 @@ export default function App() {
     setShowGrading(true)
   }
 
-  const handleGradingComplete = (results) => {
+  const handleGradingComplete = () => {
     setShowGrading(false)
     setGradingData(null)
     Toast.show({ message: '批改完成，已更新错题本', type: 'success' })
@@ -794,37 +736,6 @@ export default function App() {
     }
   }
 
-  // Edit question
-  const handleEditQuestion = (question) => {
-    setManagingTagsQuestion(question)
-    setShowTagManager(true)
-  }
-
-  // Manage tags
-  const handleManageTags = (question) => {
-    setManagingTagsQuestion(question)
-    setShowTagManager(true)
-  }
-
-  // Save tags
-  const handleSaveTags = async (questionId, tags) => {
-    try {
-      await updateQuestionTags(questionId, tags)
-      setWrongQuestions(wrongQuestions.map(wq => {
-        const question = wq.question || wq
-        return question.id === questionId
-          ? { ...wq, question: { ...question, manual_tags: tags, tags_source: 'manual' } }
-          : wq
-      }))
-      setShowTagManager(false)
-      Toast.show({ message: '标签更新成功', type: 'success' })
-    } catch (error) {
-      console.error('更新标签失败:', error)
-      Toast.show({ message: '更新标签失败', type: 'error' })
-    }
-  }
-
-
   // Delete wrong question
   const handleDeleteWrongQuestion = (wq) => {
     setDeleteTarget({ type: 'wrong', id: wq.id })
@@ -850,55 +761,6 @@ export default function App() {
       }
     }
     setDeleteTarget(null)
-  }
-
-  // Show student QR
-  const handleShowStudentQR = () => {
-    if (!currentStudent) return
-    setStudentQRData({
-      id: currentStudent.id,
-      name: currentStudent.name
-    })
-    setShowStudentQR(true)
-  }
-
-  // Manual refresh
-  const handleRefresh = async () => {
-    if (!currentStudent) {
-      Toast.show({ message: '请先选择学生', type: 'error', duration: 1500 })
-      return
-    }
-    setRefreshing(true)
-    try {
-      invalidateCache('students')
-      invalidateCache('tasks', currentStudent.id)
-      invalidateCache('wrong', currentStudent.id)
-      invalidateCache('exams', currentStudent.id)
-      invalidateCache('generated', currentStudent.id)
-
-      // 重新计算所有已批改任务的统计数据
-      if (currentPage === 'processing') {
-        const taskList = await getTasksByStudent(currentStudent.id, false)
-        const doneTasks = (Array.isArray(taskList) ? taskList : []).filter(t => isTaskCompleted(t))
-        // 并行刷新所有已批改任务的统计
-        await Promise.allSettled(doneTasks.map(t => recalculateTaskStats(t.id)))
-        // 重新加载任务数据
-        setTasks(doneTasks.length > 0 ? taskList : [])
-        // 重新从服务器获取以获取更新后的 result
-        const freshTasks = await getTasksByStudent(currentStudent.id, false)
-        setTasks(mergeTempTasks(freshTasks, currentStudent.id))
-      } else if (currentPage === 'wrongbook') {
-        await loadWrongBookData()
-      } else if (currentPage === 'exam') {
-        await loadGeneratedExams(false)
-      }
-      Toast.show({ message: '刷新成功', type: 'success', duration: 1500 })
-    } catch (error) {
-      console.error('刷新失败:', error)
-      Toast.show({ message: '刷新失败，请重试', type: 'error', duration: 2000 })
-    } finally {
-      setRefreshing(false)
-    }
   }
 
   // Retry a pending/failed task
