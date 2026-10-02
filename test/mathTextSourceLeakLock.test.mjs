@@ -18,7 +18,8 @@
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { preprocessMath, splitToSegments, renderContent } from '../src/utils/mathText.js'
+import katex from 'katex'
+import { preprocessMath, splitToSegments, renderContent, convertSqrt } from '../src/utils/mathText.js'
 
 /** 两份渲染实现的源码（屏幕 fork 与打印原本） */
 const SHARED = readFileSync(new URL('../src/utils/mathText.js', import.meta.url), 'utf8')
@@ -141,4 +142,30 @@ test('行为锁：裸根号与上标经打印链路规范化后不留裸符号',
   assert.ok(processed.includes('a^{2}'), `a² 应转成 a^{2}：${processed}`)
   assert.ok(!processed.includes('√'), `不应残留裸根号：${processed}`)
   assert.ok(!/\u00B2/.test(processed), '不应残留 Unicode 上标')
+})
+
+// ── 立方根 / 四次根（2026-10-02 负责人批准：屏幕与 PDF 一起修）──
+
+test('∛ / ∜ 必须转成带根指数的 sqrt[n]{}，且 √ 本身行为不变', () => {
+  assert.equal(convertSqrt('\u221B27'), '\\sqrt[3]{27}')
+  assert.equal(convertSqrt('\u221C81'), '\\sqrt[4]{81}')
+  assert.equal(convertSqrt('\u221A2'), '\\sqrt{2}', '平方根不得被顺手改成带指数的形式')
+  assert.equal(convertSqrt('\u221A(x+1)'), '\\sqrt{(x+1)}', '括号形式仍走原路径')
+  const stem = '立方根：\u221B27 = 3，\u221A9 = 3'
+  const processed = preprocessMath(stem)
+  assert.ok(processed.includes('\\sqrt[3]{27}'), `∛27 应转成带根指数的 sqrt 形式：${processed}`)
+  assert.ok(!/\u221B|\u221A/.test(processed), `不应残留裸根号字符：${processed}`)
+})
+
+test('KaTeX 真能画出带根指数的立方根（不是只改了字符串）', () => {
+  // throwOnError:true —— 语法不被识别会直接抛错，本身就是最硬的证据
+  const html = katex.renderToString('\\sqrt[3]{27}', { throwOnError: true })
+  // 实测结构（KaTeX 0.16）：class="mord sqrt" 容器 + class="root" 根指数块 + 被开方数 27
+  assert.ok(html.includes('mord sqrt'), '应生成 sqrt 容器')
+  assert.ok(/class="root"/.test(html), '应生成 root 块（根指数占位）')
+  assert.ok(html.includes('>27<') || html.includes('27'), '被开方数 27 应进入产物')
+  assert.ok(!/katex-error/.test(html), '不得出现错误节点')
+  // 平方根依旧不应多出根指数块
+  const plain = katex.renderToString('\\sqrt{27}', { throwOnError: true })
+  assert.ok(!/class="root"/.test(plain), '√27 不该有根指数块')
 })

@@ -166,12 +166,22 @@ function preprocessMath(text) {
   return s
 }
 
+/**
+ * 根号族：√ 平方根、∛ 立方根、∜ 四次根。
+ * 三者操作数解析规则完全一致（括号 / 混合数 / 数字字母组合 / 单字母），
+ * 区别只在输出要带根指数。以前只认 √，导致 `∛27` 在屏幕与 PDF 里都是正文字体的裸符号、
+ * 后面的数字还被当成独立数学段（2026-10-02 负责人批准：屏幕与打印一起修）。
+ */
+const RADICALS = { '\u221A': null, '\u221B': 3, '\u221C': 4 }
+
 function convertSqrt(s) {
   let out = ''
   let i = 0
   while (i < s.length) {
     const c = s[i]
-    if (c === '√') {
+    if (c in RADICALS) {
+      const degree = RADICALS[c]
+      const wrap = (inner) => (degree ? `\\sqrt[${degree}]{${inner}}` : `\\sqrt{${inner}}`)
       let j = i + 1
       while (j < s.length && (s[j] === ' ' || s[j] === '\u00A0')) j++
 
@@ -193,7 +203,7 @@ function convertSqrt(s) {
         // 递归处理 inner 里可能嵌套的 √：避免 √(2-√3) → \sqrt{(2-√3)}
         // 这种 inner 还含 Unicode 根号的半成品送进 KaTeX 后部分渲染失败，
         // 表现为"已知a=√√ ... 求b的值"这种散架（错题本 PDF 错乱根因之一）
-        out += '\\sqrt{' + convertSqrt(inner) + '}'
+        out += wrap(convertSqrt(inner))
         i = k
         continue
       }
@@ -201,7 +211,7 @@ function convertSqrt(s) {
       // B. 混合数：√2 1/2 → \sqrt{2\frac{1}{2}}
       const mixed = s.slice(j).match(/^(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/)
       if (mixed) {
-        out += '\\sqrt{' + mixed[1] + '\\frac{' + mixed[2] + '}{' + mixed[3] + '}}'
+        out += wrap(mixed[1] + '\\frac{' + mixed[2] + '}{' + mixed[3] + '}')
         i = j + mixed[0].length
         continue
       }
@@ -211,14 +221,14 @@ function convertSqrt(s) {
       if (num && num[1].length > 0) {
         // 递归：num 内部可能含 √(...) 嵌套（如 √17(a²+b²) 的 num="17" 不嵌套，
         // 但 √(x²+1) 等含括号变体经 convertSqrt 走 A 路径之后内部不会再剩 √）
-        out += '\\sqrt{' + convertSqrt(num[1]) + '}'
+        out += wrap(convertSqrt(num[1]))
         i = j + num[1].length
         continue
       }
 
       // D. 字母：√x
       if (/[a-zA-Z]/.test(s[j])) {
-        out += '\\sqrt{' + s[j] + '}'
+        out += wrap(s[j])
         i = j + 1
         continue
       }
