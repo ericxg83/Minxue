@@ -478,7 +478,7 @@ export function usePaperBank() {
             return `<div class="block-subtitle">${escapeHtml(block.content)}</div>`
           case 'section':
             return `<div class="block-section">${escapeHtml(block.content)}</div>`
-          case 'question':
+          case 'question': {
             let qHTML = `<div class="block-question">${escapeHtml(block.content)}`
             if (block.options && block.options.length > 0) {
               qHTML += `<div class="block-options">`
@@ -489,6 +489,7 @@ export function usePaperBank() {
             }
             qHTML += `</div>`
             return qHTML
+          }
           case 'text':
             return `<div class="block-text">${escapeHtml(block.content)}</div>`
           case 'image': {
@@ -497,7 +498,7 @@ export function usePaperBank() {
             }
             return `<div class="block-image" style="text-align:center;color:#999;font-style:italic;">[图: ${escapeHtml(block.caption || '待插入')}]</div>`
           }
-          case 'table':
+          case 'table': {
             if (!block.rows || block.rows.length === 0) return ''
             let tHTML = `<table class="block-table"><tbody>`
             block.rows.forEach(row => {
@@ -509,6 +510,7 @@ export function usePaperBank() {
             })
             tHTML += `</tbody></table>`
             return tHTML
+          }
           case 'footer':
             return `<div class="block-footer">${escapeHtml(block.content)}</div>`
           default:
