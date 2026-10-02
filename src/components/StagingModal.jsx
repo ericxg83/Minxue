@@ -74,7 +74,7 @@ export default function StagingModal({
   onRotateFile,
   onSubmit
 }) {
-  const title = stagingType === 'workbook' ? '练习册作业' : stagingType === 'homework' ? '日常作业' : stagingType === 'retry_bound' ? '错题重练 · 上传答卷' : '普通试卷'
+  const title = stagingType === 'homework' ? '日常作业' : stagingType === 'retry_bound' ? '错题重练 · 上传答卷' : '普通试卷'
   // 原生平台走系统相机/相册，可以连拍；Web 端只有一次性的文件选择器。
   const native = isNativeCameraAvailable()
 

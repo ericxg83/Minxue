@@ -29,10 +29,10 @@ import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
 import WrongQuestionDetailModal from './components/WrongQuestionDetailModal'
-import ProcessingPage from './pages/ProcessingPageV2'
+import ProcessingPage from './pages/ProcessingPage'
 import HomeDashboard from './components/HomeDashboardV2'
-import WrongBookPage from './pages/WrongBookPageV2'
-import ExamPage from './pages/ExamPageV2'
+import WrongBookPage from './pages/WrongBookPage'
+import ExamPage from './pages/ExamPage'
 import WorksheetPicker from './components/WorksheetPicker'
 import ConfirmDialogHost from './components/ConfirmDialog'
 
@@ -468,7 +468,6 @@ export default function App() {
     handleStagingSelectFiles, removeStagingFile, applyStagingCrop, applyStagingRotate,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
-    homeworkChoiceRef,
     handleUploadAsWorkbook, handleUploadAsRegular,
     showExamChoice, setShowExamChoice,
     examChoiceFiles, setExamChoiceFiles,
@@ -1001,23 +1000,17 @@ export default function App() {
           }}
           onSelect={({ worksheetId, worksheetName }) => {
             setShowWorksheetPicker(false)
-            if (homeworkChoiceRef.current.length > 0) {
-              // 来自暂存区：有练习册 → 走练习册批改；"不使用练习册" → 未知来源 AI 批改
-              if (worksheetId) {
-                handleUploadAsWorkbook(worksheetId, worksheetName)
-              } else {
-                handleUploadAsRegular()
-              }
-            } else if (worksheetId) {
-              // 旧 flow：选完练习册 → 打开暂存区（连拍/多选）
-              setSelectedWorksheetId(worksheetId)
-              setPendingFlow('workbook')
-              __pendingUploadStore.worksheetId = worksheetId
-              __pendingUploadStore.worksheetName = worksheetName || null
-              openStaging('workbook')
+            // 选完练习册 → 拿暂存区那批照片走练习册批改；点「不使用练习册」→ 未知来源 AI 批改。
+            //
+            // 第 47 轮删掉了这里原先的「旧 flow」分支（选完册再打开暂存区让人拍照）：
+            // 本弹层全仓只有一个开启入口（useUploadFlow.js:224，紧跟在 setHomeworkChoiceFiles 之后），
+            // 所以 homeworkChoiceRef 恒为非空——旧分支与末尾 else 都不可达；
+            // 它写的几项状态（pendingFlow / selectedWorksheetId / __pendingUploadStore.worksheet*）
+            // 活路径 handleUploadAsWorkbook 里全部也写，删它不丢任何行为（git 历史可取回）。
+            if (worksheetId) {
+              handleUploadAsWorkbook(worksheetId, worksheetName)
             } else {
-              // 用户点击"不使用练习册" → 清除 workbook 流程
-              setPendingFlow(null)
+              handleUploadAsRegular()
             }
           }}
           subject={flowSubject}

@@ -25,10 +25,10 @@
 | 层级 | 视图 | 进入方式 | 观察 |
 |---|---|---|---|
 | Tab 1 | 首页 HomeDashboard | 默认页 / tab | 上传、优先重练、任务处置的总入口 |
-| Tab 2 | 作业 ProcessingPageV2 | tab / 首页「查看作业」/ 通知面板 | 看批改结果、进复审 |
-| Tab 3 | 错题本 WrongBookPageV2 | tab / 首页 / 组卷页 | 状态分段 + 科目 chip 筛选、多选加入重练 |
-| Tab 4 | 组卷历史 ExamPageV2 | tab | 重印、上传答案 |
-| 弹层 | UploadOptionsModal | 首页「开始上传」 | 三张卡：作业 / 普通 / 错题重练 |
+| Tab 2 | 作业 ProcessingPage | tab / 首页「查看作业」/ 通知面板 | 看批改结果、进复审 |
+| Tab 3 | 错题本 WrongBookPage | tab / 首页 / 组卷页 | 状态分段 + 科目 chip 筛选、多选加入重练 |
+| Tab 4 | 组卷历史 ExamPage | tab | 重印、上传答案 |
+| 弹层 | UploadOptionsModal | 首页「上传今天的作业」 | 两张卡：日常作业 / 普通试卷（第 46 轮由三卡减为两卡） |
 | 弹层 | StagingModal | 选完上传类型 | 拍照 + 相册多选暂存 |
 | 弹层 | WorksheetPicker | 上传流程内 | 选练习册，含「不使用练习册」 |
 | 全屏 | ScanQR → Grading | 顶栏扫码 → 扫码成功 | 扫码批改链 |
@@ -53,8 +53,8 @@
 
 5. **上传主流程弹层偏深**：从首页到相机要过 UploadOptionsModal → StagingModal（中途还可能插 WorksheetPicker）。最常走的那一条若能一键直达，每天几十操作各少一步（B 级方案见「与你讨论」）。→ **第 46 轮已减一层**：弹层从三卡减为两卡（只留负责人每天用的「日常作业」与「普通试卷」），删掉的「错题重练」卡经逐行核实**不删任何能力**——它走的其实就是「普通试卷」同一条通用上传分支，而重练卷靠卷面二维码定位，从任何支路进来都会被 QR 检测拦下归位；负责人真正的习惯（组卷历史里选卷上传答卷，`retry_bound`）完全未动。
 6. **`server/index.js:4740` createServer 用 async Promise executor**：`getTaskQueue()` 抛错时外层 promise 永不 settle——启动期依赖故障表现为**无声挂死**（不报错、不退出、端口不监听）。属启动失败语义变更，未擅自修，见提案 7。
-7. **V2 命名残留**：`ExamPageV2` / `ProcessingPageV2` / `WrongBookPageV2` 的 V1 均已不在（第 40 轮归档最后一个），后缀已无对照对象，读代码时要多绕一层。纯改名整理，见提案 8。
-8. **移动端切页重复请求**：浏览器实测单次切 tab，`/api/tasks/summary`、`/api/generated-exams/*`、`/api/wrong-questions/*` 会出现 2-3 次重复 fetch（均 304 缓存命中，不致错但耗流量与时间）。需先分清楚哪些是「缓存优先 + 后台刷新」的有意双加载（第 28 轮已证实错题中心属此类），剩下的才是真重复，故只记录不擅改。
+7. ~~**V2 命名残留**~~ —— **第 47 轮已清**（裁决 ⑦）：`ExamPageV2`/`ProcessingPageV2`/`WrongBookPageV2` 三个文件与同名函数已去后缀（V1 全部已不在，后缀无对照对象）。
+8. ~~**移动端切页重复请求**~~（保留编号以免引用错乱）：浏览器实测单次切 tab，`/api/tasks/summary`、`/api/generated-exams/*`、`/api/wrong-questions/*` 会出现 2-3 次重复 fetch（均 304 缓存命中，不致错但耗流量与时间）。需先分清楚哪些是「缓存优先 + 后台刷新」的有意双加载（第 28 轮已证实错题中心属此类），剩下的才是真重复，故只记录不擅改。
 9. **错题弹窗内数学渲染口径不齐**（第 41 轮实测）：同一张详情弹窗里，题干 / 选项 / 解析都走 MathText（数学体），只有**答案是纯文本**——答案 `-2 - 2√3` 的根号没有上横线、与题干割裂。接一行 MathText 即可统一，但字母答案（如 "A"）会变成斜体数学体，属肉眼可辨的版式取舍，本轮未能截图验收，已回滚不改，见提案 13。
 
 ## 三、可删/合并候选（全部待负责人确认，绝不擅删）
@@ -63,7 +63,7 @@
 1. **三个数据分析页重叠度**：学习诊断 / 成长中心 / 错题中心都做"学生×错题×掌握度"分析——第 21 轮已实证：页面无需合并，唯一重复物（成长中心导出按钮）已删。
 2. **试卷答案库 / 我的题型库**：使用频率待负责人确认，低频则考虑收纳进二级入口
 3. **移动端页面使用频率**：现确认底部只有 4 个 tab（首页/作业/错题本/组卷历史），其余 8 个视图均为弹层或深链。**待确认**：组卷历史 tab、周报弹层、上传三卡中的「普通」支路实际使用频率——低频则收纳或删（见提案 9）。
-4. **上传选册两套 flow 并存**：`App.jsx:1140-1160` 同一个 `onSelect` 里按 `homeworkChoiceRef` 长度分叉成新旧两条链，读与改都容易错。待确认哪条已死，死则删（提案 10）。
+4. ~~**上传选册两套 flow 并存**~~ —— **第 47 轮已删旧 flow**（裁决 ⑦）：`WorksheetPicker.onSelect` 里那个 `homeworkChoiceRef.current.length > 0` 分叉已确认不可达——本弹层全仓只有一个开启入口（`useUploadFlow.js:224`，紧跟在 `setHomeworkChoiceFiles` 之后），所以该条件恒为真；旧分支与末尾 else 一起删除，它写的状态在活路径 `handleUploadAsWorkbook` 里全部也写。连带 `stagingType='workbook'` 也无入口（`pendingFlow='workbook'` 仍在用，两者不是一回事，已分开注释清楚）。
 5. ~~**两个存量孤儿组件**~~ —— **第 45 轮已全部归档**（负责人批准「清」）：`ExamResourcePicker/`（133 行）与 `Skeleton/`（5 文件 136 行）已移到 `D:\Minxue_Archive\auto-20261002\components\`，孤儿锁豁免表已清空；server 三处把它当在用组件写的注释已改口为 `ExamChoiceModal`。另：`HomeDashboard.jsx`（首页 V1）已于第 44 轮归档。
 
 ## 四、已完成的顺手化/美化
@@ -240,7 +240,29 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | `worker.js:2138` `questions.filter(q => true)` | 逐字看过上下文：函数头注释写明「参考答案永远对全部题重算」，`filter(q => true)` 是**故意表达 ALL**，不是漏写条件。可简化但不改行为，不抢批改主流程的改 |
 | `server/utils/geom/**`、`server/scripts/**`、`server/tests/**`、迁移文件 | 保护区 / 一次性脚本 / 测试 / 硬禁区，本轮全部只统计 |
 
-### 裁决 ④：死兜底与死组件批次（第 45 轮已清）
+## 十八、第 44 轮：负责人裁决落地（∛ 修复 + 启动陷阱 + 循环锁 + 判题死写）
+
+### 立方根 `∛` / `∜`（提案 14，已批准已上线）
+
+`src/utils/mathText.js` 的 `convertSqrt` 原来只认 `√`。现在改成 `RADICALS` 表（`√`→无指数、`∛`→3、`∜`→4），四个操作数分支统一走 `wrap()` 输出 `\sqrt[n]{...}`。**屏幕与打印共用这一个函数**，所以改一处两边同时生效（这正是同构锁存在的意义）。
+
+验收（playwright 无头，只读）：列表页 `katex-error` 0、可见文本无裸 `√`/`∛`；详情页 38 个根号节点中 **4 个带根指数**（`.root` 块）；截图 `deliverables/r44_cbrt_detail.png`。回归保护：新增断言 `√2` 依旧不得被顺手改成带指数形式、`√(x+1)` 仍走括号路径。
+
+### 提案 7 核实：前提半错，处置变了
+
+原以为「后端启动会因队列初始化失败而无声挂死」。逐字查完发现：**真正在跑的启动路径（`index.js:4494`）是健康的**——先 `app.listen`，再在回调里 try/catch 初始化队列并打日志。有风险的那个 `createServer` **全仓零调用**，是个没人用的导出。
+
+所以处置从「改启动语义」降级为「删陷阱死代码」：删掉 `createServer`，原地留注释说明它为何不能再用（async Promise executor 一抛错就永不 settle）、以及真要多实例启动时该照哪段写。lint error **15 → 14**（no-async-promise-executor 归零）。
+
+### 提案 12 落地：`scripts/loopGuard.mjs`
+
+把「认领轮次」从手写 JSON 变成一次带校验的动作：`acquire`（忙则退出码 1；写锁后 sleep 2s 回读，round/startedAt 不是自己写的就判定被并发抢走 → 退出码 2；同时 `git fetch` 报远端是否领先）、`release`、`status`。以后每轮开工先跑它，不再手改锁文件。
+
+### 裁决 ⑤：判题链死写已清
+
+`allCorrect`（只写不读的「小问全对→整题全对」遗留标记）与 `oldRef`（死读）已删，原地留三行注释说明它曾经是什么、要恢复语义去 `git log -p server/worker.js` 找。行为零变更（变量本来就没人读）。
+
+## 十九、第 45 轮：裁决 ④ 落地（死兜底与死组件批次）
 
 - `useUploadFlow.js` 的 `uploadViaFrontend`（26 行「前端直传兜底」，全仓零调用）已删，原地留注释说明它是什么、恢复看 git 历史；连带清掉因此变死的 `uploadImage` / `createTask` 两个 import。
 - `ExamResourcePicker/`（133 行）与 `Skeleton/`（5 文件 136 行）已归档，孤儿锁豁免表清空。
@@ -264,28 +286,24 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 
 回滚方式（如果负责人其实还想从首页直接发重练卷）：把卡片与 `onStartWrongRetry` 加回即可，一行回调、无数据变动（git 历史 d3febe3 之后的那一次提交）。
 
+## 二十一、第 47 轮：裁决 ① 与 ⑦ 落地
+
+### 裁决 ①：`answerParseService` 两个锚点变量——结论是「不是 bug」
+
+深挖后判定：`lastAnchorUnitKey` / `lastAnchorGroup` 与续行归并的实判据完全冗余——`push()` 已把 `unit_key`/`section` 写进锚点行本身，第 877-884 行的归并条件直接读 `anchor.unit_key` / `anchor.section`，所以那两个变量从来就没参与判断（不是“该读没读”的错位 bug）。已删除（行为零变更），并把注释改成实话：**单一事实只保留锚点行一个来源，不要再引入平行副本变量**——同一类“两份真相漂移”刚在 MathText 上坑过我们。
+
+### 裁决 ⑦-a：选册旧 flow 已确认不可达，已删
+
+`WorksheetPicker` 全仓**只有一个开启入口**：`useUploadFlow.js:224`，紧挨在 `setHomeworkChoiceFiles(files)` 之后，且 `files.length === 0` 时第 206 行已提前 return——所以 `homeworkChoiceRef.current.length > 0` 恒为真，旧分支与末尾 else 永远走不到。删掉后 `openStaging('workbook')` 再无调用方，连带清掉 `StagingModal` 的 `wrong_retry` 之后的 `workbook` 标题分支与 App.jsx 里无人读的 `homeworkChoiceRef` 解构。注意：`pendingFlow='workbook'`（任务类型）**依旧在用**，与 `stagingType` 不是一回事，已分开注释防误删。
+
+### 裁决 ⑦-b：V2 改名完成
+
+`ExamPageV2.jsx` → `ExamPage.jsx`、`ProcessingPageV2.jsx` → `ProcessingPage.jsx`、`WrongBookPageV2.jsx` → `WrongBookPage.jsx`，函数名与 App.jsx 三处 import 同步；代码内 `PageV2` 残留 **0 处**（历史日志 DEVLOG.md 与各轮报告不改写，它们是当时事实的记录）。
+
+### 验收
+
+1453 单测全绿；lint **error 14 / warning 215**（217→215，即删掉的两个死变量）；隔离构建 `dist_nightly_20261002k` 通过（**改名后构建能过就是路径无漏网的证据**）；无头浏览器逐页实测：四个 tab 均按预期关键词正常渲染、无崩溃兜底页、`katex-error` 0、上传弹层仍是两卡（第 46 轮成果未回退）、控制台 0 error。
+
 ### 下一轮候选（仍是死变量）
 
-`server/services/*` 剩 12 条（多为死 import 与死局部函数，包括 `answerParseService.js` 两个只写不读的锚点变量——那个要先看是不是「上一题锚点」语义，归入待确认）。
-
-## 十八、第 44 轮：负责人裁决落地（∛ 修复 + 启动陷阱 + 循环锁 + 判题死写）
-
-### 立方根 `∛` / `∜`（提案 14，已批准已上线）
-
-`src/utils/mathText.js` 的 `convertSqrt` 原来只认 `√`。现在改成 `RADICALS` 表（`√`→无指数、`∛`→3、`∜`→4），四个操作数分支统一走 `wrap()` 输出 `\sqrt[n]{...}`。**屏幕与打印共用这一个函数**，所以改一处两边同时生效（这正是同构锁存在的意义）。
-
-验收（playwright 无头，只读）：列表页 `katex-error` 0、可见文本无裸 `√`/`∛`；详情页 38 个根号节点中 **4 个带根指数**（`.root` 块）；截图 `deliverables/r44_cbrt_detail.png`。回归保护：新增断言 `√2` 依旧不得被顺手改成带指数形式、`√(x+1)` 仍走括号路径。
-
-### 提案 7 核实：前提半错，处置变了
-
-原以为「后端启动会因队列初始化失败而无声挂死」。逐字查完发现：**真正在跑的启动路径（`index.js:4494`）是健康的**——先 `app.listen`，再在回调里 try/catch 初始化队列并打日志。有风险的那个 `createServer` **全仓零调用**，是个没人用的导出。
-
-所以处置从「改启动语义」降级为「删陷阱死代码」：删掉 `createServer`，原地留注释说明它为何不能再用（async Promise executor 一抛错就永不 settle）、以及真要多实例启动时该照哪段写。lint error **15 → 14**（no-async-promise-executor 归零）。
-
-### 提案 12 落地：`scripts/loopGuard.mjs`
-
-把「认领轮次」从手写 JSON 变成一次带校验的动作：`acquire`（忙则退出码 1；写锁后 sleep 2s 回读，round/startedAt 不是自己写的就判定被并发抢走 → 退出码 2；同时 `git fetch` 报远端是否领先）、`release`、`status`。以后每轮开工先跑它，不再手改锁文件。
-
-### 裁决 ⑤：判题链死写已清
-
-`allCorrect`（只写不读的「小问全对→整题全对」遗留标记）与 `oldRef`（死读）已删，原地留三行注释说明它曾经是什么、要恢复语义去 `git log -p server/worker.js` 找。行为零变更（变量本来就没人读）。
+`server/services/*` 剩 ~10 条死 import 与死局部声明（`answerParseService` 锚点变量已在第 47 轮解决）；`server/worker.js` 剩几何相关死 import（需负责人对零回归纪律松口才动）。

@@ -60,7 +60,7 @@ function FilterChip({ active, onClick, children }) {
   )
 }
 
-export default function WrongBookPageV2({
+export default function WrongBookPage({
   filteredWrongQuestions,
   bankCounts,
   selectedQuestions,

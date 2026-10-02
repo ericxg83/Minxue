@@ -65,7 +65,7 @@ function ExamRow({ exam, onOpen }) {
   </button>
 }
 
-export default function ExamPageV2({ studentExams, onReprint, onDelete, onOpenWrongBook, onUploadAnswer }) {
+export default function ExamPage({ studentExams, onReprint, onDelete, onOpenWrongBook, onUploadAnswer }) {
   const [detailExam, setDetailExam] = useState(null)
   const [filter, setFilter] = useState('all')
   const exams = (Array.isArray(studentExams) ? studentExams : [])

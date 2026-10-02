@@ -141,7 +141,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   </div>
 }
 
-export default function ProcessingPageV2({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview, onRefresh, onDeleteTask }) {
+export default function ProcessingPage({ currentStudent, tasks, filteredTasks, isLoadingTasks, isInitializing, processingFilter, onFilterChange, onRetryTask, onOpenReview, onRefresh, onDeleteTask }) {
   const all = (Array.isArray(tasks) ? tasks : []).filter(t => t.student_id === currentStudent?.id)
   const visible = Array.isArray(filteredTasks) ? filteredTasks : []
   const tabs = [

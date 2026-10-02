@@ -808,11 +808,12 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
     })
   }
 
-  // 续行归并锚点：记录最近一次「整题答案」行在 results 中的下标与 scope，
+  // 续行归并锚点：只记录最近一次「整题答案」行在 results 中的下标，
   // 供后续不以题号开头的续行归并到该答案（同 unit_key + 同 section 才允许）。
+  // 注：判据里的 unit_key / section 一律从锚点自己那行（anchor.unit_key / anchor.section，由 push() 写入）取，
+  // 不要再引入平行的 lastAnchorUnitKey / lastAnchorGroup 变量：它们曾存在过但从未被读，
+  // 第 47 轮删除。同一事实只保一个来源，才不会像 MathText 那样漂移。
   let lastContinuationAnchor = null
-  let lastAnchorUnitKey = null
-  let lastAnchorGroup = null
 
   for (const { line: trimmed, unit, group } of processedLines) {
     const unitKey = unit?.unit_key ?? null
@@ -856,8 +857,6 @@ export function parseAnswerText(text, lowConfidence = [], initialState = null, p
 
       // 续行归并锚点：只允许归并到「整题答案」（sub_no 为空）行
       lastContinuationAnchor = results.length - 1
-      lastAnchorUnitKey = unitKey
-      lastAnchorGroup = group ?? null
       if (!isJudge) lowConfidence.push({ question_no: questionNo, answer: ans, section: group || null })
       continue
     }

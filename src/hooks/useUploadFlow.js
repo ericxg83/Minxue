@@ -51,7 +51,7 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   // ── 多图暂存区 ──
   const [showStaging, setShowStaging] = useState(false)
   const [stagingFiles, setStagingFiles] = useState([]) // [{ file, url, name }]
-  const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular' | 'workbook'；重练卷上传答卷走 openStagingForRetry 的 'retry_bound'
+const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'；重练卷上传答案走 openStagingForRetry 的 'retry_bound'。注意与 pendingFlow 的 'workbook' 无关，后者照旧在用
   const [stagingUploading, setStagingUploading] = useState(false)
   const [cameraBusy, setCameraBusy] = useState(false) // 原生相机/相册打开中
   const cameraInputRef = useRef(null)
