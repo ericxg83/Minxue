@@ -252,3 +252,34 @@
 **激光笔为何低风险**：不碰 strokes——`tool==='laser'` 时 `onPointerMove` 只更新一个 `pointer-events:none` 的独立 DOM 光点层并直接 return，绝不进 `startStroke/appendLivePoint`；导出 PNG 天然不含光点；可复用「allowTouch=false 时手指本来什么都不做」的空闲通道。
 
 **需负责人回答的 6 个口径**：一、激光笔怎么触发（只在 tool=laser 时让手指生效，不去抢现有的左右滑翻页）？二、要不要荧光笔？三、板书丢不起吗（决定 N4 上云）？四、「生成 PPTX」入口直接删掉，还是留着以后恢复？五、图形吸附对几何讲题是刚需还是锦上添花？六、全屏时右侧工具栏会不会遮挡书写区（决定要不要重排）。
+
+### 第 85 轮交付（2026-10-03）：白板 P1/P2/N1/P3/P4/P5 全做
+
+**负责人勾选口径**：P1 P2 N1 P3 P4 P5 全做｜荧光笔**不要**｜全屏右侧工具栏**不挡、位置不动**。
+其余三项由执行方按默认自决并在报告里说明：N4 板书上云**暂缓**（单用户固定设备，localStorage 够用）、
+N3 图形吸附**先观察**、Q1 激光笔触发**照 `allowTouch` 同款规则**（选中激光笔→手指即指针、横滑切题暂停，
+翻题走两侧箭头/底栏/键盘）。
+
+**改动落点**
+
+| 项 | 文件 | 做法 |
+|---|---|---|
+| P1 | `WeekendBoard.vue#onKeydown` | 新增 `1-4` 换色、`[` `]` 调粗细、`E` 切橡皮、`L` 切激光笔、`Y` 重做；工具栏 title 补快捷键提示 |
+| P2 | `WeekendBoard.vue` | `redoStack`（shallowRef）后进先出；新笔迹提交 / 切题 / 清空即失效；工具栏加按钮（空栈 disabled） |
+| N1 | `DrawingCanvas.vue` | 新增 `.dc-laser` 独立 canvas（`pointer-events:none`，z-index 4）；`tool==='laser'` 时 pointerdown/move/up 只走光点层并 return，**绝不进 `startStroke/appendLivePoint`**；拖尾按「点龄」220ms 过期 ⇒ 抬手即消；导出 PNG 只读 `localStrokes`，天然不含光点 |
+| P3 | `WeekendBoard.vue#clearAll` | 二次确认：首点变红（`.tool-btn--danger`）+ 页内提示，3s 内再点才真清，超时/切题自动复原 |
+| P4 | `DrawingCanvas.vue` / `WeekendHandout.vue` | 删 `resetView`（零调用方，含 defineExpose）；删 disabled 的「生成 PPTX（暂停开放）」入口 + `runGenerate` + `generating` + 孤儿 `Download` 图标导入；**后端 `weekendPptxService.js` 与 `/weekend-ppt/generate` 路由保留不动** |
+| P5 | `WeekendHandout.vue` | 删与实现不符的「fs=1 → 白板直接进全屏」JSDoc（白板从不读 fs）；删死参数 `params.maxPerDay`（请求体里的 `maxPerDay: 0` 保留做后端兼容） |
+
+**顺手修的一个真瑕疵**：默认笔宽 `penSize=3` 不在三档预设（2 / 3.5 / 6）里 ⇒ 工具栏粗细档「一个都不高亮」，
+且第一次按 `[`/`]` 会跳档。`stepSize()` 改为**方向吸附**：加粗取第一个更粗的、变细取最后一个更细的，端点不动。
+实测档位序列 `-1→1→2→1→0→0`（默认→3.5→6→3.5→2→2）。
+
+**四道闸（最终代码）**：`npm test` **1469/1469 全绿**｜lint **14 errors / 153 warnings**（持平基线，无新增）｜
+`dist_nightly_20261003r85` 构建成功｜真机级验证 **30/30 通过**（`_r85_board_verify.mjs`：preview 5220 移动端首页 +
+工作台真渲染、0 控制台错误、0 个 4xx/5xx；dev 3000 白板交互——快捷键/重做/激光笔不写笔迹/localStorage 笔迹数不含激光/
+清屏二次确认与 3s 复原/PPTX 入口已消失且白板入口仍在）。写接口全程 `page.route` 拦截，**零写生产库**。
+
+**遗留（不是本轮范围）**：工具栏粗细档在「默认 3」时仍无高亮档（预设里没有 3）——属既有观感问题，
+若要根治需把默认笔宽改成预设值（3.5），属行为变更，未做。
+

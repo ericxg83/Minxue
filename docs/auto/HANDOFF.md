@@ -44,6 +44,9 @@
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
 - **五条确定性通道**：函数图象 / 数轴 / **分数面积模型（新）** / DSL 构造 / 视觉目测。
+- **讲题白板（r85 后）**：工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R` + 方向键/Home/End；
+  有重做（`redoStack`）；清屏需二次确认（3s 窗口）。**激光笔走独立 `.dc-laser` canvas，绝不写 strokes**。
+  选中激光笔时手指归指针、横滑切题暂停。验证脚本 `_r85_board_verify.mjs`（gitignore 的根目录 `_*` 临时件）。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -58,26 +61,23 @@
 
 ## 五、未完成事项（按优先级）
 
-### 1. 【最高优先，等勾选】周末班课件 + 白板优化（第 84 轮已做完只读调研）
+### 1. 【✅ 已交付 · 第 85 轮】周末班课件 + 白板优化（P1/P2/N1/P3/P4/P5）
 
-白板是老师**每天高频**功能。调研结论：自研 Canvas 2D + Pointer Events，`strokes[] = {tool,color,size,points:[{x,y,p}]}`，**只有 pen/eraser 两个工具**；地基（压感、防手掌误触、无限向下生长、锚点 localStorage 持久化、全屏讲题、翻页六入口、导出板书 PNG）已扎实。**无重做、无激光笔、无图形吸附、无文本框、无贴图、板书不上云。**
+负责人已勾选：**P1 P2 N1 P3 P4 P5 全做**｜荧光笔**不做**｜全屏右侧工具栏**不挡、位置不动**。
+执行方自决三项：N4 板书上云**暂缓**（单用户固定设备）、N3 图形吸附**先观察**、Q1 激光笔触发**照 `allowTouch` 同款规则**。
 
-待勾选清单（收益/成本排序，详见 `docs/auto/backlog.md` 第 84 轮调研节）：
+已落地：`1-4` 换色 / `[` `]` 调粗细 / `E` 橡皮 / `L` 激光笔 / `Y` 重做（`redoStack` 后进先出，新笔迹·切题·清空即失效）；
+**激光笔**走 `.dc-laser` 独立 canvas（`pointer-events:none`），`tool==='laser'` 时 pointer 事件只走光点层并 return，
+**绝不进 `startStroke/appendLivePoint`**，拖尾按点龄 220ms 过期 ⇒ 抬手即消、导出 PNG 天然不含；
+清屏二次确认（首点变红 + 页内提示，3s 超时/切题自动复原）；删 `DrawingCanvas.resetView` 与 disabled 的 PPTX 前端入口
+（含 `runGenerate`/`generating`/孤儿 `Download` 导入；**后端 `weekendPptxService.js` 与路由保留**）；
+清 `fs=1` 过时 JSDoc 与死参数 `params.maxPerDay`。
 
-| # | 事项 | 类型 | 工作量 | 建议 |
-|---|---|---|---|---|
-| P1 | 换色 `1-4`、粗细 `[` `]`、橡皮 `E` 快捷键（现在要抬手点右侧工具栏） | 纯顺手化 | 小 | 做 |
-| P2 | 加「重做」（`Y`）——现在撤销手滑只能重画 | 纯顺手化 | 小 | 做 |
-| N1 | **激光笔**（老师点名要）：红点+拖尾，临时显示、不写 strokes、抬手即消 | 新增 | 小-中 | 做（手指写字会留痕，无法用现有功能替代） |
-| P3 | 清屏轻确认（按钮变红"再点一次"，3s 复原；现在 Delete 一按整页没，无确认） | 防错 | 小 | 做 |
-| P4 | 删死入口：`DrawingCanvas.resetView` 无人调用；「生成 PPTX（暂停开放）」disabled 但前后端代码都还在 | 做减法 | 小 | 做（前端删入口，后端服务暂留） |
-| P5 | 清过时注释/参数（`openBoard` 注释写 fs=1 实际不读；`maxPerDay` 已下线仍固定发 0） | 防误改 | 极小 | 做 |
-| N2/N3 | 荧光笔 / 直线图形吸附 | 新增 | 小/中 | **先观察**（别一上来堆工具） |
-| N4/N5 | 板书上云 / 文本框贴图 | 新增 | 中-大/大 | **暂缓 / 不做**（单用户固定设备；功能膨胀） |
+顺手修：默认笔宽 `penSize=3` 不在三档预设（2/3.5/6）里导致第一次按 `[`/`]` 跳档 ⇒ `stepSize()` 改为方向吸附。
 
-**落点提示**：激光笔不碰 strokes——`tool==='laser'` 时 `onPointerMove` 只更新一个 `pointer-events:none` 的独立 DOM 光点层并 return，绝不进 `startStroke/appendLivePoint`；导出 PNG 天然不含光点。快捷键只改 `WeekendBoard.vue` 的 `onKeydown`（约 L993-1026），沿用现有“metaKey/ctrlKey 直接 return、INPUT/TEXTAREA 不拦截”守卫。
-
-**还有 6 个口径必须问负责人**（他还没答）：激光笔触发方式（会不会和左右滑翻页打架）、要不要荧光笔、板书丢了疼不疼、PPTX 入口删还是留、图形吸附是刚需吗、全屏时右侧工具栏挡不挡书写区。
+验证脚本：`_r85_board_verify.mjs`（30/30，含 preview 冒烟 + 白板交互；写接口全程拦截、零写生产库）。
+细节见 `docs/auto/backlog.md` 第 85 轮交付节。**遗留观感问题**：默认 3 时工具栏粗细档无高亮（预设里没有 3），
+根治需改默认笔宽为 3.5（行为变更，未做）。
 
 ### 2. 【提案等确认】方向一：上传链路自愈
 
@@ -108,6 +108,10 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | ⑭ | 批量收紧"裁多了"的 63 题 | **不批量做**：8 条抽验 6 条会被收紧毁掉（并排多面板合法图），铁证是 `2b4aaeec` 被判"应收紧到 209×114" |
 | ⑮ | 单题收紧 `ff46daa3` | **已推翻**：dry-run 预览发现会切掉抛物线顶点与 -4 刻度，比原裁片更差 |
 | ⑯ | 24 题越界 `image_bbox` | **不动** |
+| ⑰ | 白板荧光笔（N2） | **不做**（先看激光笔够不够，避免工具膨胀） |
+| ⑱ | 白板全屏右侧工具栏重排 | **不动**（负责人实测不遮挡书写区，2026-10-03） |
+| ⑲ | 板书上云（N4） | **暂缓**（单用户固定设备，localStorage 够用） |
+| ⑳ | 白板图形/直线吸附（N3） | **先观察**（批注板不是画图板，吸附易误伤手写） |
 | — | 首页上传"直达按钮" | **否决**（保持首页→上传→选类型→相机；UploadOptionsModal 维持两卡布局） |
 | — | 变式题进重练卷 / 相似度阈值自动合并错题 / 学生端功能设想 | **永久禁止**（见 AGENTS.md 核心业务原则 9、10 与禁止事项） |
 
@@ -125,6 +129,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 81 | `cb2b42b` | ⑮ 推翻、⑪ 按证据不做；挖出真根因 24 题越界 bbox；修了"改裁片没回写 image_bbox"的数据一致性缺口 |
 | 82 | `d8f9aab` | ⑤ 第一批：`pruneDeadDeclarations.mjs`（真 AST 判副作用），删 26 条声明/152 行，警告 182→158 |
 | 83 | `3bc5623` | ⑤ 第二批：只删 5 条整行形态；拦下裁决③红线；修工具两个坑（逗号重叠写碎源码、`Select-Object -First` 截空文件）；清理线收线 |
+| 84 | `2ae8fb6` | 只读调研「周末班课件 + 白板现状与待拍板清单」；重写 HANDOFF 交接文档（循环暂停等接手） |
+| 85 | `6a5a9f5` | 白板 P1/P2/N1/P3/P4/P5：快捷键 `1-4`/`[` `]`/`E`/`L`/`Y`、重做、**激光笔**（不写 strokes）、清屏二次确认、删死入口（resetView + PPTX 前端）、清过时注释；顺手修粗细吸附。四道闸全过，`_r85_board_verify.mjs` 30/30 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 
