@@ -764,3 +764,47 @@ Windows 上 TaskStop 杀不干净 preview 的 node 子进程：`netstat -ano | g
 - **建议（A 级候选）**：未来某轮可把陈旧 `dist/` 清掉或加进 .gitignore 语义确认（它不是构建目标，
   还会骗 preview）；本轮不动 `dist/`（铁律：绝不清/写 dist/）。
 - 待拍板清单 5 条不变（见 HANDOFF-续跑指南-20261004.md 第四节）。
+
+---
+
+## 第 95 轮（2026-10-04）：冒烟直连生产根因修复（闸门构建强制本地化）
+
+### 根因链（证书噪声只是表象）
+
+1. `_r91_smoke` 偶发 `ERR_CERT_COMMON_NAME_INVALID` / `ERR_CONNECTION_CLOSED`，dev 从不复现。
+2. 写 `_r95_cert_probe.mjs` 逐路由收集 `requestfailed`：产物上出现对 **`https://minxue-api.onrender.com`**
+   的请求（`/api/tasks/summary`）——工作台页面在直连生产 Render API。
+3. 来源：`.env.production` 的 `VITE_API_URL=https://minxue-api.onrender.com/api` 被 `vite build`
+   烤进 bundle（`apiService.js` 的 `API_BASE`）；而 workbench 另有一批**裸 `fetch('/api/...')`
+   相对路径**走 preview 代理（preview 未配 proxy 时**继承 `server.proxy`** → 本机 4000）。
+   ⇒ 同一产物双 base 并存：一半生产、一半本地。
+4. 生产 API 的 TLS 在本网络抖动 ⇒ 冒烟偶发红。dev 用相对路径 + vite 代理 ⇒ 从不复现。
+
+### 修复（只动闸门命令，零产品代码）
+
+- 构建：`MSYS_NO_PATHCONV=1 VITE_API_URL=/api CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir dist_nightly_日期rN`
+- `MSYS_NO_PATHCONV=1`：Git Bash 会把环境变量值 `/api` 按 POSIX 路径改写成
+  `C:/Program Files/Git/api`（MSYS path conversion），烤进 bundle 后 fetch 全变
+  `file:///C:/Program%20Files/Git/api/...`（r95 第一次重建即踩，22/33 假红）。
+- 产物 bundle 验证：`minxue-api.onrender.com/api` 命中 0（r94 产物命中多个 chunk）。
+- 行为验证：探针全路由零外部 origin、零 requestfailed；`_r91_smoke` 33/33、`_r94_render_smoke` 8/8。
+- 生产部署不受影响：线上构建用的是服务器侧 env（本仓库 .env.production 的值本来就是占位符级别，
+  线上有自己的真实配置），本地闸门产物只用于冒烟。
+
+### 提案（等负责人拍板，未动手）
+
+- **⑦ workbench 双 base 统一**：裸 `fetch('/api/...')` 与 `apiService`（绝对 base）并存。
+  生产若靠同域反代则裸 fetch 成立、apiService 靠 CORS 也成立，但两套口径长期是隐患
+  （将来改 API 域名/加路径前缀要改两处）。候选清单：`QuotaBanner.vue`（/api/quota/status）、
+  `QuestionDetailPanel.vue`（/api/upload）、`HandoutPreview.vue`（/api/handout/export-word）、
+  `WorksheetManagement.vue`（/api/worksheets/fix-exam-units/*）。倾向：统一走 apiService。
+- **⑧ `VITE_AI_API_KEY` 客户端直读 foot-gun**：`src/config/ai.js` 在前端 bundle 里读
+  `VITE_AI_API_KEY`。当前 .env.production 是占位符 `your-ai-api-key`（**未泄露**，已取证）；
+  但谁把真 key 写进去，key 就进公开可下载的 JS。建议：确认前端直连 AI 是否还在用；
+  若用，考虑挪到服务端代理（C 级，涉及架构，必须负责人点头）。
+
+### 附带事实
+
+- vite `preview` 未显式配 proxy 时**继承 `server.proxy`**（所以隔离产物冒烟能打到本机 4000）。
+- `dist_nightly_20261004r95` 为首个「全本地」产物；r94 及更早产物均含生产 base，勿再用于
+  冒烟断言数据类项目。

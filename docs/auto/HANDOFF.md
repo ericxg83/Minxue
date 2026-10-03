@@ -24,7 +24,7 @@
 
 ## 三、必须遵守的纪律（违反 = 事故）
 
-1. **上线安全铁律（最高优先级）**：每次 git push 触发线上自动部署。**推送前必须过四道关**：① `npm test` 全绿；② lint 无新增 error；③ 构建成功（`BUILD_OUTDIR=dist_nightly_日期rN` 隔离，绝不写 dist/）；④ **真机级冒烟**——`BUILD_OUTDIR=<目录> npx vite preview --port <端口>` 跑起来，用浏览器自动化实测移动端首页与工作台真的渲染（挂载点有子节点、innerText 有真实文字、0 控制台错误、0 个 4xx/5xx）。冒烟不过不推送。
+1. **上线安全铁律（最高优先级）**：每次 git push 触发线上自动部署。**推送前必须过四道关**：① `npm test` 全绿；② lint 无新增 error；③ 构建成功（**`MSYS_NO_PATHCONV=1 VITE_API_URL=/api CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir dist_nightly_日期rN`**，绝不写 dist/。`VITE_API_URL=/api` 强制产物全走本地代理——不带会把 `.env.production` 的生产 API base 烤进包，冒烟变相直连生产（r95 实证）；`MSYS_NO_PATHCONV=1` 防 Git Bash 把 `/api` 改写成 `C:/Program Files/Git/api`（r95 实证））；④ **真机级冒烟**——`npx vite preview --port <端口> --outDir <隔离目录>` 跑起来（**必带 `--outDir`**，不带服务的是陈旧 `dist/`，r94 实证），并用浏览器自动化实测移动端首页与工作台真的渲染（挂载点有子节点、innerText 有真实文字、0 控制台错误、0 个 4xx/5xx）。冒烟不过不推送。
    - **本机浏览器窗口常处于隐藏态，`take_screenshot` 必然超时** → 冒烟改用「JS 求值读 DOM」，并在指令里明确"禁止截图"。要肉眼看图，用 `@napi-rs/canvas` 本地栅格化（见 `tmp/geo_montage.mjs` 范式）。
 2. **自决权三级**：A 直接干（行为保持型缺陷修复/死代码/顺手化/文档）；B 提案等确认（产品向决策）；C 永不（删用户数据/改 eslint 规则或 ignores/放宽任何门禁/写生产数据库或 Redis/批量调付费 AI·OCR 超 5 次）。
 3. **硬禁区（只能提案，不得动手）**：数据库 Schema/迁移；批改主流程（`server/worker.js`）设计变更；错题生命周期语义与合并规则；重练与组卷口径；掌握度口径；练习册答案解析质量闸；judgements 审计语义；共享服务与公共 API 行为变更；任务状态机；判题/答案解析服务里的正则与转义。
@@ -243,6 +243,26 @@ memory 日志、同名子串假阳性、CSS 注释提及）后全部判死删除
 （errors 持平，warnings −3 随死文件消失）｜ 构建 `dist_nightly_20261004r94` ｜ 真机冒烟
 `_r91_smoke 33/33`（×3，1 遍遇外部证书噪声 32/33，旧产物同款）+ `_r91_pc_verify 25/25` +
 `_r92_verify 12/12` + `_r93_laser_verify 15/15`（dev 与产物双跑）+ `_r94_render_smoke 8/8`。零写生产库。
+
+### 8. 【✅ 已交付 · 第 95 轮】冒烟直连生产根因修复：闸门构建强制本地化
+
+r94 报告的「外部证书噪声」查到根了，且比噪声严重：隔离产物构建时 `.env.production` 的
+`VITE_API_URL=https://minxue-api.onrender.com/api` 被烤进 bundle，而 workbench 另有一批
+**裸 `fetch('/api/...')` 相对路径**（QuotaBanner / QuestionDetailPanel / HandoutPreview /
+WorksheetManagement）走 preview 代理到本机 ⇒ **同一个产物一半请求打生产 Render API、
+一半打本机**。后果：① 冒烟断言读到的是生产数据（非确定性，学生真名都进了冒烟日志）；
+② 生产 API 的 TLS 抖动直接打进冒烟（`ERR_CERT_COMMON_NAME_INVALID` / `ERR_CONNECTION_CLOSED`
+就是 r93/r94 反复遇到的「偶发噪声」）；③ dev 从不复现（`.env` 无 VITE_API_URL，走相对路径）。
+
+**修复（闸门命令级，零产品代码改动）**：构建加 `VITE_API_URL=/api` 覆盖 + `MSYS_NO_PATHCONV=1`
+（Git Bash 会把 `/api` 环境变量值改写成 `C:/Program Files/Git/api`，r95 第一次重建就踩了，
+bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范原文。
+**验证**：新产物 `dist_nightly_20261004r95` bundle 中 `minxue-api.onrender.com/api` 命中 0；
+探针全路由**零外部 origin、零 requestfailed**；`_r91_smoke` **33/33**、`_r94_render_smoke` 8/8。
+
+**两条顺藤摸出的提案（记入 backlog，未动手）**：⑦ workbench 双 base 并存待统一；
+⑧ `VITE_AI_API_KEY` 客户端直读是 foot-gun（本仓 .env.production 是占位符 `your-ai-api-key`，
+**未泄露**，但真 key 放进去就会进公开 bundle）。
 
 ## 六、已关闭、不得重提的红线清单（负责人已裁决）
 

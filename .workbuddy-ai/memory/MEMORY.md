@@ -22,7 +22,7 @@
 - ⛔ 任务「自愈」唯一实现 `server/pendingTaskRecovery.js#describeAutoRetry`（照 SQL 判）；前端 `taskAutoRetry.js` 只翻译；缺 `auto_retry` 按「不自愈」。→ task-self-healing
 - ⛔ 多根节点组件收不到 class ⇒ 定位类挂外层；工作台内容区自己滚 ⇒ 看 `getBoundingClientRect().top`。→ data-pages
 - ⛔ src/ 不许有不可达模块（`test/moduleReachability.test.mjs` 全量 BFS）；删死代码走归档惯例（负责人 WIP 先 cp `D:\Minxue_Archive\` 再 git rm）。
-- ⛔ 隔离产物冒烟 `vite preview` **必带 `--outDir`**（不带 = 服务陈旧 `dist/`，r94 踩实）；先 curl 新产物 asset 验对象（content-type 防 SPA 假 200）。→ frontend-verify-discipline
+- ⛔ 冒烟双闸门：构建 `MSYS_NO_PATHCONV=1 VITE_API_URL=/api vite build --outDir …`（防烤入生产 base / MSYS 改写）；preview 必带 --outDir 并 curl 验对象。→ frontend-verify-discipline
 
 ## 2. 前端验证纪律
 - ⛔ 源码级回归锁必须反向自检（旧版上判红；新锁可删除前先跑，无需导出旧版）。
