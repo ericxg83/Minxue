@@ -132,6 +132,8 @@ const COMPONENTS = path.join(SRC, 'components')
  * 往里加东西 = 承认新增了一个没人用的文件，必须同时写清为什么不能直接删。
  */
 const ALLOWED_ORPHANS = new Set([
+  // 负责人的未提交 WIP（移动端新首页草稿，2026-10-02）——接线或归档由负责人定，暂豁免
+  'src/components/HomeDashboard.jsx',
 ])
 
 function walkAny(dir, acc = []) {
