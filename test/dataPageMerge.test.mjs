@@ -31,7 +31,8 @@ const HEADER_SRC = read('src/workbench/components/layout/AppHeader.vue')
 const DIAG_SRC = read('src/workbench/views/WeeklyReportWorkbench.vue')
 const STUDENT_SRC = read('src/workbench/views/StudentDetailWorkbench.vue')
 const WRONGCENTER_SRC = read('src/workbench/views/WrongBookCenterRedesign.vue')
-const RETRYTASKS_SRC = read('src/workbench/views/RetryTasksWorkbench.vue')
+// 第 94 轮：RetryTasksWorkbench.vue 经审计确认为从未进过路由/侧栏的孤儿页，已删除，
+// 原第 153 行「重练空态文案」测试随之摘除；其意图（禁指 /wrongbook）由下方全仓跳转锁覆盖。
 
 /** 去掉注释，避免注释里提到的路径命中判据 */
 function stripComments(src) {
@@ -148,13 +149,6 @@ test('⛔ 错题组件里的死勾选框必须已删（勾了没有任何事情�
   // 但真正有用的两个动作必须留着
   assert.match(code, /markMastered/, '「标记完全掌握」是错题中心独有的动作，不能一起删掉')
   assert.match(code, /removeQuestion/, '「移除」是错题中心独有的动作，不能一起删掉')
-})
-
-test('重练任务的空态文案不能再指向做不到这件事的页面', () => {
-  const code = stripComments(RETRYTASKS_SRC)
-  assert.ok(!code.includes('/wrongbook'), '空态按钮还指向已下线的错题中心')
-  assert.ok(!/去错题池创建/.test(code), '「去错题池创建」是错的引导：那个页面从来没有能触发组卷的按钮')
-  assert.ok(code.includes('/weekly-report'), '应指向真正能生成重练/再测卷的学习诊断')
 })
 
 test('学生档案页「最近重练」空态也不再指向做不到的入口', () => {

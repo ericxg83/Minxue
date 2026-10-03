@@ -213,6 +213,37 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 零自动删除、只由老师动手，详见四、白板条目）。**② IndexedDB 暂缓，等他开口**；
 路线①（按最旧淘汰）**已明确不做**（会删掉老师写的字）。
 
+### 7. 【✅ 已交付 · 第 94 轮】全仓死模块清零：30 个不可达模块删除 + 全 src 可达性闸门
+
+r92 在 Vue 工作台做了「入口可达性」，第 94 轮把口径推到**全 src**：从双入口
+（`index.html→src/main.jsx`、`workbench.html→src/workbench/main.js`）做静态 import BFS，
+185 个 src 模块里 **30 个无任何路径可达** → 逐个排除噪声（`.claude/` 快照、`_lint_*.json`、
+memory 日志、同名子串假阳性、CSS 注释提及）后全部判死删除。典型三类：
+死文件（`HomeDashboard.jsx` 被 `HomeDashboardV2` 同名顶替）、孤儿页（`RetryTasksWorkbench.vue`
+从未进过路由）、死岛（`paperStore`+`ImageBlock`+`QuestionBlock` 互相引用但整链无人用）。
+
+- ⚠️ **`HomeDashboard.jsx` 是负责人 2026-10-02 的 WIP 草稿**（fe4f941 特意保留并登记孤儿豁免），
+  处理遵循仓库归档惯例：**先归档到 `D:\Minxue_Archive\auto-20261004\components\` 再删**
+  （git 历史 fe4f941 亦有全文，零丢失）。`ALLOWED_ORPHANS` 豁免表随之清空。
+- **新闸门 `test/moduleReachability.test.mjs`**：src/ 下不许再有不可达模块（含空豁免表
+  `ALLOWED_UNREACHABLE`，纪律同 r42 的 ALLOWED_ORPHANS）。**反向自检**：删除前在旧树上跑
+  判红、恰好列出 30 个文件（非空锁，且全程未 spawnSync git）。
+- **同步改 r91 锁**：`test/dataPageMerge.test.mjs` 摘除对已删孤儿页 `RetryTasksWorkbench.vue`
+  的读取与「重练空态文案」测试（其意图——全仓禁硬跳 /wrongbook——由该文件第 ④ 组全仓扫描锁覆盖）。
+- **⛔ 冒烟闸重大陷阱（本轮实测踩中）**：`npx vite preview --port N` **不带 `--outDir` 时服务的是
+  `build.outDir`（即陈旧的 `dist/`）**，不是隔离产物！本轮陈旧 `dist/`（9-28 构建）里还有 r91 已删的
+  GrowthWorkbench 页，其 computed 抛 `undefined.filter`，差点误判为回归。**今后冒烟命令必须带
+  `--outDir <隔离目录>`**，并先 curl 一个「只存在于新产物的 asset」验明服务对象再跑断言
+  （判据：真 chunk `Content-Type: text/javascript`，SPA fallback 回的是 `text/html`）。
+- 运维注：后端 `node server/index.js`（:4000）与 dev（:3000）在会话间会被系统回收；Redis 以
+  **Memurai 服务**常驻 6379（`redis-cli` 不在 PATH，用 `Test-NetConnection -Port 6379` 探）。
+  preview 代理连不上后端表现为全页 500 `/api/quota/status`。
+
+**四道闸**：`npm test` **1537/1537**（1536 − 1 摘除 + 2 新锁）｜ lint **14 errors / 150 warnings**
+（errors 持平，warnings −3 随死文件消失）｜ 构建 `dist_nightly_20261004r94` ｜ 真机冒烟
+`_r91_smoke 33/33`（×3，1 遍遇外部证书噪声 32/33，旧产物同款）+ `_r91_pc_verify 25/25` +
+`_r92_verify 12/12` + `_r93_laser_verify 15/15`（dev 与产物双跑）+ `_r94_render_smoke 8/8`。零写生产库。
+
 ## 六、已关闭、不得重提的红线清单（负责人已裁决）
 
 | 编号 | 事项 | 裁决 |

@@ -699,3 +699,68 @@ SQL 漂移锁 + 在途口径 + 五个文件的源码级接线锁），**反向�
 ② 打桩 `/api/**` 时 **`/tasks/summary` 必须带 `summary` 字段** —— `notificationStore` 会把
 `data.summary` 整个赋给 `summary.value`，缺字段会让 `totalNotifications` 的 computed 直接抛错
 （表现为「0 控制台错误」断言假红）。
+
+---
+
+## 第 94 轮（2026-10-04）：全仓死模块清零 + 全 src 可达性闸门
+
+### 交付内容
+
+r92 把「入口可达性」做到 Vue 工作台，本轮推到**全 src**。双入口静态 import BFS：
+185 个 src 模块 → **30 个无任何路径可达** → 逐个排除噪声后全部判死删除（`git rm`）：
+
+- **死文件**：`src/components/HomeDashboard.jsx`（被 `HomeDashboardV2` 同名顶替——App.jsx
+  `import HomeDashboard from './components/HomeDashboardV2'`，本地别名让文本搜索全盲）；
+- **孤儿页**：`src/workbench/views/RetryTasksWorkbench.vue`（从未进过路由/侧栏）、
+  `PracticeReviewWorkbench.vue`、`ReviewWorkbench.vue`（`UnifiedReviewWorkbench` 的子串假阳性）；
+- **死岛**：`paperStore.js`+`ImageBlock.vue`+`QuestionBlock.vue`+`tikzGenerator` 链、
+  `WrongQuestionCard.vue`+`LazyImage.vue`、`boundingBoxDetector`+`annotationLayout` 等
+  （互相引用但整链无人 import）；
+- **旧禁令遗产**：`src/utils/questionDedup.js`（Levenshtein ≥90% 模糊合并——正是 AGENTS.md
+  第 9 条禁掉、被 `questionIdentity.js` 顶替的旧路），随死删除；
+- 其余：`cropImageService` / `heicPreview` / `nativeDownload` / `bboxFixer` / `coordinateValidator` /
+  workbench 的 `SectionBlock`/`TableBlock`/`TextBlock`/`ModeSwitcher`/`PaginationBar`/`VirtualList`/
+  `QuestionCardSkeleton`/`InlineAlert`/wrongbook 的 `FilterPanel`/`StatusTabs`/`StudentSwitcher`、
+  `stores/questionStore.js`、`stores/workbenchStore.js`。
+
+噪声排除判据（本轮实测的假阳性来源，后续轮次直接套用）：`.claude/` 快照、`_lint_*.json` 临时件、
+`.workbuddy` memory 日志、函数/变量名的子串（`renderImageBlock`、`allQuestionBlocks`）、
+CSS 注释提及（`复用 InlineAlert danger tone 的 token`）、测试文件**注释**提及（真读源码的锁除外）。
+
+### 新闸门
+
+- `test/moduleReachability.test.mjs`（2 例）：src/ 下不允许任何不可达模块；BFS 走全
+  （>100 模块）防静默失效。豁免表 `ALLOWED_UNREACHABLE` 空置，纪律同 r42 的 `ALLOWED_ORPHANS`。
+  **反向自检：删除前在旧树上判红、恰好列出 30 个文件**（新锁先跑旧状态，无需导出旧版）。
+- `test/mobilePageReachability.test.mjs` 的 `ALLOWED_ORPHANS` 清空（HomeDashboard.jsx 归档后删除）。
+- `test/dataPageMerge.test.mjs`：摘除对已删孤儿页的 `read()` 与「重练空态文案」测试
+  （意图由第 ④ 组全仓禁跳 /wrongbook 扫描锁继续覆盖），r91 锁其余断言未动。
+
+### ⚠️ 冒烟闸重大陷阱：`vite preview` 不带 `--outDir` 服务的是陈旧 `dist/`
+
+`npx vite preview --port N`（不带 `--outDir`）服务 `build.outDir` = `dist/`，**不是隔离产物**。
+本轮陈旧 `dist/`（9-28 构建）仍含 r91 已删的 GrowthWorkbench 页，`/growth` 落在死页上报
+`TypeError: Cannot read properties of undefined (reading 'filter')`，伪装成回归。
+排查链：冒烟 FAIL → 旧产物对照也偶发 → 写探针抓 stack → 指向 `GrowthWorkbench-*.js` →
+产物 assets 里根本没有该 chunk（`ls | grep -i growth` 为空）→ preview 目录验明。
+**今后冒烟必须 `npx vite preview --port N --outDir dist_nightly_*`，并先验证服务对象**：
+curl 一个只存在于新产物的 asset —— 真 chunk 回 `Content-Type: text/javascript`，
+不存在的路径被 SPA fallback 回 200 + `text/html`（这个假 200 也能骗人）。
+Windows 上 TaskStop 杀不干净 preview 的 node 子进程：`netstat -ano | grep :PORT` 找 PID 后
+`taskkill //F //PID`。
+
+### 运维现状（本轮实测）
+
+- 后端（:4000）与 dev（:3000）在会话间被系统回收 ⇒ 重启：`node server/index.js`、`npm run dev`
+  （后台、日志重定向 `> _rNN_xx.log 2>&1`）。
+- Redis 以 **Memurai** Windows 服务常驻 6379；`redis-cli` 不在 PATH，探活用
+  `powershell Test-NetConnection -Port 6379`（Git Bash 的 `/dev/tcp` 探针不可靠）。
+- preview 代理连不上后端 ⇒ 全页 500 `/api/quota/status`（冒烟大面积假红时先 curl 后端）。
+- `_r91_smoke` 存在与本轮无关的外部证书噪声（`ERR_CERT_COMMON_NAME_INVALID`，外网资源），
+  旧产物上同款出现；复跑即绿。
+
+### 遗留与建议
+
+- **建议（A 级候选）**：未来某轮可把陈旧 `dist/` 清掉或加进 .gitignore 语义确认（它不是构建目标，
+  还会骗 preview）；本轮不动 `dist/`（铁律：绝不清/写 dist/）。
+- 待拍板清单 5 条不变（见 HANDOFF-续跑指南-20261004.md 第四节）。

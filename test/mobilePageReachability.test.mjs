@@ -132,8 +132,9 @@ const COMPONENTS = path.join(SRC, 'components')
  * 往里加东西 = 承认新增了一个没人用的文件，必须同时写清为什么不能直接删。
  */
 const ALLOWED_ORPHANS = new Set([
-  // 负责人的未提交 WIP（移动端新首页草稿，2026-10-02）——接线或归档由负责人定，暂豁免
-  'src/components/HomeDashboard.jsx',
+  // 第 94 轮：HomeDashboard.jsx（负责人 2026-10-02 新首页草稿，从未接线）已按惯例
+  // 归档到 D:\Minxue_Archive\auto-20261004\components\ 后删除（git 历史 fe4f941 亦有全文）。
+  // 豁免表回到空集；再往里加东西 = 承认新增没人用的文件，必须写清为什么不能直接删。
 ])
 
 function walkAny(dir, acc = []) {
