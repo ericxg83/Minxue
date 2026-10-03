@@ -449,6 +449,38 @@ export function renderGeometrySvg(structure) {
   }
   parts.push(`</g>`)
 
+  // ── 等比/等长刻度短杠（P2-8，2026-10-03）──
+  // 教材在对应边中点画 1~4 道短杠表示“同一组比/相等关系”。尺寸在 **SVG 空间**算，
+  // 保证不管原图坐标跨度多大，短杠看起来始织一样大（6px 半长、5px 间距）。
+  if (s.ticks && s.ticks.length) {
+    parts.push(`<g stroke="#111111" stroke-width="1.4" stroke-linecap="round" fill="none">`)
+    const TICK_HALF = 6
+    const TICK_GAP = 5
+    for (const tk of s.ticks) {
+      const a = pmap[tk.from]
+      const b = pmap[tk.to]
+      if (!a || !b) continue
+      const ax = toX(a.x); const ay = toY(a.y)
+      const dx = toX(b.x) - ax
+      const dy = toY(b.y) - ay
+      const segLen = Math.hypot(dx, dy)
+      if (!(segLen > 1)) continue
+      const ux = dx / segLen; const uy = dy / segLen
+      const nx = -uy; const ny = ux          // 法向（短杠沿这个方向伸出）
+      const mx = (ax + toX(b.x)) / 2
+      const my = (ay + toY(b.y)) / 2
+      for (let k = 0; k < tk.count; k++) {
+        const off = (k - (tk.count - 1) / 2) * TICK_GAP
+        const cx = mx + ux * off
+        const cy = my + uy * off
+        parts.push(
+          `<line x1="${fmt(cx - nx * TICK_HALF)}" y1="${fmt(cy - ny * TICK_HALF)}" x2="${fmt(cx + nx * TICK_HALF)}" y2="${fmt(cy + ny * TICK_HALF)}"/>`
+        )
+      }
+    }
+    parts.push(`</g>`)
+  }
+
   // ── 长度/角度/文字标注 ──
   parts.push(`<g fill="#111111" font-family="Times New Roman, serif" font-size="14">`)
   for (const l of s.labels) {

@@ -43,6 +43,8 @@ import { canPublishDerivedFigure } from './utils/geom/derivedCoverage.js'
 import { buildFunctionGraphSvg } from './utils/functionGraph/index.js'
 // 数轴确定性图元通道（P2-7）：题面写明数值/解集时服务端精确布局，零视觉调用
 import { buildNumberAxisSvg } from './utils/numberAxis/index.js'
+// 分数面积模型确定性通道（P2-8）：题干写明「把正方形看作1，1/2+1/4+…」时服务端精确切分并标分数
+import { buildAreaModelSvg } from './utils/areaModel/index.js'
 // SVG → 图片 URL 发布通道：让重画产物对周末课件（读 clean_geometry_image_url）可见
 import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
 import {
@@ -552,6 +554,33 @@ async function processSingleAsset(asset) {
     }
   } catch (e) {
     console.warn(`   ⚠️ [几何Worker] ${shortId}: 数轴图元通道异常（继续走视觉重画）:`, e.message)
+  }
+
+  // 2.7 分数面积模型确定性通道（P2-8，零视觉调用）：「把正方形看作1，1/2+1/4+1/8…」找规律题。
+  //     这类题的图就是依次二分正方形 + 每格印分数。走视觉重绘必丢分数：渲染器的
+  //     isSymbolLabel 信任边界会剔除所有含数字标注（防学生手写答案伪装成题设），
+  //     于是产出“框线对、一格数字都没有”的空图（实测 19a2b355 / 21784525 / 073f6f6d）。
+  //     本通道从**题干文本**解析分数序列（不放宽那道过滤，走 verified 信任级通道），
+  //     几何由服务端精确布局。解析不出/题干含其它构造 → null，照旧走视觉重画。
+  try {
+    const areaBuilt = buildAreaModelSvg(asset.parent_stem, content, renderGeometrySvg)
+    if (areaBuilt) {
+      await updateGeometryReconstructionStatus(asset.id, {
+        tikz_status: 'completed',
+        tikz_json: areaBuilt.structure,
+        tikz_code: areaBuilt.svg,
+        last_error: '',
+        processed_at: new Date().toISOString()
+      })
+      await updateQuestionDenormalizedSvg(asset.question_id, areaBuilt.svg)
+      await publishCleanUrlFor(asset.question_id, areaBuilt.svg, shortId)
+      console.log(
+        `   ✅ [几何Worker] ${shortId}: 分数面积模型通道出图（${areaBuilt.spec.terms.join(' + ')}，零视觉调用）`
+      )
+      return true
+    }
+  } catch (e) {
+    console.warn(`   ⚠️ [几何Worker] ${shortId}: 面积模型通道异常（继续走视觉重画）:`, e.message)
   }
 
   // 3. Vision API 识别几何结构 → 服务端渲染干净 SVG

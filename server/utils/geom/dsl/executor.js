@@ -327,6 +327,9 @@ export function toStructure(objects) {
     }),
     angleMarks: all.filter(o => o.kind === 'mark' && o.mark === 'angle')
       .map(m => ({ vertex: m.vertex, from: m.from, to: m.to, style: 'solid' })),
+    // 等比/等长刻度短杠（P2-8）：道数合法性由 normalizeStructure 兜底再筛一遍
+    ticks: all.filter(o => o.kind === 'mark' && o.mark === 'tick')
+      .map(t => ({ from: t.from, to: t.to, count: t.count })),
     // 网格底图（P2-7）：取第一个合法 grid 对象；参数合法性由 normalizeStructure/normalizeGrid 兜底
     grid: (all.find(o => o.kind === 'g') || null),
     rightAngles: all.filter(o => o.kind === 'mark' && o.mark === 'right')

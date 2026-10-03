@@ -188,6 +188,27 @@ export function normalizeStructure(obj) {
     }
   }).filter(m => m.vertex && m.from && m.to)
 
+  // ── 等比/等长刻度短杠（2026-10-03 P2-8）──
+  // 教材用 1/2/3/4 道短杠标记对应边。只收：两端点不同、道数为 1~4 的整数；
+  // 同一对点重复取第一条（模型重复写不会叠加成一堆杠）。不合法的丢弃，不猜。
+  const seenTick = new Set()
+  const tickVertex = new Set(points.map(p => p?.label).filter(Boolean))
+  let ticks = Array.isArray(obj?.ticks) ? obj.ticks : []
+  ticks = ticks.map(t => ({
+    from: String(t?.from ?? '').trim(),
+    to: String(t?.to ?? '').trim(),
+    count: Number.isFinite(+t?.count) ? Math.round(+t.count) : 0
+  })).filter(t => {
+    const key = [t.from, t.to].sort().join('\u0000')
+    if (!t.from || !t.to || t.from === t.to) return false
+    // 端点必须是结构里真存在的顶点：给不存在的点画标记 = 凭空造几何，丢
+    if (!tickVertex.has(t.from) || !tickVertex.has(t.to)) return false
+    if (!(t.count >= 1 && t.count <= 4)) return false
+    if (seenTick.has(key)) return false
+    seenTick.add(key)
+    return true
+  })
+
   // ── 曲线（2026-09-18）──
   // 采样点折线，用于函数图象通道。points 是原始数学坐标对 [[x,y],...]，
   // 不引用 label（曲线是确定性生成的，不需要走内容闸门）。
@@ -252,6 +273,7 @@ export function normalizeStructure(obj) {
     polygons,
     arcs,
     angleMarks,
+    ticks,
     curves,
     // 优先用分类后的 geometry_labels；旧结构无该字段时回退到 labels（向后兼容已渲染的题）
     labels,

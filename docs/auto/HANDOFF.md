@@ -33,6 +33,8 @@
 
 - **测试基线**：1453 全绿；lint：204 项（14 errors 历史遗留 + 190 warnings 条条可信）
 - **第 74 轮（2026-10-03）已交付**：方向二批次执行完成（+71 张矢量配图，从未尝试池清零）；新执行器 `server/scripts/rerunNeverTriedGeometry.mjs`。
+- **第 75-76 轮已交付**：拓扑保真闸（修「回灌修正把图搬反」）+ 分数面积模型确定性通道 + 等比刻度短线（tick）图元。几何重绘现有**五条**确定性通道：函数图象 / 数轴 / 面积模型 / DSL / 视觉目测。测试基线 1453 → **1469 全绿**，lint 仍 14 errors / 182 warnings。
+- **接手后的下一轮 = 第 77 轮**：负责人已裁决 **A**——把 74 个「completed 但展示层无 SVG」的历史资产重置后重跑管线（口径见 backlog 第 74 轮附带发现）；再下一轮 = 第 78 轮死声明清理（已得「开」指令）。
 - **四条常驻测试闸**：哨兵行为（quotaSentinel.test）｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁（mobileApiImports）
 - **全局错误护栏**：workbench main.js 的 app.config.errorHandler + 移动端 ErrorBoundary（均已上线）
 - **数据备份**：`D:/Minxue_Backup/2026-10-02/`（5 表 8.5MB 快照）+ scripts/dailyBackup.mjs（每晚 21:30 自动 + 可手动跑）
@@ -47,7 +49,7 @@
 - 执行器：`server/scripts/rerunNeverTriedGeometry.mjs`（`--dry` / `--limit=N` / 进度写 `tmp/rerunNeverTriedGeometry.progress.json`）。
 - 详细数据、肉眼复核结论、两个新拍板项（零/少标注产物是否回退、completed 与展示层脱节 74 个）见 `docs/auto/backlog.md` 第 74 轮执行结果节。
 
-### 2. ~90 条多行死声明清理（分批消化）
+### 2. ~90 条多行死声明清理（分批消化）—— 负责人已给「开」（排在几何两项之后）
 - refs=1 验证器模式已备好（见 test/mobileApiImports.test.mjs 同款逻辑 + 本轮 _verify2.mjs 模式——单行完整声明已清完，剩余为多行声明块）。
 - 需要"声明块级删除"工具：从 decl 起始行起，花括号/圆括号配平后整块删除；.js 文件用 node --check 兜底，.jsx 靠测试+构建。
 

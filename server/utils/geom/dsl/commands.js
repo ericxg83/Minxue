@@ -461,6 +461,25 @@ export const COMMANDS = {
     // 本命令不得绕过它，所以只对符号型文字（α、β、l、m…）有效。
     help: 'label : "<符号文字>" <x> <y> -> L   （角名/线名等符号标注；数字与长度会被安全过滤丢掉）',
     run: ([s, x, y], ctx, out) => [{ kind: 'text', label: out[0], text: s.value, x, y }]
+  },
+
+  // ── 等比/等长刻度短杠（2026-09-XX→P2-8，2026-10-03 第 76 轮）──
+  // 教材在对应边上画 1/2/3/4 道短斜杠表示“这几条边属于同一组比/相等关系”。
+  // 此前 DSL 没有这个图元，重绘产物会把原图的等比标记全丢（实测 73506ed1 / 0e235860
+  // 题干 AB/AD=AC/AE=BC/DE，原图每条边上有 1~4 道杠，重画后一个不剩）。
+  // 纪律：**不猜**。道数只能按原图一根根数出来，1~4 之外、非整数一律报错交 ReAct 修。
+  // 同一道数 = 同一组对应边；不想要标记的边就**不要写这条命令**（宁少画不多画）。
+  tick: {
+    inputs: ['p', 'p', 'n'], outputs: 1, creates: 'mark',
+    help: 'tick : A B 2 -> m   （在线段 AB 中点画 2 道等比刻度短杠；道数按原图数，1~4；同一道数代表同一组对应边，原图没有短杠就不要写这条命令）',
+    run: ([a, b, n], ctx, out) => {
+      if (!a || !b || a.label === b.label) return { error: 'DEGENERATE_SEGMENT', hint: 'tick 的两个端点必须是不同的点' }
+      const count = n
+      if (!Number.isInteger(count) || count < 1 || count > 4) {
+        return { error: 'BAD_TICK_COUNT', hint: `刻度道数只能是 1~4 的整数（实际给了 ${n}），按原图上的短杠一根根数出来，不许猜` }
+      }
+      return [{ kind: 'mark', label: out[0], mark: 'tick', from: a.label, to: b.label, count }]
+    }
   }
 }
 
