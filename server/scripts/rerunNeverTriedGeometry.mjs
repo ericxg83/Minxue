@@ -50,11 +50,12 @@ const { processGeometryReconstruction } = await import('../geometryWorker.js')
 let sql = POOL_SQL_BASE
 const params = []
 if (IDS.length) {
+  // 支持只给 asset id 前缀（人工排查时从报表/日志里只能拿到前 8 位）
   sql = `SELECT a.id, a.question_id, q.question_number, LEFT(COALESCE(q.content,''), 36) AS head
            FROM question_assets a JOIN questions q ON q.id = a.question_id
           WHERE q.deleted_at IS NULL AND a.asset_type = 'geometry_image'
-            AND a.id = ANY($1::uuid[]) ORDER BY a.updated_at ASC`
-  params.push(IDS)
+            AND a.id::text LIKE ANY($1::text[]) ORDER BY a.updated_at ASC`
+  params.push(IDS.map(s => (/^[0-9a-f-]{36}$/.test(s) ? s : `${s}%`)))
 } else if (LIMIT) {
   sql += ` LIMIT ${parseInt(LIMIT, 10)}`
 }
