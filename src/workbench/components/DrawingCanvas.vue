@@ -11,7 +11,7 @@
       @pointerleave="onPointerUp"
       @lostpointercapture="onLostCapture"
     />
-    <!-- 激光笔光点层：独立 canvas，pointer-events:none，只画「临时指针轨迹」。
+    <!-- 激光笔光点层：独立 canvas，pointer-events:none，只画「当前那一个红点」（无拖尾）。
          它不参与 strokes —— 导出板书 PNG 只读 localStrokes，天然不含光点。 -->
     <canvas ref="laserRef" class="dc-laser" aria-hidden="true" />
     <!-- 导出板书图的「题干层」：与屏幕共用同一个 MathRender（KaTeX）。
@@ -222,7 +222,7 @@ onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (rafId) cancelAnimationFrame(rafId)
   if (laserRaf) cancelAnimationFrame(laserRaf)
-  laserTrail = []
+  laserPoint = null
   cancelWheelPan()
 })
 
@@ -456,7 +456,7 @@ function scheduleLiveRender() {
 
 // ── 收笔（pointerup / cancel / 捕获丢失 / buttons 归零共用）─────────
 function onPointerUp(e) {
-  // 激光会话结束：停止落点，拖尾按点龄自然收掉
+  // 激光会话结束：抬手立刻消失（无拖尾、无残影）
   if (laserActive) { endLaser(e); return }
   // 捏合 / 待跟踪的 touch 触点抬起：清触点，双指不足则结束捏合
   if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
@@ -496,20 +496,24 @@ function finishStroke() {
   emit('update:strokes', localStrokes.value)
 }
 
-// ── 激光笔（2026-10-03）─────────────────────────────────────────────
-// 只做「临时指针」：红点 + 短拖尾，画在独立的 pointer-events:none 光点层上。
-// 关键纪律：激光笔绝不进 startStroke/appendLivePoint，也绝不写 localStrokes ——
-// 不进笔迹数据结构，「导出板书 PNG 不含光点」因此是天然成立的，不需要额外过滤。
-// 拖尾按「点龄」过期：抬手后不再落新点，旧点 220ms 内自然掉光 → 抬手即消。
-const LASER_TRAIL_MS = 220
-const LASER_MAX_POINTS = 48
+// ── 激光笔（2026-10-03 引入；2026-10-04 改为「无拖尾」）─────────────────
+// 只做「临时指针」：**一个跟随的红点，没有拖尾**，画在独立的 pointer-events:none 光点层上。
+// 关键纪律（自引入起未变）：激光笔绝不进 startStroke/appendLivePoint，也绝不写
+// localStrokes —— 不进笔迹数据结构，「导出板书 PNG 不含光点」因此是天然成立的，
+// 不需要额外过滤。
+//
+// ⛔ 样式由负责人 2026-10-04 指定：**无拖尾 + 抬手立刻消失**。
+//    旧实现是「红点 + 220ms 按点龄衰减的拖尾线段」，抬手后拖尾还会拖一小段；
+//    现在只维护「当前那一个点」，抬手直接清空光点层（没有淡出、没有残影）。
+//    由此也不再需要「按时间淘汰旧点」的那套逻辑，`LASER_TRAIL_MS` /
+//    `LASER_MAX_POINTS` 与逐段衰减的折线绘制一并删除。
 const LASER_HEAD_R = 5
 const laserRef = ref(null)
 let laserCtx = null
 let laserActive = false
 let laserPointerId = null
 let laserRaf = 0
-let laserTrail = [] // { x, y, t } —— 屏幕 CSS 坐标（画布内），不随纸面 zoom/pan 缩放
+let laserPoint = null // { x, y } —— 屏幕 CSS 坐标（画布内），不随纸面 zoom/pan 缩放
 
 function syncLaserSize() {
   const c = laserRef.value
@@ -524,74 +528,65 @@ function syncLaserSize() {
   c.style.width = w + 'px'
   c.style.height = h + 'px'
   laserCtx = c.getContext('2d')
-  drawLaser(performance.now())
+  drawLaser()
 }
 
 function startLaser(e) {
   laserActive = true
   laserPointerId = e.pointerId
-  laserTrail = []
+  laserPoint = null
   cachedRect = canvasRef.value.getBoundingClientRect()
   try { canvasRef.value.setPointerCapture(e.pointerId) } catch { /* 指针已消失：仍可用，只是失去捕获 */ }
   pushLaserPoint(e)
 }
 
+// 只记「当前点」——没有历史点，就没有拖尾可画
 function pushLaserPoint(e) {
   const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
-  laserTrail.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, t: performance.now() })
-  if (laserTrail.length > LASER_MAX_POINTS) laserTrail.shift()
+  laserPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  // rAF 合并同一帧内的多次 pointermove（一次移动事件比一帧密得多）
   if (!laserRaf) laserRaf = requestAnimationFrame(tickLaser)
 }
 
 function tickLaser() {
   laserRaf = 0
-  const now = performance.now()
-  while (laserTrail.length && now - laserTrail[0].t > LASER_TRAIL_MS) laserTrail.shift()
-  drawLaser(now)
-  if (laserTrail.length) laserRaf = requestAnimationFrame(tickLaser)
+  drawLaser()
 }
 
-function drawLaser(now) {
+/** 只画当前那一个点：柔光外圈在下、实心红点在上。**没有拖尾**。 */
+function drawLaser() {
   const c = laserRef.value
   if (!c || !laserCtx) return
   const ratio = dpr()
   laserCtx.setTransform(ratio, 0, 0, ratio, 0, 0)
   laserCtx.clearRect(0, 0, c.width / ratio, c.height / ratio)
-  if (!laserTrail.length) return
-  laserCtx.lineCap = 'round'
-  laserCtx.lineJoin = 'round'
-  // 拖尾：逐段按点龄衰减，越旧越细越淡
-  for (let i = 1; i < laserTrail.length; i += 1) {
-    const a = laserTrail[i - 1]
-    const b = laserTrail[i]
-    const k = 1 - Math.min(1, (now - b.t) / LASER_TRAIL_MS)
-    laserCtx.strokeStyle = `rgba(239, 68, 68, ${(0.5 * k).toFixed(3)})`
-    laserCtx.lineWidth = LASER_HEAD_R * 1.2 * k
-    laserCtx.beginPath()
-    laserCtx.moveTo(a.x, a.y)
-    laserCtx.lineTo(b.x, b.y)
-    laserCtx.stroke()
-  }
-  // 头点：实心红点 + 柔光外圈
-  const head = laserTrail[laserTrail.length - 1]
-  const hk = 1 - Math.min(1, (now - head.t) / LASER_TRAIL_MS)
-  laserCtx.fillStyle = `rgba(239, 68, 68, ${(0.95 * (1 - hk * 0.6)).toFixed(3)})`
+  if (!laserPoint) return
+  const { x, y } = laserPoint
+  // 柔光外圈（先画，免得盖住核心红点）
+  laserCtx.fillStyle = 'rgba(239, 68, 68, 0.18)'
   laserCtx.beginPath()
-  laserCtx.arc(head.x, head.y, LASER_HEAD_R, 0, Math.PI * 2)
+  laserCtx.arc(x, y, LASER_HEAD_R * 2.6, 0, Math.PI * 2)
   laserCtx.fill()
-  laserCtx.fillStyle = `rgba(239, 68, 68, ${(0.18 * hk).toFixed(3)})`
+  // 实心红点
+  laserCtx.fillStyle = 'rgba(239, 68, 68, 0.95)'
   laserCtx.beginPath()
-  laserCtx.arc(head.x, head.y, LASER_HEAD_R * 2.6, 0, Math.PI * 2)
+  laserCtx.arc(x, y, LASER_HEAD_R, 0, Math.PI * 2)
   laserCtx.fill()
 }
 
-/** 结束激光会话（不清 trail：让最后一段自然过期，视觉上是「抬手后拖尾收掉」） */
+/**
+ * 结束激光会话 —— **抬手立刻消失**：丢掉当前点、停掉待执行的 rAF，并立即清空光点层。
+ * ⛔ 不要改成「让最后一点自然过期」：那是旧版拖尾的行为，负责人 2026-10-04 明确要
+ *    「无拖尾、抬起笔就消失」，任何延迟都会重新变成残影。
+ */
 function endLaser(e) {
   if (!laserActive) return
   if (e && e.pointerId !== laserPointerId) return
   laserActive = false
   laserPointerId = null
-  if (!laserRaf && laserTrail.length) laserRaf = requestAnimationFrame(tickLaser)
+  laserPoint = null
+  if (laserRaf) { cancelAnimationFrame(laserRaf); laserRaf = 0 }
+  drawLaser()
 }
 
 function onLostCapture() {

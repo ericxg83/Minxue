@@ -37,15 +37,17 @@
    - **改裁片/改产物必须把"同一事实的全部表达字段"一次对齐**。第 78 轮只改了裁片 URL 没回写 `image_bbox`，导致第 80 轮自动流程差点把人工修复退回（详见长期记忆）。
    - 附：PowerShell 重定向 node 中文输出会按 GBK 解码变乱码 → 先 `[Console]::OutputEncoding = UTF8`，或让脚本自己 `fs.writeFileSync` 落盘再读。
 
-## 四、当前系统状态（2026-10-03 晚实测，非记忆值）
+## 四、当前系统状态（2026-10-04 实测，非记忆值）
 
-- **测试基线**：`npm test` **1530 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11、r92 +5 例回归锁）。
+- **测试基线**：`npm test` **1536 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11、r92 +5、r93 +6 例回归锁）。
 - **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
 - **五条确定性通道**：函数图象 / 数轴 / **分数面积模型（新）** / DSL 构造 / 视觉目测。
 - **讲题白板（r86 后）**：工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R` + 方向键/Home/End；
-  有重做（`redoStack`）；清屏需二次确认（3s 窗口）。**激光笔走独立 `.dc-laser` canvas，绝不写 strokes**。
+  有重做（`redoStack`）；清屏需二次确认（3s 窗口）。**激光笔走独立 `.dc-laser` canvas，绝不写 strokes**；
+  **样式 = 无拖尾 + 抬手即消（r93 改）**：只维护「当前那一个点」（柔光外圈 r13 + 实心红点 r5），
+  `endLaser` 同步丢点 + 立即重绘清空光点层（旧版是「220ms 按点龄衰减的拖尾线段」，抬手还会拖一小段）。
   选中激光笔时手指归指针、横滑切题暂停。验证脚本 `_r85_board_verify.mjs`（gitignore 的根目录 `_*` 临时件）。
 - **白板导出板书图（r86 新修）**：题干不再以 LaTeX 源码印在图上。离屏 `.dc-export-render` 层用**屏幕同一个
   `MathRender`** 渲染 → `html2canvas` 光栅化（`onclone` 内联 `KATEX_CSS_WITH_FONTS` + `fixFractionLineInCloneDoc`）
@@ -113,6 +115,17 @@
   ⛔ **通用教训**：`0 控制台错误` 这个断言抓不到两类最常见的「点了没用」——
   「点了白屏」只打 vue-router warning、「点了没反应」只打 Vue warning，必须另加源码级入口锁。
   审计脚本 `_r92_route_audit.mjs` / `_r92_click_audit.mjs` 可随时重跑；反向自检 `_r92_lock_selfcheck.mjs` 7 条判红。
+- **白板激光笔改「无拖尾」（r93 新交付）**：负责人要求「无拖尾激光笔，抬起笔消失的那种样子」。
+  旧实现是「红点 + 220ms 按点龄衰减的拖尾线段」（`laserTrail` 点缓冲 + `LASER_TRAIL_MS` + `LASER_MAX_POINTS`
+  + 逐段 `lineTo` 折线 + 抬手后让最后一段自然过期）。现在 `laserPoint` 只存**当前那一个点**，
+  `drawLaser()` 不画折线、不遍历历史点，`endLaser()` 丢点 + `cancelAnimationFrame` + **立即重绘清空光点层**。
+  ⛔ **绝不改「激光笔不进 strokes」这条纪律** —— 导出板书 PNG 只读 `localStrokes`，「导出图不含光点」
+  因此是天然成立的，不需要在导出侧加过滤；前提是激光笔代码一行都不碰 `localStrokes`。
+  回归锁 `test/laserNoTrail.test.mjs`（6 例，反向自检 25 条判据 / 旧版判红 12 条）；
+  验证脚本 `_r93_laser_verify.mjs`（15/15，dev + 隔离产物各一遍，**像素级**取证：
+  拖动中光点外接框恒 26×26 宽高比 1.00（旧版拖尾 >8）、抬手后立即 0 像素、250ms 后仍 0、
+  手写 canvas 像素数不变、strokes 无 `laser`、红点跟随指针偏差 0.5px）。
+  目检截图 `server/scripts/logs/r93-look/`（during / after 两张）。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -122,7 +135,7 @@
   · `server/scripts/backfillStaleQuestionSvg.mjs` “completed 但展示层无 SVG”的三档安全回填器（默认演练）
   · `scripts/pruneDeadDeclarations.mjs` 死声明清理器（真 AST 判副作用，默认演练，内置裁决③硬名单）
   · `tmp/geo_montage.mjs` / `tmp/fig_crops_view.mjs` / `tmp/fig_fix_one.mjs` 肉眼比对与单题重裁范式
-- **预览实例**：后端 4000（`node server/index.js`）、前端 5199（vite）——**可能已死，接手后先 curl 探测**（本轮次实测两者都活着）。
+- **预览实例**：后端 4000（`node server/index.js`）、前端 dev 3000（`npm run dev`）——**可能已死，接手后先 curl 探测**（r93 实测两者都活着；隔离产物预览在 5221-5225 段）。
 - **数据备份**：`D:/Minxue_Backup/2026-10-02/`（5 表 8.5MB）+ `scripts/dailyBackup.mjs`（每晚 21:30 自动）。
 
 ## 五、未完成事项（按优先级）
@@ -242,7 +255,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 89 | `1e6d38e` | 白板**本机板书回收入口**：顶栏「本机板书」→ 看占用（进度条）/ 按题列（锚点翻成人话）/ 逐条删 / 一次清空，两次点击确认、零自动删除（`utils/strokeStorage.js` + `components/BoardStorageDialog.vue`）。⛔ 只列真写过字的题；**删到「正在讲」那一题时连板面一起清**（只删存储会被 `saveStrokes()` 写回，等于没删）。回归锁 `test/boardStorage.test.mjs`（12 例，已反向自检）。四道闸全过，`_r89_storage_verify.mjs` 27/27（dev + 隔离产物）+ r85/r86/r87/r88 回归 30/30、12/12、13/13、17/17 + 隔离产物冒烟 20/20 |
 | 90 | `4fb0b85` | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
 | 91 | `2cc8b1f` | **数据页合并 第 1 档 + 第 2 档**：成长中心（`/growth`）与错题中心（`/wrongbook`）两个页面下线，**家长成长卡搬进学习诊断输出条最右**（它是转发给家长的产出物，不能随页消失），**错题清单以组件自带的 `embedded` 形态嵌进学生档案页**（`#student-wrong` + 页内滚动 CTA），侧栏「教学工作」只剩 3 项，10 处入站链接改指，两条路由留 redirect 兜底，删掉错题中心那排**死勾选框**（勾了没有任何事发生）。⛔ 顺手抓到并修掉一个**静默失效**：`GrowthCardButton` 是多根节点组件，Vue 不透传 class ⇒ 定位类被丢弃、右对齐永远不生效（只有一条 `Extraneous non-props attributes` **warning**，不报错）——现把该 warning 当红、并用几何位置验对齐。回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。四道闸全过，`_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
-| 92 | 本轮 | **工作台入口可达性闸门**：审计 88 个文件 / 48 个导航目标 + 71 个 SFC 的 `@click` 绑定，抓到两个真缺陷 —— ① **新学生档案页的主按钮点了整页白屏**（`to: '/upload'`，工作台没有上传页；vue-router 只打 warning，内容区整片空白，实测内容长度 545→77）；② **复核页「查看错题池」绑了不存在的 `goWrongBook`**（函数叫 `goToWrongBook`）⇒ 点了没反应。新增两道常驻闸门 `test/workbenchRouteTargets.test.mjs`（3 例）+ `test/workbenchClickHandlers.test.mjs`（2 例），均已反向自检（11 条判据 7 条判红）。四道闸全过，`_r92_verify.mjs` 12/12 + 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
+| 92 | `4d23cba` | **工作台入口可达性闸门**：审计 88 个文件 / 48 个导航目标 + 71 个 SFC 的 `@click` 绑定，抓到两个真缺陷 —— ① **新学生档案页的主按钮点了整页白屏**（`to: '/upload'`，工作台没有上传页；vue-router 只打 warning，内容区整片空白，实测内容长度 545→77）；② **复核页「查看错题池」绑了不存在的 `goWrongBook`**（函数叫 `goToWrongBook`）⇒ 点了没反应。新增两道常驻闸门 `test/workbenchRouteTargets.test.mjs`（3 例）+ `test/workbenchClickHandlers.test.mjs`（2 例），均已反向自检（11 条判据 7 条判红）。四道闸全过，`_r92_verify.mjs` 12/12 + 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
+| 93 | 本轮 | **白板激光笔改「无拖尾 + 抬手即消」**：删掉旧的「红点 + 220ms 按点龄衰减拖尾线段」（`laserTrail` / `LASER_TRAIL_MS` / `LASER_MAX_POINTS` / 逐段 `lineTo`），`laserPoint` 只存当前那一个点，`drawLaser()` 不画折线，`endLaser()` 丢点 + 取消 rAF + **立即重绘清空**。⛔「激光笔不进 strokes」纪律未动（导出 PNG 只读 `localStrokes` ⇒ 天然不含光点）。回归锁 `test/laserNoTrail.test.mjs`（6 例，反向自检 25 条判据 / 旧版判红 12 条）。四道闸全过，`_r93_laser_verify.mjs` 15/15（dev + 隔离产物，像素级：拖动中光点外接框恒 26×26、抬手后立即 0 像素、strokes 无 laser、跟随偏差 0.5px）|
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 
@@ -264,7 +278,7 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
   `AUTO_RETRY_ILIKE`，否则 `test/taskAutoRetry.test.mjs` 的漂移锁会红。
 - eslint 配置仍缺 `eslint-plugin-vue` / `typescript-eslint`（.vue 模板层靠自建锁补位）。
 - **Minxue Deploy 自动提交守护进程仍在运行**（作者为 Minxue Deploy 的提交是它做的）——不要与它抢写。
-- 预览后端/前端后台进程会被系统回收——每轮开工先 curl 探测 4000/5199。
+- 预览后端/前端后台进程会被系统回收——每轮开工先 curl 探测 4000/3000。
 - 移动端首屏偶发一次 `400 Bad Request`（疑似首次 `/api/tasks` 抢跑）：第 79 轮抓到，第 80、83 轮同口径冒烟**均未复现**，暂定偶发不立案。
 - `no-unused-vars` 还剩 72 条（14 条同行 import 形态收益不抵风险；其余是函数参数/含副作用初始化/复杂形态），已分类入库。
 - 等比刻度线（tick）已建图元，但**采用率靠模型自愿**（实测 1 中 1 不中）；负责人裁决⑩ = 不加硬要求。

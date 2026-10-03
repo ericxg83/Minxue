@@ -245,7 +245,7 @@
           <button type="button" class="tool-btn" :class="{ active: tool === 'eraser' }" title="橡皮（E）" @click="toggleEraser">
             <el-icon><Remove /></el-icon>
           </button>
-          <button type="button" class="tool-btn" :class="{ active: tool === 'laser' }" title="激光笔（L）：临时红点，抬手即消、不留笔迹" @click="toggleLaser">
+          <button type="button" class="tool-btn" :class="{ active: tool === 'laser' }" title="激光笔（L）：跟随指尖的红点，无拖尾、抬手即消、不留笔迹" @click="toggleLaser">
             <el-icon><Aim /></el-icon>
           </button>
           <button type="button" class="tool-btn" title="撤销（Z）" @click="undo">

@@ -642,3 +642,60 @@ SQL 漂移锁 + 在途口径 + 五个文件的源码级接线锁），**反向�
 构建 `dist_nightly_20261003r92` ｜ 真机级 `_r92_verify.mjs` **12/12**（dev:3000 与隔离产物 :5224 各一遍）
 + 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33。零写生产库。
 截图 `server/scripts/logs/r92-look/empty-student-next-action.png`。
+
+### 第 93 轮交付（2026-10-04）：白板激光笔改成「无拖尾 + 抬起笔消失」
+
+**负责人原话**：「白板内的激光笔的样式要改一下，改成"无拖尾激光笔，抬起笔消失的那种样子"。」
+
+#### 旧实现（本轮删掉的）
+
+`DrawingCanvas.vue` 里激光笔是「红点 + 拖尾线段」：
+`laserTrail` 存 `{x, y, t}` 点序列（上限 `LASER_MAX_POINTS = 48`），
+`tickLaser()` 用 `LASER_TRAIL_MS = 220` 按**点龄**淘汰旧点，
+`drawLaser(now)` 用 `for` + `lineTo` 把相邻点连成折线、每段按 `k = 1 - age/220` 做 alpha 衰减。
+**抬手时 `endLaser()` 故意不清 trail**，让最后一段自然过期 ⇒ 视觉上「拖尾还会拖一小段」。
+
+#### 新实现（本轮）
+
+- 常量：删 `LASER_TRAIL_MS` / `LASER_MAX_POINTS`，只留 `LASER_HEAD_R = 5`。
+- 状态：`let laserTrail = []` → `let laserPoint = null // { x, y }`（**只存当前那一个点**）。
+- `pushLaserPoint(e)`：直接**覆盖式**写 `laserPoint`，不再 `push` 进数组、不再 `shift` 限长。
+- `drawLaser()`：去掉 `now` 参数，**不画折线、不遍历历史点**，只画两层圆
+  （柔光外圈 `rgba(239,68,68,0.18)` r=13 + 实心红点 `rgba(239,68,68,0.95)` r=5）。
+- `endLaser(e)`：`laserPoint = null` + `cancelAnimationFrame(laserRaf)` + **立即 `drawLaser()` 清空光点层**。
+- `onBeforeUnmount` / 切笔 `watch(tool)` 同步改成丢点；模板注释与工具按钮 `title` 文案同步
+  （「跟随指尖的红点，无拖尾、抬手即消、不留笔迹」）。
+
+#### ⛔ 没动、也不能动的那条纪律
+
+**激光笔绝不进 `startStroke` / `appendLivePoint`，绝不写 `localStrokes`。**
+导出板书 PNG 只读 `localStrokes` ⇒「导出图不含光点」是**天然成立**的，不需要在导出侧加过滤 ——
+前提是激光笔代码一行都不碰 `localStrokes`。`test/laserNoTrail.test.mjs` 把这条也锁进去了
+（四个激光函数体里不得出现 `localStrokes` / `startStroke` / `appendLivePoint` / `finishStroke`；
+`exportPng` 不得读 `laserPoint` / `laserCtx` / `laserRef`）。
+
+#### 回归锁与验证
+
+- `test/laserNoTrail.test.mjs`（6 例）：① 旧拖尾实现彻底删除（无 `laserTrail` / `LASER_TRAIL_MS` /
+  `LASER_MAX_POINTS`，`drawLaser` 无 `lineTo`/`moveTo`/`for`）② `endLaser` 丢点 + 立即重绘 + 取消 rAF
+  ③ 只维护单点（`pushLaserPoint` 不累积数组）④ 不进笔迹（含 `exportPng` 只读 `localStrokes`）
+  ⑤ 光点层是独立 canvas（`pointer-events:none`、`z-index:4`）⑥ 按钮文案写明「无拖尾、抬手即消」。
+- 反向自检 `_r93_lock_selfcheck.mjs`：**25 条判据，NEW 全绿、旧版（`git show HEAD:` 导出的 `_r93_old/`）判红 12 条**。
+  ⛔ 旧文件由 shell 预导出，**不在脚本里 `spawnSync` git**（Windows 上稳定 EBUSY，r89-r92 各踩一次）。
+- `_r93_laser_verify.mjs`（15/15，dev:3000 与隔离产物 :5225 各跑一遍）：**像素级**取证 ——
+  拖动过程中光点层非透明像素的外接框**恒为 26×26（宽高比 1.00）**，旧版拖尾会拉成 >8 的长条；
+  `page.mouse.up()` 返回后**立即**采样 = 0 像素（不等、不 sleep），250ms 后仍为 0；
+  手写 canvas 像素数不因激光笔改变；`wb_strokes_v2_*` 里没有任何 `tool==='laser'`；
+  红点外接框中心与指针位置偏差 **0.5px**。
+- 目检截图 `server/scripts/logs/r93-look/`（`laser-during.png` 单点柔光红点 / `laser-after.png` 完全干净）。
+
+**四道闸**：`npm test` **1536/1536** ｜ lint **14 errors / 153 warnings**（持平）｜
+构建 `dist_nightly_20261003r93` ｜ 真机级 `_r93_laser_verify.mjs` **15/15**（dev + 隔离产物）
++ 回归 `_r92_verify.mjs` 12/12 + `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33。零写生产库。
+
+**⛔ 本轮踩到的两个验证脚本坑**（都不是产品缺陷）：
+① 笔迹落盘是 `WeekendBoard#onStrokesChange` 里的 **300ms 防抖**，写完立刻读 localStorage 会读到 0
+⇒ 基线采样前必须等够（本轮 200ms 不够，改 700ms）；
+② 打桩 `/api/**` 时 **`/tasks/summary` 必须带 `summary` 字段** —— `notificationStore` 会把
+`data.summary` 整个赋给 `summary.value`，缺字段会让 `totalNotifications` 的 computed 直接抛错
+（表现为「0 控制台错误」断言假红）。
