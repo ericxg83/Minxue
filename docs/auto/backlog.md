@@ -313,3 +313,60 @@ N3 图形吸附**先观察**、Q1 激光笔触发**照 `allowTouch` 同款规则
 导出 PNG（`_r86_export_after.png`）已肉眼复核：题干为正常数学排版、配图在位。写接口全程 `page.route` 拦截，**零写生产库**。
 
 **遗留**：无新增。既有遗留 = 「默认笔宽 3 不在三档预设（2 / 3.5 / 6）」需改默认值，属行为变更，等负责人开口。
+
+### 第 87 轮交付（2026-10-03）：白板板书「存不下就丢字」——瘦身 + 不再静默
+
+**先量化再动手（两个只读探针）**
+
+- `_r87_stroke_size.mjs`（浏览器真书写）：量化前单点 JSON **48.7 字符**，一题写 50 笔 ≈ **145 KB**。
+- 全仓 grep：**没有任何地方清理 `wb_strokes_*` 键**（`WeekendBoard` / `DrawingCanvas` 里零 `removeItem`）。
+  板书按「题目稳定锚点」一条键**永久存在**，5MB 配额必然写满；写满后 `saveStrokes` 的
+  `catch { /* 存储满或隐私模式忽略 */ }` 把失败**静默吞掉** —— 老师当堂写的板书无声消失。
+
+**改动落点**
+
+| 文件 | 做法 |
+|---|---|
+| `src/workbench/utils/strokePoint.js`（新） | `quantizeStrokePoint` / `quantizeStrokes`：坐标与压感各留 2 位小数。单点 48.7 → ~31 字符（省 ~35%），且量化后相邻点更易重复 ⇒ `appendLivePoint` 去重多丢约 16% 冗余点，合计**体积约减半** |
+| `DrawingCanvas.vue` | `pointFromEvent` 出口量化。⛔ 必须在「点进入笔迹的那一刻」量化，不能只在落盘时做 —— 否则内存与落盘不是同一份，撤销重做/导出板书图会画出不同的线 |
+| `WeekendBoard.vue#loadStrokes` | 存量老数据（全精度浮点）读回时量化；旧键迁移**先量化再落新键**（顺手瘦掉磁盘上的胖副本），且**只有新键写入成功才删旧键**（配额满时旧键必须留着） |
+| `WeekendBoard.vue#saveStrokes` | 删掉静默 `catch`：写不进 → 先做一次安全回收（删当前题的旧键，它与新键是同一道题的重复副本）→ 重试一次 → 仍失败用**页内 hint**（原生全屏下 `ElMessage` 在 body 上、看不见）明确告诉老师去导出留存 |
+| `WeekendBoard.vue`（顺手） | 删死分支 `q-figure__hint`：`v-if="!current.figure"` 在 `v-if="displayFigureUrl"`（= `c.figure || ''`）之内**永远为假**，是 2026-09-21「整题裁片下线」留下的残骸；连带删它的 CSS |
+
+**四道闸**：`npm test` **1478/1478 全绿**（1469 + 9 例新回归锁 `test/strokePointQuantize.test.mjs`）｜
+lint **14 errors / 153 warnings**（持平基线；新测试文件曾引入 1 条 `no-loss-of-precision`，已修）｜
+`dist_nightly_20261003r87` 构建成功｜真机级 **13/13**（`_r87_board_storage_verify.mjs`：
+A 正常路径书写仍落墨 / 单点 ≤34 字符 / 点结构未变；B 旧键迁移 + 量化 + 回收；C 把 localStorage 真填满
+4.99MB 后书写 → 必须出现页内提示且不抛异常）+ r86 回归 **12/12** + r85 回归 **30/30**。
+告警条已截图肉眼复核（`server/scripts/logs/r87-look/04-quota-warning.png`）。零写生产库。
+
+**遗留（B 级，需负责人拍板）**：瘦身把余量从 ~35 题提到 ~55 题，**没有根治配额耗尽**。
+板书按题目永久累积，按每周 10-20 题算，约 3-5 周仍会写满（届时至少不再无声丢字）。
+可选路线：① 写满时按「最旧」淘汰旧题板书（**删老师的字，必须他同意**）；
+② 笔迹改存 IndexedDB（配额大得多，但 `loadStrokes` 要变异步，改动面较大）；
+③ 加「清空本机板书」入口，把回收权交给老师。
+
+### 已关闭：白板取图口径 vs 复核页口径的差异面（第 87 轮实测，**结论 = 不改**）
+
+`board.md` §3 记过「白板 `resolveFigure` 只 2 级、批改中心 `getGeometryDisplayUrl` 7 级，同一题可能显示两张图，
+统一口径需抽共享函数」。本轮用 `server/_diag_figure_caliber_gap.mjs` 全库实测（只读）：
+
+| 分档 | 全库 | 其中在错题本内（白板实际输入） |
+|---|---|---|
+| 两边一致 | 532 | 246 |
+| PC 有图 / 白板无图 | **0** | **0** |
+| 白板有图 / PC 无图 | 10 | 3 |
+| 两边都有但不是同一份 | 1 | 0 |
+
+- 「PC 有图 / 白板无图 = 0」说明 `cleanGeometryUrl.js` 的「SVG → PNG → 回写 `clean_geometry_image_url`」
+  发布通道已经把字段断点补上了，**不需要抽共享函数**。
+- 差异只剩「PC 判定裁片不可信而不显示、白板仍显示」这一档。把 3 条错题本的裁片放大目检
+  （`server/_diag_figure_gate_crops.mjs`，拼图在 `server/scripts/logs/figure-gate-crops/_montage.png`）：
+  分别是**3×3 网格作图题**、**新能源汽车 7 天路程表格**、**数轴示意图** —— 都是题目真正引用的图，
+  **白板显示是对的**，是复核页那道「无可重绘 ⇒ 不显示裁片」的闸在过度隐藏。
+- ⇒ **本轮不动白板取图逻辑**（改了反而会掉图）。复核页那道闸有回归锁
+  `test/geometryDisplayNonRedrawGate.test.mjs` 锁定两个方向，属「不放松生产闸门」范畴，如需调整另立提案。
+
+> 本节与上节引用的探针（`server/_diag_figure_caliber_gap.mjs`、`server/_diag_figure_gate_crops.mjs`、
+> 根目录 `_r87_stroke_size.mjs` / `_r87_board_storage_verify.mjs`）按既有约定是 **gitignore 的本地临时件，不入库**；
+> 需要复现时照本节描述重写即可（判据与口径都写全了）。

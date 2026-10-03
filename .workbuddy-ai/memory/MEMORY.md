@@ -1,12 +1,10 @@
 # 敏学项目长期约定
 
 > 只留硬约定与「不知道就会踩坑」的事实；细节外链 `topics/`，每日过程见 `YYYY-MM-DD.md`。
-> 2026-10-03 二次压缩（原 18.5KB → 6.7KB 仍超注入上限被截断）：过程叙述全部下沉 `topics/` 与日志；
-> 产品原则与循环机制见根目录 `AGENTS.md` 与 `docs/auto/HANDOFF.md`，本文件不重复。
+> 产品原则/循环机制见根目录 `AGENTS.md` 与 `docs/auto/HANDOFF.md`，本文件不重复（2026-10-03 二次压缩）。
 
 ## 0. 产品与自决权（最高层）
-- 单用户系统：唯一用户 = 负责人（晚托班老师）。学生是数据主体不是用户；「学生端/家长端」设想不成立。
-- 小而美：优先优化现有流程与美感；新增功能审慎；鼓励主动提删除/合并建议。
+- 单用户系统：唯一用户 = 负责人（晚托班老师）；学生是数据主体，不是软件用户。
 - 自决权：A 级（行为保持型修复/死代码/顺手化/文档）+ 四道闸全过 → 可直接 push main。
 - ⛔ 硬禁区（只能提案）：DB Schema/迁移、批改主流程设计、错题生命周期与合并、重练组卷口径、
   掌握度口径、练习册答案质量闸、judgements 语义、公共 API 行为、任务状态机、判题/抽取正则与转义。
@@ -23,18 +21,18 @@
 
 ## 3. 视觉模型（topics/vision-vendors）
 - ⛔「魔搭欠费」是误判（实为免费额度打满 429，会自恢复）；`MS_VISION_DISABLED` 是人工开关，线上 Render 需手动同步。
-- 生产视觉链 = vendorChain 显式链：`ANSWER_PAGE_VENDOR_CHAIN`（qwen3.8-flash@Bailian→kimi-k3@SN）、
+- 生产视觉链：`ANSWER_PAGE_VENDOR_CHAIN`（qwen3.8-flash@Bailian→kimi-k3@SN）、
   `WORKBOOK_OCR_VENDOR_CHAIN`（deepseek-flash@SN→qwen3.8-flash@Bailian）。
-- ⛔ 判模型能否读图只能实测（input_modalities 撒谎）；400/404 ≠ 下线；AI 调用必须关代理。
-- ⛔ 离线脚本不得用 `noBackup:true`（魔搭已禁用 ⇒ 必然失败）。
+- ⛔ 判模型能否读图只能实测（input_modalities 撒谎）；400/404 ≠ 下线；AI 调用必须关代理；
+  离线脚本不得用 `noBackup:true`（魔搭已禁用 ⇒ 必然失败）。
 - 漏裁判据：`image_type IN ('geometry','chart')` ∧ `geometry_image_url IS NULL`；⛔ 别用 image_type 非空（'none' 是纯文字题）。
 
 ## 4. 几何重画（topics/geometry-pipeline）
 - 强制 DSL 构造式（forceDsl）；DSL 成功后直接用 `correctDslByVision` 返回的 structure，禁二次 executeDsl。
 - 显示唯一入口 `getGeometryDisplayUrl`（`src/utils/geometryDisplay.js`，**无 server 镜像副本**）。
   ⛔「无可重绘的几何结构」闸门只在「仅剩原始裁片」时拦。
-- 四条出图通道（互补别混）：①视觉 JSON→`renderGeometrySvg` ②DSL+视觉闭环 ③裁片矢量化描摹
-  （`figureVectorize.js`）④原图高清重裁（`figureCropHiRes.js`）。
+- 四条出图通道（互补别混）：①视觉 JSON→`renderGeometrySvg` ②DSL+视觉闭环 ③裁片矢量化描摹（`figureVectorize.js`）
+  ④原图高清重裁（`figureCropHiRes.js`）。
 - ⛔ 视觉定位框：①会被 `figureRegionRefiner` 误伤（墨迹覆盖率 > `MAX_INK_COVERAGE=0.14` 判文字带）
   → 走 `FIGURE_REFINE=0`+已目检的框；②视觉模型非确定性 ⇒「先目检再 apply」必须复用同一个框。
 - ⛔ 判「裁片好不好」无确定性判据 ⇒ 视觉定位 + 人工目检；**缩略图会误判，必须放大再看**。
@@ -65,9 +63,8 @@
 
 ## 7. 错题 / 重练 / 练习册闸（topics/wrongbook-gate-requeue）
 - 错题「同一题」判定走 `questionIdentity.js`，禁相似度阈值合并；变式题不进重练卷与组卷，仅作讲义素材。
-- 入册「补全即补入」：`wrong_no_book` 是终态；判据 = `wrongGateRequeue.js`（唯一口径）。
-  ⛔ 手动「本次不加入」绝不自动拉回；唯一可靠判据 = skipReason ∧ `gateAuto===true`。
-  ⚠️ 未修：confidence=0 两来源且补答案不重置 ⇒ 永久卡死。
+- 入册「补全即补入」：`wrong_no_book` 是终态；判据 = `wrongGateRequeue.js`（唯一口径）。⛔ 手动「本次不加入」
+  绝不自动拉回；唯一可靠判据 = skipReason ∧ `gateAuto===true`。⚠️ 未修：confidence=0 两来源且补答案不重置 ⇒ 永久卡死。
 - 重练卷答卷（`generated_exam_id` 非空 或 `task_type='wrong_retry'`）不是独立作业：题目挂原 task；
   唯一口径 = `retryPaperState.js#isRetryPaperTask`。
 - 练习册质量闸：OCR 锁主力 + 3 并发 + 文字层门禁 + 控制字符过滤；published 必经 `getWorksheetPublishRisk`
@@ -104,3 +101,7 @@
   ⛔ 该离屏层必须 `Teleport to="body"`（`.drawing-canvas` 是 `overflow:hidden`，留在里面 html2canvas 拍不到）；
   **不要加 `z-index:-1`**（会被 body 背景盖住，裁出来是空白）。标题是「年级·日期·第 N 题」纯文本，
   不走 MathRender（否则 `10-03` 被渲染成 `10 − 03`）。
+- ⛔ 板书笔迹点量化到 2 位小数（`utils/strokePoint.js`，在 `DrawingCanvas#pointFromEvent` 出口做，
+  **不能只在落盘时做**，否则内存与落盘不是同一份）；落盘失败**必须让老师看见**（页内 `showHint`，
+  原生全屏下 `ElMessage` 不可见），不得静默 `catch`。板书按题目永久占 localStorage、全仓无清理
+  ⇒ 5MB 迟早写满（瘦身后 ~55 题，约 3–5 周），根治方案见 `topics/board.md` §11 与 HANDOFF 五-6。

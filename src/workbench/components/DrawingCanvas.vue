@@ -78,6 +78,7 @@
  */
 import { onMounted, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue'
 import MathRender from './MathRender.vue'
+import { quantizeStrokePoint } from '../utils/strokePoint'
 
 const props = defineProps({
   strokes: { type: Array, default: () => [] },
@@ -254,11 +255,15 @@ watch(() => props.strokes, (val) => {
 
 function pointFromEvent(e) {
   const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
-  return {
+  // 量化到 2 位小数（见 utils/strokePoint.js）：屏幕上完全看不出差别，
+  // 但单点 JSON 从 ~49 字符降到 ~25 —— 板书是永久存在 localStorage 的，
+  // 体积直接决定配额多久被写满。⛔ 必须在这里量化（点一进来就量化），
+  // 不能只在落盘时做，否则内存与落盘不是同一份，撤销重做/导出会画出不同的线。
+  return quantizeStrokePoint({
     x: (e.clientX - rect.left + panX) / zoom,
     y: (e.clientY - rect.top + panY) / zoom,
     p: e.pressure && e.pressure > 0 ? e.pressure : 0.5,
-  }
+  })
 }
 
 // ── 双指捏合：跟踪触点 → 第二触点落下进入捏合 → 移动更新视图 ─────────

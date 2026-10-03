@@ -51,6 +51,11 @@
   `MathRender`** 渲染 → `html2canvas` 光栅化（`onclone` 内联 `KATEX_CSS_WITH_FONTS` + `fixFractionLineInCloneDoc`）
   → 贴进导出图；失败回退旧 `fillText`。⛔ 该层必须 `Teleport to="body"` 且**不能加 `z-index:-1`**（都会被裁成空白）；
   ⛔ 标题是纯文本不走 MathRender（否则 `10-03` 变 `10 − 03`）。验证脚本 `_r86_board_export_verify.mjs`（12/12）。
+- **板书本地存储（r87 新修）**：笔迹点量化到 2 位小数（`src/workbench/utils/strokePoint.js`，在
+  `DrawingCanvas#pointFromEvent` 出口做），单点 48.7→~31 字符、体积约减半；`saveStrokes` 写不进时
+  先回收当前题的旧键再重试，仍失败用**页内 hint** 明确告知（原为静默 `catch`）。验证脚本
+  `_r87_board_storage_verify.mjs`（13/13，含把 localStorage 真填满 4.99MB 的告警路径）。
+  ⚠️ **配额仍未根治**：板书按题目永久累积、全仓无清理，约 3–5 周会写满（详见五-6 提案）。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -99,6 +104,17 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 
 三个数据分析页（学习诊断/成长中心/错题中心）重叠度、试卷答案库与我的题型库（已收纳二级入口）、移动端页面使用频率。**产品方向，只能提案，不得自行删除。**
 
+### 6. 【B 级提案 · 等拍板】板书本地存储配额迟早写满
+
+**实测**：笔迹量化后一题仍约 **97 KB**（50 笔 × 61 点，`_r87_stroke_size.mjs` + `_r87_board_storage_verify.mjs`），
+5MB 配额 ≈ **55 题**；按每周 10–20 题算约 **3–5 周写满**。写满后 r87 已做到「不静默」（页内提示去导出），
+但**没有回收手段**，老师只能清浏览器数据（会连其它本地缓存一起清掉）。
+
+三条可选路线（**都会动到老师的数据或存储层，必须他选**）：
+① 写满时按「最旧」淘汰旧题板书 —— 效果最直接，但**删的是老师的字**；
+② 笔迹改存 IndexedDB（配额大得多）—— 根治，但 `loadStrokes` 要改异步，改动面较大；
+③ 只加一个「清空本机板书」入口，把回收权交给老师 —— 最小改动、零自动删除，但需要老师自己动手。
+
 ## 六、已关闭、不得重提的红线清单（负责人已裁决）
 
 | 编号 | 事项 | 裁决 |
@@ -135,7 +151,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 83 | `3bc5623` | ⑤ 第二批：只删 5 条整行形态；拦下裁决③红线；修工具两个坑（逗号重叠写碎源码、`Select-Object -First` 截空文件）；清理线收线 |
 | 84 | `2ae8fb6` | 只读调研「周末班课件 + 白板现状与待拍板清单」；重写 HANDOFF 交接文档（循环暂停等接手） |
 | 85 | `6a5a9f5` | 白板 P1/P2/N1/P3/P4/P5：快捷键 `1-4`/`[` `]`/`E`/`L`/`Y`、重做、**激光笔**（不写 strokes）、清屏二次确认、删死入口（resetView + PPTX 前端）、清过时注释；顺手修粗细吸附。四道闸全过，`_r85_board_verify.mjs` 30/30 |
-| 86 | 本轮 | 白板导出板书图：题干由 canvas `fillText` 改为**复用屏幕同一个 `MathRender`** 渲染 + `html2canvas` 光栅化（修「LaTeX 源码印在图上」），失败回退 fillText；导出失败不再静默。四道闸全过，`_r86_board_export_verify.mjs` 12/12 + r85 回归 30/30 |
+| 86 | `88ffe05` | 白板导出板书图：题干由 canvas `fillText` 改为**复用屏幕同一个 `MathRender`** 渲染 + `html2canvas` 光栅化（修「LaTeX 源码印在图上」），失败回退 fillText；导出失败不再静默。四道闸全过，`_r86_board_export_verify.mjs` 12/12 + r85 回归 30/30 |
+| 87 | 本轮 | 白板板书存储：笔迹点量化到 2 位小数（体积约减半，`utils/strokePoint.js`）、落盘失败不再静默（页内提示去导出）、旧键迁移顺手瘦身并回收；删死分支 `q-figure__hint`。另实测关闭「白板取图口径」议题（PC 有图/白板无图 = 0，不需抽共享函数）。四道闸全过，`_r87_board_storage_verify.mjs` 13/13 + r85/r86 回归 30/30 + 12/12 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 

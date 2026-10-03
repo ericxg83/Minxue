@@ -150,7 +150,6 @@
 
           <!-- 配图区：吃掉题干区之外的全部剩余高度，图按 contain 缩放，永远完整可见 -->
           <div v-if="displayFigureUrl" class="q-figure">
-            <span v-if="!current.figure" class="q-figure__hint">题图（原题裁图）</span>
             <div class="q-figure__box">
               <img :src="displayFigureUrl" alt="题图" loading="lazy" />
             </div>
@@ -394,6 +393,7 @@ import { difficultyStars } from '../../utils/retryPaperOrder'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
 import MathRender from '../components/MathRender.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import { quantizeStrokes } from '../utils/strokePoint'
 import { useTeachingMarks } from './useTeachingMarks'
 
 const route = useRoute()
@@ -825,11 +825,37 @@ function toggleFullscreen() {
 }
 
 // ── 切题：保存当前笔迹 → 加载下一题笔迹 ──
+// 板书落盘失败 = 老师当堂写的字会消失。旧实现是 `catch {}` 静默吞掉，
+// 而失败几乎一定是 localStorage 配额写满（板书按题目永久存在，全仓没有清理逻辑）
+// ⇒ 必须先做一次安全回收，再明确告诉老师，不能无声丢字。
+let strokeSaveWarned = false
 function saveStrokes() {
-  if (!strokesKey.value) return
+  const key = strokesKey.value
+  if (!key) return
+  const payload = JSON.stringify(currentStrokes.value)
   try {
-    localStorage.setItem(strokesKey.value, JSON.stringify(currentStrokes.value))
-  } catch { /* 存储满或隐私模式忽略 */ }
+    localStorage.setItem(key, payload)
+    strokeSaveWarned = false
+    return
+  } catch { /* 配额满 → 先回收，再重试一次 */ }
+
+  // 安全回收：迁移期遗留的旧键与新键是**同一道题的重复副本**，旧键此后不再被写入
+  // （loadStrokes 也只在写入新键成功后才删它），删掉不丢任何东西。
+  try {
+    const legacy = legacyStrokesKey.value
+    if (legacy && legacy !== key && localStorage.getItem(legacy) != null) {
+      localStorage.removeItem(legacy)
+      localStorage.setItem(key, payload)
+      strokeSaveWarned = false
+      return
+    }
+  } catch { /* 回收后仍写不进 → 走下面的告警 */ }
+
+  if (!strokeSaveWarned) {
+    strokeSaveWarned = true
+    // 用页内 hint 而不是 ElMessage：原生全屏时 body 上的 toast 落在全屏元素外，看不见
+    showHint('板书没能存到本机（浏览器存储已满）— 请点右上「板书图」导出留存', 8000)
+  }
 }
 function loadStrokes() {
   currentStrokes.value = []
@@ -844,11 +870,23 @@ function loadStrokes() {
       // 避免升级当堂把老师已经写在屏幕上的板书弄没。
       const legacy = legacyStrokesKey.value
       if (legacy && legacy !== key) {
-        raw = localStorage.getItem(legacy)
-        if (raw) localStorage.setItem(key, raw)
+        const legacyRaw = localStorage.getItem(legacy)
+        if (legacyRaw) {
+          // 老数据是全精度浮点（~49 字符/点）→ 落新键前先量化，顺手把磁盘上的胖副本瘦掉一半
+          let migrated = legacyRaw
+          try { migrated = JSON.stringify(quantizeStrokes(JSON.parse(legacyRaw))) } catch { /* 脏数据原样带走 */ }
+          raw = migrated
+          try {
+            localStorage.setItem(key, migrated)
+            // 只有写入新键成功才删旧键；setItem 抛错（配额满）时旧键必须留着，否则真丢板书
+            localStorage.removeItem(legacy)
+          } catch { /* 配额满：旧键保留，本次先用内存里的 migrated 正常显示 */ }
+        }
       }
     }
-    if (raw) currentStrokes.value = JSON.parse(raw)
+    // 存量笔迹是量化前存的全精度浮点（~49 字符/点）→ 读回时顺手量化，
+    // 下一次落盘即瘦身一半。量化只降精度、不改结构，老数据照常显示。
+    if (raw) currentStrokes.value = quantizeStrokes(JSON.parse(raw))
   } catch {
     currentStrokes.value = []
   }
@@ -1600,13 +1638,6 @@ onBeforeUnmount(() => {
   margin-top: calc(16px * var(--s));
   display: flex;
   flex-direction: column;
-}
-.q-figure__hint {
-  display: block;
-  flex: 0 0 auto;
-  margin-bottom: 6px;
-  color: var(--wb-text-secondary, #64748b);
-  font-size: calc(12.5px * var(--s));
 }
 .q-figure__box { display: flex; flex: 1 1 auto; min-height: 0; align-items: center; }
 .q-figure img {
