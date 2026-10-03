@@ -727,7 +727,14 @@ async function processSingleAsset(asset) {
         console.log(`   [几何Worker] ${shortId}: 已回灌修正渲染（displacement=${corrected.solved.displacement}）`)
       } else {
         structure.solved = { skipped: true, reason: corrected.reason }
-        console.log(`   [几何Worker] ${shortId}: 未回灌修正渲染（${corrected.reason}），保留原图`)
+        if (Array.isArray(corrected.inversions) && corrected.inversions.length > 0) {
+          structure.solved.inversions = corrected.inversions
+          console.warn(
+            `   ⚠️ [几何Worker] ${shortId}: 未回灌修正渲染（拓扑被搬反：${corrected.inversions.map(i => `${i.pair}@${i.axis}`).join('、')}，displacement=${corrected.displacement?.toFixed?.(1) ?? corrected.displacement}），保留目测原图`
+          )
+        } else {
+          console.log(`   [几何Worker] ${shortId}: 未回灌修正渲染（${corrected.reason}），保留原图`)
+        }
       }
     } catch (corrErr) {
       console.warn(`   [几何Worker] ${shortId}: 修正渲染异常（保留原图）:`, corrErr?.message)

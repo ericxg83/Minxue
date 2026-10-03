@@ -141,6 +141,7 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | `scripts/auditStoreContract.mjs` | store 契约读取审计（随时可跑） |
 | `test/mobilePageReachability.test.mjs` | **新增（第 40 轮）+ 扩充（第 42 轮）**：src/pages 与 src/components 里从入口 import 链到不了、且全仓（含工作台 .vue）无人引用的文件即红（存量孤儿进豁免表） |
 | `test/mathTextSourceLeakLock.test.mjs` | **新增（第 40 轮）+ 扩充（第 41 轮）**：屏幕与打印两份数学渲染实现必须同构（定界符/填空线/根号/上下标/乘点，共 14 例，字符集逐字比对） |
+| `test/geometryTopologyGate.test.mjs` | **新增（第 75 轮）**：P5 回灌修正渲染不得把目测布局里明确的上下/左右关系搬反（拓扑保真闸）；锁住两张真实生产事故数据（73506ed1/0e235860）+ 两个「不误伤」反例 |
 
 ## 十三、第 40 轮重大修复：屏幕露裸 LaTeX 源码（同构漂移）
 

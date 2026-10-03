@@ -5,7 +5,7 @@
  *       residualGate 安全闸门 → buildCorrectedStructure 回填坐标 → renderGeometrySvg 重渲。
  *
  * 重要：本模块是纯函数，且严格受安全闸门约束——
- *   仅当「求解收敛 && 解后自洽 && 非退化」时才回灌，否则返回 ok:false 并给出 reason，
+ *   仅当「求解收敛 && 解后自洽 && 非退化 && 拓扑未被搬反」时才回灌，否则返回 ok:false 并给出 reason，
  *   调用方（geometryWorker）必须保留原图、交人工复核，绝不擅自改渲染。
  *
  * 与 computeGeometryConsistency 共用同一套约束/求解/闸门，保证「审计信号」与「修正动作」同源。
@@ -18,6 +18,64 @@ import { renderGeometrySvg } from '../geometrySvg.js'
 import { dist } from './vec.js'
 
 const isNum = (v) => typeof v === 'number' && isFinite(v)
+
+// ── 拓扑保真闸（2026-10-03 新增，只加闸不放宽）──────────────────────────────────
+// 事故：asset 73506ed1 / 0e235860（题干 AB/AD=AC/AE=BC/DE）的目测布局本来是对的
+// （A 上、E 右上、D 在形内、B/C 在底），但求解器为满足比例约束把真实顶点整体搬动
+// displacement=51.7 / 41.1，**C 与 D 的上下关系被反转**（D 被搬到 BC 之下），
+// 出线段互相穿插的错图；而 residualGate 只看约束残差（maxNorm≈0 → pass），
+// 这一维完全没人守。见回归锁 test/geometryTopologyGate.test.mjs。
+const TOPO_RAW_MIN = 0.10    // 目测布局里「关系明确」的最小间距（占图形跨度比例）
+const TOPO_SOLVED_MIN = 0.02 // 解后「确实反向」的最小间距（占比例，且不低于 2 个单位）
+
+/** 取点的 {x,y}：兼容新格式 position.{x,y} 与旧格式直接挂在点上 */
+const xyOf = (p) => {
+  if (!p) return null
+  const src = p.position && typeof p.position === 'object' ? p.position : p
+  return isNum(src.x) && isNum(src.y) ? src : null
+}
+
+/**
+ * 找出「求解后相对位置被反转」的点对：目测布局里 A 明确在 B 上/左方，解后却成了下/右方。
+ *
+ * 只判定**关系明确**的点对（|Δ| ≥ TOPO_RAW_MIN × 图形跨度），同高/同宽的点对不参与，
+ * 避免把数值噪声当成拓扑破坏。
+ *
+ * @param {Array<{label:string,x?:number,y?:number,position?:{x:number,y:number}}>} originalPoints 目测布局
+ * @param {Object<string,{x:number,y:number}>} solvedPoints 求解后的坐标
+ * @returns {Array<{pair:string,axis:'x'|'y',rawDelta:number,solvedDelta:number}>}
+ */
+export function findTopologyInversions(originalPoints, solvedPoints) {
+  const pts = (originalPoints || [])
+    .map((p) => ({ label: p && p.label, xy: xyOf(p) }))
+    .filter((p) => p.label && p.xy && solvedPoints && solvedPoints[p.label])
+  if (pts.length < 2) return []
+
+  let spread = 0
+  for (const p of pts) {
+    const sp = solvedPoints[p.label]
+    spread = Math.max(spread, Math.abs(p.xy.x), Math.abs(p.xy.y), Math.abs(sp.x), Math.abs(sp.y))
+  }
+  const rawMin = TOPO_RAW_MIN * spread
+  const solvedMin = Math.max(2, TOPO_SOLVED_MIN * spread)
+
+  const inversions = []
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const a = pts[i]; const b = pts[j]
+      const sa = solvedPoints[a.label]; const sb = solvedPoints[b.label]
+      for (const axis of ['y', 'x']) {
+        const rawDelta = a.xy[axis] - b.xy[axis]
+        const solvedDelta = sa[axis] - sb[axis]
+        if (Math.abs(rawDelta) < rawMin) continue
+        if (rawDelta * solvedDelta >= 0) continue
+        if (Math.abs(solvedDelta) < solvedMin) continue
+        inversions.push({ pair: `${a.label}/${b.label}`, axis, rawDelta: +rawDelta.toFixed(2), solvedDelta: +solvedDelta.toFixed(2) })
+      }
+    }
+  }
+  return inversions
+}
 
 /**
  * 用求解坐标回填结构中的点坐标。
@@ -48,7 +106,7 @@ export function buildCorrectedStructure(structure, solvedPoints) {
  * @param {string} content 题干文本
  * @param {object} [options]
  * @returns {{ok:boolean, svg?:string, solved?:object, reason?:string}}
- *   reason: empty_structure | no_constraints | not_converged | inconsistent | degenerate | render_failed
+ *   reason: empty_structure | no_constraints | not_converged | inconsistent | degenerate | render_failed | topology_inverted
  */
 export function correctGeometryFigure(structure, content, options = {}) {
   if (!structure || !Array.isArray(structure.points) || structure.points.length === 0) {
@@ -103,6 +161,13 @@ export function correctGeometryFigure(structure, content, options = {}) {
   const corrected = buildCorrectedStructure(structure, sol.points)
   const svg = renderGeometrySvg(corrected)
   if (!svg) return { ok: false, reason: 'render_failed' }
+
+  // 拓扑保真闸：解后若把目测布局里明确的上下/左右关系搬反了，**拒绝回灌**，
+  // 让调用方保留模型闭环确认过的 raw 布局。宁可少修正，绝不画错图。
+  const inversions = findTopologyInversions(structure.points, sol.points)
+  if (inversions.length > 0) {
+    return { ok: false, reason: 'topology_inverted', inversions, displacement: sol.displacement }
+  }
 
   // 位移分账：走冻结路径时 shiftFixed 必须为 0，全部修正由派生点承担；
   // 走退回路径时 shiftFixed > 0，量级即"真实顶点被挪了多少"，供回归与人工排查。
