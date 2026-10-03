@@ -423,3 +423,32 @@ E 写完字立刻 dispatch `pagehide` → 笔迹已落盘，且断言「防抖�
 - 验证脚本首轮 2 条 FAIL 也是**脚本自己的期望写错**：预置了 A1 的板书又途经 A1，
   离开 A1 时 `hasStrokes=true` 触发既定口径把 A1 自动标成「已讲」，题单因此少一道、
   切换后落点是空的 A2 而不是有预置笔迹的 A1。改为用底栏圆点**一跳直达** A3、不途经 A1/A2。
+
+### 第 88 轮后（2026-10-03）：负责人三问的答复与调研产出
+
+负责人本轮答复：① 板书配额「IndexedDB 是什么意思？大白话讲」② 上传自愈「先出方案给我看」
+③ 数据页「每天实际只打开**学习诊断**」。产出：`docs/auto/reports/2026-10-03-提案-上传自愈与数据页.md`。
+
+**最有价值的一条结论：HANDOFF 五-2「上传链路自愈」其实早已交付，不该立项。** 只读复核证据：
+`server/index.js:4513` 无条件启动 `pendingTaskRecovery.start()`（5 分钟一轮）；
+`server/pendingTaskRecovery.js` 覆盖 processing 卡死 >6min、pending >10min、failed 按
+`classifyLastError()` 分类重试（3/10/5+5min 冷却）、**配额跨自然日自动放行并清零重试次数**、
+配额耗尽全局熔断、练习册解析卡死 >15min；分类器有回归锁 `test/failedTaskRetryClassify.test.mjs`；
+移动端 `ProcessingPage.jsx:31-52,136` 与 PC `DashboardWorkbench.vue:371` /
+`GradeCenterWorkbench.vue:377,199` 都有可见性与手动重试入口。⇒ HANDOFF 该节已改标「关闭」。
+
+**新发现的两个真缺陷（都还没动手，等负责人勾选）**
+
+1. 错题中心的「生成重练卷」(`WrongBookCenterRedesign.vue:241,272` `createRetry`/`createRetryFor`)
+   **模板里已无任何 `@click` 触发它**，但列表的勾选框（`选择 / 全选本页`）还在 ⇒
+   **老师可以勾选一堆错题然后什么都不发生**；而 `RetryTasksWorkbench.vue:47` 的空态文案
+   「在错题池中选择题目，就可以创建针对性重练 → 去错题池创建」正好把人引到这个做不到的页面。
+   处置二选一：(a) 把按钮接回来（函数完整，只差按钮）；(b) 删勾选框+死函数并改文案指向真入口。
+2. 失败任务行未告知「系统还会自动重试」⇒ 老师看到「识别异常」就点「重新上传」，
+   与 5 分钟内服务端的自动重捞**撞车**（同一份作业处理两遍、重复烧配额、错题可能重复入库）。
+   属 A 级顺手化，改文案即可，等负责人一句话。
+
+**数据页提案分档**：第 1 档（成长中心下线、内容并入学习诊断、**家长成长卡必须挪过去**）——
+入站链接仅 1 处 `StudentDetailWorkbench.vue:165`，`growthStore`/`GrowthCardButton`/前端
+`getRecommendedTopics` 均只被成长中心引用，可整组删；第 2 档（错题中心并入）——入站 9 处需改指向；
+第 3 档（试卷答案库/我的题型库）本轮未问。**全部等勾选，不得自行删除。**
