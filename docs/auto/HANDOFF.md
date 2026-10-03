@@ -39,7 +39,7 @@
 
 ## 四、当前系统状态（2026-10-03 晚实测，非记忆值）
 
-- **测试基线**：`npm test` **1469 全绿**（第 74 轮接手时 1453，新增 16 例回归锁）。
+- **测试基线**：`npm test` **1482 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4 例回归锁）。
 - **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
@@ -56,6 +56,12 @@
   先回收当前题的旧键再重试，仍失败用**页内 hint** 明确告知（原为静默 `catch`）。验证脚本
   `_r87_board_storage_verify.mjs`（13/13，含把 localStorage 真填满 4.99MB 的告警路径）。
   ⚠️ **配额仍未根治**：板书按题目永久累积、全仓无清理，约 3–5 周会写满（详见五-6 提案）。
+- **白板板书归属正确性（r88 新修）**：`saveStrokes()` 按 `current` 算键，所以**任何换可见题单的动作
+  都必须先落盘旧题**。「只看未讲」切换原实现先换 `unTaughtOnly`/`viewSnapshot` 再 `saveStrokes()`，
+  会把当前题的板书写进**新题单同下标**那道题的键里 —— 既串题又覆盖掉那道题原有的板书（已实测复现并修）。
+  `onPageHide` 也补了一刀 `saveStrokes()`（`onBeforeUnmount` 会先 `clearTimeout(saveTimer)`，
+  否则「写完字 300ms 内离开」的最后一笔必丢）。回归锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，
+  源码级顺序锁，已反向自检过「套在修复前版本上会判红」）。验证脚本 `_r88_board_view_switch_verify.mjs`（17/17）。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -152,7 +158,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 84 | `2ae8fb6` | 只读调研「周末班课件 + 白板现状与待拍板清单」；重写 HANDOFF 交接文档（循环暂停等接手） |
 | 85 | `6a5a9f5` | 白板 P1/P2/N1/P3/P4/P5：快捷键 `1-4`/`[` `]`/`E`/`L`/`Y`、重做、**激光笔**（不写 strokes）、清屏二次确认、删死入口（resetView + PPTX 前端）、清过时注释；顺手修粗细吸附。四道闸全过，`_r85_board_verify.mjs` 30/30 |
 | 86 | `88ffe05` | 白板导出板书图：题干由 canvas `fillText` 改为**复用屏幕同一个 `MathRender`** 渲染 + `html2canvas` 光栅化（修「LaTeX 源码印在图上」），失败回退 fillText；导出失败不再静默。四道闸全过，`_r86_board_export_verify.mjs` 12/12 + r85 回归 30/30 |
-| 87 | 本轮 | 白板板书存储：笔迹点量化到 2 位小数（体积约减半，`utils/strokePoint.js`）、落盘失败不再静默（页内提示去导出）、旧键迁移顺手瘦身并回收；删死分支 `q-figure__hint`。另实测关闭「白板取图口径」议题（PC 有图/白板无图 = 0，不需抽共享函数）。四道闸全过，`_r87_board_storage_verify.mjs` 13/13 + r85/r86 回归 30/30 + 12/12 |
+| 87 | `065bcd7` | 白板板书存储：笔迹点量化到 2 位小数（体积约减半，`utils/strokePoint.js`）、落盘失败不再静默（页内提示去导出）、旧键迁移顺手瘦身并回收；删死分支 `q-figure__hint`。另实测关闭「白板取图口径」议题（PC 有图/白板无图 = 0，不需抽共享函数）。四道闸全过，`_r87_board_storage_verify.mjs` 13/13 + r85/r86 回归 30/30 + 12/12 |
+| 88 | 本轮 | 白板「只看未讲」切换**不再把板书串到别的题上**（原实现先换题单再 `saveStrokes()`，会把当前题的板书写进新题单同下标那道题的键、并覆盖其原有板书；探针实测复现）；`onPageHide` 补落盘（防抖窗口内最后一笔不再丢）；顶栏题号总数改用 `viewQuestions.length`。新增源码级顺序锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，已反向自检）。四道闸全过，`_r88_board_view_switch_verify.mjs` 17/17 + 隔离产物冒烟 20/20 + r85/r86/r87 回归 30/30 + 12/12 + 13/13 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 

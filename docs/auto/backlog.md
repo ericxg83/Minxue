@@ -370,3 +370,56 @@ A 正常路径书写仍落墨 / 单点 ≤34 字符 / 点结构未变；B 旧键
 > 本节与上节引用的探针（`server/_diag_figure_caliber_gap.mjs`、`server/_diag_figure_gate_crops.mjs`、
 > 根目录 `_r87_stroke_size.mjs` / `_r87_board_storage_verify.mjs`）按既有约定是 **gitignore 的本地临时件，不入库**；
 > 需要复现时照本节描述重写即可（判据与口径都写全了）。
+
+### 第 88 轮交付（2026-10-03）：白板「只看未讲」切换会把板书串到别的题上
+
+**缺陷（真数据损坏，不是观感）**
+
+`saveStrokes()` 是按 `current`（当前题）算 localStorage 键的
+（`strokesKey = wb_strokes_v2_<anchorKey>`）。而 `toggleUnTaughtOnly()` 原实现先把
+`unTaughtOnly` / `viewSnapshot` 换掉、**再**调 `saveStrokes()` —— 那一刻 `current` 已经变成
+**新题单同下标**的那道题，于是当前题的板书被写进别人的键里：
+
+1. **串题**：那道题会显示别的题的板书（老师会以为「上次讲过的东西怎么跑到这题上」）；
+2. **覆盖**：那道题原有的板书被整份盖掉（不可恢复）。
+
+`gotoQuestion()` 的注释里其实写着这条纪律（「顺序要紧：saveStrokes() 依赖 current（旧题）算键，必须先存」），
+`toggleUnTaughtOnly()` 漏了。
+
+**只读探针复现**（`_r88_probe.mjs`，6 题 / 第 1 题已「已讲」/ 停在 index 3，全程打桩写接口）：
+
+```
+切换前各键笔迹数: {A0:0 A1:0 A2:0 A3:3 A4:0 A5:0}
+切换后各键笔迹数: {A0:0 A1:0 A2:0 A3:3 A4:3 A5:0}   ← A4 从未写过字，被写入 A3 的 3 笔
+```
+
+**改动落点**（`src/workbench/views/WeekendBoard.vue`）
+
+| 位置 | 做法 |
+|---|---|
+| `toggleUnTaughtOnly` | 重排为「① 纯计算目标题单（没内容就直接返回）→ ② `saveStrokes()` + `marks.leaveQuestion()` 结算旧题 → ③ 才换 `unTaughtOnly`/`viewSnapshot` → ④ 回新题单第一题」。行为不变，只是把顺序摆正 |
+| `onPageHide` | 补一刀 `saveStrokes()`。`onStrokesChange` 是 300ms 防抖保存，而 `onBeforeUnmount` 会**先** `clearTimeout(saveTimer)` **再**调 `onPageHide()` ⇒ 原实现下「写完字 300ms 内离开白板」的那一笔必然丢掉 |
+| 顶栏副标题 | `第 {{ currentIndex + 1 }} / {{ questions.length }} 题` → `viewQuestions.length`。开着「只看未讲」时原写法显示「第 1 / 6 题」，但实际只有 5 题可翻（底栏圆点、边缘翻题热区、按钮 disabled 判据用的都是 `viewQuestions.length`，只有这一处口径不一致） |
+
+**回归锁**（`test/weekendBoardViewSwitchOrder.test.mjs`，4 例）：源码级顺序锁 ——
+`toggleUnTaughtOnly` 里 `saveStrokes()` 必须早于 `unTaughtOnly.value = true` / `viewSnapshot.value =`，
+且只出现一次；`gotoQuestion` 的「先存后切」不得被破坏；`onPageHide` 必须含 `saveStrokes()`；
+顶栏总数必须用 `viewQuestions.length`。
+**反向自检**：把同一批判据套在修复前的版本上（`git show HEAD:…`），三条全部判红 —— 锁不是空的。
+
+**四道闸**：`npm test` **1482/1482 全绿**（1478 + 4 例新回归锁）｜lint **14 errors / 153 warnings**（持平基线）｜
+`dist_nightly_20261003r88` 构建成功｜真机级 **17/17**（`_r88_board_view_switch_verify.mjs`：
+A 开「只看未讲」后 A4 仍为空、A3 板书原样；B 关回去后 A0 仍为空；C 落点与顶栏题号；D 预置板书能读回且没被覆盖；
+E 写完字立刻 dispatch `pagehide` → 笔迹已落盘，且断言「防抖尚未触发」证明本项不空转；F 0 控制台错误）
++ 隔离产物冒烟 **20/20**（`_r88_smoke.mjs`：移动端首页/工作台/周末班选题页/白板页真渲染、0 控制台错误、
+0 个 4xx/5xx；另单列「无 payload 走回退时 400 必须被翻成人话而不是裸状态码」）
++ r87 回归 **13/13** + r86 回归 **12/12** + r85 回归 **30/30**。零写生产库。
+
+**过程记录（值得留的两条）**
+
+- 冒烟首轮把「白板页无 payload 走回退」也按「0 个 4xx/5xx」判，误报 2 条 FAIL。
+  该 400 是**业务响应**（该时段没有符合条件的错题），界面已把它翻成
+  「加载题目失败：该时段没有符合条件的错题，未生成课件。」—— 属预期路径，不是回归。改成断言「可读中文 + 无裸状态码」。
+- 验证脚本首轮 2 条 FAIL 也是**脚本自己的期望写错**：预置了 A1 的板书又途经 A1，
+  离开 A1 时 `hasStrokes=true` 触发既定口径把 A1 自动标成「已讲」，题单因此少一道、
+  切换后落点是空的 A2 而不是有预置笔迹的 A1。改为用底栏圆点**一跳直达** A3、不途经 A1/A2。

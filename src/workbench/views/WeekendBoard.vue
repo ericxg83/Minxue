@@ -27,7 +27,7 @@
         </button>
         <div class="tb-title">
           <strong>{{ handout?.grade || '初三' }}{{ handout?.subject ? ' · ' + handout.subject : '' }} · 周末讲题白板</strong>
-          <span>第 {{ currentIndex + 1 }} / {{ questions.length }} 题 · {{ current?.day || '' }}</span>
+          <span>第 {{ currentIndex + 1 }} / {{ viewQuestions.length }} 题 · {{ current?.day || '' }}</span>
         </div>
       </div>
       <div class="tb-right">
@@ -1174,26 +1174,36 @@ function toggleOriginal() { showOriginal.value = !showOriginal.value }
 // ── 讲题状态：顶栏开关 ──────────────────────────────────────────
 /** 「只看未讲」：把已讲 / 跳过的题从可见题单里摘掉，解决「下次别再重复讲」 */
 function toggleUnTaughtOnly() {
+  // ① 先纯计算目标题单（不改任何状态）；没内容就直接返回，不白结算一次
+  let nextList = null
   if (!unTaughtOnly.value) {
-    const list = questions.value.filter(q => marks.isUnTaught(q))
-    if (list.length === 0) {
+    nextList = questions.value.filter(q => marks.isUnTaught(q))
+    if (nextList.length === 0) {
       showHint('没有未讲的题了 —— 全部都已讲过或已跳过')
       return
     }
-    unTaughtOnly.value = true
-    viewSnapshot.value = list
-    showHint(`只看未讲：${list.length} 题（已隐藏 ${questions.value.length - list.length} 题）`)
-  } else {
-    unTaughtOnly.value = false
-    viewSnapshot.value = null
-    showHint(`已显示全部 ${questions.value.length} 题`)
   }
-  // 可见题单换了，回到第一题。顺序同 gotoQuestion：先存笔迹、再结算、再切
+  // ② ⛔ 顺序要紧（与 gotoQuestion 同一条纪律）：saveStrokes() 是按 current（旧题）算
+  //    localStorage 键的，所以**必须先落盘旧题、再换可见题单**。
+  //    踩过的坑：原实现先换 unTaughtOnly/viewSnapshot 再 saveStrokes()，那一刻 current
+  //    已经是新题单同下标的那道题 —— 当前题的板书被写进**别人的键**里：既串题（那道题
+  //    显示的是别的题的板书），又把那道题原有的板书整份覆盖掉。第 88 轮已实测复现。
   saveStrokes()
   marks.leaveQuestion({
     hasStrokes: currentStrokes.value.some(s => s?.points?.length),
     viewedAnswer: showAnswer.value,
   })
+  // ③ 现在才换可见题单
+  if (nextList) {
+    unTaughtOnly.value = true
+    viewSnapshot.value = nextList
+    showHint(`只看未讲：${nextList.length} 题（已隐藏 ${questions.value.length - nextList.length} 题）`)
+  } else {
+    unTaughtOnly.value = false
+    viewSnapshot.value = null
+    showHint(`已显示全部 ${questions.value.length} 题`)
+  }
+  // ④ 回到新题单第一题
   currentIndex.value = 0
   showAnswer.value = false
   showOriginal.value = false
@@ -1314,6 +1324,10 @@ function goBack() {
 
 // 关标签页 / 切后台被杀：用 keepalive 尽力送达，别让这次课讲的题白讲
 function onPageHide() {
+  // ⛔ 必须先把还在防抖窗口里的最后一笔补落盘：onStrokesChange 是 300ms 防抖保存，
+  //    而 onBeforeUnmount 会先 clearTimeout(saveTimer) 再调本函数 —— 不补这一刀，
+  //    「写完字 300ms 内离开白板」的那一笔会永远丢掉（板书丢失对老师是静默事故）。
+  saveStrokes()
   marks.leaveQuestion({
     hasStrokes: currentStrokes.value.some(s => s?.points?.length),
     viewedAnswer: showAnswer.value,
