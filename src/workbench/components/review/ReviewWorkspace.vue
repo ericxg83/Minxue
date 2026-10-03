@@ -40,7 +40,10 @@
       </div>
       <div class="review-blocked-actions">
         <el-button plain @click="goGradeCenter">返回批改中心</el-button>
-        <el-button text @click="goWrongBook">查看错题池</el-button>
+        <!-- ⛔ 第 92 轮修：这里原来绑的是 `goWrongBook`，而函数叫 `goToWrongBook`（下方 136 行）
+             ⇒ 模板里引用了不存在的名字，按钮点了完全没反应（Vue 只在控制台留一条
+             「Property "goWrongBook" was accessed during render but is not defined」告警）。 -->
+        <el-button text @click="goToWrongBook">查看错题池</el-button>
       </div>
       <RetryPaperPreview
         v-if="blockedQuestionIds.length"

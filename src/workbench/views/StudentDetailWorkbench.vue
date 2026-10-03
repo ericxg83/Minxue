@@ -52,7 +52,7 @@
           <div class="next-action__text">{{ nextAction.text }}</div>
           <div v-if="nextAction.evidence" class="next-action__evidence">说明：{{ nextAction.evidence }}</div>
         </div>
-        <div class="next-action__cta">
+        <div v-if="nextAction.cta" class="next-action__cta">
           <ActionButton variant="primary" @click="runNextAction">
             {{ nextAction.cta }}<el-icon class="el-icon--right"><ArrowRight /></el-icon>
           </ActionButton>
@@ -310,11 +310,17 @@ const nextAction = computed(() => {
     }
   }
   if (!tasks.value.length) {
+    // ⛔ 第 92 轮修：这里原本给了一个 `to: '/upload'` 的 CTA —— 而工作台**没有**上传页
+    //    （上传只在手机 App 里做）。点下去 vue-router 匹配不到路由，只打一条
+    //    「No match found for location with path "/upload"」**warning**（不是 error，
+    //    所以「0 控制台错误」的断言照样绿），内容区整片空白。
+    //    新学生档案页上最大的那个主按钮，恰好就是老师加完学生后第一个会点的地方。
+    //    现在不给按钮，直接把「去哪儿上传」说清楚。
     return {
-      text: `还没有 ${student.value.name} 的作业记录，上传第一份作业后会自动出诊断。`,
+      text: `还没有 ${student.value.name} 的作业记录。作业在手机 App 里拍照上传，传完这里会自动出诊断。`,
       evidence: '',
-      to: '/upload',
-      cta: '上传作业'
+      to: '',
+      cta: ''
     }
   }
   return null

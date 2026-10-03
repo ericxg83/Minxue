@@ -596,3 +596,49 @@ SQL 漂移锁 + 在途口径 + 五个文件的源码级接线锁），**反向�
 **⛔ 构建输出目录的一个坑**：`vite build --outDir <已存在目录>` 要清空目录，
 本机 `rmSync` 被安全删除守卫拦下（>50 个文件需确认）⇒ 报 `SAFE_DELETE_BULK_CONFIRM_REQUIRED`。
 解法：`CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir ...`（只放开让 vite 清自己刚建的产物目录）。
+
+### 第 92 轮交付（2026-10-04）：工作台「入口可达性」审计 —— 抓到两个「点了没反应 / 点了白屏」
+
+**动机**：第 91 轮下线了两个页面（`/growth` / `/wrongbook`），这类改动最容易留下死入口。
+与其等老师点到，不如把「工作台里所有导航目标 / 所有按钮绑的处理函数」变成可重复跑的检查。
+
+#### 缺陷 1（严重）：新学生档案页的主按钮点了**整页白屏**
+
+- **现象**：学生**还没有作业记录**时（新加的学生就是这种），「下一步建议」给了一个
+  `to: '/upload'` 的主按钮「上传作业」。
+- **根因**：工作台**没有上传页** —— 上传只在手机 App 里做。`vue-router` 匹配不到路由，
+  只打一条 `[Vue Router warn]: No match found for location with path "/upload"`。
+  **warning 不是 error**，所以「0 控制台错误」这类断言永远抓不到它。
+- **实测后果**（Playwright 取证，非推测）：点击前内容区文本长度 545，点击后 **77**
+  —— 内容区整片空白，只剩侧栏；`location.hash` 变成 `#/upload?studentId=...`。
+- **修法**：该分支不再给按钮（`to: ''` / `cta: ''`），文案改为
+  「还没有 X 的作业记录。作业在手机 App 里拍照上传，传完这里会自动出诊断。」
+  模板的 CTA 容器改为 `v-if="nextAction.cta"`（空 cta 不能渲染出一个空白按钮）。
+
+#### 缺陷 2：复核页「查看错题池」绑了一个不存在的函数名
+
+- `ReviewWorkspace.vue` 重练卷「还不能复核」空态里，绑的是 `goWrongBook`，
+  而函数实际叫 `goToWrongBook`（同文件 136 行）⇒ **点了完全没反应**，
+  只在控制台留一条「Property "goWrongBook" was accessed during render but is not defined」。
+
+#### 新增两道常驻闸门（只加闸不放宽）
+
+| 闸门 | 管什么 |
+|---|---|
+| `test/workbenchRouteTargets.test.mjs`（3 例） | 工作台里每个导航目标（path 字面量 / path 模板 / **具名路由**）都必须能被 `router/index.js` 接住；并单列「工作台没有上传页，任何跳 `/upload` 都是错的」 |
+| `test/workbenchClickHandlers.test.mjs`（2 例） | 模板里 `@事件="x"` 绑的 `x` 必须在 script 里存在（函数/变量/import/解构/**函数型 prop**/`$emit` 都算） |
+
+**⛔ 审计器自己的两个误报源**（第一版各踩一次，都已修）：
+① **模板边界**：JSDoc 用法示例里也有 `</template>`，直接 `lastIndexOf('</template>')`
+会把示例文字当成真模板（`WorkbenchDialog.vue` 因此误报 2 条）⇒ 先切掉 `<script>` 再找模板；
+② **`$emit` 与函数型 prop** 是合法的 `@click` 目标，不认就会误报。
+两者都用**变异测试**验过：把 `goToWrongBook` 改回 `goWrongBook`，审计器立刻报出该处。
+
+**验证**：`_r92_route_audit.mjs`（88 文件 / 48 个导航目标 / 不可达 1 → 0）、
+`_r92_click_audit.mjs`（71 个 SFC / 死绑定 1 → 0）、`_r92_verify.mjs`（12/12，四条分支全覆盖）。
+反向自检 `_r92_lock_selfcheck.mjs`：**11 条判据，7 条在 HEAD 版本上判红**。
+
+**四道闸**：`npm test` **1530/1530** ｜ lint **14 errors / 153 warnings**（持平）｜
+构建 `dist_nightly_20261003r92` ｜ 真机级 `_r92_verify.mjs` **12/12**（dev:3000 与隔离产物 :5224 各一遍）
++ 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33。零写生产库。
+截图 `server/scripts/logs/r92-look/empty-student-next-action.png`。

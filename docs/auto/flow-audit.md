@@ -144,6 +144,9 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | `test/geometryTopologyGate.test.mjs` | **新增（第 75 轮）**：P5 回灌修正渲染不得把目测布局里明确的上下/左右关系搬反（拓扑保真闸）；锁住两张真实生产事故数据（73506ed1/0e235860）+ 两个「不误伤」反例 |
 | `test/areaModelChannel.test.mjs` | **新增（第 76 轮）**：分数面积模型确定性通道——「把正方形看作1，1/2+1/4+…」必须出带分数标注的图；序列不等比/含其它构造一律不出图（不猜） |
 | `test/geometryTickMark.test.mjs` | **新增（第 76 轮）**：等比刻度短线图元——DSL `tick` 命令、道数 1~4 越界即报错、端点必须真存在、短杠垂直居中于边、无 ticks 旧结构渲染不变 |
+| `test/dataPageMerge.test.mjs` | **新增（第 91 轮）**：工作台数据页合并——家长成长卡不能丢、多根节点组件收不到 class、侧栏只剩 3 项、两条下线路由必须留 redirect、全仓无 `/wrongbook` `/growth` 硬跳转 |
+| `test/workbenchRouteTargets.test.mjs` | **新增（第 92 轮）**：工作台**每个导航目标**（path 字面量 / path 模板 / 具名路由）都必须能被 `router/index.js` 接住 ⇒ 防「点了白屏」 |
+| `test/workbenchClickHandlers.test.mjs` | **新增（第 92 轮）**：模板里 `@事件="x"` 绑的 `x` 必须在 script 里存在（函数/变量/import/解构/函数型 prop/`$emit` 都算）⇒ 防「点了没反应」 |
 
 ## 十三、第 40 轮重大修复：屏幕露裸 LaTeX 源码（同构漂移）
 

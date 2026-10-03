@@ -39,7 +39,7 @@
 
 ## 四、当前系统状态（2026-10-03 晚实测，非记忆值）
 
-- **测试基线**：`npm test` **1525 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11 例回归锁）。
+- **测试基线**：`npm test` **1530 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11、r92 +5 例回归锁）。
 - **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
@@ -100,6 +100,19 @@
   `_r91_pc_verify.mjs`（25/25）+ `_r91_smoke.mjs`（33/33），dev 与隔离产物各一遍。
   ⛔ **构建坑**：`vite build --outDir <已存在目录>` 需清空目录，本机 `rmSync` 会被安全删除守卫拦下
   ⇒ 用 `CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir ...`。
+- **工作台入口可达性闸门（r92 新交付）**：把「所有导航目标」与「所有按钮绑的处理函数」变成可重复跑的检查，
+  抓到两个真家伙 ——
+  ① **新学生档案页的主按钮点了整页白屏**：「下一步建议」在学生**还没有作业记录**时给了
+  `to: '/upload'` 的按钮，而工作台**没有上传页**（上传只在手机 App 做）；vue-router 匹配不到路由，
+  **只打一条 warning**（不是 error，所以「0 控制台错误」抓不到），内容区整片空白
+  （Playwright 取证：点击前内容长度 545 → 后 77）。现在不给按钮，文案改为「作业在手机 App 里拍照上传」，
+  CTA 容器按 `nextAction.cta` 有无渲染。
+  ② **复核页「查看错题池」绑了不存在的函数名**（`goWrongBook` vs `goToWrongBook`）⇒ 点了没反应。
+  常驻闸门：`test/workbenchRouteTargets.test.mjs`（导航目标必须能被路由表接住，含**具名路由**）
+  + `test/workbenchClickHandlers.test.mjs`（`@click` 绑的名字必须存在，函数型 prop 与 `$emit` 算已定义）。
+  ⛔ **通用教训**：`0 控制台错误` 这个断言抓不到两类最常见的「点了没用」——
+  「点了白屏」只打 vue-router warning、「点了没反应」只打 Vue warning，必须另加源码级入口锁。
+  审计脚本 `_r92_route_audit.mjs` / `_r92_click_audit.mjs` 可随时重跑；反向自检 `_r92_lock_selfcheck.mjs` 7 条判红。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -228,7 +241,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 88 | `075af3c` | 白板「只看未讲」切换**不再把板书串到别的题上**（原实现先换题单再 `saveStrokes()`，会把当前题的板书写进新题单同下标那道题的键、并覆盖其原有板书；探针实测复现）；`onPageHide` 补落盘（防抖窗口内最后一笔不再丢）；顶栏题号总数改用 `viewQuestions.length`。新增源码级顺序锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，已反向自检）。四道闸全过，`_r88_board_view_switch_verify.mjs` 17/17 + 隔离产物冒烟 20/20 + r85/r86/r87 回归 30/30 + 12/12 + 13/13 |
 | 89 | `1e6d38e` | 白板**本机板书回收入口**：顶栏「本机板书」→ 看占用（进度条）/ 按题列（锚点翻成人话）/ 逐条删 / 一次清空，两次点击确认、零自动删除（`utils/strokeStorage.js` + `components/BoardStorageDialog.vue`）。⛔ 只列真写过字的题；**删到「正在讲」那一题时连板面一起清**（只删存储会被 `saveStrokes()` 写回，等于没删）。回归锁 `test/boardStorage.test.mjs`（12 例，已反向自检）。四道闸全过，`_r89_storage_verify.mjs` 27/27（dev + 隔离产物）+ r85/r86/r87/r88 回归 30/30、12/12、13/13、17/17 + 隔离产物冒烟 20/20 |
 | 90 | `4fb0b85` | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
-| 91 | 本轮 | **数据页合并 第 1 档 + 第 2 档**：成长中心（`/growth`）与错题中心（`/wrongbook`）两个页面下线，**家长成长卡搬进学习诊断输出条最右**（它是转发给家长的产出物，不能随页消失），**错题清单以组件自带的 `embedded` 形态嵌进学生档案页**（`#student-wrong` + 页内滚动 CTA），侧栏「教学工作」只剩 3 项，10 处入站链接改指，两条路由留 redirect 兜底，删掉错题中心那排**死勾选框**（勾了没有任何事发生）。⛔ 顺手抓到并修掉一个**静默失效**：`GrowthCardButton` 是多根节点组件，Vue 不透传 class ⇒ 定位类被丢弃、右对齐永远不生效（只有一条 `Extraneous non-props attributes` **warning**，不报错）——现把该 warning 当红、并用几何位置验对齐。回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。四道闸全过，`_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
+| 91 | `2cc8b1f` | **数据页合并 第 1 档 + 第 2 档**：成长中心（`/growth`）与错题中心（`/wrongbook`）两个页面下线，**家长成长卡搬进学习诊断输出条最右**（它是转发给家长的产出物，不能随页消失），**错题清单以组件自带的 `embedded` 形态嵌进学生档案页**（`#student-wrong` + 页内滚动 CTA），侧栏「教学工作」只剩 3 项，10 处入站链接改指，两条路由留 redirect 兜底，删掉错题中心那排**死勾选框**（勾了没有任何事发生）。⛔ 顺手抓到并修掉一个**静默失效**：`GrowthCardButton` 是多根节点组件，Vue 不透传 class ⇒ 定位类被丢弃、右对齐永远不生效（只有一条 `Extraneous non-props attributes` **warning**，不报错）——现把该 warning 当红、并用几何位置验对齐。回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。四道闸全过，`_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
+| 92 | 本轮 | **工作台入口可达性闸门**：审计 88 个文件 / 48 个导航目标 + 71 个 SFC 的 `@click` 绑定，抓到两个真缺陷 —— ① **新学生档案页的主按钮点了整页白屏**（`to: '/upload'`，工作台没有上传页；vue-router 只打 warning，内容区整片空白，实测内容长度 545→77）；② **复核页「查看错题池」绑了不存在的 `goWrongBook`**（函数叫 `goToWrongBook`）⇒ 点了没反应。新增两道常驻闸门 `test/workbenchRouteTargets.test.mjs`（3 例）+ `test/workbenchClickHandlers.test.mjs`（2 例），均已反向自检（11 条判据 7 条判红）。四道闸全过，`_r92_verify.mjs` 12/12 + 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 
