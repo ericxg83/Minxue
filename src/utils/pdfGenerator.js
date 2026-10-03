@@ -1,5 +1,4 @@
 import html2canvas from 'html2canvas'
-import jsPDF from 'jspdf'
 import qrcode from 'qrcode-generator'
 import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
@@ -13,9 +12,6 @@ import { resolveQuestionDisplayStem } from './questionStem'
 // 而被整块漏掉），与判题侧的 question_ids 顺序不一致 → 卷面第 N 题 ≠ 判题第 N 题。
 import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from './retryPaperOrder'
 
-const A4_W = 210
-const A4_H = 297
-const CONTENT_W = 170
 
 // KaTeX 全部字体族。html2canvas 光栅化前必须显式预加载，否则会回退到
 // 系统字体、度量错误，导致根号横线、分数线、上下标错位。
@@ -85,7 +81,6 @@ function getQuestionIllustration(q) {
   return null
 }
 
-const isRemoteUrl = (u) => !!u && !u.startsWith('data:')
 
 function escapeHtml(text) {
   if (!text) return ''
