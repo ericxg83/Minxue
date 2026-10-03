@@ -452,3 +452,31 @@ E 写完字立刻 dispatch `pagehide` → 笔迹已落盘，且断言「防抖�
 入站链接仅 1 处 `StudentDetailWorkbench.vue:165`，`growthStore`/`GrowthCardButton`/前端
 `getRecommendedTopics` 均只被成长中心引用，可整组删；第 2 档（错题中心并入）——入站 9 处需改指向；
 第 3 档（试卷答案库/我的题型库）本轮未问。**全部等勾选，不得自行删除。**
+
+### 第 89 轮交付（2026-10-03）：白板「本机板书」回收入口
+
+负责人答复：板书配额「采纳③先加『清空本机板书』，三四周后要是发现老要点它，再上②换仓库」。
+交付：`src/workbench/utils/strokeStorage.js`（纯函数：键→可读标签/体积/汇总）+
+`src/workbench/components/BoardStorageDialog.vue`（弹窗）+ 白板顶栏「本机板书」入口。
+
+**设计上踩过的三个坑（都已修，别再踩）**
+
+1. **列表必须滤掉「空壳键」**。`saveStrokes()` 在**每次切题**时都会写一次，没写过字的题也会
+   留下一条 `'[]'`（约 15 B）⇒ 不滤掉，弹窗会被「其实没写过字」的题灌满，老师看到的
+   「本机已存 N 道题」全是假的。判据用 `strokeCount !== 0`；**脏数据（非 JSON）保留并展示**
+   （它确实占着空间，得让老师能删），不能和「确定是空」混为一谈。
+2. **删到「正在讲」那一题时，只删存储是假的**。屏幕上那份在内存里（`currentStrokes`），
+   离开这一题时 `gotoQuestion()→saveStrokes()` 会把它原样写回同一个键 ⇒ 等于没删，
+   老师会以为删了。所以父组件收到 `currentRemoved` 必须**连板面一起清**，且清之前先
+   `clearTimeout(saveTimer)`（300ms 内刚写的那一笔会把键又写回来）。实测：删完 ink 6474→0，
+   切走再切回来不复活。
+3. **打开弹窗前必须先补落盘**（`openStorage()` 里 `clearTimeout(saveTimer)` + `saveStrokes()`）。
+   否则弹窗里的数字漏掉刚写的那一笔，`currentRemoved` 判断也会错（键还没建）。
+   这条已写成源码级顺序锁。
+
+**顺带改的文案**：`saveStrokes()` 配额满的告警原来只说「请点右上『板书图』导出留存」，
+现在改成「点右上『本机板书』清掉旧题的板书就能继续，或先点『板书图』导出留存」——
+**在出问题的那一刻告诉老师新入口在哪**。
+
+**验证**：`test/boardStorage.test.mjs`（12 例，源码级锁已反向自检：套在 r89 之前的版本上 10/10 判红）；
+`_r89_storage_verify.mjs` 27/27（dev 与隔离构建产物各跑一遍）。

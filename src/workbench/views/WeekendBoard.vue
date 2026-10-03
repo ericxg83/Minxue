@@ -59,6 +59,17 @@
         <button class="tb-btn tb-export" type="button" @click="exportBoard">
           <el-icon><Download /></el-icon>板书图
         </button>
+        <!-- 本机板书：板书按题目永久存在这台设备的浏览器里，全仓没有回收入口。
+             存储写满时白板会提示「板书没能存到本机」，但老师原来除了清浏览器数据
+             （会连其它本地缓存一起清掉）别无办法 —— 这里把回收权交回给他。 -->
+        <button
+          class="tb-btn tb-storage"
+          type="button"
+          title="本机存的板书：占了多少、都是哪些题，可以逐条删或一次清空"
+          @click="openStorage"
+        >
+          <el-icon><FolderOpened /></el-icon>本机板书
+        </button>
         <button
           class="tb-btn tb-fullscreen"
           type="button"
@@ -378,6 +389,14 @@
         </figure>
       </div>
     </el-dialog>
+
+    <!-- 本机板书管理（第 89 轮）。
+         同样必须 :append-to-body="false"：原生全屏时挂到 body 的弹窗落在全屏元素之外。 -->
+    <BoardStorageDialog
+      v-model="showStorage"
+      :current-key="strokesKey"
+      @deleted="onStrokesDeleted"
+    />
   </div>
 </template>
 
@@ -385,7 +404,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  Aim, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Picture, Pointer, Reading, RefreshLeft, RefreshRight, Remove, View,
+  Aim, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FolderOpened, FullScreen, Picture, Pointer, Reading, RefreshLeft, RefreshRight, Remove, View,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
@@ -393,7 +412,9 @@ import { difficultyStars } from '../../utils/retryPaperOrder'
 import DrawingCanvas from '../components/DrawingCanvas.vue'
 import MathRender from '../components/MathRender.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
+import BoardStorageDialog from '../components/BoardStorageDialog.vue'
 import { quantizeStrokes } from '../utils/strokePoint'
+import { formatBytes } from '../utils/strokeStorage'
 import { useTeachingMarks } from './useTeachingMarks'
 
 const route = useRoute()
@@ -590,6 +611,18 @@ const redoStack = shallowRef([])
 // 清空本页的二次确认态：按钮变红，3 秒内再点才真清空，超时自动复原。
 const clearArmed = ref(false)
 let clearArmTimer = null
+// 本机板书管理弹窗（第 89 轮）：板书按题目永久占本机 localStorage，全仓无回收逻辑。
+const showStorage = ref(false)
+/**
+ * 打开弹窗前先把还在防抖窗口里的最后一笔落盘。
+ * ⛔ 不补这一刀，弹窗里的「已存 N 道题 / 共多少」会漏掉刚写的那一笔，
+ *    而且 `currentRemoved` 判断会错（键还没建，删到当前题也不清板面）。
+ */
+function openStorage() {
+  clearTimeout(saveTimer)
+  saveStrokes()
+  showStorage.value = true
+}
 
 // 导出用：题干文本
 const exportTitle = computed(() => {
@@ -854,7 +887,7 @@ function saveStrokes() {
   if (!strokeSaveWarned) {
     strokeSaveWarned = true
     // 用页内 hint 而不是 ElMessage：原生全屏时 body 上的 toast 落在全屏元素外，看不见
-    showHint('板书没能存到本机（浏览器存储已满）— 请点右上「板书图」导出留存', 8000)
+    showHint('板书没能存到本机（浏览器存储已满）— 点右上「本机板书」清掉旧题的板书就能继续，或先点「板书图」导出留存', 9000)
   }
 }
 function loadStrokes() {
@@ -890,6 +923,27 @@ function loadStrokes() {
   } catch {
     currentStrokes.value = []
   }
+}
+
+/**
+ * 本机板书弹窗删完之后的收尾（第 89 轮）。
+ * ⛔ 只删存储是不够的：屏幕上这一份是**内存里的 currentStrokes**，离开这一题时
+ *    saveStrokes() 会把它原样写回同一个键 —— 等于没删，老师会以为删了。
+ *    所以「删掉的正好是当前这一题」时必须连板面一起清，否则这个功能是假的。
+ *    （清之前先掐掉防抖定时器：300ms 内刚写的那一笔会把键又写回来。）
+ */
+function onStrokesDeleted(payload) {
+  const keys = Array.isArray(payload?.keys) ? payload.keys : []
+  if (!keys.length) return
+  const freed = formatBytes(payload?.freedBytes)
+  if (payload?.currentRemoved) {
+    clearTimeout(saveTimer)
+    currentStrokes.value = []
+    redoStack.value = []
+    showHint(`已删除这道题的板书（屏幕上这一份也一起清掉了，腾出 ${freed}）`, 6000)
+    return
+  }
+  showHint(`已清理本机板书，腾出 ${freed}`, 5000)
 }
 
 function onStrokesChange(val) {
@@ -1522,6 +1576,8 @@ onBeforeUnmount(() => {
 .tb-btn.active { background: var(--wb-primary-mist, #eef2ff); color: var(--wb-primary, #6366f1); border-color: var(--wb-primary, #6366f1); }
 .tb-export { color: #16a34a; border-color: #bbe7c9; }
 .tb-export:hover { color: #16a34a; border-color: #16a34a; }
+.tb-storage { color: #7c3aed; border-color: #ddd6fe; }
+.tb-storage:hover { color: #6d28d9; border-color: #7c3aed; }
 .tb-fullscreen { padding: 0 12px; }
 
 /* 主区 */
