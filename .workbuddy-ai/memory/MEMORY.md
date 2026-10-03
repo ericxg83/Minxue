@@ -1,19 +1,19 @@
 # 敏学项目长期约定
 
 > 只留硬约定与「不知道就会踩坑」的事实；细节外链 `topics/`，每日过程见 `YYYY-MM-DD.md`。
-> 2026-10-03 压缩重写（原 18.5KB 超注入上限被截断）：过程叙述下沉 topics/ 与日志；
-> 产品原则与循环机制见根目录 `AGENTS.md` 与 `docs/auto/HANDOFF.md`，本文件不再重复。
+> 2026-10-03 二次压缩（原 18.5KB → 6.7KB 仍超注入上限被截断）：过程叙述全部下沉 `topics/` 与日志；
+> 产品原则与循环机制见根目录 `AGENTS.md` 与 `docs/auto/HANDOFF.md`，本文件不重复。
 
 ## 0. 产品与自决权（最高层）
 - 单用户系统：唯一用户 = 负责人（晚托班老师）。学生是数据主体不是用户；「学生端/家长端」设想不成立。
 - 小而美：优先优化现有流程与美感；新增功能审慎；鼓励主动提删除/合并建议。
 - 自决权：A 级（行为保持型修复/死代码/顺手化/文档）+ 四道闸全过 → 可直接 push main。
-- ⛔ 硬禁区（只能提案）：DB Schema/迁移、批改主流程设计、错题生命周期与合并、重练组卷口径、掌握度口径、
-  练习册答案质量闸、judgements 语义、公共 API 行为、任务状态机、判题/抽取正则与转义。
+- ⛔ 硬禁区（只能提案）：DB Schema/迁移、批改主流程设计、错题生命周期与合并、重练组卷口径、
+  掌握度口径、练习册答案质量闸、judgements 语义、公共 API 行为、任务状态机、判题/抽取正则与转义。
 
 ## 1. 完整性判定（topics/question-completeness）
 - `checkQuestionCompleteness()`（server/utils ↔ src/utils 逐字一致）是唯一判据；`is_complete` 仅缓存、偏保守。
-- `parent_stem` 三硬约束：①重算 SELECT 必带 ②引擎输入必拼（只喂 content → 条件题判缺条件、answer 永久空）③写入侧只告警不拦截。
+- `parent_stem` 三硬约束：①重算 SELECT 必带 ②引擎输入必拼（漏 → 条件题判缺条件、answer 永久空）③写入侧只告警不拦截。
 - 引擎输入须与生产逐字同构：`parent_stem`+`content`+`options`（漏 options → 字母答案被覆盖成选项正文）。
 - 残题分组键必含 `page_number`；同页题号撞车禁公共题干/邻题配图兜底；残句小问以行首 `(N)` 最权威，宁可留空不填错。
 - 配图只认 `geometry_image_url`；⛔ 禁 `image_bbox`↔`block_coordinates` 互比判归属（假阳~28%）。
@@ -22,64 +22,85 @@
 - OCR prompt 必带 `options`（图形选项写 `["选项A图",…]`，绝不因是图留空）；存量补全 `backfill-choice-options.mjs`（默认 dry-run）。
 
 ## 3. 视觉模型（topics/vision-vendors）
-- ⛔「魔搭欠费」（2026-09-22）是误判，实为免费额度打满（429 insufficient balance），会自恢复；`MS_VISION_DISABLED` 是人工开关（已置 0），线上 Render 若配了需手动同步。
-- 生产视觉链 = vendorChain 显式链：`ANSWER_PAGE_VENDOR_CHAIN`（qwen3.8-flash@Bailian→kimi-k3@SN）、`WORKBOOK_OCR_VENDOR_CHAIN`（deepseek-flash@SN→qwen3.8-flash@Bailian）。
-- ⛔ 判模型能否读图只能实测（input_modalities 撒谎）；400/404 ≠ 下线，用其真支持的接口测；AI 调用必须关代理。
+- ⛔「魔搭欠费」是误判（实为免费额度打满 429，会自恢复）；`MS_VISION_DISABLED` 是人工开关，线上 Render 需手动同步。
+- 生产视觉链 = vendorChain 显式链：`ANSWER_PAGE_VENDOR_CHAIN`（qwen3.8-flash@Bailian→kimi-k3@SN）、
+  `WORKBOOK_OCR_VENDOR_CHAIN`（deepseek-flash@SN→qwen3.8-flash@Bailian）。
+- ⛔ 判模型能否读图只能实测（input_modalities 撒谎）；400/404 ≠ 下线；AI 调用必须关代理。
 - ⛔ 离线脚本不得用 `noBackup:true`（魔搭已禁用 ⇒ 必然失败）。
 - 漏裁判据：`image_type IN ('geometry','chart')` ∧ `geometry_image_url IS NULL`；⛔ 别用 image_type 非空（'none' 是纯文字题）。
 
 ## 4. 几何重画（topics/geometry-pipeline）
 - 强制 DSL 构造式（forceDsl）；DSL 成功后直接用 `correctDslByVision` 返回的 structure，禁二次 executeDsl。
 - 显示唯一入口 `getGeometryDisplayUrl`（`src/utils/geometryDisplay.js`，**无 server 镜像副本**）。
-  ⛔「无可重绘的几何结构」闸门只在「仅剩原始裁片」时拦（2026-09-26 已下移到裁片回退之前）。
-- 四条出图通道（互补别混）：①视觉 JSON→`renderGeometrySvg` ②DSL+视觉闭环 ③裁片矢量化描摹（`utils/figureVectorize.js`，忠实不构造、去不了手写）④原图高清重裁（`utils/figureCropHiRes.js`）。
-- ⛔ 视觉定位框两个硬事实：①模型框会被 `figureRegionRefiner` 误伤（墨迹覆盖率 > `MAX_INK_COVERAGE=0.14` 判文字带）→ 走 `FIGURE_REFINE=0`+已人工目检的框；②视觉模型非确定性 ⇒「先目检再 apply」必须 plan 复用同一个框。
+  ⛔「无可重绘的几何结构」闸门只在「仅剩原始裁片」时拦。
+- 四条出图通道（互补别混）：①视觉 JSON→`renderGeometrySvg` ②DSL+视觉闭环 ③裁片矢量化描摹
+  （`figureVectorize.js`）④原图高清重裁（`figureCropHiRes.js`）。
+- ⛔ 视觉定位框：①会被 `figureRegionRefiner` 误伤（墨迹覆盖率 > `MAX_INK_COVERAGE=0.14` 判文字带）
+  → 走 `FIGURE_REFINE=0`+已目检的框；②视觉模型非确定性 ⇒「先目检再 apply」必须复用同一个框。
 - ⛔ 判「裁片好不好」无确定性判据 ⇒ 视觉定位 + 人工目检；**缩略图会误判，必须放大再看**。
 - ⛔ 画图铁律：数值必须全部来自题干文本，图里才有的位置绝不靠猜。
-- 脏重绘图（图上印内部变量名）走 `scripts/retract-dirty-figures.mjs`（definite/suspect 两档）；发布侧 `geometryContentGate.js#findSuspiciousSvgLabels` 防复发。
+- 脏重绘图（图上印内部变量名）走 `scripts/retract-dirty-figures.mjs`；发布侧
+  `geometryContentGate.js#findSuspiciousSvgLabels` 防复发。
 
 ## 5. 本地开发（topics/local-dev-process）
 - ⛔ 入口第一行必 `import './loadEnv.js'`；验配置只认启动日志 `🧠 [Answer Engine] 启用 → …`。
-- 后端 `node server/index.js` → 4000（内嵌 BullMQ worker，须 Redis 先起）；前端 dev 3000 / 预览 5199。
+- 后端 `node server/index.js` → 4000（内嵌 BullMQ worker，须 Redis 先起）；前端 dev 3000 / 预览 5220。
 - ⛔ `Edit` 报成功 ≠ 落盘：改完立刻 `grep -c`/`node --check` 复核；同一文件禁并行发多个 Edit。
 - ⛔ 后台起服务用 run_in_background，**别加 `&`**（会让后端在 Redis 连接池初始化后退出）。
-- ⛔ 会写文件的命令**绝不能用 `… | Select-Object -First N` 取输出**（PowerShell 提前终止上游 → 文件被截空）；要 `> file 2>&1` 再读；中文先 `[Console]::OutputEncoding = UTF8`。
-- DB 串在 `server/.env` 的 `NEON_DATABASE_URL`；只读探针写 `server/_diag_*.mjs`。⚠️ server/.env 中文注释已成 U+FFFD → 改它用原生 Buffer utf8 + round-trip 校验 + 备份。
+- ⛔ 会写文件的命令**绝不能用 `… | Select-Object -First N` 取输出**（上游提前终止 → 文件被截空）；要 `> file 2>&1` 再读。
+- ⛔ `curl` 探活 localhost 必须 `--noproxy '*'`（环境代理会劫持成 502 假死）。
+- DB 串在 `server/.env` 的 `NEON_DATABASE_URL`；只读探针写 `server/_diag_*.mjs`。
+  ⚠️ 该文件中文注释已成 U+FFFD → 改它用原生 Buffer utf8 + round-trip 校验 + 备份。
 
-## 6. 答案引擎 / 校验 / 判分 / 抽取（topics/answer-engine-fallback-chain、judge-sign-guard）
-- 链路（2026-09-22）：`SenseNova:[deepseek-flash→glm-5.2→sensenova-6.8-flash-lite]`（双 Key）→ BigModel:glm-4.7-flash → Bailian:qwen3.8-flash → Huihuiyun:deepseek-v4-flash → 留空转人工。
-- 双 SN Key 独立配额池；轮转 = 模型外层 × Key 内层；`keyDisabledForRun`（本次内判废）≠ `_answerEngineKeyCooldown`（跨调用 5h 冷却）；SenseNova 额度 = 5h 滑动窗口 + 周额度。
-- ⛔ 全链失败返回 `{content:'',provider:'no-channel-available'}` → 转人工；⚠️ `ANSWER_ENGINE_ENABLED=0` 仍走 callTextCompletion（"整个引擎关掉"语义），别误删。备用供应商必写 `Vendor:model`；备用通道 retry429:false。
-- 确定性校验器（⛔ 三次误清空教训）：worker.js 落库点加闸，结论与数值求解不符 → 清 answer + 标异常 + 转人工。根因 = 算式抽取不校验完整性；根治 `isCompleteExpression()`（省略号/首尾运算符/括号不配对 → applicable:false 保留）。⚠️ 前导 +/- 是单元运算符合法；改校验器必跑 `test/arithmeticAnswerValidator.test.mjs`，只许加规则/测试。
-- 判分器：`\FRAC{}{}`→`n/d` 必须排在尾标点剥离之前；`extractNumericValues` 必认中文带分数 `N又a/b` 为整体。符号放水窄闸（删符号后两侧相同+负号数不同+含非零数字→判错）。⛔ 两个解析函数都不能单独改；先复制打补丁→全库对跑→只翻转可逐条解释的 N 条。人工真值集有噪声。
-- 参考答案位只能显示 `q.answer`，⛔ 禁 analysis 兜底；全库 125 条实测：88 占位串/29 缺条件/8 抽取器 miss ⇒ 只有 8 条值得回填。⛔「AI 自述缺条件」一半是假的：先查 parent_stem 非空。抽取器必须有填空题末句兜底；回填 answer 必须同时复位 `answer_exception=FALSE`。
+## 6. 答案引擎 / 校验 / 判分 / 抽取（topics/answer-engine-fallback-chain、answer-validators-and-judge）
+- 链路：`SenseNova:[deepseek-flash→glm-5.2→sensenova-6.8-flash-lite]`（双 Key）→ BigModel:glm-4.7-flash
+  → Bailian:qwen3.8-flash → Huihuiyun:deepseek-v4-flash → 留空转人工。全链失败返回
+  `{content:'',provider:'no-channel-available'}`；⚠️ `ANSWER_ENGINE_ENABLED=0` 仍走 callTextCompletion，别误删。
+- ⛔ 确定性校验器（三次误清空教训）：结论与数值求解不符 → 清 answer + 标异常。根治 `isCompleteExpression()`
+  （省略号/首尾运算符/括号不配对 → applicable:false **保留答案**）。只许加规则/测试，不得放宽或绕行。
+- ⛔ 判分器：`\FRAC{}{}`→`n/d` 必须排在尾标点剥离之前；两个解析函数都不能单独改
+  （先复制打补丁 → 全库对跑 → 只翻转可逐条解释的 N 条）。
+- 参考答案位只能显示 `q.answer`，⛔ 禁 analysis 兜底；⛔「AI 自述缺条件」一半是假的：**先查 parent_stem 非空**。
+  回填 answer 必须同时复位 `answer_exception=FALSE`。
 
 ## 7. 错题 / 重练 / 练习册闸（topics/wrongbook-gate-requeue）
 - 错题「同一题」判定走 `questionIdentity.js`，禁相似度阈值合并；变式题不进重练卷与组卷，仅作讲义素材。
-- 入册「补全即补入」：`wrong_no_book` 是终态；PUT /api/questions/:id 判据 = `wrongGateRequeue.js`（唯一口径）。⛔ 手动「本次不加入」绝不自动拉回；唯一可靠判据 = skipReason ∧ `gateAuto===true`。⚠️ 未修：confidence=0 两来源且补答案不重置 ⇒ 永久卡死。
-- 重练卷答卷（`generated_exam_id` 非空 或 `task_type='wrong_retry'`）不是独立作业：题目挂原 task，只进「错题重练」入口；唯一口径 = `retryPaperState.js#isRetryPaperTask`。
-- 练习册质量闸：OCR 锁主力 + 3 并发 + 文字层门禁 + 控制字符过滤；published 必经 `getWorksheetPublishRisk`（blocking→409，须 force=true）；新增版式异常只许加规则/加测试。
+- 入册「补全即补入」：`wrong_no_book` 是终态；判据 = `wrongGateRequeue.js`（唯一口径）。
+  ⛔ 手动「本次不加入」绝不自动拉回；唯一可靠判据 = skipReason ∧ `gateAuto===true`。
+  ⚠️ 未修：confidence=0 两来源且补答案不重置 ⇒ 永久卡死。
+- 重练卷答卷（`generated_exam_id` 非空 或 `task_type='wrong_retry'`）不是独立作业：题目挂原 task；
+  唯一口径 = `retryPaperState.js#isRetryPaperTask`。
+- 练习册质量闸：OCR 锁主力 + 3 并发 + 文字层门禁 + 控制字符过滤；published 必经 `getWorksheetPublishRisk`
+  （blocking→409，须 force=true）；新增版式异常只许加规则/加测试。
 - `processWorkbookGrading` 从不读 `r.answer_status`；`processAnswerBankGrading` 有 → 未审核答案库被判分产生假红叉。
-- 参考答案空值唯一可信判据 = 数 `questions.answer`，⛔ 别只看 `tasks.last_error`；`answer_exception_reason` 空=静默空，有值=主动丢弃。答案册完整性体检只报内部空洞 + 孤立题号。
+- 参考答案空值唯一可信判据 = 数 `questions.answer`，⛔ 别只看 `tasks.last_error`；
+  `answer_exception_reason` 空=静默空，有值=主动丢弃。
 
 ## 8. 长耗时接口与错误外露（topics/long-request-and-error-surfacing）
 - ⛔ 含 AI/外部服务/长事务的 POST 必须显式 `apiRequest(path, opts, 1)`（默认 3 次重放 + 等待拉到 95s）并放宽 timeout。
 - ⛔ 后端错误体契约 `{ error:'<code>', message:'<中文可读>' }`；前端一律读 `err?.payload?.message || err?.message`。
 - ⛔ pg query 在已建连接上无限等（connectionTimeoutMillis 只管建连）；手动触发类路由必须自带应用层超时。
-- DB 故障（503 db-unavailable）与业务失败（502 engine-empty）分开报；结算类后置动作失败只告警，不得吞掉已写库的主结果。
+- DB 故障（503 db-unavailable）与业务失败（502 engine-empty）分开报；结算类后置动作失败只告警，不吞主结果。
 
-## 9. 缺配图闸 + 补答案路径（2026-09-24）
-- `figureRequirementGuard.js`：判据 = `hasFigureReference(q)`（复用 questionCompleteness，绝不自写正则）∧ 无 `geometry_image_url`；开关 `ANSWER_FIGURE_PREFLIGHT_SKIP=0`；非终态，补图后可重算。接线 worker.js#generateMissingAnswers + 重解析端点 400 figure-missing。
-- 补答案优先级：同卷副本回填 > 文本链重跑 > 读图解题 > 转人工。副本工具 `backfill-answers-from-copies.mjs` 四道闸：①归一化 content 完全相等（norm 去填空下划线 `_`）②答案非空且非占位串 ③选择/判断题核对选项 ④多副本语义一致（`isSameAnswerSemantic`）。
-- ⛔ 多数票 ≠ 正确；⛔ 判「几源一致」必须剔除本轮自己写入的行；⛔ 跨 task 借 parent_stem 是错的（只有同 task 同题号能配对）。
-- 重跑工具 `rerun-blank-answer-with-figure.mjs`：dry-run `--out` → 人工过 → `--commit <json>`（零 AI）。⛔ Bailian:qwen3.8-flash 并发承受力 = 1，批量必须 `--conc 1`；⛔ 防幻觉比对用 `isSameAnswerSemantic`（`isSameMathAnswer` 实测 8/8 误杀）。
-- ⛔ 读图判幻觉：「两次独立运行一致」不构成证据；可靠手段 = 只转录不计算（`_probe-figure-labels.mjs`）。⛔ 错的答案比空答案更糟 ⇒ OVERWRITE 清单必带 wasWrong 条件更新。「只剩引导语」的行不是题目，answer 本就该空。
+## 9. 缺配图闸 + 补答案路径（topics/blank-answer-recovery）
+- `figureRequirementGuard.js`：判据 = `hasFigureReference(q)` ∧ 无 `geometry_image_url`；非终态，补图后可重算。
+- 补答案优先级：同卷副本回填 > 文本链重跑 > 读图解题 > 转人工。
+- ⛔ 多数票 ≠ 正确；⛔ 判「几源一致」必须剔除本轮自己写入的行；⛔ 跨 task 借 parent_stem 是错的；
+  ⛔ 读图判幻觉：「两次独立运行一致」不构成证据，可靠手段 = 只转录不计算；⛔ 错的答案比空答案更糟。
 
 ## 10. 其他硬约定
-- ⛔ 下载 OSS 图片必须禁代理（唯一来源 `noProxyHttp.js`；回归 `test/noProxyDownload.test.mjs` 扫描漏带即失败）。
+- ⛔ 下载 OSS 图片必须禁代理（唯一来源 `noProxyHttp.js`；回归 `test/noProxyDownload.test.mjs`）。
 - 题目解析入口唯一化：只走题干行「解析」按钮（`review/AnalysisSource.vue`）。
-- 白板/课件：内容一律走 `MathRender`（KaTeX；库里大量题干是裸 LaTeX）；选择题必渲染选项（守卫 = 有选项 且 题干未内联 ≥2 个 A–D 标号）；短答案传 `force-inline`。布局高度跟随父容器（禁 `100vh`）；全屏弹窗一律 `:append-to-body="false"`。
-- 讲题白板工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R`。
-  ⛔ 激光笔走独立 `.dc-laser` canvas（`pointer-events:none`），**绝不进 `startStroke/appendLivePoint`、绝不写 strokes**
-  ⇒ 导出 PNG 天然不含光点；选中激光笔时手指归指针、横滑切题暂停。清屏有二次确认（3s 窗口）。
-  详见 `topics/board.md`。
+- 白板/课件：内容一律走 `MathRender`（KaTeX；库里大量题干是裸 LaTeX）；选择题必渲染选项；短答案传
+  `force-inline`。布局高度跟随父容器（禁 `100vh`）；全屏弹窗一律 `:append-to-body="false"`。
+- 讲题白板（`topics/board.md`）：工具 = pen / eraser / **laser**；
+  快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R`。
+  ⛔ 激光笔走独立 `.dc-laser` canvas（`pointer-events:none`），**绝不进 `startStroke/appendLivePoint`、
+  绝不写 strokes** ⇒ 导出 PNG 天然不含光点。清屏有二次确认（3s 窗口）。
+- ⛔ 导出板书图（`DrawingCanvas#exportPng`）题干必须经 KaTeX 渲染：离屏 `.dc-export-render` 层用**同一个
+  `MathRender`** 渲染 → `html2canvas` 光栅化 → 贴进导出图（`onclone` 内联 `KATEX_CSS_WITH_FONTS` +
+  `fixFractionLineInCloneDoc`）。**绝不用 canvas `fillText` 画含 LaTeX 的题干**（会把源码印到图上）；
+  只在光栅化失败时回退 fillText。
+  ⛔ 该离屏层必须 `Teleport to="body"`（`.drawing-canvas` 是 `overflow:hidden`，留在里面 html2canvas 拍不到）；
+  **不要加 `z-index:-1`**（会被 body 背景盖住，裁出来是空白）。标题是「年级·日期·第 N 题」纯文本，
+  不走 MathRender（否则 `10-03` 被渲染成 `10 − 03`）。

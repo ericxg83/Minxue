@@ -283,3 +283,33 @@ N3 图形吸附**先观察**、Q1 激光笔触发**照 `allowTouch` 同款规则
 **遗留（不是本轮范围）**：工具栏粗细档在「默认 3」时仍无高亮档（预设里没有 3）——属既有观感问题，
 若要根治需把默认笔宽改成预设值（3.5），属行为变更，未做。
 
+
+### 第 86 轮交付（2026-10-03）：白板导出板书图 —— 题干不再印 LaTeX 源码
+
+**缺陷（先证实再动手）**：`DrawingCanvas#exportPng` 用 canvas `fillText` 逐行画题干，
+题干里的 LaTeX 以**源码**形式印在板书图上。板书图是老师转发给家长的产物，源码不可用。
+只读探针 `_r86_export_probe.mjs` 钩 `toDataURL` 截获导出画布落盘 `_r86_export_before.png`，
+肉眼确认：屏幕 `katexNodes:3` 正常，导出图里是 `\sqrt{a^4}=a^2` / `\frac{1}{2}x+3=7` 源码。
+
+**改动落点**
+
+| 文件 | 做法 |
+|---|---|
+| `DrawingCanvas.vue` | 新增 `<Teleport to="body">` 的离屏题干层 `.dc-export-render`，用**屏幕同一个 `MathRender`** 渲染标题（纯文本）与题干/小问（KaTeX）——**零第二份实现**，不会与屏幕漂移；`exportPng` 改 async：`html2canvas` 光栅化该层（`onclone` 内联 `KATEX_CSS_WITH_FONTS` + `fixFractionLineInCloneDoc`，前置 `preloadKatexFonts`）→ 贴到 `(EXPORT_PAD, EXPORT_PAD)`，配图接在块下方，笔迹最后叠最上层；光栅化失败回退旧 `fillText`（`drawExportTextFallback`） |
+| `DrawingCanvas.vue` | `html2canvas` / `pdfGenerator` / `katexCssWithFonts`（371KB，含 20 个 base64 数学字体）全部**动态 import** 并缓存 Promise ⇒ 不进工作台首屏包 |
+| `WeekendBoard.vue` | `exportBoard` 改 async：`await exportPng` + 失败页内提示（原为静默调用，异步后失败会变成 unhandled rejection） |
+
+**⛔ 三条硬约束（都实际踩过，已写入 MEMORY §10 与 `topics/board.md` §10）**：
+1. 离屏层必须 `Teleport to="body"` —— `.drawing-canvas` 是 `overflow:hidden`，留在里面 html2canvas 拍不到（空白）。
+2. **不要加 `z-index:-1`** —— 会被 body 背景盖住，裁出来仍是空白。移出视口用 `position:absolute; left:-9999px`
+   即可（照 `src/features/PaperBank/index.jsx:583` 既有范式）。
+3. **标题不走 `MathRender`** —— 它是「年级 · 日期 · 第 N 题」拼出来的纯文本，走 KaTeX 会把 `10-03`
+   的连字符渲染成减号 `10 − 03`（第一版就是这样，肉眼复核导出图时发现并改回纯文本）。
+
+**四道闸**：`npm test` **1469/1469 全绿**｜lint **14 errors / 153 warnings**（持平基线，无新增）｜
+`dist_nightly_20261003r86` 构建成功｜真机级 **12/12**（`_r86_board_export_verify.mjs`：A 正常路径 ——
+离屏层在 body / 已移出视口 / 有 `.katex` / 导出图顶部文字带确有墨 / 0 控制台错误；B 回退路径 ——
+`page.route` 掐断 `**/*html2canvas*` 后仍能出图且不抛错）+ r85 白板回归 **30/30**。
+导出 PNG（`_r86_export_after.png`）已肉眼复核：题干为正常数学排版、配图在位。写接口全程 `page.route` 拦截，**零写生产库**。
+
+**遗留**：无新增。既有遗留 = 「默认笔宽 3 不在三档预设（2 / 3.5 / 6）」需改默认值，属行为变更，等负责人开口。

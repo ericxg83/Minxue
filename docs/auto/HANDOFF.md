@@ -44,9 +44,13 @@
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
 - **五条确定性通道**：函数图象 / 数轴 / **分数面积模型（新）** / DSL 构造 / 视觉目测。
-- **讲题白板（r85 后）**：工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R` + 方向键/Home/End；
+- **讲题白板（r86 后）**：工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R` + 方向键/Home/End；
   有重做（`redoStack`）；清屏需二次确认（3s 窗口）。**激光笔走独立 `.dc-laser` canvas，绝不写 strokes**。
   选中激光笔时手指归指针、横滑切题暂停。验证脚本 `_r85_board_verify.mjs`（gitignore 的根目录 `_*` 临时件）。
+- **白板导出板书图（r86 新修）**：题干不再以 LaTeX 源码印在图上。离屏 `.dc-export-render` 层用**屏幕同一个
+  `MathRender`** 渲染 → `html2canvas` 光栅化（`onclone` 内联 `KATEX_CSS_WITH_FONTS` + `fixFractionLineInCloneDoc`）
+  → 贴进导出图；失败回退旧 `fillText`。⛔ 该层必须 `Teleport to="body"` 且**不能加 `z-index:-1`**（都会被裁成空白）；
+  ⛔ 标题是纯文本不走 MathRender（否则 `10-03` 变 `10 − 03`）。验证脚本 `_r86_board_export_verify.mjs`（12/12）。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -131,6 +135,7 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 83 | `3bc5623` | ⑤ 第二批：只删 5 条整行形态；拦下裁决③红线；修工具两个坑（逗号重叠写碎源码、`Select-Object -First` 截空文件）；清理线收线 |
 | 84 | `2ae8fb6` | 只读调研「周末班课件 + 白板现状与待拍板清单」；重写 HANDOFF 交接文档（循环暂停等接手） |
 | 85 | `6a5a9f5` | 白板 P1/P2/N1/P3/P4/P5：快捷键 `1-4`/`[` `]`/`E`/`L`/`Y`、重做、**激光笔**（不写 strokes）、清屏二次确认、删死入口（resetView + PPTX 前端）、清过时注释；顺手修粗细吸附。四道闸全过，`_r85_board_verify.mjs` 30/30 |
+| 86 | 本轮 | 白板导出板书图：题干由 canvas `fillText` 改为**复用屏幕同一个 `MathRender`** 渲染 + `html2canvas` 光栅化（修「LaTeX 源码印在图上」），失败回退 fillText；导出失败不再静默。四道闸全过，`_r86_board_export_verify.mjs` 12/12 + r85 回归 30/30 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 

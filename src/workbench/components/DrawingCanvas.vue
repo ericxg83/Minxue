@@ -14,6 +14,21 @@
     <!-- 激光笔光点层：独立 canvas，pointer-events:none，只画「临时指针轨迹」。
          它不参与 strokes —— 导出板书 PNG 只读 localStrokes，天然不含光点。 -->
     <canvas ref="laserRef" class="dc-laser" aria-hidden="true" />
+    <!-- 导出板书图的「题干层」：与屏幕共用同一个 MathRender（KaTeX）。
+         旧实现用 canvas fillText 逐行画题干，题干里的 LaTeX 会以源码形式
+         （\frac{1}{2}x+3=7）原样印在板书图上，老师转发给家长的图就是乱码。
+         改为先渲染成 DOM，再由 html2canvas 光栅化后贴进导出 PNG。
+         必须 Teleport 到 body：.drawing-canvas 是 overflow:hidden，离屏节点
+         留在里面会被裁掉，html2canvas 拍不到。它不参与任何交互（pointer-events
+         :none），也不进 strokes。 -->
+    <Teleport to="body">
+      <div ref="exportRenderRef" class="dc-export-render" aria-hidden="true">
+        <div v-if="exportTitle" class="dc-export-render__title">{{ exportTitle }}</div>
+        <div v-for="(t, i) in exportTexts" :key="i" class="dc-export-render__line">
+          <MathRender :content="t" />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -25,8 +40,8 @@
  * 笔迹与题目分层叠加（清笔画不破坏题目）。统一支持鼠标 / 触控笔（含压感）/
  * 触摸屏（Pointer Events 原生能力）。
  *
- * 功能：换色 / 换粗细 / 橡皮 / 撤销 / 激光笔 / 清空 / 导出板书图（白底 + 题干文本 +
- * 配图 + 笔迹 → PNG 下载）。
+ * 功能：换色 / 换粗细 / 橡皮 / 撤销 / 激光笔 / 清空 / 导出板书图（白底 + 题干
+ * （KaTeX 渲染）+ 配图 + 笔迹 → PNG 下载）。
  *
  * 数据流：组件内部维护 localStrokes 作为唯一书写源；外部「切题替换笔迹」
  * 通过 props.strokes 传入，watch 覆盖本地并重绘；每一笔「收笔」时 emit
@@ -62,6 +77,7 @@
  *    合成路径，透明叠加恢复正常。
  */
 import { onMounted, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue'
+import MathRender from './MathRender.vue'
 
 const props = defineProps({
   strokes: { type: Array, default: () => [] },
@@ -82,6 +98,8 @@ const size = defineModel('size', { type: Number, default: 3 })
 
 const wrapRef = ref(null)
 const canvasRef = ref(null)
+// 导出板书图的离屏题干层（Teleport 到 body，见模板注释）
+const exportRenderRef = ref(null)
 
 // 已收笔的笔迹（唯一可变数据）。shallowRef：一笔几百个点位，深度响应式代理
 // 是纯开销 —— 重绘由本组件手动触发，父组件只会整组替换这个数组。
@@ -660,7 +678,13 @@ function redraw() {
   }
 }
 
-// ── 导出板书图：白底 + 题干文本 + 配图 + 笔迹 → PNG ──
+// ── 导出板书图：白底 + 题干（KaTeX 渲染）+ 配图 + 笔迹 → PNG ──
+// 题干不能再用 canvas fillText 逐行画：库里题干大量是 LaTeX（\frac{1}{2}x+3=7），
+// fillText 会把源码原样印到板书图上。改为复用屏幕同一个 MathRender 组件渲染成
+// DOM，再由 html2canvas 光栅化后贴进导出图；光栅化失败时回退旧 fillText 逐行
+// （宁可图朴素，也不能导不出来）。
+const EXPORT_PAD = 24
+
 function wrapText(octx, text, maxW) {
   const lines = []
   let cur = ''
@@ -677,14 +701,108 @@ function wrapText(octx, text, maxW) {
   return lines.length ? lines : ['']
 }
 
-function exportPng(filename = '板书.png') {
+/** 旧版逐行 fillText 画题干（仅当 KaTeX 光栅化失败时兜底）。返回绘制后的底边 Y。 */
+function drawExportTextFallback(octx, W, topY) {
+  let y = topY + 16
+  octx.fillStyle = '#1E293B'
+  octx.font = '600 18px "Microsoft YaHei", sans-serif'
+  if (props.exportTitle) {
+    octx.fillText(props.exportTitle.slice(0, 60), EXPORT_PAD, y)
+    y += 34
+  }
+  octx.font = '15px "Microsoft YaHei", sans-serif'
+  for (const t of props.exportTexts || []) {
+    for (const ln of wrapText(octx, t, W - EXPORT_PAD * 2)) {
+      octx.fillText(ln, EXPORT_PAD, y)
+      y += 26
+    }
+  }
+  return y + 4
+}
+
+// html2canvas 与 KaTeX 光栅化助手只在「点导出」时才需要，动态 import 避免把
+// 它们（含 20 个 base64 数学字体）打进工作台首屏包。缓存 Promise，多次导出只加载一次。
+let __h2cPromise = null
+function loadHtml2canvas() {
+  if (!__h2cPromise) __h2cPromise = import('html2canvas').then((m) => m.default)
+  return __h2cPromise
+}
+let __katexCapturePromise = null
+function loadKatexCaptureHelpers() {
+  if (!__katexCapturePromise) {
+    __katexCapturePromise = Promise.all([
+      import('../../utils/pdfGenerator'),
+      import('../../utils/katexCssWithFonts'),
+    ]).then(([pdf, css]) => ({
+      preloadKatexFonts: pdf.preloadKatexFonts,
+      fixFractionLineInCloneDoc: pdf.fixFractionLineInCloneDoc,
+      katexCss: css.KATEX_CSS_WITH_FONTS,
+    }))
+  }
+  return __katexCapturePromise
+}
+
+/**
+ * 把离屏题干层光栅化成一张 canvas（物理宽度 = width * ratio）。
+ * 无题干时返回 null；渲染失败抛错，由调用方兜底回退。
+ */
+async function rasterizeExportText(width, ratio) {
+  const el = exportRenderRef.value
+  if (!el) return null
+  if (!props.exportTitle && !(props.exportTexts || []).length) return null
+  el.style.width = Math.max(80, Math.round(width)) + 'px'
+  void el.offsetWidth // 强制一次布局，保证 html2canvas 读到新宽度
+  const [html2canvas, helpers] = await Promise.all([loadHtml2canvas(), loadKatexCaptureHelpers()])
+  // KaTeX 光栅化前必须显式预载数学字体，否则回退系统字体、根号/分式度量错位
+  await helpers.preloadKatexFonts(document)
+  return await html2canvas(el, {
+    scale: ratio,
+    width: Math.round(width),
+    height: Math.max(1, Math.ceil(el.scrollHeight)),
+    backgroundColor: null,
+    useCORS: true,
+    logging: false,
+    onclone: (cloneDoc) => {
+      if (!cloneDoc) return
+      // 主文档的全局 katex.min.css 不会跟着进 clone 文档 → 必须内联，
+      // 否则根号横线、分数线、上下标在导出图里全部散架（与 PDF 路径同因）
+      try {
+        const style = cloneDoc.createElement('style')
+        style.textContent = helpers.katexCss
+        cloneDoc.head.appendChild(style)
+      } catch (e) { /* 注入失败仍继续，最多回退到系统字体 */ }
+      try { helpers.fixFractionLineInCloneDoc(cloneDoc) } catch (e) {
+        console.warn('[DrawingCanvas] frac-line 修复失败:', e)
+      }
+    },
+  })
+}
+
+async function exportPng(filename = '板书.png') {
   const canvas = canvasRef.value
   const wrap = wrapRef.value
   if (!canvas || !wrap) return
   const ratio = Math.min(window.devicePixelRatio || 1, 2)
-  // 导出宽度/高度按板面内容的实际边界（缩放平移后笔迹可能超出可视区），至少一屏
+  // 导出宽度按板面内容的实际边界（缩放平移后笔迹可能超出可视区），至少一屏
   const W = Math.max(wrap.clientWidth, Math.ceil(contentMaxX) + 40)
-  const H = Math.max(wrap.clientHeight, Math.ceil(contentMaxY) + 40)
+  const textW = W - EXPORT_PAD * 2
+
+  // 题干块（KaTeX 光栅化）。失败不阻断导出：退回旧 fillText 逐行。
+  let textCanvas = null
+  try {
+    textCanvas = await rasterizeExportText(textW, ratio)
+  } catch (e) {
+    console.warn('[DrawingCanvas] 题干光栅化失败，回退纯文本绘制:', e)
+  }
+  const textH = textCanvas ? textCanvas.height / ratio : 0
+
+  // 高度：至少一屏，且要容下题干块 + 配图
+  const H = Math.max(
+    wrap.clientHeight,
+    Math.ceil(contentMaxY) + 40,
+    Math.ceil(EXPORT_PAD + textH + EXPORT_PAD + (props.exportFigure ? 160 : 0))
+  )
+
   const out = document.createElement('canvas')
   out.width = Math.round(W * ratio)
   out.height = Math.round(H * ratio)
@@ -693,22 +811,12 @@ function exportPng(filename = '板书.png') {
   octx.fillStyle = '#FFFFFF'
   octx.fillRect(0, 0, W, H)
 
-  octx.fillStyle = '#1E293B'
-  octx.font = '600 18px "Microsoft YaHei", sans-serif'
-  let y = 40
-  if (props.exportTitle) {
-    octx.fillText(props.exportTitle.slice(0, 60), 24, y)
-    y += 34
-  }
-  octx.font = '15px "Microsoft YaHei", sans-serif'
-  for (const t of props.exportTexts || []) {
-    const lines = wrapText(octx, t, W - 48)
-    for (const ln of lines) {
-      octx.fillText(ln, 24, y)
-      y += 26
-      if (y > H - 20) break
-    }
-    if (y > H - 20) break
+  let y
+  if (textCanvas) {
+    octx.drawImage(textCanvas, EXPORT_PAD, EXPORT_PAD, textW, textH)
+    y = EXPORT_PAD + textH + 12
+  } else {
+    y = drawExportTextFallback(octx, W, EXPORT_PAD)
   }
 
   const finish = () => {
@@ -743,10 +851,10 @@ function exportPng(filename = '板书.png') {
     img.onload = () => {
       const iw = img.width
       const ih = img.height
-      const maxW = W - 48
+      const maxW = W - EXPORT_PAD * 2
       const maxH = Math.max(120, H - y - 30)
       const r = Math.min(maxW / iw, maxH / ih, 1.5)
-      octx.drawImage(img, 24, Math.min(y + 10, H - (ih * r) - 10), iw * r, ih * r)
+      octx.drawImage(img, EXPORT_PAD, Math.min(y + 10, H - (ih * r) - 10), iw * r, ih * r)
       finish()
     }
     img.onerror = finish
@@ -847,5 +955,33 @@ defineExpose({
   inset: 0;
   z-index: 4;
   pointer-events: none;
+}
+/* 导出板书图的离屏题干层（Teleport 到 body，只在导出时被 html2canvas 拍）。
+   不能用 display:none / visibility:hidden —— html2canvas 拍不到；用负 left 移出视口。
+   宽度由 exportPng 按导出图宽度动态设置，保证换行位置与导出图一致。
+   不设 z-index:-1：会被 body 背景盖住，html2canvas 裁出来就是空白。 */
+.dc-export-render {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 600px;
+  background: #ffffff;
+  color: #1e293b;
+  font-family: "Microsoft YaHei", sans-serif;
+  pointer-events: none;
+}
+.dc-export-render__title {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.5;
+  margin-bottom: 10px;
+  /* 标题是「年级 · 日期 · 第 N 题」拼出来的纯文本，不过 MathRender：
+     否则 10-03 里的连字符会被当数学减号，渲染成「10 − 03」。 */
+  white-space: pre-wrap;
+}
+.dc-export-render__line {
+  font-size: 15px;
+  line-height: 1.75;
+  margin-bottom: 6px;
 }
 </style>

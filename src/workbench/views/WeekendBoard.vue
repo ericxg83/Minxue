@@ -1247,11 +1247,17 @@ function toggleZoom(src) {
 // 弹窗关闭（Esc / 点遮罩 / 点 ×）时退出放大态，避免下次打开仍是放大图
 watch(showOriginal, (v) => { if (!v) zoomedSrc.value = '' })
 
-function exportBoard() {
+async function exportBoard() {
   const c = current.value
   if (!c) return
   const name = `${handout.value?.grade || ''}_${c.day}_题${c.questionNumber ?? ''}_板书.png`
-  canvasRef.value?.exportPng(name)
+  // 导出改为异步（题干要经 KaTeX 光栅化），失败必须让老师看到，不能静默无反应
+  try {
+    await canvasRef.value?.exportPng(name)
+  } catch (e) {
+    showHint('导出板书图失败，请重试')
+    console.warn('[WeekendBoard] 导出板书图失败:', e)
+  }
 }
 
 function goBack() {
