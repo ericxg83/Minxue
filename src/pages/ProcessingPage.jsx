@@ -6,6 +6,7 @@ import EmptyState from '../components/EmptyState'
 import SwipeableRow from '../components/SwipeableRow'
 import { MobileList, MobileSegmentedTabs, MobileTextAction } from '../features/mobile/MobilePrimitives'
 import { describeTaskResult } from '../domain/taskResultStats'
+import { isSelfHealing, selfHealingNote } from '../domain/taskAutoRetry'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const active = new Set(['processing', 'queued', 'pending'])
@@ -33,7 +34,12 @@ const formatStalled = (start) => {
 // 排队期（还没被 worker 接手、started_at 为空）给更长缓冲，避免攒在队列里就被误判超时。
 const STALL_MS = 30 * 60 * 1000
 const QUEUE_STALL_MS = 60 * 60 * 1000
-const stage = t => t.status === 'failed' ? 'failed'
+// 第 90 轮新增 'self-healing' 档：系统还会自己救的失败（自动重试排队中 / 等配额跨日重置）。
+// ⛔ 它既不算失败、也不能走"卡死"判定 —— 卡死看的是 started_at 起算的时长，而这类任务
+//    恰恰是"已经失败过一次、正在被系统重新捡起来"，按卡死算会让老师被催着去点重试。
+//    判定来自服务端（domain/taskAutoRetry 只做翻译），前端不自己算。
+const stage = t => isSelfHealing(t) ? 'self-healing'
+  : t.status === 'failed' ? 'failed'
   : active.has(t.status) ? (Date.now() - new Date(t.started_at || t.created_at).getTime() > (t.started_at ? STALL_MS : QUEUE_STALL_MS) ? 'stalled' : 'processing')
   : complete(t) ? 'completed' : 'waiting'
 
@@ -88,8 +94,12 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   // figureMissingRefs 只有新任务才有（旧数据无此字段），不会让历史任务突然冒提示。
   const truncated = Number(task.result?.ocrTruncated) > 0 || Number(task.result?.figureMissingRefs) > 0
   const bad = current === 'failed' || current === 'stalled'
+  // 系统还会自己救 → 视觉上就是"还在处理"：转圈、中性色、**没有按钮**。
+  // 老师不需要知道系统内部在重试，只需要知道"这活还在，不用你管"。
+  const healing = current === 'self-healing'
+  const busy = current === 'processing' || healing
   const clickable = current === 'completed' && !retry(task)
-  const Icon = bad ? AlertCircle : current === 'processing' ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
+  const Icon = bad ? AlertCircle : busy ? Loader2 : current === 'completed' ? CheckCircle2 : Clock3
   const pageCount = (Array.isArray(task.images) ? task.images.length : 0) || (Array.isArray(task.pages) ? task.pages.length : 0) || 0
   const isTemp = Boolean(task.is_temp) || (typeof task.id === 'string' && task.id.startsWith('temp-'))
   // 后端 result.progress 是 0-100 的真实批改进度；只有处理中且非 0/100 时显示百分比，
@@ -100,6 +110,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const name = retry(task) ? '错题重练' : (task.original_name || '日常作业')
   const detail = current === 'failed' ? failReason(task)
     : current === 'stalled' ? formatStalled(task.started_at || task.created_at)
+    : healing ? selfHealingNote(task)
     : current === 'processing' && isTemp ? '正在上传图片'
     : current === 'processing' ? (showProgress ? `已耗时 ${formatElapsed(task.started_at || task.created_at)} · ${Math.round(progress)}%` : `已耗时 ${formatElapsed(task.started_at || task.created_at)}`)
     : current === 'completed'
@@ -109,7 +120,7 @@ function TaskRow({ task, onRetryTask, onOpenReview }) {
   const body = (
     <>
       <span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg' style={{ background: bad ? 'var(--danger-soft)' : 'var(--primary-soft)', color: bad ? 'var(--danger)' : 'var(--primary)' }}>
-        <Icon size={16} className={current === 'processing' ? 'animate-spin' : ''} />
+        <Icon size={16} className={busy ? 'animate-spin' : ''} />
       </span>
       <span className='min-w-0 flex-1'>
         <span className='flex items-center gap-1.5 min-w-0'>
@@ -151,7 +162,9 @@ export default function ProcessingPage({ currentStudent, tasks, filteredTasks, i
   ]
   // 有处理中任务时每 5s 拉一次最新进度（result.progress），让百分比实时上屏；
   // 全部任务都结束（done / failed / 无等待）就停轮询，避免无效请求。
-  const hasInFlight = all.some(t => active.has(t.status) && stage(t) === 'processing')
+  // ⛔ 自愈中的任务（系统马上会重新捡起来）也要算"在途"，否则那一行会一直停在
+  //    「正在处理」，直到用户手动刷新才看到它变成真正的新状态。
+  const hasInFlight = all.some(t => (active.has(t.status) && stage(t) === 'processing') || stage(t) === 'self-healing')
   const onRefreshRef = useRef(onRefresh)
   onRefreshRef.current = onRefresh
   useEffect(() => {

@@ -794,12 +794,15 @@ export default function App() {
       // 必须走 apiRequest：这里原先是裸 fetch('/api/tasks/retry')，相对路径在
       // Web 端会被 vite dev proxy 兜住，打包进 App 后 API_BASE 指向线上域名，
       // 相对路径却打到 https://localhost/api/... → 必然失败。这就是"重试不行"。
-      await apiRequest('/tasks/retry', {
+      const res = await apiRequest('/tasks/retry', {
         method: 'POST',
         body: JSON.stringify({ taskId })
       })
 
-      Toast.show({ message: '已重新加入处理队列', type: 'success', duration: 2000 })
+      // 第 90 轮：服务端可能回「这份作业正在处理中，不用重复提交」（自动重试已经排上了）。
+      // 照实显示服务端的话，别一律报"已重新加入队列" —— 否则老师会以为这一下点出了效果，
+      // 其实系统早就在处理它了（而且重复入队会被服务端挡掉）。
+      Toast.show({ message: res?.message || '已重新加入处理队列', type: 'success', duration: 2000 })
 
       // Refresh task list after a short delay
       setTimeout(() => loadTasks(), 1000)

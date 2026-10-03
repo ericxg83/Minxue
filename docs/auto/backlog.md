@@ -480,3 +480,61 @@ E 写完字立刻 dispatch `pagehide` → 笔迹已落盘，且断言「防抖�
 
 **验证**：`test/boardStorage.test.mjs`（12 例，源码级锁已反向自检：套在 r89 之前的版本上 10/10 判红）；
 `_r89_storage_verify.mjs` 27/27（dev 与隔离构建产物各跑一遍）。
+
+### 第 90 轮交付（2026-10-04）：让自动重试对老师**完全无感**（自愈中的失败不显示成失败）
+
+**负责人 2026-10-04 原话**（否决了上一轮我提的「失败行补一句『系统还会自动重试』」文案方案）：
+
+> 「不想补『系统还会重试』这句话，你系统可以更聪明的办法，『不让我自己手动点』就可以了，
+> 你自动进行尝试 让我无感不是更好？」
+
+⇒ 目标从「告知」改成「不让他看见失败」。**结论：不再加任何提示文案。**
+
+#### 事实基础（只读核实，不要重新发现）
+
+- 自动重试**早就在跑**：`server/index.js:4513` 无条件 `pendingTaskRecovery.start()`，默认 5 分钟一轮。
+- 所以 `failed` 只是一个**过渡态**：它只存在于两次扫描之间（最长 5 分钟；配额类要等自然日重置）。
+- 但界面上这段时间一直显示成「识别异常 / 重新上传」⇒ 老师看到红色就点，点了白等，
+  还和服务端的自动重捞**撞车**（同一份作业被两个 job 各处理一遍，重复烧配额）。
+
+#### 交付内容（A 级：不改状态机 / 不改重试次数上限 / 不改分类正则语义）
+
+1. **服务端唯一判定** `server/pendingTaskRecovery.js#describeAutoRetry(task, now)`
+   → `{ willRetry, state, retriesUsed, reason }`，`state ∈ n/a | retrying | quota-wait | gave-up | blocked`。
+   随 `/api/tasks/student/:id` 的 `auto_retry` 与 `/api/tasks/summary` 的 `autoRetry` 下发。
+2. **前端唯一翻译层** `src/domain/taskAutoRetry.js`：`isSelfHealing` / `isFailedForTeacher` /
+   `autoRetryState` / `selfHealingNote`。**缺 `auto_retry` 字段一律按「不自愈」**。
+3. **三处入口**：移动端任务页（新增 `'self-healing'` 档，**排在 `failed` 之前**、不算 `bad`
+   ⇒ 那一行**没有按钮**，转圈 + 「正在处理」）、移动端首页（自愈不算失败也不算卡死
+   ⇒ 落进「作业批改中」）、PC 批改中心（自愈 → `workflowStatus: processing`，不再算「识别异常」）。
+4. **手动重试不再撞车**：`retryTaskById()` 开头按 `IN_FLIGHT_JOB_STATES` + `collectInFlightTaskIds()`
+   去重，命中直接返回 `alreadyQueued`，**不动 status / retry_count / last_error**；
+   三处重试端点共用文案「这份作业正在处理中，不用重复提交」。
+
+#### 两个必须记住的坑
+
+1. ⛔ **SQL 的 ILIKE 名单 ≠ JS 正则**。`scanFailedTasks` 的 SQL 里拒绝话术只有 **9 项**、
+   配额只有 **7 项**，与 `isAIRefusalLikely` / `QUOTA_ERROR_PATTERNS` **都不等价**
+   （SQL 少了 无法识别 / 无法看到 / 看不清 / 页面内容为空 / 页识别失败 / AI_EMPTY / I'm sorry…）。
+   `describeAutoRetry` 的职责是**照实**回答"系统还会不会再试"，必须跟着 SQL 走 ——
+   按"设计意图"走会让界面替系统许下它不兑现的承诺。
+   防线：`test/taskAutoRetry.test.mjs` 从源码抠出全部 `last_error ILIKE '<字面量>'`，
+   断言与 `AUTO_RETRY_ILIKE` 三张表**集合相等**，且三个分支归属不串。
+2. ⛔ **配额分支不能按常规 3 次判**。初版把「配额类错误、`retry_count=9`」判成 `gave-up`
+   —— 而 SQL 的配额分支**根本不看 retry_count**、跨自然日必捞。判成 gave-up 等于界面说
+   "系统已放弃"，而实际明天会自愈：**把能自愈的说成不能，是最危险的方向**。
+
+#### 验证（生产库没有失败任务时怎么办）
+
+生产库当前 **0 条 failed**、队列 **0 个在途 job** ⇒ 界面上看不到任何失败行，不造数据验不了。
+做法：Playwright **只打桩任务列表接口**，且**每行的 `auto_retry` 用真实服务端函数
+`describeAutoRetry()` 现算**，其余全走真后端 ⇒ 验的是「真判定 + 真渲染」，唯一假的是那条任务本身。
+⛔ 打桩的假学生 id 在真库里不存在，真后端会对 `/wrong-questions/student/<假id>` 返 500，
+必须一并打桩，否则污染「0 控制台错误」这条判据。
+⛔ 时间夹具要跟真实时钟对齐（`isBeforeTodayUtc()` 内部用真实 `new Date()`，写死日期必踩）。
+
+**回归锁**：`test/taskAutoRetry.test.mjs` 21 例（`describeAutoRetry` 全边界 + ILIKE 语义 +
+SQL 漂移锁 + 在途口径 + 五个文件的源码级接线锁），**反向自检 19/19 条判据在 HEAD 版本上判红**。
+**四道闸**：`npm test` 1515/1515 ｜ lint 14 errors / 153 warnings（持平）｜ 构建
+`dist_nightly_20261003r90` ｜ 真机级 `_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6
+（dev:3000 与隔离产物 :5222 各一遍）+ `_r90_smoke.mjs` 27/27。零写生产库。

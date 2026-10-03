@@ -39,7 +39,7 @@
 
 ## 四、当前系统状态（2026-10-03 晚实测，非记忆值）
 
-- **测试基线**：`npm test` **1494 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12 例回归锁）。
+- **测试基线**：`npm test` **1515 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21 例回归锁）。
 - **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
@@ -68,6 +68,22 @@
   `onPageHide` 也补了一刀 `saveStrokes()`（`onBeforeUnmount` 会先 `clearTimeout(saveTimer)`，
   否则「写完字 300ms 内离开」的最后一笔必丢）。回归锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，
   源码级顺序锁，已反向自检过「套在修复前版本上会判红」）。验证脚本 `_r88_board_view_switch_verify.mjs`（17/17）。
+- **任务自愈的对外呈现（r90 新修）**：自动重试**一直在跑**（`index.js:4513` 无条件 `start()`，默认 5 分钟一轮），
+  但失败行在两次扫描之间（最长 5 分钟；配额类等到自然日重置）一直显示成「识别异常 / 重新上传」⇒ 老师点了白等，
+  还和服务端自动重捞撞车（同一份作业两个 job 各处理一遍，重复烧配额）。**修法不是加提示文案**（负责人已否决），
+  而是**这类失败不显示成失败**：服务端 `pendingTaskRecovery.js#describeAutoRetry` 是唯一判定实现（随
+  `/api/tasks/student/:id` 的 `auto_retry` 与摘要的 `autoRetry` 下发），前端 `src/domain/taskAutoRetry.js`
+  只翻译不重算（**缺字段一律按"不自愈"**，防老缓存把真失败藏起来）。三处入口：移动端任务页新增
+  `'self-healing'` 档（**排在 failed 之前、不算 `bad` ⇒ 那一行没有按钮**、转圈 + 「正在处理」）、
+  移动端首页（自愈不算失败也不算卡死 ⇒ 落进「作业批改中」）、PC 批改中心（自愈 → `workflowStatus: processing`）。
+  手动重试也不撞车：`retryTaskById` 在途去重（`alreadyQueued`，不动 status/retry_count/last_error）。
+  ⛔ **SQL 的 ILIKE 名单 ≠ JS 正则**（SQL 拒绝话术只有 9 项、配额只有 7 项，`isAIRefusalLikely` 多认
+  无法识别/看不清/页识别失败/AI_EMPTY）⇒ 对外判定必须**照 SQL 走**，否则界面替系统许下不兑现的承诺；
+  漂移锁从源码抠 ILIKE 字面量做集合相等断言。⛔ 配额分支**不能**按常规 3 次判（SQL 配额分支不看 retry_count，
+  跨日必捞；判成 gave-up 等于说"系统放弃了"而实际明天会自愈）。回归锁 `test/taskAutoRetry.test.mjs`（21 例，已反向自检）。
+  验证脚本 `_r90_autoretry_verify.mjs`（19/19）、`_r90_pc_verify.mjs`（6/6）、`_r90_smoke.mjs`（27/27），
+  三者 dev 与隔离产物各跑一遍。**生产库当前 0 条 failed、队列 0 在途 job ⇒ 验这类改动必须造数据**：
+  只打桩任务列表接口，每行的 `auto_retry` 用真实 `describeAutoRetry()` 现算。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -115,7 +131,13 @@
 
 ⇒ **本项关闭，不得再作为「待批准的新工作」提出。** 只余两个小缺口（详见
 `docs/auto/reports/2026-10-03-提案-上传自愈与数据页.md` 一、）：① 失败行未告知「系统还会自动重试」，
-老师容易重复上传（A 级顺手化，等负责人一句话）；② 「还会自动重试」与「已放弃」在 UI 上分不清（B 级，建议先不做）。
+老师容易重复上传；② 「还会自动重试」与「已放弃」在 UI 上分不清。
+
+**第 90 轮：两个缺口一起解决，但不是靠文案。** 负责人 2026-10-04 明确否决补文案 ——
+「不想补『系统还会重试』这句话，你系统可以更聪明的办法，不让我自己手动点就可以了，
+你自动进行尝试让我无感不是更好？」⇒ 落点改为「**自愈中的失败根本不显示成失败**」
+（见四、任务自愈的对外呈现）：缺口 ① 消失（那一行没有按钮，老师不会去点）；
+缺口 ② 由 `state` 分档回答（`quota-wait` 说"等 AI 服务恢复"、`gave-up`/`blocked` 才显示成失败）。
 
 ### 3. 【等开口】配图「裁多了」的 24 题越界 `image_bbox`
 
@@ -194,7 +216,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 86 | `88ffe05` | 白板导出板书图：题干由 canvas `fillText` 改为**复用屏幕同一个 `MathRender`** 渲染 + `html2canvas` 光栅化（修「LaTeX 源码印在图上」），失败回退 fillText；导出失败不再静默。四道闸全过，`_r86_board_export_verify.mjs` 12/12 + r85 回归 30/30 |
 | 87 | `065bcd7` | 白板板书存储：笔迹点量化到 2 位小数（体积约减半，`utils/strokePoint.js`）、落盘失败不再静默（页内提示去导出）、旧键迁移顺手瘦身并回收；删死分支 `q-figure__hint`。另实测关闭「白板取图口径」议题（PC 有图/白板无图 = 0，不需抽共享函数）。四道闸全过，`_r87_board_storage_verify.mjs` 13/13 + r85/r86 回归 30/30 + 12/12 |
 | 88 | `075af3c` | 白板「只看未讲」切换**不再把板书串到别的题上**（原实现先换题单再 `saveStrokes()`，会把当前题的板书写进新题单同下标那道题的键、并覆盖其原有板书；探针实测复现）；`onPageHide` 补落盘（防抖窗口内最后一笔不再丢）；顶栏题号总数改用 `viewQuestions.length`。新增源码级顺序锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，已反向自检）。四道闸全过，`_r88_board_view_switch_verify.mjs` 17/17 + 隔离产物冒烟 20/20 + r85/r86/r87 回归 30/30 + 12/12 + 13/13 |
-| 89 | 本轮 | 白板**本机板书回收入口**：顶栏「本机板书」→ 看占用（进度条）/ 按题列（锚点翻成人话）/ 逐条删 / 一次清空，两次点击确认、零自动删除（`utils/strokeStorage.js` + `components/BoardStorageDialog.vue`）。⛔ 只列真写过字的题；**删到「正在讲」那一题时连板面一起清**（只删存储会被 `saveStrokes()` 写回，等于没删）。回归锁 `test/boardStorage.test.mjs`（12 例，已反向自检）。四道闸全过，`_r89_storage_verify.mjs` 27/27（dev + 隔离产物）+ r85/r86/r87/r88 回归 30/30、12/12、13/13、17/17 + 隔离产物冒烟 20/20 |
+| 89 | `1e6d38e` | 白板**本机板书回收入口**：顶栏「本机板书」→ 看占用（进度条）/ 按题列（锚点翻成人话）/ 逐条删 / 一次清空，两次点击确认、零自动删除（`utils/strokeStorage.js` + `components/BoardStorageDialog.vue`）。⛔ 只列真写过字的题；**删到「正在讲」那一题时连板面一起清**（只删存储会被 `saveStrokes()` 写回，等于没删）。回归锁 `test/boardStorage.test.mjs`（12 例，已反向自检）。四道闸全过，`_r89_storage_verify.mjs` 27/27（dev + 隔离产物）+ r85/r86/r87/r88 回归 30/30、12/12、13/13、17/17 + 隔离产物冒烟 20/20 |
+| 90 | 本轮 | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 
@@ -210,6 +233,10 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 ## 九、已知遗留风险
 
 - **方向一自愈机制：早已交付，不是遗留风险**（第 88 轮后复核，见五-2）。勿再作为待办提出。
+  ⚠️ 第 90 轮新增一条必须记住的口径漂移：**`scanFailedTasks` 的 SQL ILIKE 名单与
+  `isAIRefusalLikely` / `QUOTA_ERROR_PATTERNS` 不是一套**（SQL 拒绝话术 9 项、配额 7 项）。
+  任何"系统还会不会再试"的对外判断都必须照 SQL 走；改任一边都要同步
+  `AUTO_RETRY_ILIKE`，否则 `test/taskAutoRetry.test.mjs` 的漂移锁会红。
 - eslint 配置仍缺 `eslint-plugin-vue` / `typescript-eslint`（.vue 模板层靠自建锁补位）。
 - **Minxue Deploy 自动提交守护进程仍在运行**（作者为 Minxue Deploy 的提交是它做的）——不要与它抢写。
 - 预览后端/前端后台进程会被系统回收——每轮开工先 curl 探测 4000/5199。

@@ -289,6 +289,7 @@ import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
+import { autoRetryState, isSelfHealing } from '../../domain/taskAutoRetry'
 import {
   RETRY_PAPER_STATE,
   resolveRetryPaperState,
@@ -457,7 +458,18 @@ const formatTime = value => {
   return dayDiff > 0 && dayDiff <= 7 ? `${monthDay} ${hm}` : monthDay
 }
 
-const normalizeHomeworkStatus = status => {
+const normalizeHomeworkStatus = task => {
+  const status = task?.status
+  // 第 90 轮：系统还会自己救的失败（自动重试排队中 / 等配额跨日重置）**不显示成「识别异常」**。
+  // 自动重试一直在跑（服务端 5 分钟一轮），失败态只存在于两次扫描之间；把它当异常报出来，
+  // 老师就会点「重新处理」—— 既白等，又和服务端的自动重捞撞车（同一份作业处理两遍）。
+  // 判定来自服务端（domain/taskAutoRetry 只做翻译），不在前端自己看 retry_count。
+  if (status === 'failed' && isSelfHealing(task)) {
+    const waitingQuota = autoRetryState(task) === 'quota-wait'
+    return waitingQuota
+      ? { workflowStatus: 'processing', statusLabel: '等待 AI 服务恢复', tone: 'processing', aiStatusLabel: '额度已用满，恢复后自动继续' }
+      : { workflowStatus: 'processing', statusLabel: 'AI 处理中', tone: 'processing', aiStatusLabel: '正在识别与判题' }
+  }
   if (status === 'failed') return { workflowStatus: 'failed', statusLabel: '识别异常', tone: 'danger', aiStatusLabel: '识别异常' }
   if (status === 'reviewed') return { workflowStatus: 'completed', statusLabel: '已确认', tone: 'success', aiStatusLabel: '教师已确认' }
   if (status === 'done') return { workflowStatus: 'review', statusLabel: '待复核', tone: 'warning', aiStatusLabel: 'AI 已完成' }
@@ -466,7 +478,7 @@ const normalizeHomeworkStatus = status => {
 }
 
 const homework = (task, student) => {
-  const state = normalizeHomeworkStatus(task.status)
+  const state = normalizeHomeworkStatus(task)
   const questionCount = Number(task.question_count || task.total_questions || task.total_count || task.result?.questionCount || 0)
   return {
     ...state,
@@ -734,8 +746,10 @@ async function handleRetryTask(task) {
   if (!task?.id) return
   retryingTaskKey.value = task.key
   try {
-    await retryTask(task.id)
-    ElMessage.success('已重新提交处理队列，稍后刷新即可看到结果')
+    // 第 90 轮：服务端可能回「这份作业正在处理中，不用重复提交」（自动重试已经排上了）。
+    // 照实显示服务端的话，别一律报"已重新提交" —— 那会让老师以为这一下点出了效果。
+    const res = await retryTask(task.id)
+    ElMessage.success(res?.message || '已重新提交处理队列，稍后刷新即可看到结果')
     await loadData()
   } catch (err) {
     console.error('[GradeCenter] 重新处理失败:', err)

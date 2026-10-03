@@ -4,7 +4,12 @@ import './loadEnv.js'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { pendingTaskRecovery } from './pendingTaskRecovery.js'
+import {
+  pendingTaskRecovery,
+  describeAutoRetry,
+  IN_FLIGHT_JOB_STATES,
+  collectInFlightTaskIds,
+} from './pendingTaskRecovery.js'
 import { runMigrations } from './migrations/migrationLedger.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
@@ -611,7 +616,13 @@ app.get('/api/tasks/summary', async (req, res) => {
     const { rows } = await query(
       `SELECT
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $2 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS failed_tasks,
+         -- 第 90 轮：failed 任务的最终计数改在 JS 侧用 describeAutoRetry 过滤（见下方 failedTasks），
+         -- 这里只取判定需要的四个字段。⛔ 不在 SQL 里重写一遍判据 —— 那会变成第二套口径。
+         COALESCE((SELECT json_agg(row_to_json(f)) FROM (
+           SELECT t.status, t.last_error, t.retry_count, t.created_at, t.updated_at
+           FROM ${TABLES.TASKS} t
+           WHERE t.status = $2 AND t.deleted_at IS NULL AND t.notification_read_at IS NULL
+         ) f), '[]'::json) AS failed_detail,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $4 AND deleted_at IS NULL), 0) AS in_progress_count,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
@@ -630,6 +641,7 @@ app.get('/api/tasks/summary', async (req, res) => {
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
+                  t.last_error, t.retry_count,
                   COALESCE((t.result->>'wrongCount')::int, (t.result->>'wrong_count')::int, 0) AS wrong_count,
                   COALESCE((t.result->>'questionCount')::int, (t.result->>'question_count')::int, 0) AS question_count,
                   COALESCE((t.result->>'emptyCount')::int, (t.result->>'empty_count')::int, 0) AS empty_count,
@@ -659,20 +671,30 @@ app.get('/api/tasks/summary', async (req, res) => {
       questionCount: t.question_count,
       wrongCount: t.wrong_count,
       emptyCount: t.empty_count,
-      pendingCount: t.pending_count
+      pendingCount: t.pending_count,
+      // 第 90 轮：与任务列表同一个派生字段（铃铛里点失败任务同样要能判断"该不该催老师"）
+      autoRetry: describeAutoRetry(t)
     })
 
     const r = rows[0]
+    // 第 90 轮：系统还会自己救回来的失败任务，不计入「识别异常」，也不进铃铛清单。
+    // 它们几分钟后（配额类最晚第二天）会自己变成正常结果；提前报一次异常只会让老师白点一次，
+    // 而且会与自动重捞撞车。⛔ 判据复用 describeAutoRetry，不在 SQL 里另写一套。
+    const failedDetail = Array.isArray(r.failed_detail) ? r.failed_detail : []
+    const failedTasks = failedDetail.filter((d) => !describeAutoRetry(d).willRetry).length
+    const recentTasks = (r.recent_tasks || [])
+      .filter((t) => t.status !== 'failed' || !describeAutoRetry(t).willRetry)
+      .map(mapTask)
     const data = {
       success: true,
       summary: {
         pendingReview: r.pending_review,
-        failedTasks: r.failed_tasks,
+        failedTasks,
         todayNewWrongQuestions: r.today_new_wrong,
         inProgressCount: r.in_progress_count,
-        totalNotifications: r.pending_review + r.failed_tasks,
+        totalNotifications: r.pending_review + failedTasks,
         pendingTasks: (r.pending_tasks || []).map(mapTask),
-        recentTasks: (r.recent_tasks || []).map(mapTask)
+        recentTasks
       }
     }
 
@@ -833,7 +855,13 @@ app.get('/api/tasks/student/:studentId', async (req, res) => {
     )
     // 回填失败不能拖垮列表：摘要退化成旧口径，但作业列表照常返回
     await backfillPendingCount(rows).catch(e => console.error('回填 pendingCount 失败:', e.message))
-    res.json({ success: true, tasks: rows })
+    // 第 90 轮：把「系统还会不会自己救回来」随列表下发（只读派生字段，不落库、不改状态）。
+    // 前端据此决定要不要把这条显示成失败 —— 自动重试其实一直在跑，但失败态会在下次扫描前
+    // （最长 5 分钟；配额类要等到第二天）一直以「识别异常 / 重新上传」示人，老师看到就点，
+    // 既白等又和自动重捞撞车。手机上（ProcessingPage/HomeDashboard）与电脑上
+    // （GradeCenterWorkbench）都读这一个字段，不在前端各判一套。
+    const tasks = rows.map((row) => ({ ...row, auto_retry: describeAutoRetry(row) }))
+    res.json({ success: true, tasks })
   } catch (error) {
     console.error('获取学生任务失败:', error)
     res.status(500).json({ error: error.message })
@@ -892,6 +920,24 @@ async function retryTaskById(taskId) {
   const queue = await getTaskQueue()
   const result = task.result || {}
 
+  // ⛔ 在途去重（第 90 轮）：自动恢复每 5 分钟就会把可自愈的失败任务重新入队，
+  //    老师若在同一时间点「重新上传」，同一份作业会被两个 job 各处理一遍 ——
+  //    重复烧 AI 配额，错题还可能重复入库。判据与 pendingTaskRecovery 的
+  //    inFlightTaskIds 完全同口径（waiting/active/delayed 三态按 taskId 比对）。
+  //    命中就直接返回，**不动 status / retry_count / last_error** —— 已经排着队的那份会自己跑。
+  if (queue) {
+    try {
+      const inFlightJobs = await queue.getJobs(IN_FLIGHT_JOB_STATES)
+      if (collectInFlightTaskIds(inFlightJobs).has(taskId)) {
+        console.log(`[API] 任务已在处理队列中，跳过重复入队: ${task.original_name || taskId}`)
+        return { taskId: task.id, originalName: task.original_name, status: task.status, alreadyQueued: true }
+      }
+    } catch (e) {
+      // 去重失败不能挡住老师：放行本次重试（最坏结果 = 与老行为一致，多跑一次）
+      console.warn('在途去重检查失败，放行本次重试:', e.message)
+    }
+  }
+
   // 用户主动重试 → 重置 retry_count 与 last_error，给一份全新的自动重试额度。
   // 否则 retry_count 已撞上 MAX_AUTO_RETRIES 的任务即使这次又失败，
   // 也再不会被 PendingTaskRecovery 接管；残留的 last_error 还会命中非重试黑名单，
@@ -942,7 +988,11 @@ app.post('/api/tasks/:taskId/retry', async (req, res) => {
   try {
     const { taskId } = req.params
     const result = await retryTaskById(taskId)
-    res.json({ success: true, message: '任务已重新提交', ...result })
+    res.json({
+      success: true,
+      message: result.alreadyQueued ? '这份作业正在处理中，不用重复提交' : '任务已重新提交',
+      ...result
+    })
   } catch (error) {
     console.error('重试任务失败:', error)
     const status = error.message === '任务不存在' ? 404 : 500
@@ -966,7 +1016,11 @@ app.post('/api/admin/tasks/retry-by-name', async (req, res) => {
 
     const taskId = rows[0].id
     const result = await retryTaskById(taskId)
-    res.json({ success: true, message: '任务已重新提交', ...result })
+    res.json({
+      success: true,
+      message: result.alreadyQueued ? '这份作业正在处理中，不用重复提交' : '任务已重新提交',
+      ...result
+    })
   } catch (error) {
     console.error('按名称重试任务失败:', error)
     res.status(500).json({ error: error.message })
@@ -1579,7 +1633,12 @@ app.post('/api/tasks/retry', async (req, res) => {
     // 多页任务还会只重跑第一页。
     const result = await retryTaskById(taskId)
     console.log(`[API] 任务已重新加入队列: ${result.originalName || taskId}`)
-    res.json({ success: true, message: '任务已重新加入队列', ...result })
+    res.json({
+      success: true,
+      // 已在队列里时不能报「已重新加入」——那会让老师以为点了一次、其实什么都没发生
+      message: result.alreadyQueued ? '这份作业正在处理中，不用重复提交' : '任务已重新加入队列',
+      ...result
+    })
   } catch (error) {
     console.error('重试任务失败:', error)
     const status = error.message === '任务不存在' ? 404 : 500

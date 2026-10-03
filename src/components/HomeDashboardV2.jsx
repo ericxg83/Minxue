@@ -2,14 +2,19 @@ import { AlertCircle, Camera, ChevronRight, Clock3, FileCheck2, Wand2 } from 'lu
 import { motion } from 'motion/react'
 import { MobileSectionHeading } from '../features/mobile/MobilePrimitives'
 import { buildLatestTaskReminder } from '../domain/taskResultStats'
+import { autoRetryState, isFailedForTeacher, isSelfHealing, selfHealingNote } from '../domain/taskAutoRetry'
 
 const done = new Set(['done', 'graded', 'completed', 'reviewed'])
 const complete = (task) => done.has(task.status) || Boolean(task.result?.questionCount)
-const failed = (task) => task.status === 'failed'
+// 第 90 轮：系统还会自己救的失败（自动重试排队中 / 等配额跨日重置）**不算失败** ——
+// 首页不该为它弹「重新提交」卡，那等于让老师替系统干活，还会和服务端的自动重捞撞车。
+// 判定来自服务端（domain/taskAutoRetry 只做翻译），前端不自己算。
+const failed = (task) => isFailedForTeacher(task)
 // 服务重启/worker 崩溃会让任务永久停在 processing，仅看 status 首页会永远挂"批改中"
 // 且每次进首页都复活这个提醒。与作业页同一口径：超过 30 分钟即判超时，引导去重试。
 const STALL_MS = 30 * 60 * 1000
-const stalled = (task) => !complete(task) && !failed(task) && (Date.now() - new Date(task.started_at || task.created_at || 0).getTime() > STALL_MS)
+// ⛔ 自愈中的任务不走"超时"判定：它本来就是失败后被系统重新捡起来的，按超时算会催老师去点重试
+const stalled = (task) => !complete(task) && !failed(task) && !isSelfHealing(task) && (Date.now() - new Date(task.started_at || task.created_at || 0).getTime() > STALL_MS)
 const processing = (task) => !complete(task) && !failed(task) && !stalled(task)
 
 // 主行动：永远存在、视觉权重最高，无论有没有错题/失败都不会被挤掉
@@ -68,7 +73,7 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   // 首页是决策层：提醒卡只导航或发起流程，打开批改结果的动作归作业页列表行。
   const reminders = []
   if (!isInitializing && stalledTask) reminders.push({ key: 'stalled', icon: <AlertCircle size={18} />, tone: 'info', title: '上次作业处理超时', detail: 'AI 没有按时完成批改，去作业页重新处理', onClick: onOpenTasks })
-  if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: '完成后会自动归入错题本', onClick: onOpenTasks })
+  if (!isInitializing && activeTask) reminders.push({ key: 'active', icon: <Clock3 size={18} />, tone: 'info', title: '作业批改中', detail: autoRetryState(activeTask) === 'quota-wait' ? selfHealingNote(activeTask) : '完成后会自动归入错题本', onClick: onOpenTasks })
   if (!isInitializing && latest) {
     // 文案与成色统一走 domain（错/空/待复核四态），避免首页与通知页两套判据
     const r = buildLatestTaskReminder(latest)

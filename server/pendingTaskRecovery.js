@@ -104,6 +104,15 @@ export const MAX_TRANSIENT_RETRIES = 5
 // 冷却：上次失败后至少间隔 5 分钟才再入队，避免 5 分钟扫描周期内反复入队刷日志
 export const TRANSIENT_RETRY_COOLDOWN_MS = 5 * 60 * 1000
 
+// 常规任务自动重试上限（2026-10-04 第 90 轮：从 scanFailedTasks 局部常量提升到模块作用域）。
+// ⛔ 提升的唯一目的：让「系统还会不会自己救」这个判断只有一处阈值。
+//    扫描用它们、对外状态也用它们 —— 两处各写一套就会漂移（列表说会重试、扫描其实已放弃）。
+export const MAX_AUTO_RETRIES = 3
+// AI 偶发拒绝 / 输出格式异常放宽上限
+export const MAX_AI_REFUSAL_RETRIES = 10
+// 自动恢复只看 7 天内的失败任务（与 scanFailedTasks 的 created_at > NOW() - INTERVAL '7 days' 对齐）
+export const AUTO_RETRY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
 /**
  * 判断 last_error 是否命中"不应自动重试"黑名单。
  * 返回 { skip, kind, reason }：
@@ -138,6 +147,162 @@ export function classifyLastError(lastError) {
   }
 
   return { skip: false, kind: 'none' }
+}
+
+/**
+ * AI 偶发拒绝话术（"图片是空白" / "Unable to identify"）—— 这类不是真失败，是 8B 视觉模型
+ * 在配额紧张时的抽风：同样一张高清图，一次说"图片是空白"、下一次能完整 OCR 出 15+ 道题。
+ * 2026-10-04 第 90 轮从类方法提升为模块级纯函数，供「对外状态判定」复用。
+ */
+export function isAIRefusalLikely(lastError) {
+  if (!lastError) return false
+  return /图片是空白|图片为空白|无法识别|无法看到|Unable to identify|Cannot identify|no text detected|cannot see|看不清|页面内容为空|用户提供的图片是空|所有页面识别结果为空|页识别失败|OCR 未识别到任何题目|AI_EMPTY|很抱歉|抱歉[，,]|对不起|由于您提供的|I'm sorry|I am sorry|I cannot|unable to process/i.test(String(lastError))
+}
+
+/**
+ * ⛔ 与 scanFailedTasks 的 SQL **逐字对齐**的 ILIKE 名单（第 90 轮新增）。
+ *
+ * 为什么不复用 isAIRefusalLikely / QUOTA_ERROR_PATTERNS：
+ *   SQL 的 ILIKE 名单和那两个正则**不是一套**（拒绝话术 SQL 少了 无法识别 / 看不清 /
+ *   页识别失败 / AI_EMPTY 等；配额 SQL 的「%配额%用尽%」比「所有魔搭视觉模型.*配额.*用尽」宽）。
+ *   describeAutoRetry 的职责是**照实**回答"系统还会不会再试"，必须跟着 SQL 走，
+ *   不能按"设计意图"走 —— 否则界面会替系统许下它不会兑现的承诺。
+ *
+ * ⛔ 漂移防线：test/taskAutoRetry.test.mjs 会从本文件的 SQL 源码里抠出全部 ILIKE 字面量，
+ *    断言与这三张表**集合相等**。谁改了一边没改另一边，测试立刻红。
+ *    另一条路（用数组生成 SQL 的 OR 子句）能更彻底地防漂移，但要改正在跑的恢复管线，
+ *    本轮不做 —— 先用锁把漂移挡住。
+ */
+export const AUTO_RETRY_ILIKE = {
+  // SQL 第 2 个 OR 分支：拒绝话术 / 输出格式异常，额度放宽到 MAX_AI_REFUSAL_RETRIES
+  refusal: [
+    '%图片是空白%', '%图片为空白%', '%Unable to identify%', '%no text detected%',
+    '%cannot identify%', '%很抱歉%', '%对不起%', '%由于您提供的%', '%JSON 格式错误%'
+  ],
+  // SQL 第 3 个 OR 分支：下载类瞬时错误，额度 MAX_TRANSIENT_RETRIES（重试成本只是一次 HTTP GET）
+  transient: ['%下载图片失败%'],
+  // SQL 第 4 个 OR 分支：配额/限流，当天拦、跨自然日自动放行
+  quota: [
+    '%配额%用尽%', '%视觉模型%不可用%', '%所有视觉模型%失败%',
+    '%quota%exhaust%', '%rate limit%', '%rate_limit%', '%429%'
+  ]
+}
+
+/** 把 SQL 的 ILIKE 模式（只含 `%` 通配）编译成正则，让 JS 侧能逐字复现 SQL 判据 */
+function compileIlike(pattern) {
+  const body = String(pattern).split('%')
+    .map((seg) => seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[\\s\\S]*')
+  return new RegExp(`^${body}$`, 'i')
+}
+
+const ILIKE_MATCHERS = Object.fromEntries(
+  Object.entries(AUTO_RETRY_ILIKE).map(([k, list]) => [k, list.map(compileIlike)])
+)
+
+/** 该错误文本是否命中某张 ILIKE 表（语义等同 SQL 的 `last_error ILIKE 任意一项`） */
+export function matchesAutoRetryIlike(kind, lastError) {
+  const text = String(lastError || '')
+  return (ILIKE_MATCHERS[kind] || []).some((re) => re.test(text))
+}
+
+/**
+ * BullMQ 里算「正在路上」的三态。第 90 轮提取为共享常量：
+ * 手动重试（index.js#retryTaskById）与自动恢复（scanFailedTasks）必须用同一套，
+ * 否则手动那次会看不见自动那次刚排的队，同一份作业被处理两遍。
+ */
+export const IN_FLIGHT_JOB_STATES = ['waiting', 'active', 'delayed']
+
+/** 队列里「正在路上」的任务 id 集合（两个调用方共用同一口径） */
+export function collectInFlightTaskIds(jobs) {
+  const ids = new Set()
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const id = job?.data?.taskId
+    if (id) ids.add(id)
+  }
+  return ids
+}
+
+/**
+ * 「这个失败任务，系统还会不会自己救回来？」—— 第 90 轮新增。
+ *
+ * 起因：自动重试其实一直在跑（5 分钟一轮），但失败任务在**下次扫描之前**（最长 5 分钟，
+ * 配额类要等到第二天）就一直以「识别异常 / 重新上传」示人。老师看到红色就点，既白等，
+ * 又和自动重捞撞车（同一份作业处理两遍）。正确做法不是加一句「系统会自动重试」的提示，
+ * 而是**这类任务根本不该显示成失败**。
+ *
+ * ⛔ 本函数只读不写，不改任何状态、不入队。判断顺序与 scanFailedTasks 的 SQL + 循环体一一对应：
+ *      ① 7 天窗口（SQL: created_at > NOW() - INTERVAL '7 days'）
+ *      ② 永久黑名单（classifyLastError → kind='permanent'，重试无意义）
+ *      ③ 配额/限流跨自然日 → 下次扫描自动放行（SQL 第 4 个 OR 分支 + quotaCrossedDay）
+ *      ④ 额度：常规 3 / 拒绝话术与 JSON 格式错误 10 / 下载类瞬时 5（SQL 前 3 个 OR 分支）
+ *      ⑤ 瞬时错误的 5 分钟冷却只推迟"这一轮"，不改变"还会不会重试"
+ *
+ * @param {{status?:string,last_error?:string,retry_count?:number,created_at?:string,updated_at?:string}} task
+ * @param {number} [now] 便于测试注入
+ * @returns {{willRetry:boolean,state:'n/a'|'retrying'|'quota-wait'|'gave-up'|'blocked',retriesUsed:number,reason:string}}
+ *   state：'n/a' 不是失败任务；'retrying' 还会自动重试；'quota-wait' 等自然日重置后自动继续；
+ *          'gave-up' 额度用尽、系统已放弃；'blocked' 数据/资源问题、重试无意义。后两者才是"需要你"。
+ */
+export function describeAutoRetry(task, now = Date.now()) {
+  const t = task || {}
+  if (String(t.status || '') !== 'failed') {
+    return { willRetry: false, state: 'n/a', retriesUsed: 0, reason: '非失败任务' }
+  }
+
+  const err = String(t.last_error || '')
+  const used = Number(t.retry_count || 0) || 0
+  const failedAt = t.updated_at || t.created_at || null
+  const createdMs = t.created_at ? new Date(t.created_at).getTime() : NaN
+
+  // ① 超出 7 天窗口 → 扫描的 SQL 不会再捞它
+  if (Number.isFinite(createdMs) && now - createdMs > AUTO_RETRY_WINDOW_MS) {
+    return { willRetry: false, state: 'gave-up', retriesUsed: used, reason: '超出 7 天自动恢复窗口' }
+  }
+
+  const verdict = classifyLastError(err)
+  const inQuotaSql = matchesAutoRetryIlike('quota', err)
+  const crossedDay = isBeforeTodayUtc(failedAt)
+
+  // ② 永久黑名单：URL 失效 / 图片分辨率过低 / 模型下架 / 上传未完成……重试无意义
+  if (verdict.kind === 'permanent') {
+    return { willRetry: false, state: 'blocked', retriesUsed: used, reason: verdict.reason }
+  }
+
+  // ③ 配额 / 限流：当天一律不动它（防烧配额），跨自然日后由扫描自动放行。
+  //    能不能等到明天，取决于明天扫描还捞不捞得到它：
+  //      · 命中 SQL 配额分支 → 明天 updated_at 已跨日，必捞；
+  //      · 只命中 classify 的配额正则、不在 SQL 名单里（当前 QUOTA_ERROR_PATTERNS ⊆ SQL 名单，
+  //        所以这条实际不可达，纯防御）→ 只能靠常规额度兜底，用尽就永远捞不到。
+  if (inQuotaSql || verdict.kind === 'quota') {
+    if (!inQuotaSql && used >= MAX_AUTO_RETRIES) {
+      return { willRetry: false, state: 'gave-up', retriesUsed: used, reason: '配额类错误，且常规重试额度已用尽' }
+    }
+    return crossedDay
+      ? { willRetry: true, state: 'retrying', retriesUsed: used, reason: '配额已跨自然日重置，下次扫描自动放行' }
+      : { willRetry: true, state: 'quota-wait', retriesUsed: used, reason: '配额/限流，等自然日重置后自动继续' }
+  }
+
+  // ④ 额度：与 SQL 的三个 OR 分支一一对应（顺序也必须一致）
+  const inRefusal = matchesAutoRetryIlike('refusal', err)
+  const inTransient = matchesAutoRetryIlike('transient', err)
+  const cap = inRefusal ? MAX_AI_REFUSAL_RETRIES
+    : inTransient ? MAX_TRANSIENT_RETRIES
+      : MAX_AUTO_RETRIES
+  if (used >= cap) {
+    return { willRetry: false, state: 'gave-up', retriesUsed: used, reason: `已重试 ${used} 次（上限 ${cap}），系统已放弃` }
+  }
+
+  // ⑤ 瞬时错误的 5 分钟冷却只推迟"这一轮"，不改变"还会不会重试"
+  const coolingDown = verdict.kind === 'transient'
+    && failedAt
+    && (now - new Date(failedAt).getTime()) < TRANSIENT_RETRY_COOLDOWN_MS
+  return {
+    willRetry: true,
+    state: 'retrying',
+    retriesUsed: used,
+    reason: coolingDown ? '瞬时错误冷却中，稍后自动重试' : `还会自动重试（已试 ${used} 次）`
+  }
 }
 
 class PendingTaskRecovery {
@@ -242,15 +407,14 @@ class PendingTaskRecovery {
    *   不应该被 MAX_AUTO_RETRIES=3 永久卡死。但完全不限会浪费配额在真的空白图上，
    *   10 次 ≈ 50 分钟足够。
    */
-  isAIRefusalLikely = (lastError) => {
-    if (!lastError) return false
-    return /图片是空白|图片为空白|无法识别|无法看到|Unable to identify|Cannot identify|no text detected|cannot see|看不清|页面内容为空|用户提供的图片是空|所有页面识别结果为空|页识别失败|OCR 未识别到任何题目|AI_EMPTY|很抱歉|抱歉[，,]|对不起|由于您提供的|I'm sorry|I am sorry|I cannot|unable to process/i.test(String(lastError))
-  }
+  // 2026-10-04 第 90 轮：实现提升为模块级纯函数（对外状态判定要复用同一套话术）。
+  // 保留同名方法只为不惊动调用点；判据只有一处。
+  isAIRefusalLikely = (lastError) => isAIRefusalLikely(lastError)
 
   async scanFailedTasks() {
     try {
-      const MAX_AUTO_RETRIES = 3
-      const MAX_AI_REFUSAL_RETRIES = 10  // AI 偶发拒绝任务放宽上限
+      // ⛔ 阈值提升到模块作用域（MAX_AUTO_RETRIES / MAX_AI_REFUSAL_RETRIES）：
+      //    describeAutoRetry 要用同一对阈值，各写一套就会漂移。
       console.log('[PendingTaskRecovery]  开始扫描 failed 任务...')
 
       // ── 双轨扫描 ──
@@ -325,8 +489,8 @@ class PendingTaskRecovery {
       }
 
       // 去重：已在队列中的任务不再重复入队。
-      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
-      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
+      const inFlightJobs = await queue.getJobs(IN_FLIGHT_JOB_STATES)
+      const inFlightTaskIds = collectInFlightTaskIds(inFlightJobs)
 
       let recoveredCount = 0
       let skippedCount = 0
@@ -451,8 +615,8 @@ class PendingTaskRecovery {
         return
       }
 
-      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
-      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
+      const inFlightJobs = await queue.getJobs(IN_FLIGHT_JOB_STATES)
+      const inFlightTaskIds = collectInFlightTaskIds(inFlightJobs)
 
       let recoveredCount = 0
       let skippedCount = 0
@@ -541,8 +705,8 @@ class PendingTaskRecovery {
       }
 
       // Single Redis call to fetch all in-flight jobs (was one getJobs() per task = N+1).
-      const inFlightJobs = await queue.getJobs(['waiting', 'active', 'delayed'])
-      const inFlightTaskIds = new Set(inFlightJobs.map(j => j.data?.taskId).filter(Boolean))
+      const inFlightJobs = await queue.getJobs(IN_FLIGHT_JOB_STATES)
+      const inFlightTaskIds = collectInFlightTaskIds(inFlightJobs)
 
       let recoveredCount = 0
       for (const task of rows) {
