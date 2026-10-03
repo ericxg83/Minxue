@@ -32,6 +32,7 @@
 ## 四、当前系统状态（交接时刻）
 
 - **测试基线**：1453 全绿；lint：204 项（14 errors 历史遗留 + 190 warnings 条条可信）
+- **第 74 轮（2026-10-03）已交付**：方向二批次执行完成（+71 张矢量配图，从未尝试池清零）；新执行器 `server/scripts/rerunNeverTriedGeometry.mjs`。
 - **四条常驻测试闸**：哨兵行为（quotaSentinel.test）｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁（mobileApiImports）
 - **全局错误护栏**：workbench main.js 的 app.config.errorHandler + 移动端 ErrorBoundary（均已上线）
 - **数据备份**：`D:/Minxue_Backup/2026-10-02/`（5 表 8.5MB 快照）+ scripts/dailyBackup.mjs（每晚 21:30 自动 + 可手动跑）
@@ -41,10 +42,10 @@
 
 ## 五、未完成任务（按优先级，含执行细节）
 
-### 1. 方向二批次执行（负责人已批准预算，**未开始**）
-- **目标池（已实测）**：`SELECT id FROM question_assets WHERE asset_type='geometry_image' AND COALESCE(tikz_status,'(none)')='none' AND COALESCE(last_error,'')=''` ≈ **94 个从未尝试 tikz 的资产**（另有 ~23 个带 last_error 的是闸门正确拒绝——勿动）。
-- **工具**：既有确定性构造管线。参考旧脚本 `scripts/_rerunRejectedGeometry.mjs`（已随归档移至 `D:/Minxue_Archive/auto-20260930/` 或 `auto-20261002/`，可恢复适配选材）；或走 geometryWorker.js 既有处理函数。
-- **执行纪律**：① 先抽样 2 个资产验证管线可用（付费视觉接口）；② 可用后全量后台跑（每张 1-5 分钟，总时长数小时）；③ 进度实时写回 docs/auto/backlog.md；④ 失败如实记录 last_error 不重试超限；⑤ 完成后浏览器抽查渲染质量并汇报成功/失败分布。
+### 1. 方向二批次执行（负责人已批准预算）—— ✅ **已于第 74 轮执行完毕（2026-10-03）**
+- 结果：目标池实测 79 个（非 94），全部跑完 → **出图 71 / 未出图 8**（其中 5 个闸门正确拒绝 + 3 个 failed 可重试），全库 completed 384 → 455，从未尝试池已清零。**不要重跑本项。**
+- 执行器：`server/scripts/rerunNeverTriedGeometry.mjs`（`--dry` / `--limit=N` / 进度写 `tmp/rerunNeverTriedGeometry.progress.json`）。
+- 详细数据、肉眼复核结论、两个新拍板项（零/少标注产物是否回退、completed 与展示层脱节 74 个）见 `docs/auto/backlog.md` 第 74 轮执行结果节。
 
 ### 2. ~90 条多行死声明清理（分批消化）
 - refs=1 验证器模式已备好（见 test/mobileApiImports.test.mjs 同款逻辑 + 本轮 _verify2.mjs 模式——单行完整声明已清完，剩余为多行声明块）。
