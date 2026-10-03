@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getQuestionsByIds, updateQuestion } from '../../services/apiService'
+import { updateQuestion } from '../../services/apiService'
 
 // 题目类型
 export const QUESTION_TYPES = {
@@ -287,7 +287,7 @@ export const useQuestionStore = defineStore('questionBank', () => {
   const batchUpdate = async (updates) => {
     loading.value = true
     try {
-      const results = await Promise.all(
+      await Promise.all(
         selectedQuestions.value.map(id => updateQuestion(id, updates))
       )
 

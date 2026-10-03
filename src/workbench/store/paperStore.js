@@ -1,6 +1,5 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
 
 export const usePaperStore = defineStore('paper', () => {
   // 试卷信息
