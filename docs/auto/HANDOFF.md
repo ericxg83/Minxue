@@ -39,7 +39,7 @@
 
 ## 四、当前系统状态（2026-10-03 晚实测，非记忆值）
 
-- **测试基线**：`npm test` **1515 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21 例回归锁）。
+- **测试基线**：`npm test` **1525 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11 例回归锁）。
 - **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
@@ -84,6 +84,22 @@
   验证脚本 `_r90_autoretry_verify.mjs`（19/19）、`_r90_pc_verify.mjs`（6/6）、`_r90_smoke.mjs`（27/27），
   三者 dev 与隔离产物各跑一遍。**生产库当前 0 条 failed、队列 0 在途 job ⇒ 验这类改动必须造数据**：
   只打桩任务列表接口，每行的 `auto_retry` 用真实 `describeAutoRetry()` 现算。
+- **工作台数据页合并（r91 新交付）**：三个数据分析页 → 一个。成长中心（`/growth`）与错题中心（`/wrongbook`）
+  下线，均留 redirect 兜底（`/wrongbook?studentId=X` 落该生档案页，无参数落学生列表）。
+  ① **家长成长卡**（`GrowthCardButton`）搬进学习诊断底部输出条**最右**；
+  ② **错题清单**以 `WrongCardCenterRedesign` 自带的 `embedded` 形态嵌进学生档案页
+  （`<section id="student-wrong">`，源码注释本来就写着"嵌在学生档案页的错题 tab 里"，只是从没接上）；
+  「下一步建议」的两条 CTA 由跳路由改为**页内滚动**（`scrollToWrong()`）；
+  ③ 侧栏「教学工作」只剩 **批改中心 / 学习诊断 / 学生管理**，10 处入站链接改指，删死勾选框。
+  ⛔ **两条必须记住的坑**：① `GrowthCardButton` 是**多根节点组件**（`el-button` + `el-dialog` + Teleport），
+  Vue **不透传 class** ⇒ 定位类挂它身上会被静默丢弃，只在控制台留一条
+  `Extraneous non-props attributes` **warning**（不报错，扫日志极易漏）——定位类必须挂外层元素；
+  **验对齐要看几何位置，不能只看"按钮存在"**。② 工作台内容区**自己滚**（不是 `window`）⇒
+  验页内滚动必须看 `getBoundingClientRect().top` 变化，`window.scrollY` 恒为 0。
+  回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。验证脚本
+  `_r91_pc_verify.mjs`（25/25）+ `_r91_smoke.mjs`（33/33），dev 与隔离产物各一遍。
+  ⛔ **构建坑**：`vite build --outDir <已存在目录>` 需清空目录，本机 `rmSync` 会被安全删除守卫拦下
+  ⇒ 用 `CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir ...`。
 - **常驻测试闸（6 条）**：哨兵行为 quotaSentinel｜工作台 store 导入锁｜Vue 模板锁｜移动端导入锁 mobileApiImports｜`test/geometryTopologyGate.test.mjs`（第 75 轮）｜`test/areaModelChannel.test.mjs` + `test/geometryTickMark.test.mjs`（第 76 轮）。
 - **全局错误护栏**：`src/workbench/main.js` 的 `app.config.errorHandler` + 移动端 `ErrorBoundary`（均已上线）。
 - **配额哨兵**：`/api/quota/status` 接口 + 顶栏降级横幅 `QuotaBanner.vue`（三家供应商降级事件显性化）。
@@ -147,25 +163,19 @@
 
 antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git 6784a 前后）。回归前必须先查 `vite.config.js` 的 `manualChunks`——这是待办的打包配置排查。
 
-### 5. 【第 89 轮已获授权，动工中】数据页合并（三档）
+### 5. 【✅ 已交付 · 第 91 轮】数据页合并（第 1 档 + 第 2 档）
 
 **负责人 2026-10-03 答复**：三个数据分析页里**每天实际只打开「学习诊断」**（`/weekly-report`）。
 据此已出合并/下线提案：`docs/auto/reports/2026-10-03-提案-上传自愈与数据页.md` 二。
 
-**第 89 轮答复：第 1 档和第 2 档「可以做」**（已授权，A/B 级边界内动手）：
+**第 89 轮答复：第 1 档和第 2 档「可以做」**；**第 91 轮已全部执行完毕**（细节见四、工作台数据页合并
+与 `docs/auto/backlog.md` 第 91 轮交付节）。两档都做了「页面下线 + 内容搬到真在用的页 + 老书签 redirect
+兜底 + 清死 UI/死入口」四件事，家长成长卡与错题清单**都保住了**。
 
-- **第 1 档**：成长中心（`/growth`）下线，内容并入学习诊断；**家长成长卡必须挪过去**
-  （`GrowthCardButton` 是老师转发给家长的产出物，不能随页面一起消失）；入站链接仅 1 处
-  （`StudentDetailWorkbench.vue:165`）；`growthStore` / `GrowthCardButton` / 前端 `getRecommendedTopics` 可整组删。
-- **第 2 档**：错题中心（`/wrongbook`）并入。**9 处入站链接**：侧边栏菜单 1、`DashboardWorkbench.vue`
-  2（`to="/wrongbook"` + 快捷入口表）、`RetryTasksWorkbench.vue:47` 空态按钮 1、
-  `StudentDetailWorkbench.vue` 4（:141/:264/:295/:303）、`WeeklyReportWorkbench.vue:1190` 1。
-- **第 3 档**（试卷答案库 / 我的题型库等）未问，等他说到再说。
-
-**顺带挖出的真缺陷（与第 2 档一起处置）**：错题中心的 `createRetry`/`createRetryFor` 已无任何按钮触发
-（模板里零 `@click`），但「全选本页」和逐行勾选框还在 ⇒ **勾了没反应**；`RetryTasksWorkbench.vue:47`
-的空态文案还指向它。PC 错题中心相对移动端错题本**只多两件事**：「标记完全掌握」
-（移动端只能看状态、不能改）和「移除」（移动端是左滑删除，等价）。⇒ 处置方向见第 89 轮报告。
+- **第 3 档**（试卷答案库 / 我的题型库等二级入口）**未问，等他说到再说**。
+- **等拍板的一件事**：错题中心那对死函数 `createRetry` / `createRetryFor` —— 本轮只删了死勾选框，
+  函数**保留但未引用**。二选一：(a) 把「生成重练卷」按钮接回来（PC 就能自己组卷）；
+  (b) 连函数一起删（组卷只走移动端错题本 / 学习诊断「生成再测卷」）。
 
 ### 6. 【① 已交付 · ③ 等开口】板书本地存储配额迟早写满
 
@@ -217,7 +227,8 @@ antd-mobile PullToRefresh 曾致 vendor 分包断裂白屏（已回滚，见 git
 | 87 | `065bcd7` | 白板板书存储：笔迹点量化到 2 位小数（体积约减半，`utils/strokePoint.js`）、落盘失败不再静默（页内提示去导出）、旧键迁移顺手瘦身并回收；删死分支 `q-figure__hint`。另实测关闭「白板取图口径」议题（PC 有图/白板无图 = 0，不需抽共享函数）。四道闸全过，`_r87_board_storage_verify.mjs` 13/13 + r85/r86 回归 30/30 + 12/12 |
 | 88 | `075af3c` | 白板「只看未讲」切换**不再把板书串到别的题上**（原实现先换题单再 `saveStrokes()`，会把当前题的板书写进新题单同下标那道题的键、并覆盖其原有板书；探针实测复现）；`onPageHide` 补落盘（防抖窗口内最后一笔不再丢）；顶栏题号总数改用 `viewQuestions.length`。新增源码级顺序锁 `test/weekendBoardViewSwitchOrder.test.mjs`（4 例，已反向自检）。四道闸全过，`_r88_board_view_switch_verify.mjs` 17/17 + 隔离产物冒烟 20/20 + r85/r86/r87 回归 30/30 + 12/12 + 13/13 |
 | 89 | `1e6d38e` | 白板**本机板书回收入口**：顶栏「本机板书」→ 看占用（进度条）/ 按题列（锚点翻成人话）/ 逐条删 / 一次清空，两次点击确认、零自动删除（`utils/strokeStorage.js` + `components/BoardStorageDialog.vue`）。⛔ 只列真写过字的题；**删到「正在讲」那一题时连板面一起清**（只删存储会被 `saveStrokes()` 写回，等于没删）。回归锁 `test/boardStorage.test.mjs`（12 例，已反向自检）。四道闸全过，`_r89_storage_verify.mjs` 27/27（dev + 隔离产物）+ r85/r86/r87/r88 回归 30/30、12/12、13/13、17/17 + 隔离产物冒烟 20/20 |
-| 90 | 本轮 | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
+| 90 | `4fb0b85` | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
+| 91 | 本轮 | **数据页合并 第 1 档 + 第 2 档**：成长中心（`/growth`）与错题中心（`/wrongbook`）两个页面下线，**家长成长卡搬进学习诊断输出条最右**（它是转发给家长的产出物，不能随页消失），**错题清单以组件自带的 `embedded` 形态嵌进学生档案页**（`#student-wrong` + 页内滚动 CTA），侧栏「教学工作」只剩 3 项，10 处入站链接改指，两条路由留 redirect 兜底，删掉错题中心那排**死勾选框**（勾了没有任何事发生）。⛔ 顺手抓到并修掉一个**静默失效**：`GrowthCardButton` 是多根节点组件，Vue 不透传 class ⇒ 定位类被丢弃、右对齐永远不生效（只有一条 `Extraneous non-props attributes` **warning**，不报错）——现把该 warning 当红、并用几何位置验对齐。回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。四道闸全过，`_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 

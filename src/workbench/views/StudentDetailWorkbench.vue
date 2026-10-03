@@ -53,7 +53,7 @@
           <div v-if="nextAction.evidence" class="next-action__evidence">说明：{{ nextAction.evidence }}</div>
         </div>
         <div class="next-action__cta">
-          <ActionButton variant="primary" @click="go(nextAction.to, { studentId: student.id })">
+          <ActionButton variant="primary" @click="runNextAction">
             {{ nextAction.cta }}<el-icon class="el-icon--right"><ArrowRight /></el-icon>
           </ActionButton>
         </div>
@@ -127,25 +127,20 @@
               <span v-if="exam.status === 'graded'" class="retry-count">{{ exam.correct_count }} 对 / {{ exam.wrong_count }} 错</span>
             </div>
           </div>
-          <EmptyState v-else title="还没有重练卷" description="去「错题本」勾选题目创建第一份吧" />
+          <EmptyState v-else title="还没有重练卷" description="在学习诊断里点「生成再测卷」，或在手机错题本里创建第一份吧" />
         </ContentCard>
       </section>
 
-      <!-- 行动入口 3 块（去 transform / shadow / icon 块） -->
-      <ContentCard title="进入详细分析" description="错题、重练与掌握度是独立的功能页">
+      <!-- 错题清单（第 91 轮：独立的「错题中心」页面下线，清单并入学生档案）
+           ⛔ 复用组件自带的 embedded 模式 —— 它的源码注释本来就写着「嵌在学生档案页的错题 tab 里」，
+              只是从没接上。嵌入时它隐藏自己的页头与学生切换器，学生上下文由本页给定。 -->
+      <section id="student-wrong" class="wrong-section" aria-label="错题清单">
+        <WrongBookCenterRedesign embedded :student-id="student.id" @exam-created="refreshRetry" />
+      </section>
+
+      <!-- 其它入口（原「进入详细分析」；错题本已在本页，不再重复给入口） -->
+      <ContentCard title="更多入口" description="重练与学习诊断仍是独立的功能页">
         <div class="action-grid">
-          <button
-            class="action-tile"
-            type="button"
-            :aria-label="`进入错题本，待处理 ${pendingWrongCount} 道，重复出错 ${repeatWrongCount} 道`"
-            @click="go('/wrongbook', { studentId: student.id })"
-          >
-            <div class="action-tile__body">
-              <div class="action-tile__title">错题本</div>
-              <div class="action-tile__meta">待处理 {{ pendingWrongCount }} 道 · 重复出错 {{ repeatWrongCount }} 道</div>
-            </div>
-            <el-icon class="action-tile__arrow"><ArrowRight /></el-icon>
-          </button>
           <button
             class="action-tile"
             type="button"
@@ -161,11 +156,11 @@
           <button
             class="action-tile"
             type="button"
-            :aria-label="`进入知识点掌握，薄弱 ${weakness.length} 个，已掌握 ${masteredKpCount} 个`"
-            @click="go('/growth', { studentId: student.id })"
+            :aria-label="`进入学习诊断，薄弱 ${weakness.length} 个，已掌握 ${masteredKpCount} 个`"
+            @click="go('/weekly-report', { studentId: student.id })"
           >
             <div class="action-tile__body">
-              <div class="action-tile__title">知识点掌握</div>
+              <div class="action-tile__title">学习诊断</div>
               <div class="action-tile__meta">薄弱 {{ weakness.length }} 个 · 已掌握 {{ masteredKpCount }} 个</div>
             </div>
             <el-icon class="action-tile__arrow"><ArrowRight /></el-icon>
@@ -207,6 +202,7 @@ import KpiStrip from '../components/ui/KpiStrip.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import WrongBookCenterRedesign from './WrongBookCenterRedesign.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -261,7 +257,8 @@ const kpiItems = computed(() => {
       tone: pendingWrongCount.value ? 'danger' : 'success',
       actionLabel: '看错题',
       actionIcon: ArrowRight,
-      onClick: () => sid && go('/wrongbook', { studentId: sid })
+      // 第 91 轮：错题清单已在本页下方 ⇒ 就地滚过去，不再跳外链页面
+      onClick: () => scrollToWrong()
     },
     {
       key: 'exams',
@@ -292,16 +289,16 @@ const nextAction = computed(() => {
     return {
       text: `${student.value.name} 在「${urgent.name}」上反复出错，建议创建一份定向重练卷。`,
       evidence: `${urgent.subject} · 掌握度 ${urgent.mastery}% · 涉及 ${urgent.wrongQuestions} 道错题${urgent.lossPositions ? ' · 失分位置：' + urgent.lossPositions : ''}`,
-      to: '/wrongbook',
-      cta: '去错题本创建'
+      to: '#wrong',
+      cta: '看错题并创建重练'
     }
   }
   if (pendingWrongCount.value >= 5) {
     return {
-      text: `还有 ${pendingWrongCount.value} 道错题未掌握，建议先在错题本里回顾并安排重练。`,
+      text: `还有 ${pendingWrongCount.value} 道错题未掌握，建议先回顾错题并安排重练。`,
       evidence: `累计错题 ${wrongQuestions.value.length} 道 · 重复出错 ${repeatWrongCount.value} 道`,
-      to: '/wrongbook',
-      cta: '进入错题本'
+      to: '#wrong',
+      cta: '看错题清单'
     }
   }
   if (pendingExams.value > 0) {
@@ -332,6 +329,23 @@ const taskTone = status => {
 
 const initial = (name) => (name || '?').slice(0, 1)
 const go = (path, query = {}) => router.push({ path, query })
+
+// 「下一步建议」的动作分流：页内锚点（#wrong）就地滚动，其余走路由跳转。
+// 第 91 轮前这两条 CTA 都跳 /wrongbook，那个页面已下线。
+function runNextAction() {
+  const target = nextAction.value?.to
+  if (!target) return
+  if (target === '#wrong') return scrollToWrong()
+  go(target, { studentId: student.value?.id })
+}
+function scrollToWrong() {
+  const el = document.getElementById('student-wrong')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // 键盘/读屏用户也要能落到这里：给区块一个可聚焦的落点
+  el.setAttribute('tabindex', '-1')
+  el.focus({ preventScroll: true })
+}
 const formatDate = (value) => {
   if (!value) return ''
   const date = new Date(value)

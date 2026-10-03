@@ -44,7 +44,10 @@
             <el-button v-else class="row-action" text type="primary" @click="openReview(exam)">查看结果</el-button>
           </article>
         </div>
-        <div v-else class="state"><el-icon><Document /></el-icon><strong>还没有重练任务</strong><span>在错题池中选择题目，就可以创建针对性重练。</span><el-button text type="primary" @click="router.push('/wrongbook')">去错题池创建</el-button></div>
+        <!-- 第 91 轮改文案：原指向「错题池（错题中心）」，而那个页面里的「生成重练卷」
+             本来就没有按钮能触发（死函数）。真正能创建重练卷的入口是：
+             移动端错题本「生成重练」、学习诊断「生成再测卷」。 -->
+        <div v-else class="state"><el-icon><Document /></el-icon><strong>还没有重练任务</strong><span>在学习诊断里点「生成再测卷」，或在手机错题本里勾题「生成重练」。</span><el-button text type="primary" @click="router.push('/weekly-report')">去学习诊断</el-button></div>
       </section>
     </div>
   </div>

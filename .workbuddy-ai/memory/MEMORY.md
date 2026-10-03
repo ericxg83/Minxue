@@ -29,6 +29,11 @@
 - ⛔ 板书永久占 localStorage、全仓无清理（~55 题写满）；r89 已加「清空本机板书」入口。→ board §14
 - ⛔ 任务「自愈」判定唯一实现 = `server/pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，非照设计意图**）；
   前端 `src/domain/taskAutoRetry.js` 只翻译不重算；缺 `auto_retry` 字段一律按「不自愈」。→ task-self-healing
+- ⛔ 多根节点组件（如 `GrowthCardButton` = 按钮+弹窗+Teleport）**收不到 class**，挂上去被静默丢弃，
+  只在控制台留一条 `Extraneous non-props attributes` **warning**（不报错）⇒ 定位类挂外层元素，
+  **验对齐要看几何位置，不能只看「按钮存在」**。→ data-pages
+- ⛔ 工作台内容区**自己滚**（不是 `window`）⇒ 验页内滚动看 `getBoundingClientRect().top` 变化，
+  `window.scrollY` 恒为 0。→ data-pages
 
 ## 2. 前端验证纪律
 - ⛔ 源码级回归锁必须**反向自检**（套在 `git show HEAD:<file>` 旧版上必须判红），否则是空锁。

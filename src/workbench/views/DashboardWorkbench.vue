@@ -103,8 +103,8 @@
           <section class="panel" aria-label="错题消化与薄弱点">
             <header class="panel__head">
               <h2 class="panel__title">错题消化</h2>
-              <router-link to="/wrongbook" class="panel__link">
-                错题中心 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+              <router-link to="/students" class="panel__link">
+                按学生查看 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
               </router-link>
             </header>
             <div class="digest">
@@ -332,7 +332,7 @@ const kpiCards = computed(() => [
     foot: '较昨日',
     delta: wrongDelta.value,
     tone: wrongCount.value > 0 ? 'warning' : 'default',
-    to: '/wrongbook'
+    to: '/students'
   },
   {
     key: 'undigested',

@@ -25,11 +25,13 @@ const routes = [
     component: () => import('../views/TodoWorkbench.vue'),
     meta: { requiresPC: true }
   },
+  // 第 91 轮：独立的「错题中心」页面下线，错题清单并入学生档案页（#student-wrong）。
+  // 保留 redirect 只作历史书签的兜底：老链接带 studentId 就落到那名学生的档案页，否则落到学生列表。
   {
     path: '/wrongbook',
-    name: 'WrongBook',
-    component: () => import('../views/WrongBookWorkbench.vue'),
-    meta: { requiresPC: true }
+    redirect: to => (to.query.studentId
+      ? { path: `/students/${to.query.studentId}` }
+      : { path: '/students' })
   },
   {
     path: '/paper',
@@ -55,11 +57,11 @@ const routes = [
     component: () => import('../views/StudentDetailWorkbench.vue'),
     meta: { requiresPC: true }
   },
+  // 第 91 轮：「成长中心」下线（它展示的每一块在学习诊断里都有对应物，唯一独有的
+  // 「家长成长卡」已搬到学习诊断的输出条）。redirect 只作历史书签兜底。
   {
     path: '/growth',
-    name: 'Growth',
-    component: () => import('../views/GrowthWorkbench.vue'),
-    meta: { requiresPC: true }
+    redirect: to => ({ path: '/weekly-report', query: to.query })
   },
   {
     path: '/exam-history',

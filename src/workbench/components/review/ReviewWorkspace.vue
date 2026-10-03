@@ -131,7 +131,11 @@ const router = useRouter()
 // [P0-1 完成引导] 右栏完成态按钮经由这里转发到顶栏的 handleComplete / goNextTask
 const reviewTopBarRef = ref(null)
 const goToTodo = () => router.push('/todo')
-const goToWrongBook = () => router.push({ path: '/wrongbook', query: { studentId: store.currentStudent?.id } })
+// 第 91 轮：错题中心页面下线，清单并入学生档案页（没有学生上下文时落到学生列表，
+// 避免拼出 /students/undefined）
+const goToWrongBook = () => router.push(
+  store.currentStudent?.id ? { path: `/students/${store.currentStudent.id}` } : { path: '/students' }
+)
 const goToStudents = () => router.push('/students')
 const goGradeCenter = () => router.push('/grade')
 

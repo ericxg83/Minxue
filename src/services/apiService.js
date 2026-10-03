@@ -1312,20 +1312,8 @@ export const getStudentWeakness = async (studentId, opts = {}) => {
   return data.weakness || []
 }
 
-/**
- * 获取「本周最该讲」推荐列表（按优先级排序）
- * @param {Object} [opts]
- * @param {number} [opts.limit]
- * @param {string} [opts.subject]
- */
-export const getRecommendedTopics = async (opts = {}) => {
-  const params = new URLSearchParams()
-  if (opts.limit) params.set('limit', String(opts.limit))
-  if (opts.subject) params.set('subject', opts.subject)
-  const q = params.toString()
-  const data = await apiRequest(`/weakness/recommend${q ? '?' + q : ''}`)
-  return data.topics || []
-}
+// 第 91 轮：「成长中心」下线后，前端唯一的调用方（GrowthWorkbench）已随页删除，
+// 这里的前端封装一并移除。后端 /weakness/recommend 是共享路由，保留不动。
 
 export const getQuestionAssets = async (questionId, type = null) => {
   const qs = type ? `?type=${encodeURIComponent(type)}` : ''

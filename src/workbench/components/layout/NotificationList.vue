@@ -118,7 +118,9 @@ function goRoute(type) {
   emit('close')
   switch (type) {
     case 'wrongQuestions':
-      router.push('/wrongbook')
+      // 第 91 轮：错题中心页面下线，错题清单在学生档案页里 ⇒ 通知没有学生上下文，
+      // 先落到学生列表让老师选人。
+      router.push('/students')
       break
     case 'pendingReview':
     case 'failedTasks':
