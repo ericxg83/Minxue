@@ -26,6 +26,7 @@
 
 1. **上线安全铁律（最高优先级）**：每次 git push 触发线上自动部署。**推送前必须过四道关**：① `npm test` 全绿；② lint 无新增 error；③ 构建成功（**`MSYS_NO_PATHCONV=1 VITE_API_URL=/api CODEBUDDY_SAFE_DELETE_ENABLED=0 npx vite build --outDir dist_nightly_日期rN`**，绝不写 dist/。`VITE_API_URL=/api` 强制产物全走本地代理——不带会把 `.env.production` 的生产 API base 烤进包，冒烟变相直连生产（r95 实证）；`MSYS_NO_PATHCONV=1` 防 Git Bash 把 `/api` 改写成 `C:/Program Files/Git/api`（r95 实证））；④ **真机级冒烟**——`npx vite preview --port <端口> --outDir <隔离目录>` 跑起来（**必带 `--outDir`**，不带服务的是陈旧 `dist/`，r94 实证），并用浏览器自动化实测移动端首页与工作台真的渲染（挂载点有子节点、innerText 有真实文字、0 控制台错误、0 个 4xx/5xx）。冒烟不过不推送。
    - **本机浏览器窗口常处于隐藏态，`take_screenshot` 必然超时** → 冒烟改用「JS 求值读 DOM」，并在指令里明确"禁止截图"。要肉眼看图，用 `@napi-rs/canvas` 本地栅格化（见 `tmp/geo_montage.mjs` 范式）。
+   - **冒烟标准工具已入库（r96）**：`scripts/gate/cert_probe.mjs`（零外联验证）+ `scripts/gate/render_smoke.mjs`（双端真渲染 8 项）+ `scripts/gate/README.md`（前置命令三件套）。直接跑，不再每轮重写临时件。
 2. **自决权三级**：A 直接干（行为保持型缺陷修复/死代码/顺手化/文档）；B 提案等确认（产品向决策）；C 永不（删用户数据/改 eslint 规则或 ignores/放宽任何门禁/写生产数据库或 Redis/批量调付费 AI·OCR 超 5 次）。
 3. **硬禁区（只能提案，不得动手）**：数据库 Schema/迁移；批改主流程（`server/worker.js`）设计变更；错题生命周期语义与合并规则；重练与组卷口径；掌握度口径；练习册答案解析质量闸；judgements 审计语义；共享服务与公共 API 行为变更；任务状态机；判题/答案解析服务里的正则与转义。
 4. **长期授权**：A 级 + 四道关全过 → 直接 git add/commit/push 到 main，无需请示（紧急 revert 也可）。
