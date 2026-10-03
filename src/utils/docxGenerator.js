@@ -11,7 +11,6 @@ import {
   TableCell,
   WidthType,
   PageBreak,
-  TabStopPosition,
   TabStopType,
 } from 'docx'
 import { saveAs } from 'file-saver'

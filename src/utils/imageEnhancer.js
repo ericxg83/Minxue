@@ -184,8 +184,6 @@ export async function enhanceImage(input, options = {}) {
   // 如果 pixelValue < (localMean - C)，则为黑色 (0)，否则为白色 (255)
   const binaryData = new Uint8Array(paddedW * paddedH)
 
-  // 预计算高斯权重
-  const gaussWeights = buildGaussianWeights(bs)
 
   for (let y = 0; y < paddedH; y++) {
     for (let x = 0; x < paddedW; x++) {

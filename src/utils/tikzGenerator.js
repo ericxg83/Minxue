@@ -471,7 +471,7 @@ function geometryParamsToSvg(params, width, height) {
   
   // 角度标记
   if (params.angles) {
-    params.angles.forEach(([v1, v2, v3, angle]) => {
+    params.angles.forEach(([_v1, v2, _v3, angle]) => {
       const v = vertices.find(vt => vt[0] === v2)
       if (v) {
         const cx = v[1] * scale + offsetX

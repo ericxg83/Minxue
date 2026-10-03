@@ -27,7 +27,6 @@ import {
   renderMathInContainer,
   applyQRToContainer,
   preloadKatexFonts,
-  KATEX_FONT_FAMILIES,
 } from './pdfGenerator'
 import { KATEX_CSS_WITH_FONTS } from './katexCssWithFonts'
 import { getQuestionsByIds } from '../services/apiService'

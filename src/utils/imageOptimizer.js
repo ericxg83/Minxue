@@ -286,8 +286,6 @@ export async function autoCropBlackBorders(imageSrc, threshold = 40, margin = 5)
 export async function removeTextBackground(imageSrc, options = {}) {
   const {
     textThreshold = 200,
-    minStrokeWidth = 1,
-    maxStrokeWidth = 15,
     preserveLetters = true,
     preserveGraphics = true
   } = options
@@ -397,7 +395,7 @@ export async function removeTextBackground(imageSrc, options = {}) {
   const preserveMask = new Uint8Array(width * height)
 
   for (const region of regions) {
-    const { width: rw, height: rh, aspectRatio, size } = region
+    const { aspectRatio, size } = region
 
     // 图形特征判断:
     // - 较大的区域(size>100)
