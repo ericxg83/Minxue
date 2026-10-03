@@ -159,15 +159,6 @@
             <el-icon><MagicStick /></el-icon>
             白板模式
           </ActionButton>
-          <ActionButton
-            variant="primary"
-            :disabled="true"
-            title="生成 PPTX 功能暂停开放，请使用白板模式讲题"
-            @click="runGenerate"
-          >
-            <el-icon v-if="!generating"><Download /></el-icon>
-            {{ generating ? '正在生成 PPTX…' : '生成 PPTX（暂停开放）' }}
-          </ActionButton>
         </template>
 
         <!-- 全选工具条 -->
@@ -349,7 +340,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Download, MagicStick, Reading, Search } from '@element-plus/icons-vue'
+import { MagicStick, Reading, Search } from '@element-plus/icons-vue'
 import { apiRequest, updateQuestion } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -381,7 +372,6 @@ const params = ref({
   to: '',
   students: [],
   limit: 10,
-  maxPerDay: 0,
   mergeThin: 0,
   difficulty: 'medium',
   chapter: '',
@@ -390,12 +380,10 @@ const params = ref({
 const periodPreset = ref('days7')
 // 版本固定为讲义版（含参考答案，2026-09-23 用户指定）：界面不再提供切换，
 // 后端字段保留兼容，白板/预览强制 withAnswer=true。
-// 注：params.maxPerDay 仅保留做请求体兜底（固定 0），界面已隐藏该输入框。
 const withAnswer = ref(true)
 const previewing = ref(false)
 const previewSlow = ref(false)
 let previewTimer = null
-const generating = ref(false)
 const handout = ref(null)
 const selected = ref(new Set())
 
@@ -701,8 +689,9 @@ function buildParamsBody(extra = {}) {
 }
 
 /** 白板模式：携带筛选参数 + selected 题号打开讲题白板。
- *  fs=1 → 白板直接进全屏讲题模式（平板场景：选完题即可全屏开讲）。
- *  新标签页打开：白板全屏后不覆盖选题页，讲完可直接回来调整勾选。 */
+ *  新标签页打开：白板全屏后不覆盖选题页，讲完可直接回来调整勾选。
+ *  注：全屏由白板内的「全屏」按钮手动触发（白板不读任何 fs 参数），
+ *  这里不带任何全屏标记 —— 旧注释写的「fs=1 直接进全屏」与实现不符，已删。 */
 function openBoard() {
   if (selected.value.size === 0) {
     ElMessage.warning('请先勾选题目')
@@ -749,42 +738,10 @@ function openBoard() {
   if (!win) router.push({ path: '/weekend-ppt/board', query })
 }
 
-async function runGenerate() {
-  if (selected.value.size === 0) {
-    ElMessage.warning('请先勾选题目')
-    return
-  }
-  generating.value = true
-  try {
-    const body = buildParamsBody({ selected: [...selected.value] })
-    const res = await fetch('/api/weekend-ppt/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try { const j = await res.json(); if (j?.error) msg = j.error } catch {}
-      throw new Error(msg)
-    }
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    const h = handout.value
-    const fname = `${h.grade}${h.subject ? '_' + h.subject : ''}_周末班错题课件_${h.period.start}_${h.period.end}.pptx`
-    a.href = url
-    a.download = fname
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    setTimeout(() => URL.revokeObjectURL(url), 1000)
-    ElMessage.success(`已生成 ${selected.value.size} 题课件并开始下载`)
-  } catch (e) {
-    ElMessage.error('生成失败：' + (e.message || '网络错误'))
-  } finally {
-    generating.value = false
-  }
-}
+// 注：原「生成 PPTX」按钮及其下载逻辑（调用 POST /api/weekend-ppt/generate）已于
+// 2026-10-03 删除 —— 该入口长期处于 disabled 状态，讲评统一改用白板模式。
+// 后端 server/services/weekendPptxService.js 与 /weekend-ppt/generate 路由保留不动，
+// 需要恢复时从 git 历史取回这段前端代码即可。
 </script>
 
 <style scoped>

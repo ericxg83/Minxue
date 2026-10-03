@@ -208,13 +208,13 @@
         </div>
         <div class="tool-group">
           <button
-            v-for="c in penColors"
+            v-for="(c, ci) in penColors"
             :key="c.value"
             type="button"
             class="tool-color"
             :class="{ active: color === c.value }"
             :style="{ background: c.value }"
-            :title="c.label"
+            :title="`${c.label}（${ci + 1}）`"
             @click="setColor(c.value)"
           />
         </div>
@@ -225,19 +225,32 @@
             type="button"
             class="tool-size-btn"
             :class="{ active: penSize === s.value && tool === 'pen' }"
+            :title="`粗细 ${s.label}（[ ]）`"
             @click="setSize(s.value)"
           >
             <span class="size-dot" :style="{ width: s.dot, height: s.dot }" />
           </button>
         </div>
         <div class="tool-group">
-          <button type="button" class="tool-btn" :class="{ active: tool === 'eraser' }" title="橡皮" @click="toggleEraser">
+          <button type="button" class="tool-btn" :class="{ active: tool === 'eraser' }" title="橡皮（E）" @click="toggleEraser">
             <el-icon><Remove /></el-icon>
+          </button>
+          <button type="button" class="tool-btn" :class="{ active: tool === 'laser' }" title="激光笔（L）：临时红点，抬手即消、不留笔迹" @click="toggleLaser">
+            <el-icon><Aim /></el-icon>
           </button>
           <button type="button" class="tool-btn" title="撤销（Z）" @click="undo">
             <el-icon><RefreshLeft /></el-icon>
           </button>
-          <button type="button" class="tool-btn" title="清空本页" @click="clearAll">
+          <button type="button" class="tool-btn" :disabled="redoStack.length === 0" title="重做（Y）" @click="redo">
+            <el-icon><RefreshRight /></el-icon>
+          </button>
+          <button
+            type="button"
+            class="tool-btn"
+            :class="{ 'tool-btn--danger': clearArmed }"
+            :title="clearArmed ? '再点一次确认清空本页' : '清空本页'"
+            @click="clearAll"
+          >
             <el-icon><Delete /></el-icon>
           </button>
         </div>
@@ -373,7 +386,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Picture, Pointer, Reading, RefreshLeft, Remove, View,
+  Aim, ArrowLeft, ArrowRight, ArrowUp, ArrowDown, Back, Delete, Download, FullScreen, Picture, Pointer, Reading, RefreshLeft, RefreshRight, Remove, View,
 } from '@element-plus/icons-vue'
 import { apiRequest } from '../../services/apiService'
 import { hasExplicitOptionMarkers } from '../../utils/questionCompleteness'
@@ -571,6 +584,12 @@ const strokesKey = computed(() => {
 // DrawingCanvas，子组件「自身 emit 回流」的引用等值判断失效 —— 每一笔收笔都
 // 被当成外部替换，画布视图被强制归零（书写中页面上下弹动的元凶之一）。
 const currentStrokes = shallowRef([])
+// 重做链：只存「刚被撤销掉的笔迹」，后进先出。任何新笔迹提交 / 切题 / 清空都会
+// 清空它（新动作之后旧的「重做」不再成立）。
+const redoStack = shallowRef([])
+// 清空本页的二次确认态：按钮变红，3 秒内再点才真清空，超时自动复原。
+const clearArmed = ref(false)
+let clearArmTimer = null
 
 // 导出用：题干文本
 const exportTitle = computed(() => {
@@ -689,6 +708,7 @@ const isFsOn = computed(() => isImmersive.value || nativeFs.value)
 const fsTitle = computed(() => (isFsOn.value ? '退出全屏（Esc）' : '全屏讲题（F）'))
 const showEdgeNav = computed(() => isTouchDevice.value && viewQuestions.value.length > 1)
 const navHint = computed(() => {
+  if (tool.value === 'laser') return '激光笔：手指即指针 · 用两侧箭头或底栏翻题'
   if (allowTouch.value) return '手指绘制已开启 · 可用两侧箭头或底栏翻题'
   return isTouchDevice.value ? '左右滑动屏幕切题' : '← → 切题'
 })
@@ -813,6 +833,7 @@ function saveStrokes() {
 }
 function loadStrokes() {
   currentStrokes.value = []
+  redoStack.value = []
   const key = strokesKey.value
   if (!key) return
   try {
@@ -835,6 +856,8 @@ function loadStrokes() {
 
 function onStrokesChange(val) {
   currentStrokes.value = val
+  // 画布只在「收笔」时 emit：有新的笔迹落盘，重做链立即失效
+  redoStack.value = []
   // 在题上写了字 = 最强「讲过」信号（比停留时长可靠得多）
   marks.noteStrokes(current.value, Array.isArray(val) && val.some(s => s?.points?.length))
   // 防抖保存（书写过程中也逐步落盘，切题/关页不丢）
@@ -878,6 +901,9 @@ function gotoQuestion(i, dir) {
   loadStrokes()
   if (qBodyRef.value) qBodyRef.value.scrollTop = 0
   if (hint.value) hint.value = ''
+  // 切题时复位「清空本页」的待确认态，别把上一题的待确认带到新题
+  clearArmed.value = false
+  clearTimeout(clearArmTimer)
   playSlide(d)
   marks.enterQuestion(list[i])
   closeMarkMenu()
@@ -907,7 +933,8 @@ function onGestureStart(e) {
     gesture = null
     return
   }
-  if (e.pointerType !== 'touch' || allowTouch.value) return
+  // 手指绘制开启时（allowTouch）/ 激光笔模式下，手指归书写层，不做滑动切题。
+  if (e.pointerType !== 'touch' || allowTouch.value || tool.value === 'laser') return
   // 双指捏合缩放进行中（画布层接管）：单指手势让路，否则题干会跟着二指乱滚
   if (canvasRef.value?.pinchActive?.()) return
   // 已有手势进行中：忽略后续触点，多指互抢会把题面拽来拽去 / 误判横向切题
@@ -1015,6 +1042,17 @@ function onKeydown(e) {
       if (!e.repeat) toggleFullscreen()
       break
     case 'z': case 'Z': undo(); break
+    case 'y': case 'Y': redo(); break
+    case 'e': case 'E': toggleEraser(); break
+    case 'l': case 'L': toggleLaser(); break
+    // 1-4 换笔色（顺序同工具栏：红蓝绿黑）；[ ] 调粗细；都是「抬手就能换」的顺手化
+    case '1': case '2': case '3': case '4': {
+      const c = penColors[Number(e.key) - 1]
+      if (c) setColor(c.value)
+      break
+    }
+    case '[': case '【': stepSize(-1); break
+    case ']': case '】': stepSize(1); break
     case 'u': case 'U': toggleUnTaughtOnly(); break
     case 'r': case 'R': resumeLecture(); break
     case 'Escape':
@@ -1028,20 +1066,58 @@ function onKeydown(e) {
 // ── 工具 ──
 function setColor(c) { color.value = c; tool.value = 'pen' }
 function setSize(s) { penSize.value = s; tool.value = 'pen' }
+/** 粗细按档位上下调（[ / ] 快捷键）。当前值可能不在三档预设里（默认 3 就不在），
+ *  此时按方向「吸附」到最近的一档：加粗取第一个更粗的，变细取最后一个更细的；
+ *  已在端点则不动。 */
+function stepSize(dir) {
+  const i = penSizes.findIndex(s => s.value === penSize.value)
+  let next
+  if (i >= 0) {
+    next = penSizes[Math.min(penSizes.length - 1, Math.max(0, i + dir))]
+  } else if (dir > 0) {
+    next = penSizes.find(s => s.value > penSize.value)
+  } else {
+    next = [...penSizes].reverse().find(s => s.value < penSize.value)
+  }
+  if (next && next.value !== penSize.value) setSize(next.value)
+}
 function toggleEraser() { tool.value = tool.value === 'eraser' ? 'pen' : 'eraser' }
+function toggleLaser() { tool.value = tool.value === 'laser' ? 'pen' : 'laser' }
 function toggleAllowTouch() {
   allowTouch.value = !allowTouch.value
   showHint(allowTouch.value ? '手指绘制已开启：滑动切题暂停，可用两侧箭头翻题' : '手指绘制已关闭：左右滑动可切题')
 }
+// 撤销 / 重做：redoStack 只存「刚被撤销掉的笔迹」，后进先出。
+// 有新笔迹提交（onStrokesChange）、切题或清空时，重做链立即失效并清空。
 function undo() {
   const arr = [...currentStrokes.value]
   if (arr.length === 0) return
-  arr.pop()
+  const last = arr.pop()
+  redoStack.value = [...redoStack.value, last]
   currentStrokes.value = arr
   saveStrokes()
 }
+function redo() {
+  const stack = [...redoStack.value]
+  if (stack.length === 0) return
+  const s = stack.pop()
+  redoStack.value = stack
+  currentStrokes.value = [...currentStrokes.value, s]
+  saveStrokes()
+}
+// 清空本页：二次确认（按钮变红 + 页内提示，3 秒内再点才真清空，超时自动复原）
 function clearAll() {
+  if (!clearArmed.value) {
+    clearArmed.value = true
+    showHint('再点一次确认清空本页')
+    clearTimeout(clearArmTimer)
+    clearArmTimer = setTimeout(() => { clearArmed.value = false }, 3000)
+    return
+  }
+  clearTimeout(clearArmTimer)
+  clearArmed.value = false
   currentStrokes.value = []
+  redoStack.value = []
   saveStrokes()
 }
 // 板书上下平移（dir=-1 上翻 / dir=1 下翻），委托给画布的虚拟滚动
@@ -1665,6 +1741,11 @@ onBeforeUnmount(() => {
 }
 .tool-btn:hover { background: var(--wb-bg-hover, #f1f5f9); }
 .tool-btn.active { background: var(--wb-primary-mist, #eef2ff); color: var(--wb-primary, #6366f1); }
+.tool-btn:disabled { opacity: .38; cursor: not-allowed; }
+.tool-btn:disabled:hover { background: transparent; }
+/* 清空本页的「待确认」态：变红，提示再点一次 */
+.tool-btn--danger,
+.tool-btn--danger:hover { background: #fee2e2; color: #dc2626; }
 
 /* 底栏 */
 .board-footer {

@@ -9,8 +9,11 @@
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
       @pointerleave="onPointerUp"
-      @lostpointercapture="finishStroke"
+      @lostpointercapture="onLostCapture"
     />
+    <!-- 激光笔光点层：独立 canvas，pointer-events:none，只画「临时指针轨迹」。
+         它不参与 strokes —— 导出板书 PNG 只读 localStrokes，天然不含光点。 -->
+    <canvas ref="laserRef" class="dc-laser" aria-hidden="true" />
   </div>
 </template>
 
@@ -22,7 +25,7 @@
  * 笔迹与题目分层叠加（清笔画不破坏题目）。统一支持鼠标 / 触控笔（含压感）/
  * 触摸屏（Pointer Events 原生能力）。
  *
- * 功能：换色 / 换粗细 / 橡皮 / 撤销 / 清空 / 导出板书图（白底 + 题干文本 +
+ * 功能：换色 / 换粗细 / 橡皮 / 撤销 / 激光笔 / 清空 / 导出板书图（白底 + 题干文本 +
  * 配图 + 笔迹 → PNG 下载）。
  *
  * 数据流：组件内部维护 localStrokes 作为唯一书写源；外部「切题替换笔迹」
@@ -187,6 +190,7 @@ function syncSize() {
   ctx.lineJoin = 'round'
   cachedRect = null
   redraw()
+  syncLaserSize()
 }
 
 let resizeObserver = null
@@ -198,6 +202,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (rafId) cancelAnimationFrame(rafId)
+  if (laserRaf) cancelAnimationFrame(laserRaf)
+  laserTrail = []
   cancelWheelPan()
 })
 
@@ -290,6 +296,13 @@ function endPinch() {
 function onPointerDown(e) {
   if (props.disabled) return
   if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
+  // 激光笔：手指 / 触控笔 / 鼠标一视同仁 —— 只驱动光点层，不落墨、不进捏合
+  if (tool.value === 'laser') {
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    if (laserActive) return
+    startLaser(e)
+    return
+  }
   if (e.pointerType === 'touch') {
     // 手指绘画开启时手指就是笔，两指 = 两笔画，不做捏合；笔模式下跟踪触点，
     // 第二个触点落下进入捏合缩放
@@ -332,6 +345,14 @@ function startStroke(e, eraserEnd) {
 
 // ── 行笔：只收点 + 增量画新段。不碰响应式、不 emit、不全量重绘 ──────
 function onPointerMove(e) {
+  // 激光会话中：只推光点，其余一律不碰（绝不 appendLivePoint）
+  if (laserActive) {
+    if (e.pointerId !== laserPointerId) return
+    // 抬笔事件丢失兜底：buttons 归零 = 这一下已结束
+    if (e.buttons === 0) { endLaser(e); return }
+    pushLaserPoint(e)
+    return
+  }
   // 捏合中的双指触点：更新位置并按 rAF 节流重算视图
   if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
     touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY })
@@ -412,6 +433,8 @@ function scheduleLiveRender() {
 
 // ── 收笔（pointerup / cancel / 捕获丢失 / buttons 归零共用）─────────
 function onPointerUp(e) {
+  // 激光会话结束：停止落点，拖尾按点龄自然收掉
+  if (laserActive) { endLaser(e); return }
   // 捏合 / 待跟踪的 touch 触点抬起：清触点，双指不足则结束捏合
   if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
     touchPts.delete(e.pointerId)
@@ -449,6 +472,112 @@ function finishStroke() {
   }
   emit('update:strokes', localStrokes.value)
 }
+
+// ── 激光笔（2026-10-03）─────────────────────────────────────────────
+// 只做「临时指针」：红点 + 短拖尾，画在独立的 pointer-events:none 光点层上。
+// 关键纪律：激光笔绝不进 startStroke/appendLivePoint，也绝不写 localStrokes ——
+// 不进笔迹数据结构，「导出板书 PNG 不含光点」因此是天然成立的，不需要额外过滤。
+// 拖尾按「点龄」过期：抬手后不再落新点，旧点 220ms 内自然掉光 → 抬手即消。
+const LASER_TRAIL_MS = 220
+const LASER_MAX_POINTS = 48
+const LASER_HEAD_R = 5
+const laserRef = ref(null)
+let laserCtx = null
+let laserActive = false
+let laserPointerId = null
+let laserRaf = 0
+let laserTrail = [] // { x, y, t } —— 屏幕 CSS 坐标（画布内），不随纸面 zoom/pan 缩放
+
+function syncLaserSize() {
+  const c = laserRef.value
+  const wrap = wrapRef.value
+  if (!c || !wrap) return
+  const w = wrap.clientWidth
+  const h = wrap.clientHeight
+  if (w === 0 || h === 0) return
+  const ratio = dpr()
+  c.width = Math.round(w * ratio)
+  c.height = Math.round(h * ratio)
+  c.style.width = w + 'px'
+  c.style.height = h + 'px'
+  laserCtx = c.getContext('2d')
+  drawLaser(performance.now())
+}
+
+function startLaser(e) {
+  laserActive = true
+  laserPointerId = e.pointerId
+  laserTrail = []
+  cachedRect = canvasRef.value.getBoundingClientRect()
+  try { canvasRef.value.setPointerCapture(e.pointerId) } catch { /* 指针已消失：仍可用，只是失去捕获 */ }
+  pushLaserPoint(e)
+}
+
+function pushLaserPoint(e) {
+  const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
+  laserTrail.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, t: performance.now() })
+  if (laserTrail.length > LASER_MAX_POINTS) laserTrail.shift()
+  if (!laserRaf) laserRaf = requestAnimationFrame(tickLaser)
+}
+
+function tickLaser() {
+  laserRaf = 0
+  const now = performance.now()
+  while (laserTrail.length && now - laserTrail[0].t > LASER_TRAIL_MS) laserTrail.shift()
+  drawLaser(now)
+  if (laserTrail.length) laserRaf = requestAnimationFrame(tickLaser)
+}
+
+function drawLaser(now) {
+  const c = laserRef.value
+  if (!c || !laserCtx) return
+  const ratio = dpr()
+  laserCtx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  laserCtx.clearRect(0, 0, c.width / ratio, c.height / ratio)
+  if (!laserTrail.length) return
+  laserCtx.lineCap = 'round'
+  laserCtx.lineJoin = 'round'
+  // 拖尾：逐段按点龄衰减，越旧越细越淡
+  for (let i = 1; i < laserTrail.length; i += 1) {
+    const a = laserTrail[i - 1]
+    const b = laserTrail[i]
+    const k = 1 - Math.min(1, (now - b.t) / LASER_TRAIL_MS)
+    laserCtx.strokeStyle = `rgba(239, 68, 68, ${(0.5 * k).toFixed(3)})`
+    laserCtx.lineWidth = LASER_HEAD_R * 1.2 * k
+    laserCtx.beginPath()
+    laserCtx.moveTo(a.x, a.y)
+    laserCtx.lineTo(b.x, b.y)
+    laserCtx.stroke()
+  }
+  // 头点：实心红点 + 柔光外圈
+  const head = laserTrail[laserTrail.length - 1]
+  const hk = 1 - Math.min(1, (now - head.t) / LASER_TRAIL_MS)
+  laserCtx.fillStyle = `rgba(239, 68, 68, ${(0.95 * (1 - hk * 0.6)).toFixed(3)})`
+  laserCtx.beginPath()
+  laserCtx.arc(head.x, head.y, LASER_HEAD_R, 0, Math.PI * 2)
+  laserCtx.fill()
+  laserCtx.fillStyle = `rgba(239, 68, 68, ${(0.18 * hk).toFixed(3)})`
+  laserCtx.beginPath()
+  laserCtx.arc(head.x, head.y, LASER_HEAD_R * 2.6, 0, Math.PI * 2)
+  laserCtx.fill()
+}
+
+/** 结束激光会话（不清 trail：让最后一段自然过期，视觉上是「抬手后拖尾收掉」） */
+function endLaser(e) {
+  if (!laserActive) return
+  if (e && e.pointerId !== laserPointerId) return
+  laserActive = false
+  laserPointerId = null
+  if (!laserRaf && laserTrail.length) laserRaf = requestAnimationFrame(tickLaser)
+}
+
+function onLostCapture() {
+  finishStroke()
+  endLaser()
+}
+
+/** 切走激光笔（换笔 / 橡皮）时立刻结束会话，避免光点残留 */
+watch(tool, (t) => { if (t !== 'laser') endLaser() })
 
 // ── 笔迹渲染 ────────────────────────────────────────────────────────
 function lineWidth(stroke) {
@@ -635,17 +764,6 @@ function panBoard(dy) {
   panY = next
   redraw()
 }
-/** 回到原位（顶部 + 1:1，露出题干） */
-function resetView() {
-  cancelWheelPan()
-  if (panY !== 0 || panX !== 0 || zoom !== 1) {
-    panX = 0
-    panY = 0
-    zoom = 1
-    redraw()
-  }
-}
-
 /** 以屏幕点 (clientX, clientY) 为锚缩放纸面（Ctrl+滚轮；捏合走 trackTouchDown 一路） */
 function zoomAt(factor, clientX, clientY) {
   cancelWheelPan()
@@ -700,7 +818,7 @@ function wheelPanBy(delta) {
 }
 
 defineExpose({
-  exportPng, redraw, syncSize, panBoard, resetView, wheelPanBy, zoomAt,
+  exportPng, redraw, syncSize, panBoard, wheelPanBy, zoomAt,
   boardScrolled: () => panY > 0,
   pinchActive: () => !!pinch,
   zoomLevel: () => zoom,
@@ -722,5 +840,12 @@ defineExpose({
 }
 .dc-canvas.dc-eraser {
   cursor: cell;
+}
+/* 激光笔光点层：只显示、不接收事件（事件仍落在下面的手写 canvas 上） */
+.dc-laser {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
 }
 </style>
