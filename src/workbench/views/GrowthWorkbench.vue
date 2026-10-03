@@ -47,6 +47,9 @@
               <div class="kpi-card__left">
                 <div class="kpi-card__label">错题总数</div>
                 <div class="kpi-card__value">{{ kpiData.totalWrong }} <span class="kpi-card__unit">题</span></div>
+                <div v-if="trend" class="kpi-card__trend" :class="trend.wrongDelta > 0 ? 'trend-bad' : 'trend-good'">
+                  本周新增 {{ trend.wrongNewThis }} 题（上周 {{ trend.wrongNewLast }} 题）
+                </div>
               </div>
               <div class="kpi-card__icon kpi-card__icon--blue">
                 <el-icon><Document /></el-icon>
@@ -56,6 +59,9 @@
               <div class="kpi-card__left">
                 <div class="kpi-card__label">错题已掌握率</div>
                 <div class="kpi-card__value">{{ kpiData.accuracy }}%</div>
+                <div v-if="trend" class="kpi-card__trend" :class="trend.masteredDelta >= 0 ? 'trend-good' : 'trend-bad'">
+                  本周新掌握 {{ trend.masteredDelta >= 0 ? '+' : '' }}{{ trend.masteredDelta }} 题（上周 {{ trend.masteredLast }} 题）
+                </div>
                 <div class="kpi-card__trend-hint">{{ kpiData.totalWrong }} 题中已掌握 {{ kpiData.accuracy }}%（按错题生命周期）</div>
               </div>
               <div class="kpi-card__icon kpi-card__icon--green">
@@ -274,7 +280,7 @@ import {
   PieChart, Top, Bottom
 } from '@element-plus/icons-vue'
 import { useGrowthStore } from '../stores/growthStore'
-import { getStudents } from '../../services/apiService'
+import { getStudents, getWeeklyReport } from '../../services/apiService'
 import { getRecommendedTopics } from '../../services/apiService'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
 import * as echarts from 'echarts/core'
@@ -570,6 +576,30 @@ watch([selectedStudentId, subjectFilter], () => {
   loadRecommend()
 })
 
+// 本周 vs 上周趋势（提案 7）：复用 weeklyReport 周聚合，真实周环比
+const trend = ref(null)
+const loadTrend = async () => {
+  if (!selectedStudentId.value) return
+  try {
+    const [thisWeek, lastWeek] = await Promise.all([
+      getWeeklyReport(selectedStudentId.value, { mode: 'week', offset: 0 }),
+      getWeeklyReport(selectedStudentId.value, { mode: 'week', offset: 1 }),
+    ])
+    if (!thisWeek?.success || !lastWeek?.success) return
+    const tw = thisWeek.stats || {}
+    const lw = lastWeek.stats || {}
+    trend.value = {
+      wrongNewThis: tw.newWrongCount ?? 0,
+      wrongNewLast: lw.newWrongCount ?? 0,
+      wrongDelta: (tw.newWrongCount ?? 0) - (lw.newWrongCount ?? 0),
+      masteredThis: tw.masteredCount ?? 0,
+      masteredLast: lw.masteredCount ?? 0,
+      masteredDelta: (tw.masteredCount ?? 0) - (lw.masteredCount ?? 0),
+    }
+  } catch { /* 趋势加载失败静默：KPI 主数值不受影响 */ }
+}
+watch(selectedStudentId, () => { loadTrend() })
+
 // 一键生成讲义：跳转到讲义预览页（HandoutPreview 走 /handout/from-diagnosis）
 const handleGenerateHandout = () => {
   if (generatingHandout.value) return
@@ -764,6 +794,10 @@ onUnmounted(() => {
   color: var(--wb-text-tertiary);
   margin-top: 6px;
 }
+
+/* 真实周环比趋势（提案 7）：错题增=红，掌握增=绿，色板取自全站既有用色 */
+.kpi-card__trend.trend-good { color: #16a34a; }
+.kpi-card__trend.trend-bad { color: #dc2626; }
 
 /* 口径说明（2026-10-02）：KPI 卡片不再展示假趋势箭头，改为一行口径说明 */
 .kpi-card__trend-hint {
