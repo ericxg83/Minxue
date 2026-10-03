@@ -79,7 +79,6 @@ test('ossService.uploadImage 白名单接受 jpg 但拒 heic（修复前 bug）'
   const { uploadImage } = await import('../services/ossService.js')
   // mock uploadFile 防止真打 OSS
   const origUploadFile = (await import('../services/ossService.js')).uploadFile
-  let lastExt = null
   // 用 Object.defineProperty 不能直接改 imported 函数，
   // 改测白名单逻辑：ext 不在 ['jpg','jpeg','png','webp'] 时 throw
   const ext = 'heic'

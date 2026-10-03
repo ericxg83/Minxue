@@ -31,7 +31,6 @@ const pool = new Pool({
 const q = (sql, params) => pool.query(sql, params)
 
 const STUDENT_ID = 'cd4773e3-71da-4da3-a452-cfb7f9b6c33f' // 余晨瑞
-const STUDENT_NAME = '余晨瑞'
 const BACKUP_TABLE = 'wrong_questions_bak_20260914_pollution'
 
 const rollback = process.argv.includes('--rollback')

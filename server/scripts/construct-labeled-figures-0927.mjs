@@ -34,7 +34,6 @@ assertCurve(f1, null, [[-1, 0], [4, 0], [1.5, 6.25], [0, 4], [3, 4]], '9b409c35'
 const curve1 = []
 for (let x = -1.25; x <= 4.25; x += 0.05) { const y = f1(x); if (y >= -1.1) curve1.push([r2(x), r2(y)]) }
 const V = (x, y, text) => ({ x, y, text, verified: true })
-const xTicks = [-2, -1, 1, 2, 3, 4]
 const s1 = {
   figure_type: 'function',
   grid: { x: -2, y: -1, unit: 1, cols: 6, rows: 7 },

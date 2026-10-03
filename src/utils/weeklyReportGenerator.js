@@ -8,8 +8,6 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 
 dayjs.extend(isoWeek)
 
-const A4_W = 210
-const A4_H = 297
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）

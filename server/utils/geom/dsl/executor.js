@@ -19,7 +19,6 @@ import { parseDsl } from './parser.js'
 import { evalExpr, parseFunctionExpr } from './expr.js'
 import { COMMANDS, hasCommand, commandNames } from './commands.js'
 
-const isNum = (v) => typeof v === 'number' && Number.isFinite(v)
 
 /** 把命令表的 inputs 规格展开成「每位的可接受类型集合」 */
 function slotsOf(spec, n) {

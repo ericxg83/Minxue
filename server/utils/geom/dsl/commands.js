@@ -69,10 +69,7 @@ function clipCurveOutliers(pts) {
 export const TYPES = ['p', 's', 'l', 'r', 'c', 'C', 'P', 'k', 'g', 'f', 'n']
 
 const isP = (o) => o?.kind === 'p'
-const isLineLike = (o) => o?.kind === 'l' || o?.kind === 's' || o?.kind === 'r'
 const isCircleLike = (o) => o?.kind === 'c'
-/** 有界的线（线段/射线）——交点必须落在范围内 */
-const isBounded = (o) => o?.kind === 's' || o?.kind === 'r'
 
 /**
  * 把「线状对象」化成 { p, d, len, bounded, kind }。

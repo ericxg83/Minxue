@@ -17,37 +17,6 @@ function rgbToGray(r, g, b) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 
-/**
- * 预计算高斯权重矩阵 (7x7 截断近似 41 邻域的高效计算)
- * 对于 blockSize=41 的完整高斯计算量太大，使用积分图+均值近似
- */
-function buildGaussianWeights(blockSize) {
-  const half = Math.floor(blockSize / 2)
-  const sigma = half / 3.0 // 标准差
-  const weights = []
-  let totalWeight = 0
-
-  for (let y = 0; y < blockSize; y++) {
-    weights[y] = []
-    for (let x = 0; x < blockSize; x++) {
-      const dx = x - half
-      const dy = y - half
-      const distSq = dx * dx + dy * dy
-      const w = Math.exp(-distSq / (2 * sigma * sigma))
-      weights[y][x] = w
-      totalWeight += w
-    }
-  }
-
-  // 归一化
-  for (let y = 0; y < blockSize; y++) {
-    for (let x = 0; x < blockSize; x++) {
-      weights[y][x] /= totalWeight
-    }
-  }
-
-  return weights
-}
 
 /**
  * 构建灰度积分图 (Integral Image / Summed Area Table)

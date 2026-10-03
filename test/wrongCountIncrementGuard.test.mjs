@@ -98,7 +98,6 @@ test('finalizeGeneratedExamResults 的全部写入必须在 transaction() 内', 
   }
   const poolInTx = (inner.match(/[^.]query\(/g) || []).filter(m => true).length
   const clientQueries = (inner.match(/client\.query\(/g) || []).length
-  const directPool = poolInTx - 0 // 仅供可读性；下方逐条断言更精确
   assert.ok(clientQueries >= 5, `事务内至少 5 次 client.query（错题插入/更新、题目回写、exam 标记、审计），实际 ${clientQueries}`)
   // 事务体内不允许出现裸 pool 级 query( 调用（会逃出事务）
   const barePool = inner.match(/(?<!client\.)(?<!\w)query\(/g) || []

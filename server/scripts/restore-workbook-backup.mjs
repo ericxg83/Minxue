@@ -15,12 +15,8 @@ console.log(`备份: ${FILE}`)
 console.log(`  created=${backup.createdAt}  questions=${backup.questions.length} wrong=${backup.wrongQuestions.length} judgements=${backup.judgements.length}`)
 
 const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } })
-const q = async (s, p) => (await pool.query(s, p)).rows
 const ids = backup.taskIds
 
-// 只保留当前表里真实存在的列，避免备份列与现库结构漂移
-const colsOf = async (table) =>
-  (await q(`SELECT column_name FROM information_schema.columns WHERE table_name=$1`, [table])).map(r => r.column_name)
 
 const insertRows = async (client, table, rows) => {
   if (!rows.length) return 0

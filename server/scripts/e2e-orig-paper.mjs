@@ -4,7 +4,6 @@
 import { chromium } from 'playwright'
 
 const BASE = 'http://localhost:3000/workbench.html'
-const OUT = 'D:/Minxue_App_V3/server/scripts/logs/dsl-demo/'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 const EXAM = 'd6e95822-2313-4467-82f3-89e30a65484f'

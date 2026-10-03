@@ -57,7 +57,6 @@ const m = (key, fn) => [key, fn]
 
 test('版本号对同一键 + 同一实现稳定，对源码变化敏感', () => {
   const a = async () => {}
-  const b = async () => {}
   assert.equal(versionOf('k', a), versionOf('k', a), '同键同实现必须稳定，否则每次都重跑')
 
   // 模拟「迁移文件被改了」：同名键、不同实现

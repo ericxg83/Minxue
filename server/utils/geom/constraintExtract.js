@@ -25,8 +25,6 @@ import {
 const P = String.raw`[A-Z][′'’]?`
 const norm = (s) => String(s ?? '').replace(/[′'’]/g, '′')
 const re = (body, flags = 'g') => new RegExp(body.replace(/\bP\b/g, P), flags)
-/** 找首处的单次匹配正则（.match 语义），用于「从片段里找轴」这类需要捕获组的场景 */
-const reOnce = (body) => re(body, '')
 const splitPoints = (run) => [...String(run).matchAll(new RegExp(P, 'g'))].map(m => norm(m[0]))
 
 /** 结论不是条件：求证式里的等式描述的是待证目标，抄成约束会把图拧成"已证"的样子 */

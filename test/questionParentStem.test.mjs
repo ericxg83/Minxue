@@ -251,7 +251,6 @@ test('extractPrereqRefs：识别各类前置引用语', () => {
   assert.deepEqual(extractPrereqRefs('(2)结合(2)的内容再算一遍.'), ['2'], '引用自身也不误报为缺失')
 })
 
-const GRP = { task_id: 't1', page_number: 2, question_number: 10 }
 const mkGroup = (overrides) => ({
   task_id: 't1', page_number: 2, question_number: 10,
   ...overrides

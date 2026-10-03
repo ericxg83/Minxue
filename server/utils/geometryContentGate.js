@@ -13,7 +13,6 @@
 
 import { isAuxPointLabel, isTickNumberLabel, isVertexSymbolLabel, detectNumberAxis, detectCoordAxes } from './geom/structure.js'
 
-const GREEK = 'αβγδεζηθικλμνξοπρστυφχψω'
 
 // （点名正则 PT / PT_LOWER 见下方 normalizeLabel 旁——两者共用同一套下标/撇归一约定）
 
@@ -203,8 +202,6 @@ function allReferencedLetters(text) {
   return set
 }
 
-/** 撇号归一：把各种撇（' ’ ′）统一成 U+2032，便于跨来源比较字母 */
-const normalizePrime = (s) => String(s ?? '').replace(/[′'’]/g, '′')
 
 /**
  * 点名的**唯一归一函数**：撇号统一 + 下标统一（₀-₉ → 0-9）。

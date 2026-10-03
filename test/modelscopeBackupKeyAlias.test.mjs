@@ -58,7 +58,6 @@ function withEnv(patch, fn) {
   }
 }
 
-const VARS = ['MODELSCOPE_BACKUP_API_KEY', 'MODELSCOPE_BACKUP_API_KEY_2']
 
 // ── 1. 别名可读（今天踩的坑本体）─────────────────────────────────────────────
 

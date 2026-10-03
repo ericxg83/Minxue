@@ -79,7 +79,6 @@ async function main() {
   const impure = []
   let parseHits = 0
   for (const q of candidates) {
-    const text = `${q.parentStem} ${q.content}`
     const built = buildFunctionGraphSvg(q.parentStem, q.content, renderGeometrySvg)
     if (built) { hits.push({ ...q, ...built }); continue }
     // 区分"解析不出来"与"解析出来但题干含其他几何构造（画出来会残缺）"

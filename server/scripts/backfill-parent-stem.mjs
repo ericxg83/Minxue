@@ -47,7 +47,6 @@ const taskIdx = process.argv.indexOf('--task')
 const TASK_PREFIX = taskIdx > -1 ? process.argv[taskIdx + 1] || '' : ''
 
 const SUB_HEAD_RE = /^[（(]\s*([0-9１-９一二三四五六七八九]{1,2})\s*[)）]/
-const SUB_MARKER_ANY_RE = /[（(]\s*\d{1,2}\s*[)）]/
 const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 
 // 「这一行是不是依赖公共条件才可作答」——应用题/几何题/函数题必须带条件；
@@ -236,7 +235,6 @@ async function main() {
         if (subRows.length > 0 && subRows.every(r => isSelfCompleteContent(r.content))) return false
         return g.rows.some(r => needsParentStem(r.content))
       })
-  const skipped0 = beforeFilter - kept.length
   const taskFiltered = TASK_PREFIX ? kept.filter(g => g.task_id.startsWith(TASK_PREFIX)) : kept
   const skipped = beforeFilter - taskFiltered.length
 
