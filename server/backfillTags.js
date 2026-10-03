@@ -20,11 +20,7 @@ dotenv.config({ path: resolve(__dirname, '.env') })
 import axios from 'axios'
 import { query, TABLES } from './config/neon.js'
 import {
-  AI_CONFIG,
-  getAIHeaders,
   buildTaggingPrompt,
-  getCurrentTextModel,
-  rotateTextModel,
   callTextCompletion
 } from './config/ai.js'
 

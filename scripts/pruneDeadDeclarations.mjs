@@ -36,6 +36,17 @@ const onlyIdx = argv.indexOf('--only')
 const ONLY = onlyIdx >= 0 ? argv[onlyIdx + 1] : null
 const limitIdx = argv.indexOf('--limit')
 const LIMIT = limitIdx >= 0 ? parseInt(argv[limitIdx + 1], 10) || 0 : 0
+// 第二批：未使用的 import 说明符。**仅当同一 import 语句还有其他说明符时才删**——
+// 那样模块仍被加载，副作用一字不变；而「该模块唯一导入」删了会整行消失，
+// 等于把一次模块加载副作用也删了（polyfill / 注册型模块会直接碎），所以不碰。
+const IMPORTS = argv.includes('--imports')
+
+// 负责人裁决红线（2026-10-02 裁决③，backlog 已记「任何轮次不得自行清理，等负责人再开口」）：
+// 几何重绘目录那 5 个整行死 import 不碰。本工具把它们写死为保护名单，
+// 防止以后某轮“反正工具能删”把它们顺手清掉。
+const PROTECTED_NAMES = new Set([
+  'checkFigureReference', 'FIGURE_GATE_MESSAGE', 'buildFunctionGraphSvg', 'renderGeometrySvg', 'publishCleanGeometryUrl'
+])
 
 // ── 1. 取 eslint 的 no-unused-vars 报告（复用现有 eslint.config.js，口径不漂移）──
 const JSON_PATH = path.join(ROOT, 'tmp', 'prune-lint.json')
@@ -166,8 +177,14 @@ for (const w of warnings) {
   const hit = decls.find(d => d.name === w.name && d.line === w.line && d.col === w.column)
     || decls.find(d => d.name === w.name && Math.abs((d.line || 0) - w.line) <= 1)
   if (!hit) { kept.push({ ...w, why: '未匹配到声明（函数体内局部变量/闭包变量等）' }); continue }
+  if (PROTECTED_NAMES.has(w.name)) { kept.push({ ...w, why: '负责人裁决③：几何重绘目录的 5 个死 import 先不动' }); continue }
   if (hit.kind === 'param') { kept.push({ ...w, why: '函数参数（删参数会改调用契约）' }); continue }
-  if (hit.kind === 'import') { kept.push({ ...w, why: hit.multiDeclarator ? 'import 说明符（它是该模块唯一导入，删了会改变模块加载副作用）' : 'import 说明符（同模块还有其他导入，下一批可安全删）' }); continue }
+  if (hit.kind === 'import') {
+    if (hit.multiDeclarator) { kept.push({ ...w, why: 'import 说明符（它是该模块唯一导入，删了会改变模块加载副作用）' }); continue }
+    if (!IMPORTS) { kept.push({ ...w, why: 'import 说明符（同模块还有其他导入，加 --imports 才处理）' }); continue }
+    deletable.push({ ...w, kind: 'import-spec', start: hit.start, end: hit.end })
+    continue
+  }
   if (hit.kind === 'var' && hit.multiDeclarator) { kept.push({ ...w, why: '多声明子句（只删一个会改语义）' }); continue }
   if (!hit.pure) { kept.push({ ...w, why: '初始化含调用/await 等副作用，删了等于删掉那次执行' }); continue }
   deletable.push({ ...w, kind: hit.kind, start: hit.start, end: hit.end })
@@ -193,7 +210,7 @@ for (const [file, list] of byFile.entries()) {
   byFile.set(file, out)
 }
 const totalDeletable = [...byFile.values()].reduce((n, l) => n + l.length, 0)
-console.log(`${APPLY ? '【实际删除】' : '【演练，零改写】'} 可安全删除 ${totalDeletable} 条（分布在 ${byFile.size} 个文件，已去掉 ${droppedNested} 条与外层重叠的内层项）；保留并报告 ${kept.length} 条`)
+console.log(`${APPLY ? '【实际删除】' : '【演练，零改写】'} 可安全删除 ${totalDeletable} 条（分布在 ${byFile.size} 个文件，含 import 说明符 ${deletable.filter(d => d.kind === 'import-spec').length} 条，已去掉 ${droppedNested} 条与外层重叠的内层项）；保留并报告 ${kept.length} 条`)
 for (const [file, list] of [...byFile.entries()].sort()) {
   console.log(`\n  ${file}  (${list.length})`)
   for (const d of list.sort((a, b) => a.line - b.line)) console.log(`    L${d.line} ${d.kind} ${d.name}`)
@@ -243,12 +260,44 @@ function expandRange(src, start, end) {
   return [from, to]
 }
 
+/**
+ * import 说明符的删除区间。
+ *
+ * ⚠️ 只支持**多行写法**（这一行除它自己与逗号外没别的内容）→ 删整行。
+ * 同行还挂着其他说明符时一律不碰：实测“删自身 + 一个相邻逗号”的写法在同一条 import 里
+ * 有多个未用说明符时，两个区间会争抢同一个逗号（一个往后吃、一个往前吃）而重叠，
+ * splice 后会把 `}` 一起吃掉，产出 `import {  from 'x'` 这种语法碎（第 83 轮演练发现，
+ * 已 git checkout 回退，未进仓库）。同行情形交人工，不值得为它冒弄坏源文件的风险。
+ */
+function expandSpecifier(src, start, end) {
+  const lineStart = src.lastIndexOf('\n', start - 1) + 1
+  let lineEnd = src.indexOf('\n', end)
+  if (lineEnd === -1) lineEnd = src.length
+  const line = src.slice(lineStart, lineEnd)
+  const onlyThis = line.replace(/[,;\s]/g, '') === src.slice(start, end).replace(/[,;\s]/g, '')
+  if (!onlyThis) return null
+  let to = lineEnd
+  if (src[to] === '\r' && src[to + 1] === '\n') to += 2
+  else if (src[to] === '\n') to += 1
+  return [lineStart, to]
+}
+
 let written = 0
 let removedLines = 0
+let skippedSameLine = 0
 for (const [file, list] of byFile.entries()) {
   const p = path.join(ROOT, file)
   let src = fs.readFileSync(p, 'utf8')
-  const expanded = list.map(d => expandRange(src, d.start, d.end)).sort((a, b) => b[0] - a[0])
+  const all = list.map(d => (d.kind === 'import-spec' ? expandSpecifier(src, d.start, d.end) : expandRange(src, d.start, d.end)))
+  const expanded = all.filter(Boolean).sort((a, b) => b[0] - a[0])
+  skippedSameLine += all.length - expanded.length
+  // 双重保险：区间按降序排列后，前一项的起点必须 >= 后一项的终点（互不重叠）；
+  // 一旦发现重叠就放弃整个文件（宁可少删，不可把源文件写碎）。
+  let overlap = false
+  for (let i = 0; i + 1 < expanded.length; i++) {
+    if (expanded[i][0] < expanded[i + 1][1]) { overlap = true; break }
+  }
+  if (overlap) { console.error(`  ❌ ${file} 存在重叠删除区间，跳过整个文件不写`); continue }
   for (const [from, to] of expanded) {
     removedLines += (src.slice(from, to).match(/\n/g) || []).length
     src = src.slice(0, from) + src.slice(to)
@@ -256,6 +305,6 @@ for (const [file, list] of byFile.entries()) {
   fs.writeFileSync(p, src, 'utf8')
   written++
 }
-console.log(`\n已改写 ${written} 个文件，共移除了 ${removedLines} 行（含紧邻的孤儿文档注释）。`)
+console.log(`\n已改写 ${written} 个文件，共移除了 ${removedLines} 行（含紧邻的孤儿文档注释）；另有 ${skippedSameLine} 条 import 说明符因与其他内容同行而跳过（安全规则，交人工）。`)
 console.log('下一步必须：node --check（.js）+ npm test + npx vite build + 冒烟')
 process.exit(0)
