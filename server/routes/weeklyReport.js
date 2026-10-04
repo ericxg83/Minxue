@@ -190,6 +190,28 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       [studentId, periodStart, periodEnd]
     )
 
+    // 8.5 错因分布（仅做错题，空题不分析错因）——复用 diagnosisService 已回填的
+    // wrong_questions.error_type（与 teaching.js 教学诊断同一口径，不重造错因分析）。
+    const { rows: errorTypeRows } = await query(
+      `SELECT
+        COALESCE(NULLIF(wq.error_type, ''), '未分析') AS error_type,
+        COUNT(*)::int AS count
+      FROM ${TABLES.WRONG_QUESTIONS} wq
+      WHERE wq.student_id = $1
+        AND wq.added_at >= $2
+        AND wq.added_at < $3
+        AND (wq.is_blank IS NOT TRUE)
+      GROUP BY COALESCE(NULLIF(wq.error_type, ''), '未分析')
+      ORDER BY count DESC`,
+      [studentId, periodStart, periodEnd]
+    )
+    const errorTotal = errorTypeRows.reduce((s, r) => s + r.count, 0)
+    const errorDistribution = errorTypeRows.map(r => ({
+      errorType: r.error_type,
+      count: r.count,
+      ratio: errorTotal > 0 ? Math.round((r.count / errorTotal) * 100) : 0
+    }))
+
     // 组合掌握状态统计
     let masteredCount = 0
     let pendingCount = 0
@@ -252,6 +274,7 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       stats,
       knowledgeDiagnosis,
       subjectDiagnosis,
+      errorDistribution,
       dailyTrend,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,

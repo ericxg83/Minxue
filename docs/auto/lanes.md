@@ -116,6 +116,13 @@
 - ⚠️ 并发 hazard 实记：本轮首次编辑后，`weeklyReportGenerator.js` 被另一会话回退到 r115q 提交态（未提交的 r116q 改动被抹），已重新应用全部四处（函数/CSS/变量/新页）。教训：移动端 PDF 改动要快改快提，降低被并发 checkout 抹掉的风窗口。
 - 四道闸：单测 1585/1585｜lint 0 error（仅 2 条既存 warning）｜`dist_nightly_20261004r116q`（明细页内容已入 chunk）｜真机 PNG 渲染自检（4 页完整）。
 
+**第 117q 轮（2026-10-04，本赛道）已交付：【PDF】接入「错因分布」（复用已有 diagnosisService，不重造）**
+- 负责人明确：错因是重要信息，系统里已有相关代码，只调用不重造。实测定位：`server/services/diagnosisService.js` 已回填 `wrong_questions.error_type`（启发式+LLM+词表约束+周定时），**PC 版学习诊断已在展示错因分布**（`WeeklyReportWorkbench.vue` 读 `errorDistribution`），只是移动端 PDF 没接。
+- 后端 `weeklyReport.js`（我的 PDF 数据端点）：新增按学生+周期的 `GROUP BY error_type` 聚合（排除空题 is_blank），作用域改成本生，与 teaching.js 同一口径，返回 `errorDistribution`。
+- 前端 `weeklyReportGenerator.js`：新增 `renderErrorDistribution`（带色条形图）接入学科诊断页。实测真实数据：计算错诶 51% / 概念不理解 21% / 审题错误 13% / 步骤遗漏 7% / 粗心 3%…
+- 并发：4000 后端被对方 keep-alive 占着 kill 不掉，另起 4100 实例加载新代码验证（只读 GET）。新锁 `test/weeklyReportErrorCause.test.mjs` 守两端链路不被静默改没。
+- 四道闸：单测 1591/1591｜lint 0 error｜`dist_nightly_20261004r117q`（错因分布已入 chunk）｜真机 PNG 渲染自检（学科页错因分布 8 类彩色条完整）。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到

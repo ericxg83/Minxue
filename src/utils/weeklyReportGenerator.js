@@ -225,6 +225,32 @@ function renderMasteryDistribution(subjectDiagnosis) {
 }
 
 /**
+ * 错因分布（计算错误/单位错误/步骤遗漏/概念错误/未分析 …）。
+ * 数据来自后端 weekly-report 的 errorDistribution（聚合 diagnosisService 已回填的
+ * wrong_questions.error_type）。错因是老师/家长最关心的“为什么错”，比“错了几题”更可行动。
+ */
+const ERROR_TYPE_COLORS = {
+  计算错误: T.danger, 概念不理解: T.primary, 审题错误: T.teal,
+  步骤遗漏: T.accent, 粗心: T.warning, 不会分析: T.purple,
+  单位错误: T.warning, 概念错误: T.primary, 誊写错误: T.purple, 未分析: T.textTer,
+}
+function renderErrorDistribution(errorDistribution) {
+  const rows = (errorDistribution || []).filter(e => e && e.count > 0)
+  if (rows.length === 0) return ''
+  const maxCount = Math.max(...rows.map(r => r.count), 1)
+  const bars = rows.map(e => {
+    const c = ERROR_TYPE_COLORS[e.errorType] || T.primary
+    const w = Math.max(3, Math.round((e.count / maxCount) * 100))
+    return `<div class="bar-row">
+      <div class="bar-name" style="width:80px">${escapeHtml(e.errorType)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${c}"></div></div>
+      <div class="bar-val" style="color:${c};width:72px">${e.count}次 · ${e.ratio}%</div>
+    </div>`
+  }).join('')
+  return `<div class="bar-chart">${bars}</div>`
+}
+
+/**
  * 重点薄弱知识点明细（错题≥2，按错误次数降序，最多 24 条）。
  * 后端 knowledgeDiagnosis 返回全部知识点（实测可达 130+ 条），旧版学科页只用了
  * subjectDiagnosis.topTags 每科 TOP5，绝大多数真实数据被丢弃。这里把「错得最多」的
@@ -329,7 +355,7 @@ function renderComparePage(curStats, prevStats, retryProgress, badgeLabel, prevP
 }
 
 export function buildDiagnosisHTML(reportData) {
-  const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
+  const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], errorDistribution = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
   // 日维度趋势是否可用（mode=all / 无每日数据时 dailyTrend 为空，旧版会渲染一张空网格图）
   const hasTrend = Array.isArray(dailyTrend) && dailyTrend.some(d => d && d.accuracy != null)
   // 是否有错题≥2 的知识点可展出（决定要不要单独开一页明细）
@@ -676,6 +702,8 @@ export function buildDiagnosisHTML(reportData) {
       <div class="sec-sub">聚焦需要优先支持的知识点</div>
 
       ${subjectCards}
+
+      ${errorDistribution.length > 0 ? `<div class="sub-label">错因分布（做错 ${stats.wrongCount || 0} 题归因）</div><div class="chart-card" style="padding:16px 16px 12px">${renderErrorDistribution(errorDistribution)}</div>` : ''}
 
       <div class="advice">
         <div class="advice-icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 18h6M10 21h4M12 3a6 6 0 00-4 10c.7.7 1 1.4 1 2h6c0-.6.3-1.3 1-2a6 6 0 00-4-10z" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg></div>
