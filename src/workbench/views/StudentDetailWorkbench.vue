@@ -83,7 +83,7 @@
                   :loading="creatingExam && creatingPoint === point.kpId"
                   @click="createExamFromWeakPoint(point)"
                 >
-                  创建组卷
+                  生成定向重练卷
                 </ActionButton>
               </div>
             </div>
