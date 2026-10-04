@@ -11,19 +11,26 @@ dayjs.extend(isoWeek)
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
- * 2026-10-04 r120q 专业重设计：深海军蓝主 + 金点缀，冷灰白中性，语义色绿/琥珀/赤陶。
- * key 名保留（全仓多处引用），只换值。primary=navy、accent=gold。
+ *
+ * r135 品牌对齐（负责人 2026-10-04：「希望 UI 统一，和系统统一」）：
+ *   旧值是 r120q 的「深海军蓝 #123A5F + 金 #C8A24A」自成一派，
+ *   与系统实际主色 **蓝 #3157D5**（workbench-theme.css / index.css）不一致 ——
+ *   家长手里的 PDF 与老师手里的系统看起来像两个产品。
+ *   现在直接对齐系统 token（同一批 hex），改动只落在这一个对象里：
+ *   23 个 T.* key 保留（全仓多处引用），只换值 ⇒ 影响面可控。
+ *   灰阶同步换成系统的 slate 系（#1E293B / #64748B / #94A3B8 / #E2E8F0）。
+ *   语义色与系统一致：绿 #16A34A、琥珀 #D97706、赤 #DC2626。
  */
 const T = {
-  primary: '#123A5F', primaryDark: '#0C2A47', primarySoft: '#E4ECF4', primaryMist: '#F2F6FA',
-  teal: '#2C7A7B', tealSoft: '#E3F0F0',
-  success: '#2E7D5B', successSoft: '#E3F1EA',
-  warning: '#C77D2A', warningSoft: '#FAEFDF',
-  danger: '#B4483B', dangerSoft: '#F7E7E4',
-  accent: '#C8A24A', accentSoft: '#F6EEDB',
-  purple: '#7A5C9E', purpleSoft: '#EFEAF6',
-  text: '#1B2A38', textSec: '#5B6B7A', textTer: '#93A1AE',
-  border: '#D7E0E9', borderLight: '#EAF0F5', bg: '#F5F7FA', card: '#FFFFFF'
+  primary: '#3157D5', primaryDark: '#2847B8', primarySoft: '#E8EDFF', primaryMist: '#F2F5FF',
+  teal: '#0D9488', tealSoft: '#E3F5F2',
+  success: '#16A34A', successSoft: '#E7F6EC',
+  warning: '#D97706', warningSoft: '#FDF3E3',
+  danger: '#DC2626', dangerSoft: '#FDECEC',
+  accent: '#3157D5', accentSoft: '#E8EDFF',
+  purple: '#7C3AED', purpleSoft: '#F1EAFE',
+  text: '#1E293B', textSec: '#64748B', textTer: '#94A3B8',
+  border: '#E2E8F0', borderLight: '#F1F5F9', bg: '#F5F6F8', card: '#FFFFFF'
 }
 
 /** 品牌信息（统一维护，便于替换） */
@@ -83,6 +90,23 @@ function ktRowIcon(index) {
   return `<span class="kt-ic" style="background:${c.soft};color:${c.bg}">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="4.5" stroke="currentColor" stroke-width="2"/><path d="M8.5 12h7M12 8.5v7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
   </span>`
+}
+
+/**
+ * 封面学习周期文案（r135）。
+ * ⛔ 「全部」模式的 period 是 2000-01-01 ~ 2099-12-31（period.js 的 all 分支），
+ *   直接印给家长看很荒谬：「学习周期：2000-01-01 ~ 2099-12-31」。
+ *   改为按 mode 说人话。
+ */
+function periodLabelText(period) {
+  if (!period) return ''
+  const y1 = String(period.start || '').slice(0, 4)
+  const y2 = String(period.end || '').slice(0, 4)
+  // 跨度异常大 ⇒ 是「全部」模式
+  if (y1 === '2000' || y2 === '2099') {
+    return y1 && y1 !== '2000' ? `学习周期：${y1} 年至今` : '学习周期：全部记录'
+  }
+  return `学习周期：${period.start} ~ ${period.end}`
 }
 
 /** 学习寄语（依据统计自动拼装模板话术） */
@@ -337,19 +361,31 @@ function renderErrorFunnel(stats, retryProgress) {
 /**
  * 掌握度流转堆叠条：新错 / 基本掌握 / 完全掌握 占比（从红到绿）。
  */
+/**
+ * 错题掌握度三态构成（r135 修正）。
+ *
+ * ⛔ 旧版用 `basic = pending - newWrongCount` 推导「基本掌握」——
+ *   这在 r130 之前碰巧成立（pending 就是全部未掌握数），但 r130 加了
+ *   basicMasteredCount / notStartedCount 之后，`pending(72) - newWrong(74) = -2`
+ *   ⇒ **基本掌握恒为 0**。实测陆晨曦 PDF 上写着「基本掌握 0」，而库里是 14。
+ *   同一个数在后台页面显示 14、在家长 PDF 显示 0 —— 口径漂移的典型案例。
+ *   现在直读后端三态字段（r130 起提供），旧推导彻底删除。
+ *
+ * 视觉重心也一并调整：r135 起最长的条是「已记住」而非「待提升」，
+ * 让家长第一眼看到的是成果而不是欠账。
+ */
 function renderMasteryStack(stats) {
   const mastered = stats.masteredCount || 0
-  const pending = stats.pendingCount || 0
-  const basic = Math.max(0, pending - (stats.newWrongCount || 0)) // 基本掌握 = 待提升中已非新增的部分
-  const fresh = Math.min(pending, stats.newWrongCount || 0)
-  const total = Math.max(mastered + pending, 1)
+  const basic = stats.basicMasteredCount || 0
+  const todo = stats.notStartedCount || 0
+  const total = Math.max(mastered + basic + todo, 1)
   const seg = (v, color) => v > 0 ? `<div class="ms-seg" style="width:${(v / total) * 100}%;background:${color}">${v >= total * 0.12 ? v : ''}</div>` : ''
   return `<div class="ms-wrap">
-    <div class="ms-bar">${seg(fresh, T.danger)}${seg(basic, T.warning)}${seg(mastered, T.success)}</div>
+    <div class="ms-bar">${seg(mastered, T.success)}${seg(basic, T.primary)}${seg(todo, T.danger)}</div>
     <div class="ms-legend">
-      <span><i style="background:${T.danger}"></i>待提升 ${fresh}</span>
-      <span><i style="background:${T.warning}"></i>基本掌握 ${basic}</span>
-      <span><i style="background:${T.success}"></i>完全掌握 ${mastered}</span>
+      <span><i style="background:${T.success}"></i>彻底掌握 ${mastered}</span>
+      <span><i style="background:${T.primary}"></i>已记住 ${basic}</span>
+      <span><i style="background:${T.danger}"></i>还在攻克 ${todo}</span>
     </div>
   </div>`
 }
@@ -357,10 +393,37 @@ function renderMasteryStack(stats) {
 /**
  * 提升总览页（第 02 页）：错题消灭漏斗 + 掌握度流转 + 重练 KPI。
  */
+/**
+ * 01 消灭错题 · 提升总览（r135 重写）
+ *
+ * 负责人要求：「没有体现消灭错题带来的提升（可参考刚才的后台界面）」。
+ * 旧版三个问题（都是实图复核出来的，不是想象）：
+ *   ① **视觉重心压在失败上**：漏斗第一根最长条是红色的「本周期错题 74」，
+ *      而成果只有细细一根 —— 家长翻开第一眼看到的是"欠了 74 道"。
+ *   ② **口径漂移**：「基本掌握 0」（已由 renderMasteryStack 修正）。
+ *   ③ **下半页大片空白**（实测该页内容仅占 ~60%），显得像没做完。
+ *
+ * 现在的叙事：先给成果（战果条 + 三态 + 已练口径），再讲进度（漏斗），
+ * 最后是重练明细。三块内容把整页填满，且每一块都在回答"孩子进步了多少"。
+ *
+ * 口径与后台页面完全一致（同一套字段、同一套措辞）：
+ *   主数字 = 已记住（答对 1 次）；彻底掌握只作小徽章；已练口径避免被未练题稀释。
+ */
 function renderProgressPage(stats, retryProgress, badgeLabel) {
   const rp = retryProgress || {}
   const hasRetry = (rp.retriedCount || 0) > 0
   const kpi = (v, l, color) => `<div class="rk-card"><div class="rk-v" style="color:${color || T.primary}">${v}</div><div class="rk-l">${l}</div></div>`
+
+  // 战果数据（与后台同源：mastered=彻底掌握 / basic=已记住 / todo=还在攻克）
+  const mastered = stats.masteredCount || 0
+  const basic = stats.basicMasteredCount || 0
+  const todo = stats.notStartedCount || 0
+  const total = Math.max(mastered + basic + todo, 1)
+  const secured = mastered + basic
+  const practiced = stats.practicedCount || 0
+  // 已练口径：只在练过 >0 时才有意义，否则不编分母
+  const pace = practiced > 0 ? Math.round((secured / practiced) * 100) : null
+
   return `
   <div class="page">
     <div class="pad">
@@ -368,12 +431,22 @@ function renderProgressPage(stats, retryProgress, badgeLabel) {
         ${renderLogo({ compact: true })}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">01</span>消灭错题 · 提升总览</div>
-      <div class="sec-sub">从“产生错题”到“重练掌握”的转化过程，越往下越接近真正学会</div>
+      <div class="sec-title"><span class="sec-num">01</span>战果 · 错题消灭进度</div>
+      <div class="sec-sub">答对一次就算记住 —— 这一页看的是已经拿下了多少</div>
 
-      <div class="panel">
-        <div class="panel-t">错题消灭漏斗</div>
-        ${renderErrorFunnel(stats, retryProgress)}
+      <!-- 战果头：主数字用「已记住」，彻底掌握只作小徽章 -->
+      <div class="trophy">
+        <div class="trophy-l">
+          <div class="trophy-n">${total}<span>道错题，已拿下</span></div>
+          <div class="trophy-n trophy-n--big">${secured}<span>道</span></div>
+          ${mastered > 0 ? `<div class="trophy-badge">✓ ${mastered} 道彻底掌握</div>` : ''}
+        </div>
+        <div class="trophy-r">
+          ${pace !== null
+            ? `<div class="trophy-k">练过 <b>${practiced}</b> 道 · 拿下 <b>${secured}</b> 道（<b>${pace}%</b>）</div>`
+            : '<div class="trophy-k">新错题已入库，重练后这里会显示进步</div>'}
+          <div class="trophy-sub">只看已经练过的题，${practiced > 0 ? `每 10 道里有 ${Math.round(secured / practiced * 10)} 道被拿下` : '不受尚未安排的新题影响'}</div>
+        </div>
       </div>
 
       <div class="panel">
@@ -381,13 +454,21 @@ function renderProgressPage(stats, retryProgress, badgeLabel) {
         ${renderMasteryStack(stats)}
       </div>
 
+      <div class="panel">
+        <div class="panel-t">重练转化过程</div>
+        <div class="panel-s">从“产生错题”到“重练掌握”，越往下越接近真正学会</div>
+        ${renderErrorFunnel(stats, retryProgress)}
+      </div>
+
       ${hasRetry ? `<div class="sub-label">本周期重练成果</div>
       <div class="rk-grid">
         ${kpi(rp.retriedCount, '重练题目', T.primary)}
-        ${kpi((rp.pushedToBasic || 0) + (rp.masteredCnt || 0), '掌握进阶', T.success)}
-        ${kpi((rp.masteredCnt || 0) + ' 题', '完全掌握', T.success)}
+        ${kpi((rp.pushedToBasic || 0) + (rp.masteredCnt || 0), '推进到已记住', T.success)}
+        ${kpi((rp.masteredCnt || 0) + ' 题', '彻底掌握', T.success)}
         ${kpi(rp.retryAccuracy + '%', '重练正确率', T.warning)}
-      </div>` : `<div class="empty-hint">本周期尚未开始重练，下一阶段将错题逐题消灭，提升数据会在此呈现。</div>`}
+      </div>
+      <div class="rp-note">答对 ${rp.correctCount} 题 · 未通过回到待练 ${rp.stillNew} 题 —— 未通过的题不算失败，只是还需要再练一次</div>`
+      : `<div class="empty-hint">本周期尚未开始重练。已记住的 ${secured} 道会在重练卷里做二次验证，再对一次就能升级为彻底掌握。</div>`}
     </div>
     <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
   </div>`
@@ -605,6 +686,20 @@ export function buildDiagnosisHTML(reportData) {
   .ms-legend{display:flex;gap:20px;margin-top:12px;font-size:12px;color:${T.textSec}}
   .ms-legend span{display:flex;align-items:center;gap:6px}
   .ms-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+  /* ── r135 战果头（对应后台的 TrophyBar，视觉与措辞对齐）── */
+  .trophy{display:flex;align-items:stretch;justify-content:space-between;gap:20px;padding:16px 18px;margin-bottom:14px;background:${T.primary};border-radius:12px;color:#fff}
+  .trophy-l{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .trophy-n{font-size:13px;opacity:.85;line-height:1.35}
+  .trophy-n span{margin-left:5px;font-size:12px;opacity:.8}
+  .trophy-n--big{font-size:40px;font-weight:800;line-height:1.1;letter-spacing:-1px;opacity:1;margin-top:2px}
+  .trophy-n--big span{font-size:15px;font-weight:600;opacity:.85;margin-left:4px}
+  .trophy-badge{align-self:flex-start;margin-top:7px;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.18);font-size:11px;font-weight:600}
+  .trophy-r{display:flex;max-width:250px;flex-direction:column;justify-content:center;gap:5px;text-align:right}
+  .trophy-k{font-size:12.5px;opacity:.9;line-height:1.5}
+  .trophy-k b{font-size:15px;font-weight:800;opacity:1}
+  .trophy-sub{font-size:11px;opacity:.72;line-height:1.5}
+  .panel-s{margin:-2px 0 10px;color:${T.textTer};font-size:11px;line-height:1.5}
+  .rp-note{margin-top:10px;padding:10px 12px;background:${T.primaryMist};border-radius:8px;color:${T.textSec};font-size:11.5px;line-height:1.6}
   .rk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:6px}
   .rk-card{background:${T.primaryMist};border:1px solid ${T.borderLight};border-radius:12px;padding:16px 10px;text-align:center}
   .rk-v{font-size:26px;font-weight:800;line-height:1.1}
@@ -713,6 +808,15 @@ export function buildDiagnosisHTML(reportData) {
   .value-t{font-size:14px;color:${T.primary}}
   .value-d{font-size:11px;color:${T.textSec}}
   .slogan{color:${T.primary};font-size:14px;margin-top:33px;letter-spacing:.5px}
+  /* r135：封面主体是 align-items:flex-start（封面覆盖块改的），
+     所以战果条作为 flex 子项会被压成内容宽度 —— 实测只有 158px 宽，
+     完全不像主视觉。这里 align-self:stretch 拉通，并让数字与说明横排。 */
+  .cover-trophy{align-self:stretch;display:flex;align-items:center;gap:18px;margin-top:22px;padding:20px 24px;background:linear-gradient(135deg,${T.primary},${T.primaryDark});border-radius:12px;color:#fff}
+  .ctr-n{font-size:48px;font-weight:800;line-height:1;letter-spacing:-2px;flex:0 0 auto}
+  .ctr-n{font-size:46px;font-weight:800;line-height:1;letter-spacing:-1.5px}
+  .ctr-txt{display:flex;flex-direction:column;gap:2px}
+  .ctr-l{font-size:15px;font-weight:600;opacity:.95}
+  .ctr-badge{align-self:flex-start;padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.2);font-size:11.5px;font-weight:600}
   .cover-metrics{display:flex;gap:10px;margin-top:26px}
   .cm-cell{flex:1;background:#fff;border:1px solid ${T.border};border-radius:4px;padding:14px 8px;text-align:center}
   .cm-v{font-size:24px;font-weight:800;color:${T.primary};line-height:1.1}
@@ -723,7 +827,13 @@ export function buildDiagnosisHTML(reportData) {
   .kpi-v{color:${T.primary}}
   .ring{background:conic-gradient(${accColor} ${stats.accuracy * 3.6}deg, ${T.borderLight} 0)}
   .tri{border-top-width:3px}
+  /* r135 修可读性缺陷：这段是**封面专用覆盖**，但 .comment / .advice 被全文档共用，
+     覆盖后内页的「学习寄语」也变成深色底，而 .comment-t/.comment-d 的文字色
+     仍是深色 T.text / T.textSec ⇒ 深底深字，实测几乎不可读（「学习寄语」那块）。
+     修法：深底时同步指定浅色文字（而不是改回浅底 —— 深色寄语框本身是刻意设计）。 */
   .comment,.advice{border-radius:4px;background:${T.primary};box-shadow:none}
+  .comment .comment-t,.advice .advice-t{color:#fff}
+  .comment .comment-d,.advice .advice-d{color:rgba(255,255,255,.88)}
   .comment-icon,.advice-icon{background:${T.success};border-radius:50%}
   .subj-head{background:${T.primaryMist}}
   .subj-badge{background:#fff;border-radius:50%}
@@ -745,18 +855,29 @@ export function buildDiagnosisHTML(reportData) {
         ${renderAvatar(student)}
         <div class="cover-name">${escapeHtml(student.name)}<span class="tag">同学</span></div>
         <div class="class-badge">${escapeHtml(student.grade || '')}</div>
-        <div class="period-line">学习周期：${period.start} ~ ${period.end}</div>
+        <div class="period-line">${periodLabelText(period)}</div>
         <div class="values">
           <div class="value-item"><div class="value-icon">${VALUE_ICONS.find}</div><div class="value-t">发现问题</div><div class="value-d">从学习记录中发现需要关注的内容</div></div>
           <div class="value-item"><div class="value-icon">${VALUE_ICONS.train}</div><div class="value-t">针对训练</div><div class="value-d">围绕关键问题安排针对性训练</div></div>
           <div class="value-item"><div class="value-icon">${VALUE_ICONS.grow}</div><div class="value-t">持续进步</div><div class="value-d">在过程记录中观察学习变化</div></div>
         </div>
         <div class="slogan">发现问题 · 提供支持 · 记录变化</div>
+        <!-- r135：封面加「战果条」—— 负责人要求体现消灭错题带来的提升。
+             旧版封面只有 4 个中性数字（正确率/题量/新增错题/完全掌握），
+             其中 2 个是负向的、1 个是苛刻门槛（完全掌握 2），且下半页大片空白。
+             现在把「已拿下 N 道」做成封面的主视觉，家长翻开第一眼看到的是成果。 -->
+        <div class="cover-trophy">
+          <div class="ctr-n">${(stats.masteredCount || 0) + (stats.basicMasteredCount || 0)}</div>
+          <div class="ctr-txt">
+            <div class="ctr-l">道错题已经记住</div>
+            ${(stats.masteredCount || 0) > 0 ? `<div class="ctr-badge">✓ 其中 ${stats.masteredCount} 道彻底掌握</div>` : ''}
+          </div>
+        </div>
         <div class="cover-metrics">
           <div class="cm-cell"><div class="cm-v" style="color:${accColor}">${stats.accuracy}%</div><div class="cm-l">整体正确率</div></div>
           <div class="cm-cell"><div class="cm-v">${stats.totalQuestions}</div><div class="cm-l">记录题量</div></div>
-          <div class="cm-cell"><div class="cm-v" style="color:${T.warning}">${stats.newWrongCount}</div><div class="cm-l">新增错题</div></div>
-          <div class="cm-cell"><div class="cm-v" style="color:${T.success}">${stats.masteredCount}</div><div class="cm-l">完全掌握</div></div>
+          <div class="cm-cell"><div class="cm-v" style="color:${T.primary}">${stats.practicedCount || 0}</div><div class="cm-l">已安排重练</div></div>
+          <div class="cm-cell"><div class="cm-v" style="color:${T.warning}">${stats.newWrongCount}</div><div class="cm-l">待攻克错题</div></div>
         </div>
       </div>
       <div class="wave">${waveSvg}</div>
@@ -787,7 +908,7 @@ export function buildDiagnosisHTML(reportData) {
 
       <div class="tri-row">
         <div class="tri" style="background:${T.warningSoft};border-color:#FDE68A"><div class="tri-v" style="color:${T.warning}">${stats.newWrongCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#92400E">新增错题</div></div>
-        <div class="tri" style="background:${T.successSoft};border-color:#BBF7D0"><div class="tri-v" style="color:${T.success}">${stats.masteredCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#166534">完全掌握错题</div></div>
+        <div class="tri" style="background:${T.successSoft};border-color:#A7F3D0"><div class="tri-v" style="color:${T.success}">${(stats.masteredCount || 0) + (stats.basicMasteredCount || 0)}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#065F46">已记住的错题</div></div>
         <div class="tri" style="background:${T.primaryMist};border-color:${T.primarySoft}"><div class="tri-v" style="color:${T.primary}">${stats.pendingCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:${T.primaryDark}">待提升错题</div></div>
       </div>
 
