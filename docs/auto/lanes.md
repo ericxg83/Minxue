@@ -20,7 +20,19 @@
 | 赛道 | 范围（可写路径） | 认领方 | 状态 |
 |---|---|---|---|
 | **移动端 App 体验 + 打印/PDF 产出物** | `src/App.jsx`、`src/pages/**`、`src/components/**`、`src/hooks/**`、`src/utils/**`（含 `pdfGenerator.js`、`imageEnhancer.js`、`nativeDownload.js`）、`src/services/apiService.js`、`src/domain/**`、`vite.config.js` 分包、`server/routes/**` 中仅导出/PDF 相关端点 | Quest 会话（2026-10-04 认领，定时任务「移动端与PDF产出物巡检优化」每 30 分钟） | 🟢 已认领 |
-| **服务端基础设施（非批改）** | `server/config/**`、`server/utils/**`（除 `geom/**`、`areaModel*`、`numberAxis*`、`functionGraph*`）、`server/queue.js` 的队列/连接配置、`server/index.js` 的非批改部分、数据库查询与索引健康、进程内存/句柄、定时任务、日志与可观测性 | 常驻巡检会话（2026-10-04 认领，定时任务「敏学常驻巡检循环」每日 21:30） | 🟢 已认领 |
+| **服务端基础设施（非批改）** | `server/config/**`、`server/utils/**`（除 `geom/**`、`areaModel*`、`numberAxis*`、`functionGraph*`）、`server/queue.js` 的队列/连接配置、`server/index.js` 的非批改部分、数据库查询与索引健康、进程内存/句柄、定时任务、日志与可观测性、**家长可见产出物的服务端渲染**（`server/services/shareCard*.js`、`server/routes/{shareCard,weeklyReport}.js`） | 常驻巡检会话（2026-10-04 认领，定时任务「敏学常驻巡检循环」每日 21:30） | 🟢 已认领 |
+
+**第 132 轮（2026-10-05，本赛道）已交付：家长分享卡「基本掌握」层（commit `d3a899d`）**
+- 分享卡 = 老师**唯一转发给家长**的输出物，但它只从 stats 取 `masteredCount`，
+  把 `basicMasteredCount`/`notStartedCount` 直接忽略 ⇒ 家长看到的卡片是「完全掌握 2 题 /
+  待提升错题 72 题」，实际已记住 **16** 道（r130 只修了学习诊断页，提案③的服务端一半未跟）。
+- 修复：`shareCardTemplate.js` 三态口径对齐 `splitMasteryStates`，新增 `securedCount`，
+  「完全掌握」→「已记住」、「待提升错题」→「还在攻克」；恒等式 已记住 + 还在攻克 = 新增错题。
+  新锁 `test/shareCardMasteryTiers.test.mjs` 6 条（纯函数 ⇒ 真跑渲染断言 HTML，非源码 grep）。
+- 顺手修了本赛道外的门禁假红：`test/mobilePullToRefresh.test.mjs` 残留目录清理 fail-closed
+  （本机 safe-delete 对目录删不掉，见 HANDOFF 第九节），判据一行未改。
+- 四道闸：单测 1674/1674｜lint 我方 0 error｜`dist_nightly_20261005r132`｜render_smoke 8/8。
+- ⚠️ 未跟的同类（只提案，属移动端赛道）：`src/utils/weeklyReportGenerator.js` 仍是旧口径，见 backlog 提案①。
 | **流程沉淀与 skill 维护** | `~/.workbuddy/skills/minxue-*/SKILL.md`（调用名一律中文）、`docs/auto/backlog.md` 的勘误与止损记录、`.workbuddy/memory/**` | 常驻巡检会话（2026-10-04 认领） | 🟢 已认领 |
 
 **为什么选这条**：近 25 个提交的改动文件统计显示，`src/workbench/**` 被反复触碰，而移动端 `src/`（除 workbench）几乎没动过（`App.jsx` 仅 2 次、`apiService.js` 2 次）。

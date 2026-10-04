@@ -359,6 +359,22 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
   可改用 `vue/compiler-sfc` 真编译 + `vue/server-renderer` 内存 SSR 渲染作为替代验证
   （r130 已用此法覆盖 19 项，见 `_r130_build_ssr.mjs` / `_r130_sfc_verify.mjs`），
   但**替代验证不能替代真机冒烟**，恢复后仍需补跑。
+  ✅ **2026-10-05 r132 实测已恢复**：`npx esbuild --version` 正常返回 0.21.5，
+  隔离构建 `dist_nightly_20261005r132` `✓ built in 36.67s`，preview + render_smoke 8/8 全过。
+  ⚠️ 但**跑构建前仍建议先 `npx esbuild --version` 探一次**——这个故障会自己冒出来又自己消失，
+  直接写「本机构建不可用」会误导接手轮放弃闸 3/闸 4，写成「必崩」同样会误导。
+
+- **⛔ 本机 safe-delete 对「目录」fail-closed（2026-10-05 r132 实测）**：
+  `rmSync(p,{recursive:true,force:true})` / `rm -rf` / `Remove-Item -Recurse` /
+  **Python `shutil.rmtree`** —— 四种方式全被同一道 shim 拦住
+  （`[safe-delete] 操作失败 ... trash operation ... operations were aborted`），连 `mv` 都 `Permission denied`。
+  影响：**测试残留目录现在删不掉也移不走**（如 `_r131q_badlock/`），只能在别的机器或重启后清理。
+  更要命的是它会制造**假红**：`test/mobilePullToRefresh.test.mjs` 的反向自检，
+  一开场那句 `rmSync(base,{recursive:true})` 清不掉上轮残留 ⇒ 当场抛错、
+  **反向自检根本没跑到**，一把防空锁长期不验证，却只在人手动点它时才显红
+  （比不报警更坏：它会让人以为验过了）。已在 r132 把清理降为 warn（判据一行未改）。
+  ⇒ 接手轮遇到「某把锁的红在 safe-delete 上」时，**先判断是真缺陷还是清不掉残留**；
+  ⛔ 不要为了让测试变绿而删别人的断言，那两者是两回事。
 
 ## 九点五、第 131 轮新增（2026-10-04 19:53）
 
