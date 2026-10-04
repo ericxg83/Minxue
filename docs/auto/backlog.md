@@ -1022,3 +1022,52 @@ answer / student_answer / ai_answer / analysis / metadata / created_at`——
 ③ 继续加索引/改写只会增加改动面与未来维护成本，违反 AGENTS.md「小而美、修改范围最小」。
 **⑬-3 那份「按优先级排序、建议批三个索引」的建议整体撤回**（⑬-2 的列存在性勘误仍有效）。
 后续巡检**不要**再在索引/N+1 上找活，除非出现新的实测劣化证据。
+
+### 提案⑮ 连接池冷启动惩罚：加 `min:1` 可省 435ms（2026-10-04，常驻巡检赛道，待拍板）
+
+**现象（端到端实测，非推断）：**
+`server/config/neon.js` 的池只设了 `max: 10`，**没设 `min`**，且 `idleTimeoutMillis: 10000`
+（10 秒就回收空闲连接）。实测 `/api/wrong-questions/student/:id`（无缓存、确定打库）：
+
+| 场景 | 现状实测 |
+|---|---|
+| 热连接连打 3 次 | 0.315 / 0.316 / 0.317 s |
+| 静置 15s 后首个请求 | **0.668 s**（多付 ~350ms 建连） |
+| 之后紧接的请求 | 0.266 s |
+
+独立对照实验（`_diag_pool_min_1004.mjs`，生产同款 IPv4 优先解析，各含 2 轮 15s 静置）：
+
+| 组 | 冷启动首查 | **静置 15s 后首查** | 紧接下一查 |
+|---|---|---|---|
+| 现状（不设 min） | 555 ms | **513 ms** | 72 ms |
+| 实验（`min: 1`） | 560 ms | **78 ms** | 78 ms |
+
+→ **`min: 1` 稳定消掉冷连接惩罚，差 435 ms（6.6 倍）**。这正对应已沉淀的
+「敏学冷启动慢」症状：隔一段时间打开要重新加载、而且要很久。
+⛔ `/api/students` 有 5 分钟进程内缓存（`studentsCache`），所以工作台学生列表不付这个代价；
+真正受害的是**所有无缓存的 DB 端点**（错题中心、任务列表、知识点掌握度…）。
+
+**建议改动（`server/config/neon.js` 第 44-62 行，仅加一行）：**
+```js
+_pool = new Pool({
+  connectionString,
+  ssl: { rejectUnauthorized: false },
+  max: 10,
+  min: 1,            // ← 新增：保底留 1 条热连接，消掉空闲后首个请求的 ~435ms 建连
+  lookup: ipv4FirstLookup,
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  connectionTimeoutMillis: 20000,
+  idleTimeoutMillis: 10000,
+})
+```
+
+**⛔ 残留风险（必须知情后再决定，这是它没被我直接改掉的原因）：**
+长期持有连接会重新引入「Connection terminated unexpectedly」——2026-09-23 那起
+本地卡顿事故的根因之一就是死连接（长期记忆铁律 26/27）。现有缓解手段：
+① `keepAlive: true` + `keepAliveInitialDelayMillis: 10000`，TCP 层每 10s 探针并能识别死连接；
+② 池已挂 `error` 监听会剔除并打日志。
+**但仍有一个未覆盖的缺口**：`neon.js` 的 `query()` **没有重试**——
+若那条保底连接恰好在中间被静默掐断，该次请求会直接抛错给用户（表现为"偶发一次失败"）。
+彻底闭环需给 `query()` 加「仅对连接类错误重试一次」的保护，那会触及错误语义，故一并提请拍板。
+⛔ 未动手，等负责人点头。探针：`_diag_pool_min_1004.mjs`（只读，可复现）。
