@@ -968,3 +968,31 @@ answer / student_answer / ai_answer / analysis / metadata / created_at`——
 1.0ms 与 0.8ms 的差异用户完全感知不到；② 多一个 LEFT JOIN 会扩大改动面，
 与 AGENTS.md「小而美、修改范围最小」相悖；③ 收益纯属微观指标，不构成真实用户价值。
 若将来该端点去掉缓存或被高频调用，再回来做。
+
+### 提案⑬ 索引探针 v1 的根本缺陷与 v2 修正（2026-10-04，常驻巡检赛道）
+
+**⑬-1 v1 探针（`_diag_infra_health_1004.mjs` 第 4 节）从根上是错的：它只按列名去
+`pg_index` 找索引，从不先确认「列是否存在」，于是把「列根本不存在」一律误报成「缺索引」。**
+⑩-2 / ⑪-1 连续两轮都建立在这个错误探针上。已用
+`_diag_index_verify2_1004.mjs`（先查 information_schema.columns 再谈索引）修正。
+
+**⑬-2 勘误清单（4 条建议作废 / 1 条降级 / 4 条新增）：**
+
+| 原建议 | 真实情况 | 处置 |
+|---|---|---|
+| `questions.lifecycle` | **列不存在**（questions 只有 status / review_status） | ❌ 作废 |
+| `judgements.task_id` | **列不存在** | ❌ 作废（⑪-1 已作废，此处确认） |
+| `question_assets.status` | **列不存在**（有 tikz_status，无 status） | ❌ 作废 |
+| `tasks.created_at` | 列存在、确实无索引 | ⚠️ 降级（表仅 192 行，收益很小） |
+| — | **新增：`wrong_questions.lifecycle_status` 列存在但无索引** | ✅ **真正的高价值项** |
+| — | 新增：`questions.review_status` 列存在但无索引 | ✅ 中等（人工复核筛选用） |
+| — | 新增：`wrong_questions.added_at` 列存在但无索引 | ✅ 中等（周报「今日新错题」用） |
+
+**⑬-3 真正值得批的排序（v2 实测）：**
+1. **`wrong_questions.lifecycle_status`** —— 错题生命周期主字段（长期记忆铁律 2 的唯一真相所依据的列），
+   1120 行，`weaknessService.js:199` 的 `WHERE lifecycle_status IN ('new','review_1')`
+   每次都全表扫；**重练选题只放行 lifecycle='new'**，这条查询在批改链路上跑得很勤。
+2. `wrong_questions.added_at` —— `weeklyReport.js:627` 的今日新错题统计用 `added_at::date = CURRENT_DATE`。
+3. `questions.review_status` —— 人工复核筛选。
+4. `tasks.created_at` —— 收益最小（表 192 行），可不做。
+⛔ 四项均属 C 级（DB Schema/索引），未动手，等负责人逐条点头。
