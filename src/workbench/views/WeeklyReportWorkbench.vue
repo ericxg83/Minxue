@@ -89,6 +89,15 @@
         </section>
 
         <template v-else>
+          <!-- r134 布局骨架（按 03-mockup-v2 重做）：左主栏 + 右侧操作栏。
+               r133 我把内容全铺成了通栏长条 —— 视觉上像一张Excel 表，
+               信息密度上去了但**没有视线的落点**。mockup 的核心是那条竖直分界：
+               左边是「诊断」（是什么情况），右边是「行动」（接下来做什么），
+               视线自然从左扫到右，形成「看问题 → 找动作」的动线。
+               右侧栏固定 372px：动作卡都是短条目，窄栏反而更易扫读。 -->
+          <div class="dx">
+            <div class="dx__main">
+
           <!-- 单生学习概览 hero：选中学生后的第一眼数字（与分享卡 hero 同构） -->
           <section v-if="singleHero" class="hero-strip" aria-label="学生学习概览">
             <div class="hero-ring-wrap">
@@ -117,29 +126,18 @@
                放在 hero 正下方（第一屏）而不是趋势图之后 —— 实测两列卡片原本落在
                1281px，第一屏完全看不到，等于白做。叙事顺序也更像诊断：
                先「已拿下多少」→ 再「为什么错」→ 再「接下来做什么」→ 最后才是趋势与明细。 -->
-          <div class="diag-two-col">
-            <ContentCard
-              title="错因分布：为什么错"
-              :description="currentStudentDetail?.errorDistribution?.length
-                ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 点任一项可筛出对应题目`
-                : '错因会在每周一凌晨自动回填'"
-            >
-              <ErrorCauseBars
-                :items="currentStudentDetail?.errorDistribution || []"
-                @select="onErrorCauseClick"
-              />
-            </ContentCard>
-
-            <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干">
-              <NextActions
-                :error-causes="currentStudentDetail?.errorDistribution || []"
-                :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
-                :basic-count="singleHero?.basicMasteredCount || 0"
-                :todo-count="singleHero?.notStartedCount || 0"
-                :zero-accuracy-tags="zeroAccuracyTags"
-              />
-            </ContentCard>
-          </div>
+          <ContentCard
+            class="dx__errcause"
+            title="错因分布：为什么错"
+            :description="currentStudentDetail?.errorDistribution?.length
+              ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 占前三类的比例最高，优先处理`
+              : '错因会在每周一凌晨自动回填，或随批改逐步补齐'"
+          >
+            <ErrorCauseBars
+              :items="currentStudentDetail?.errorDistribution || []"
+              @select="onErrorCauseClick"
+            />
+          </ContentCard>
           <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
                它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
                point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
@@ -263,6 +261,55 @@
             </div>
           </ContentCard>
           <EmptyState v-else-if="!generating && currentStudentDetail" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
+            </div>
+
+            <!-- ── 右侧操作栏：行动 + 战绩 + 产出 ── -->
+            <aside class="dx__rail">
+              <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干" flush>
+                <div class="dx__rail-body">
+                  <NextActions
+                    :error-causes="currentStudentDetail?.errorDistribution || []"
+                    :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
+                    :basic-count="singleHero?.basicMasteredCount || 0"
+                    :todo-count="singleHero?.notStartedCount || 0"
+                    :zero-accuracy-tags="zeroAccuracyTags"
+                  />
+                </div>
+              </ContentCard>
+
+              <ContentCard v-if="retryProgressVisible" title="重练战绩" :description="`${retryProgress.examCount} 份卷 · ${retryProgress.retriedCount} 题`" flush>
+                <div class="dx__rail-body">
+                  <div class="rail-stats">
+                    <div class="rail-stat">
+                      <b :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 60 }">{{ retryProgress.retryAccuracy }}<small>%</small></b>
+                      <span>重练正确率</span>
+                    </div>
+                    <div class="rail-stat">
+                      <b class="is-good">{{ retryProgress.pushedToBasic }}</b>
+                      <span>推进到已记住</span>
+                    </div>
+                  </div>
+                  <p class="rail-note">
+                    答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题
+                  </p>
+                </div>
+              </ContentCard>
+
+              <ContentCard title="发给家长" description="老师转发用，家长只看产出物" flush>
+                <div class="dx__rail-body">
+                  <ParentOutputCard
+                    :student-name="currentStudentName"
+                    :total-questions="singleHero?.totalQuestions || 0"
+                    :correct-count="currentStudentDetail?.stats?.correctCount || 0"
+                    :accuracy="singleHero?.acc"
+                    :secured="singleHero?.securedCount || 0"
+                    :mastered="singleHero?.masteredCount || 0"
+                    :new-wrong="singleHero?.newWrongCount || 0"
+                  />
+                </div>
+              </ContentCard>
+            </aside>
+          </div>
         </template>
       </template>
 
@@ -600,6 +647,7 @@ import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
 import ErrorCauseBars from '../components/diagnosis/ErrorCauseBars.vue'
 import NextActions from '../components/diagnosis/NextActions.vue'
 import StudentPicker from '../components/diagnosis/StudentPicker.vue'
+import ParentOutputCard from '../components/diagnosis/ParentOutputCard.vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
@@ -1462,8 +1510,24 @@ function knowledgeLevel(row) {
 
 /* ── 周末讲题错题卷（grade view） ── */
 .picker-row{margin-bottom:var(--wb-space-4)}
-.diag-two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--wb-space-4);margin-bottom:var(--wb-space-4);align-items:start}
-@media(max-width:1100px){.diag-two-col{grid-template-columns:1fr}}
+/* ── r134 诊断页两列骨架（按 03-mockup-v2）──
+   mockup 的核心是那条竖直分界：左「诊断」右「行动」。r133 全部通栏 ⇒ 视觉退化成
+   一张长表，没有视线落点。右栏 372px：动作条目都短，窄栏更易扫读。
+   1360px 容器 - 372px 右栏 - 20px 间距 ≈ 主栏 968px，够放 5 个 KPI + 三态条。 */
+.dx{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:var(--wb-space-5);align-items:start}
+.dx__main{display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
+.dx__rail{position:sticky;top:calc(var(--wb-header-height) + var(--wb-space-4));display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
+/* 右栏卡内的内容统一内缩（ContentCard 用 flush 时 body 无 padding） */
+.dx__rail-body{padding:var(--wb-space-4)}
+.rail-stats{display:grid;grid-template-columns:1fr 1fr;gap:var(--wb-space-3)}
+.rail-stat b{display:block;color:var(--wb-text);font-size:var(--wb-fs-stat);font-weight:var(--wb-fw-bold);line-height:var(--wb-lh-tight);font-variant-numeric:tabular-nums}
+.rail-stat b.is-good{color:var(--wb-status-success-fg)}
+.rail-stat b small{font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}
+.rail-stat span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
+.rail-note{margin:var(--wb-space-3) 0 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
+/* 窄屏：右栏落到主栏下方，不做挤压 */
+@media(max-width:1280px){.dx{grid-template-columns:1fr}.dx__rail{position:static}}
+
 .trend-line-card{margin-bottom:16px}
 .trend-switch{display:flex;gap:2px;padding:2px;background:var(--wb-bg-elevated);border-radius:8px}
 .trend-switch__btn{padding:5px 13px;border:0;border-radius:6px;background:transparent;color:var(--wb-text-tertiary);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
