@@ -11,18 +11,19 @@ dayjs.extend(isoWeek)
 
 /**
  * 设计 token（PDF HTML 无法引用 CSS 变量，写死等值 hex）
- * 对齐「敏学成长中心」品牌视觉：暖白留白、专业蓝绿结构、成长绿小面积强调
+ * 2026-10-04 r120q 专业重设计：深海军蓝主 + 金点缀，冷灰白中性，语义色绿/琥珀/赤陶。
+ * key 名保留（全仓多处引用），只换值。primary=navy、accent=gold。
  */
 const T = {
-  primary: '#0F6B6D', primaryDark: '#0A5052', primarySoft: '#D9ECE9', primaryMist: '#EEF7F5',
-  teal: '#287E7C', tealSoft: '#E5F1EF',
-  success: '#4CAF50', successSoft: '#EAF6EA',
-  warning: '#A66A24', warningSoft: '#FBF4E8',
-  danger: '#B85A4F', dangerSoft: '#F9ECEA',
-  accent: '#26797A', accentSoft: '#E5F1EF',
-  purple: '#5A8581', purpleSoft: '#EFF5F3',
-  text: '#203836', textSec: '#60726F', textTer: '#91A09E',
-  border: '#DCE6E2', borderLight: '#EAF0ED', bg: '#F6F7F5'
+  primary: '#123A5F', primaryDark: '#0C2A47', primarySoft: '#E4ECF4', primaryMist: '#F2F6FA',
+  teal: '#2C7A7B', tealSoft: '#E3F0F0',
+  success: '#2E7D5B', successSoft: '#E3F1EA',
+  warning: '#C77D2A', warningSoft: '#FAEFDF',
+  danger: '#B4483B', dangerSoft: '#F7E7E4',
+  accent: '#C8A24A', accentSoft: '#F6EEDB',
+  purple: '#7A5C9E', purpleSoft: '#EFEAF6',
+  text: '#1B2A38', textSec: '#5B6B7A', textTer: '#93A1AE',
+  border: '#D7E0E9', borderLight: '#EAF0F5', bg: '#F5F7FA', card: '#FFFFFF'
 }
 
 /** 品牌信息（统一维护，便于替换） */
@@ -299,6 +300,100 @@ function renderAvatar(student) {
  * 生成诊断报告 HTML 内容（3 页：封面 / 概览 / 学科诊断）
  */
 /**
+ * 错题消灭漏斗（提升总览页主视觉）。
+ * 三阶：本周期错题池 → 已重练 → 掌握进阶（基本+完全），用转化率讲“消灭错题→变强”。
+ * 数据全来自 retryProgress / stats，不造假；某阶为 0 时仍如实画。
+ */
+function renderErrorFunnel(stats, retryProgress) {
+  const pool = stats.newWrongCount || stats.pendingCount || 0
+  const retried = retryProgress ? (retryProgress.retriedCount || 0) : 0
+  const advanced = retryProgress ? ((retryProgress.pushedToBasic || 0) + (retryProgress.masteredCnt || 0)) : 0
+  const stages = [
+    { label: '本周期错题', value: pool, color: T.danger },
+    { label: '已重练', value: retried, color: T.warning },
+    { label: '掌握进阶', value: advanced, color: T.success },
+  ]
+  const max = Math.max(pool, retried, advanced, 1)
+  const W = 660, rowH = 62, gap = 10
+  let y = 6
+  const rows = stages.map((s, i) => {
+    const wRatio = Math.max(0.12, s.value / max)
+    const barW = Math.round((W - 200) * wRatio)
+    const conv = i === 0 ? '' : (stages[i - 1].value > 0 ? `转化 ${Math.round((s.value / stages[i - 1].value) * 100)}%` : '')
+    const cy = y
+    const html = `<g>
+      <text x="0" y="${cy + 24}" font-size="14" font-weight="700" fill="${T.text}">${s.label}</text>
+      <text x="0" y="${cy + 44}" font-size="11" fill="${T.textTer}">${conv}</text>
+      <rect x="150" y="${cy + 8}" width="${barW}" height="40" rx="6" fill="${s.color}"/>
+      <text x="${150 + barW + 12}" y="${cy + 34}" font-size="20" font-weight="800" fill="${s.color}">${s.value}<tspan font-size="12" font-weight="500" fill="${T.textTer}"> 题</tspan></text>
+    </g>`
+    y += rowH + gap
+    return html
+  }).join('')
+  const totalH = y + 4
+  return `<svg width="${W}" height="${totalH}" viewBox="0 0 ${W} ${totalH}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%">${rows}</svg>`
+}
+
+/**
+ * 掌握度流转堆叠条：新错 / 基本掌握 / 完全掌握 占比（从红到绿）。
+ */
+function renderMasteryStack(stats) {
+  const mastered = stats.masteredCount || 0
+  const pending = stats.pendingCount || 0
+  const basic = Math.max(0, pending - (stats.newWrongCount || 0)) // 基本掌握 = 待提升中已非新增的部分
+  const fresh = Math.min(pending, stats.newWrongCount || 0)
+  const total = Math.max(mastered + pending, 1)
+  const seg = (v, color) => v > 0 ? `<div class="ms-seg" style="width:${(v / total) * 100}%;background:${color}">${v >= total * 0.12 ? v : ''}</div>` : ''
+  return `<div class="ms-wrap">
+    <div class="ms-bar">${seg(fresh, T.danger)}${seg(basic, T.warning)}${seg(mastered, T.success)}</div>
+    <div class="ms-legend">
+      <span><i style="background:${T.danger}"></i>待提升 ${fresh}</span>
+      <span><i style="background:${T.warning}"></i>基本掌握 ${basic}</span>
+      <span><i style="background:${T.success}"></i>完全掌握 ${mastered}</span>
+    </div>
+  </div>`
+}
+
+/**
+ * 提升总览页（第 02 页）：错题消灭漏斗 + 掌握度流转 + 重练 KPI。
+ */
+function renderProgressPage(stats, retryProgress, badgeLabel) {
+  const rp = retryProgress || {}
+  const hasRetry = (rp.retriedCount || 0) > 0
+  const kpi = (v, l, color) => `<div class="rk-card"><div class="rk-v" style="color:${color || T.primary}">${v}</div><div class="rk-l">${l}</div></div>`
+  return `
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        ${renderLogo({ compact: true })}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
+      </div>
+      <div class="sec-title"><span class="sec-num">01</span>消灭错题 · 提升总览</div>
+      <div class="sec-sub">从“产生错题”到“重练掌握”的转化过程，越往下越接近真正学会</div>
+
+      <div class="panel">
+        <div class="panel-t">错题消灭漏斗</div>
+        ${renderErrorFunnel(stats, retryProgress)}
+      </div>
+
+      <div class="panel">
+        <div class="panel-t">错题掌握度构成</div>
+        ${renderMasteryStack(stats)}
+      </div>
+
+      ${hasRetry ? `<div class="sub-label">本周期重练成果</div>
+      <div class="rk-grid">
+        ${kpi(rp.retriedCount, '重练题目', T.primary)}
+        ${kpi((rp.pushedToBasic || 0) + (rp.masteredCnt || 0), '掌握进阶', T.success)}
+        ${kpi((rp.masteredCnt || 0) + ' 题', '完全掌握', T.success)}
+        ${kpi(rp.retryAccuracy + '%', '重练正确率', T.warning)}
+      </div>` : `<div class="empty-hint">本周期尚未开始重练，下一阶段将错题逐题消灭，提升数据会在此呈现。</div>`}
+    </div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
+  </div>`
+}
+
+/**
  * 单个对比指标卡：本周值 + 较上周差值（带"升=好"语义配色）
  * @param {string} label
  * @param {number} cur - 本周值
@@ -351,7 +446,7 @@ function renderComparePage(curStats, prevStats, retryProgress, badgeLabel, prevP
       </div>
       <div style="font-size:11px;color:${T.textSec};margin-top:8px">重练答对 ${retryProgress.correctCount} 题 · 未通过回到待练 ${retryProgress.stillNew} 题</div>` : ''}
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 04 -</span></div>
   </div>`
 }
 
@@ -499,6 +594,22 @@ export function buildDiagnosisHTML(reportData) {
   .mdist-cell{flex:1;border-radius:12px;padding:14px 10px;text-align:center}
   .mdist-v{font-size:26px;font-weight:800;line-height:1.1}
   .mdist-l{font-size:12px;margin-top:5px;font-weight:600}
+
+  /* 提升总览页：面板 / 漏斗 / 堆叠 / 重练 KPI */
+  .panel{background:${T.card};border:1px solid ${T.borderLight};border-radius:14px;padding:18px 20px;margin-bottom:16px}
+  .panel-t{font-size:14px;font-weight:700;color:${T.primary};margin-bottom:14px;display:flex;align-items:center;gap:8px}
+  .panel-t::before{content:'';width:4px;height:15px;border-radius:2px;background:${T.accent}}
+  .ms-wrap{padding:6px 0}
+  .ms-bar{display:flex;height:30px;border-radius:8px;overflow:hidden;background:${T.borderLight}}
+  .ms-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:700;min-width:0}
+  .ms-legend{display:flex;gap:20px;margin-top:12px;font-size:12px;color:${T.textSec}}
+  .ms-legend span{display:flex;align-items:center;gap:6px}
+  .ms-legend i{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .rk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:6px}
+  .rk-card{background:${T.primaryMist};border:1px solid ${T.borderLight};border-radius:12px;padding:16px 10px;text-align:center}
+  .rk-v{font-size:26px;font-weight:800;line-height:1.1}
+  .rk-l{font-size:11px;color:${T.textSec};margin-top:6px}
+  .empty-hint{background:${T.bg};border:1px dashed ${T.border};border-radius:12px;padding:20px;text-align:center;color:${T.textSec};font-size:13px}
 
   /* 教学判断卡 */
   .teaching-summary{background:#fffaf0;border:1px solid #FDE68A;border-radius:14px;padding:16px 18px;margin-bottom:16px}
@@ -652,6 +763,8 @@ export function buildDiagnosisHTML(reportData) {
     </div>
   </div>
 
+  ${renderProgressPage(stats, retryProgress, badgeLabel)}
+
   <!-- ═══ 概览页 ═══ -->
   <div class="page">
     <div class="pad">
@@ -659,7 +772,7 @@ export function buildDiagnosisHTML(reportData) {
         ${logoSm}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">01</span>本周学习概览</div>
+      <div class="sec-title"><span class="sec-num">02</span>本周学习概览</div>
       <div class="sec-sub">从本周期学习记录中提炼的观察结果</div>
 
       <div class="sub-label">本周学习概览</div>
@@ -696,7 +809,7 @@ export function buildDiagnosisHTML(reportData) {
         <div><div class="comment-t">学习寄语</div><div class="comment-d">${escapeHtml(teacherComment)}</div></div>
       </div>
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 02 -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- 03 -</span></div>
   </div>
 
   ${hasCompare ? renderComparePage(stats, prev.stats, retryProgress, badgeLabel, `${prev.period.start} ~ ${prev.period.end}`) : ''}
@@ -709,7 +822,7 @@ export function buildDiagnosisHTML(reportData) {
         ${logoSm}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">02</span>学科诊断分析</div>
+      <div class="sec-title"><span class="sec-num">${hasCompare ? '04' : '03'}</span>学科诊断分析</div>
       <div class="sec-sub">聚焦需要优先支持的知识点</div>
 
       ${subjectCards}
@@ -721,7 +834,7 @@ export function buildDiagnosisHTML(reportData) {
         <div><div class="advice-t">学习建议</div><div class="advice-d">${escapeHtml(teacherAdvice)}</div></div>
       </div>
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '04' : '03'} -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '05' : '04'} -</span></div>
   </div>
   ` : ''}
 
@@ -733,12 +846,12 @@ export function buildDiagnosisHTML(reportData) {
         ${logoSm}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">03</span>知识点掌握度明细</div>
+      <div class="sec-title"><span class="sec-num">${hasCompare ? '05' : '04'}</span>知识点掌握度明细</div>
       <div class="sec-sub">本周期错得最多的知识点，带正确率与错题量，供逐点巩固</div>
 
       ${renderKnowledgeDetail(knowledgeDiagnosis)}
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '05' : '04'} -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '06' : '05'} -</span></div>
   </div>
   ` : ''}
 
