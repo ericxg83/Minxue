@@ -63,7 +63,7 @@
       </div>
       <div class="all-done-hint">可在上方切换其他学生继续处理</div>
       <div class="all-done-actions">
-        <el-button type="primary" @click="goToTodo">查看待办</el-button>
+        <el-button type="primary" @click="goDashboard">工作台首页</el-button>
         <el-button plain @click="goToWrongBook">查看错题池</el-button>
         <el-button text @click="goToStudents">切换学生</el-button>
       </div>
@@ -133,7 +133,8 @@ const route = useRoute()
 const router = useRouter()
 // [P0-1 完成引导] 右栏完成态按钮经由这里转发到顶栏的 handleComplete / goNextTask
 const reviewTopBarRef = ref(null)
-const goToTodo = () => router.push('/todo')
+// 第 137 轮（裁决②）：独立待办页已删，首页驾驶舱（KPI + 需要处理 + 待关注）即真·待办总览，按钮改指首页。
+const goDashboard = () => router.push('/')
 // 第 91 轮：错题中心页面下线，清单并入学生档案页（没有学生上下文时落到学生列表，
 // 避免拼出 /students/undefined）
 const goToWrongBook = () => router.push(

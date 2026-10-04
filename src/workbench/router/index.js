@@ -19,12 +19,10 @@ const routes = [
     redirect: to => ({ path: '/grade', query: { ...to.query, source: 'homework' } }),
     meta: { requiresPC: true }
   },
-  {
-    path: '/todo',
-    name: 'Todo',
-    component: () => import('../views/TodoWorkbench.vue'),
-    meta: { requiresPC: true }
-  },
+  // 第 137 轮（负责人裁决②）：独立「待办」页下线——其内容（待复核/识别异常/新增错题）
+  // 逐项都是首页驾驶舱 KPI + 「需要处理」提醒带 + 铃铛通知的子集，且从不进侧栏、只靠
+  // 复核台空态一颗按钮触达。整页删除，复核台那颗按钮改指首页 '/'。该页非导航目标、
+  // 无外部书签，不留 redirect。
   // 第 91 轮：独立的「错题中心」页面下线，错题清单并入学生档案页（#student-wrong）。
   // 保留 redirect 只作历史书签的兜底：老链接带 studentId 就落到那名学生的档案页，否则落到学生列表。
   {
@@ -63,17 +61,13 @@ const routes = [
     path: '/growth',
     redirect: to => ({ path: '/weekly-report', query: to.query })
   },
+  // 第 137 轮（负责人裁决③）：删除从未被任何导航指向的死路由 /exam-history/review。
+  // 重练复核实际链路是 /grade?source=retry → /grade/task（source 走 query，不再依赖已删的 legacySource prop）。
+  // /exam-history 重定向保留作历史书签兜底。
   {
     path: '/exam-history',
     name: 'ExamHistory',
     redirect: to => ({ path: '/grade', query: { ...to.query, source: 'retry' } }),
-    meta: { requiresPC: true }
-  },
-  {
-    path: '/exam-history/review',
-    name: 'ExamHistoryReview',
-    component: () => import('../views/UnifiedReviewWorkbench.vue'),
-    props: { legacySource: 'retry' },
     meta: { requiresPC: true }
   },
   {
