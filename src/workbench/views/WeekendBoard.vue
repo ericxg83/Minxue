@@ -245,7 +245,7 @@
           <button type="button" class="tool-btn" :class="{ active: tool === 'eraser' }" title="橡皮（E）" @click="toggleEraser">
             <el-icon><Remove /></el-icon>
           </button>
-          <button type="button" class="tool-btn" :class="{ active: tool === 'laser' }" title="激光笔（L）：跟随指尖的红点，无拖尾、抬手即消、不留笔迹" @click="toggleLaser">
+          <button type="button" class="tool-btn" :class="{ active: tool === 'laser' }" title="激光笔（L）：像笔一样写，抬手 1 秒后渐隐，不留笔迹" @click="toggleLaser">
             <el-icon><Aim /></el-icon>
           </button>
           <button type="button" class="tool-btn" title="撤销（Z）" @click="undo">
@@ -741,7 +741,7 @@ const isFsOn = computed(() => isImmersive.value || nativeFs.value)
 const fsTitle = computed(() => (isFsOn.value ? '退出全屏（Esc）' : '全屏讲题（F）'))
 const showEdgeNav = computed(() => isTouchDevice.value && viewQuestions.value.length > 1)
 const navHint = computed(() => {
-  if (tool.value === 'laser') return '激光笔：手指即指针 · 用两侧箭头或底栏翻题'
+  if (tool.value === 'laser') return '激光笔：像笔一样写，抬手 1 秒后渐隐 · 用两侧箭头或底栏翻题'
   if (allowTouch.value) return '手指绘制已开启 · 可用两侧箭头或底栏翻题'
   return isTouchDevice.value ? '左右滑动屏幕切题' : '← → 切题'
 })

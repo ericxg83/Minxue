@@ -11,8 +11,9 @@
       @pointerleave="onPointerUp"
       @lostpointercapture="onLostCapture"
     />
-    <!-- 激光笔光点层：独立 canvas，pointer-events:none，只画「当前那一个红点」（无拖尾）。
-         它不参与 strokes —— 导出板书 PNG 只读 localStrokes，天然不含光点。 -->
+    <!-- 激光笔迹层：独立 canvas，pointer-events:none，画「像笔一样书写的激光笔迹」，
+         每一笔抬手后 1 秒渐隐（多笔共存、各自独立倒计时）。
+         它不参与 strokes —— 导出板书 PNG 只读 localStrokes，天然不含激光笔迹。 -->
     <canvas ref="laserRef" class="dc-laser" aria-hidden="true" />
     <!-- 导出板书图的「题干层」：与屏幕共用同一个 MathRender（KaTeX）。
          旧实现用 canvas fillText 逐行画题干，题干里的 LaTeX 会以源码形式
@@ -222,7 +223,7 @@ onBeforeUnmount(() => {
   if (resizeObserver) resizeObserver.disconnect()
   if (rafId) cancelAnimationFrame(rafId)
   if (laserRaf) cancelAnimationFrame(laserRaf)
-  laserPoint = null
+  laserStrokes = []
   cancelWheelPan()
 })
 
@@ -456,7 +457,7 @@ function scheduleLiveRender() {
 
 // ── 收笔（pointerup / cancel / 捕获丢失 / buttons 归零共用）─────────
 function onPointerUp(e) {
-  // 激光会话结束：抬手立刻消失（无拖尾、无残影）
+  // 激光会话结束：这一笔进入 1 秒渐隐（多笔互不影响，渐隐由 tickLaser 驱动）
   if (laserActive) { endLaser(e); return }
   // 捏合 / 待跟踪的 touch 触点抬起：清触点，双指不足则结束捏合
   if (e.pointerType === 'touch' && touchPts.has(e.pointerId)) {
@@ -496,24 +497,26 @@ function finishStroke() {
   emit('update:strokes', localStrokes.value)
 }
 
-// ── 激光笔（2026-10-03 引入；2026-10-04 改为「无拖尾」）─────────────────
-// 只做「临时指针」：**一个跟随的红点，没有拖尾**，画在独立的 pointer-events:none 光点层上。
+// ── 激光笔（2026-10-03 引入；10-04 上午改「无拖尾」；10-04 深夜按负责人新裁决改为
+//    「笔迹式激光 + 抬手 1 秒渐隐」）─────────────────────────────────────
 // 关键纪律（自引入起未变）：激光笔绝不进 startStroke/appendLivePoint，也绝不写
-// localStrokes —— 不进笔迹数据结构，「导出板书 PNG 不含光点」因此是天然成立的，
+// localStrokes —— 不进笔迹数据结构，「导出板书 PNG 不含激光笔迹」因此是天然成立的，
 // 不需要额外过滤。
 //
-// ⛔ 样式由负责人 2026-10-04 指定：**无拖尾 + 抬手立刻消失**。
-//    旧实现是「红点 + 220ms 按点龄衰减的拖尾线段」，抬手后拖尾还会拖一小段；
-//    现在只维护「当前那一个点」，抬手直接清空光点层（没有淡出、没有残影）。
-//    由此也不再需要「按时间淘汰旧点」的那套逻辑，`LASER_TRAIL_MS` /
-//    `LASER_MAX_POINTS` 与逐段衰减的折线绘制一并删除。
+// ⛔ 样式由负责人 2026-10-04 深夜指定：**像笔一样可以写，抬手 1 秒后消失；
+//    一秒内的连续多笔互不影响（可以画框，笔画间的抬手不会让前面的笔迹提前消失）**。
+//    实现：laserStrokes 每笔独立记录点列与 fadeStart（该笔抬手时刻），
+//    渐隐期 alpha = 1 - (now - fadeStart)/LASER_FADE_MS，到 0 整笔移除；
+//    正在书写的笔不参与倒计时，所以写字 / 画框的过程中笔迹完整可见。
 const LASER_HEAD_R = 5
+const LASER_FADE_MS = 1000
+const LASER_MAX_POINTS = 1500 // 单笔点数上限（防极端长划把数组撑爆，超限丢最旧的点）
 const laserRef = ref(null)
 let laserCtx = null
 let laserActive = false
 let laserPointerId = null
 let laserRaf = 0
-let laserPoint = null // { x, y } —— 屏幕 CSS 坐标（画布内），不随纸面 zoom/pan 缩放
+let laserStrokes = [] // [{ pts: [{x,y}...], fadeStart: null|ms }] —— 激光层私有，屏幕 CSS 坐标（画布内），不随纸面 zoom/pan 缩放
 
 function syncLaserSize() {
   const c = laserRef.value
@@ -534,58 +537,76 @@ function syncLaserSize() {
 function startLaser(e) {
   laserActive = true
   laserPointerId = e.pointerId
-  laserPoint = null
+  laserStrokes.push({ pts: [], fadeStart: null })
   cachedRect = canvasRef.value.getBoundingClientRect()
   try { canvasRef.value.setPointerCapture(e.pointerId) } catch { /* 指针已消失：仍可用，只是失去捕获 */ }
   pushLaserPoint(e)
 }
 
-// 只记「当前点」——没有历史点，就没有拖尾可画
+// 往当前这笔追加点 —— 激光和笔一样「写」出笔迹
 function pushLaserPoint(e) {
+  const stroke = laserStrokes[laserStrokes.length - 1]
+  if (!stroke) return
   const rect = cachedRect || (cachedRect = canvasRef.value.getBoundingClientRect())
-  laserPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+  stroke.pts.push({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+  if (stroke.pts.length > LASER_MAX_POINTS) stroke.pts.shift()
   // rAF 合并同一帧内的多次 pointermove（一次移动事件比一帧密得多）
   if (!laserRaf) laserRaf = requestAnimationFrame(tickLaser)
 }
 
 function tickLaser() {
-  laserRaf = 0
   drawLaser()
+  // 还有正在写的笔或渐隐中的笔 ⇒ 继续下一帧；全部清空了才停表
+  laserRaf = (laserActive || laserStrokes.length) ? requestAnimationFrame(tickLaser) : 0
 }
 
-/** 只画当前那一个点：柔光外圈在下、实心红点在上。**没有拖尾**。 */
+/** 画全部激光笔迹：每笔两层（柔光在下、亮芯在上），渐隐期按各自 fadeStart 算 alpha。 */
 function drawLaser() {
   const c = laserRef.value
   if (!c || !laserCtx) return
   const ratio = dpr()
   laserCtx.setTransform(ratio, 0, 0, ratio, 0, 0)
   laserCtx.clearRect(0, 0, c.width / ratio, c.height / ratio)
-  if (!laserPoint) return
-  const { x, y } = laserPoint
-  // 柔光外圈（先画，免得盖住核心红点）
-  laserCtx.fillStyle = 'rgba(239, 68, 68, 0.18)'
+  if (!laserStrokes.length) return
+  const now = performance.now()
+  laserCtx.lineCap = 'round'
+  laserCtx.lineJoin = 'round'
+  for (const stroke of laserStrokes) {
+    if (stroke.pts.length < 2) continue
+    const alpha = stroke.fadeStart == null ? 1 : Math.max(0, 1 - (now - stroke.fadeStart) / LASER_FADE_MS)
+    if (alpha <= 0) continue
+    // 柔光外层（先画，免得盖住亮芯）
+    laserCtx.strokeStyle = `rgba(239, 68, 68, ${0.18 * alpha})`
+    laserCtx.lineWidth = LASER_HEAD_R * 2.6
+    drawLaserPolyline(stroke.pts)
+    // 亮芯
+    laserCtx.strokeStyle = `rgba(239, 68, 68, ${0.95 * alpha})`
+    laserCtx.lineWidth = LASER_HEAD_R
+    drawLaserPolyline(stroke.pts)
+  }
+  laserStrokes = laserStrokes.filter((s) => s.fadeStart == null || now - s.fadeStart < LASER_FADE_MS)
+}
+
+function drawLaserPolyline(pts) {
   laserCtx.beginPath()
-  laserCtx.arc(x, y, LASER_HEAD_R * 2.6, 0, Math.PI * 2)
-  laserCtx.fill()
-  // 实心红点
-  laserCtx.fillStyle = 'rgba(239, 68, 68, 0.95)'
-  laserCtx.beginPath()
-  laserCtx.arc(x, y, LASER_HEAD_R, 0, Math.PI * 2)
-  laserCtx.fill()
+  laserCtx.moveTo(pts[0].x, pts[0].y)
+  for (let i = 1; i < pts.length; i++) laserCtx.lineTo(pts[i].x, pts[i].y)
+  laserCtx.stroke()
 }
 
 /**
- * 结束激光会话 —— **抬手立刻消失**：丢掉当前点、停掉待执行的 rAF，并立即清空光点层。
- * ⛔ 不要改成「让最后一点自然过期」：那是旧版拖尾的行为，负责人 2026-10-04 明确要
- *    「无拖尾、抬起笔就消失」，任何延迟都会重新变成残影。
+ * 结束当前这笔 —— 该笔进入 1 秒渐隐倒计时（fadeStart = 抬手时刻），
+ * 其他笔不受影响；渐隐由 tickLaser 驱动，所以这里**不能**停 rAF。
+ * ⛔ 也不要在这里清空 laserStrokes：那是「抬手即消」的旧行为，
+ *    负责人 2026-10-04 深夜已改为「像笔一样写、抬手 1 秒后消失」。
  */
 function endLaser(e) {
   if (!laserActive) return
   if (e && e.pointerId !== laserPointerId) return
   laserActive = false
   laserPointerId = null
-  laserPoint = null
-  if (laserRaf) { cancelAnimationFrame(laserRaf); laserRaf = 0 }
+  const stroke = laserStrokes[laserStrokes.length - 1]
+  if (stroke && stroke.fadeStart == null) stroke.fadeStart = performance.now()
   drawLaser()
 }
 
@@ -594,7 +615,7 @@ function onLostCapture() {
   endLaser()
 }
 
-/** 切走激光笔（换笔 / 橡皮）时立刻结束会话，避免光点残留 */
+/** 切走激光笔（换笔 / 橡皮）时结束当前笔，让它照常 1 秒渐隐（而不是一直留在屏上） */
 watch(tool, (t) => { if (t !== 'laser') endLaser() })
 
 // ── 笔迹渲染 ────────────────────────────────────────────────────────
