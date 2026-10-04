@@ -1144,3 +1144,100 @@ _pool = new Pool({
   循环格局确认，我的循环以其接力锁 `_loop_state.json` 为准（互不写）。
 - 布局档结论：bug/专业度/布局三层审计全绿。UI 美化（品味级）属 B 级提案，
   需负责人给方向（哪个页面、什么风格），不擅自动。
+
+### 提案⑰ 复核工作台与移动端的两处异步竞态（2026-10-04，第 105 轮深审发现，待拍板）
+
+第 105 轮对 `reviewStore.js`（1786 行全文）+ 移动端 `src/App.jsx` 做了只读深审。
+P1-1（判定失败回滚）/ P1-2（自动完成卷身份守卫）已由第 107 轮落地（9d25ba0）。
+以下为本轮深审剩余的真实发现，**按赛道归属分别提案**：
+
+**⑰-1（PC 工作台 stores 赛道，建议 A 级修复）`selectTask` / `loadStudentTasks` /
+`autoSelectPendingTask` 无请求序号保护（reviewStore.js:907/1115/600；ReviewTopBar.vue:488-502）**
+- 问题：快速连选试卷/学生时，慢返回的旧请求最后覆写 `allQuestions`/`currentTaskId`，
+  与 `currentTask` 错配；旧学生 `loadStudentTasks(A)` 慢返回还会在 `currentStudent=B`
+  上下文里选中 A 的卷（跨学生串数据）。
+- 触发：下拉快速切两份卷 / 顶栏快速换学生（网络 200-500ms 内二次操作）。
+- 建议修复：store 内自增序号（如 `let requestSeq = 0`），`selectTask`/`loadStudentTasks`
+  开头捕获 `const seq = ++requestSeq`，每个 `await` 落地前校验 `seq !== requestSeq` 则丢弃
+  （旧响应不得写 state）。改动面：reviewStore.js 一处 + ReviewTopBar 无改动（调 store 函数即可）。
+- ⛔ 注意：reviewStore 刚被 r107 收尾过，修复前先 `git log` 确认无 in-flight 改动。
+
+**⑰-2（移动端赛道，提名 Quest 会话核实）App.jsx 错题本「切换学生竞态」
+（loadWrongBookData L506-533 / loadMoreWrongQuestions L536-558 / 触发 effect L288-292）**
+- 问题：两处都在**发起时**捕获 `studentId`，结果落地前不校验当前学生身份。错题本请求
+  在途时换学生，晚到的 A 学生响应执行 `setWrongQuestions/setBankCounts/setWrongBookOffset`
+  覆盖 B 学生数据；展示层按 `student_id === B` 过滤后为空 → 错题本卡「这个分类暂时没有
+  错题」空态，bankCounts 串成 A 的计数。且空态不渲染触底哨兵，**不会自愈**，必须切页面
+  或再切学生才能恢复。
+- 建议修复：落地前校验 `useStudentStore.getState().currentStudent?.id === studentId`，
+  不符则丢弃（或 AbortController / 请求 token）。
+- ⛔ 属移动端赛道（Quest 会话），本讲只记录不代修；r108q/r109q 已做的是「失败 Toast」，
+  **与本竞态是两回事**（后者是成功响应串学生，不是失败反馈），不要混淆。
+
+**⑰-3（已核实，半误报）`nextTask/prevTask` 完成后索引回绕（reviewStore.js:1334-1352）**
+- 复核完成流程（autoCompleteAndAdvance L883 附近）先 `markTaskReviewedLocally`（task 标
+  reviewed 从 pendingTasks 移除）再 `nextTask()` → `findIndex=-1` → 返回 `pendingTasks[0]`
+  （回卷首）。**核实结论：完成当前卷后「回到列表第一份待复核」正是期望行为**，且
+  `pendingTasks` 是 computed 实时过滤，「完成前 nextTask（T 快捷键）idx 正常」。
+- 唯一边界：手动按 T 时 currentTask 已被外部清空的缝隙——实际极少触发，**判定为低价值，
+  不修**。留档防后续轮次重复排查。
+
+**⑰-4（已核实，低价值）exclude 后撤销按钮可用但无效（reviewStore.js:197-217, 746-759）**
+- exclude 把题 splice 出 allQuestions 后 `undoLastReview` 的 `find` 恒 undefined 无法恢复，
+  但 `undoHint` 仍显示可点。答案：exclude 不设 undoHint 或禁用撤销按钮。
+- 老师场景：误排除一道题会立即点「撤销」——现点了没反应（题已消失且撤销无效），
+  只能重进卷。属顺手化缺陷，建议 A 级改（一行：exclude 分支不 push undoHint）。
+- 归属：PC 工作台 stores 赛道，可与其他轮次一并处理。
+
+### 提案⑰⛔ 生产 API 无鉴权 + CORS 全开，学生数据对全互联网可读（第 13 轮，待拍板）
+
+**⑰-1 实测证据（2026-10-04，只读探测生产，未改任何配置）：**
+```bash
+P=https://minxue-api.onrender.com/api
+curl -s -I --noproxy '*' -H "Origin: https://example.com" $P/health
+#   → HTTP/1.1 200 OK
+#     access-control-allow-origin: https://example.com      ← 任意来源都被 echo 放行
+curl -s --noproxy '*' $P/students        # 无任何凭证 → 返回 21 名学生姓名/年级/错题数
+curl -s --noproxy '*' $P/tasks/summary   # 无任何凭证 → 返回任务原始文件名
+grep -rnE "requireAuth|apiKey|Bearer|passport" server/index.js   # → 无任何命中
+```
+⇒ 生产环境 `ALLOWED_ORIGIN=*` 且**全站无鉴权中间件**。任何人一枚 curl
+即可读全部学生姓名、年级、错题数、掌握情况、任务文件名。**涉及未成年人个人信息。**
+
+**⑰-2 根因链（这才是可修的地方）**
+1. `server/.env.example` **从未记录 `ALLOWED_ORIGIN`** ⇒ 部署时没人知道要配（本轮已补，见下）。
+2. `server/index.js:186` 的兜底只有 localhost 白名单 ⇒ 万一漏配，会**静默降级**成
+   「已部署网页被 CORS 拦」，表现是前端报网络错误而后端日志全是 200，最难排查。
+3. 于是实际运维时最容易走的最短路径就是配 `*`（省事、不影响本地联调）⇒ 现状。
+
+**⑰-3 已做（A 级，安全且不改行为）**
+- `server/.env.example` 新增「CORS 允许来源（生产必填！）」段，写明两个方向的坑：
+  不配＝静默降级；配 `*`＝对全互联网开放（并写入本条实测结论）。
+- 新增回归锁 `test/corsExposureGuard.test.mjs` 5 项，守三条底线：
+  ① 代码兜底白名单**不得出现 `*`**；② 兜底必须含 localhost；
+  ③ 不得引入 `ALLOWED_ORIGIN || '*'` / `?? '*'` 这类「默认全开」写法。
+  已做反向自检：把兜底改成 `|| '*'` 后第 1、5 项正确判红。
+
+**⑰-4 ⛔ 待负责人拍板：收敛生产 CORS（属 C 级「公共 API 行为变更」，未动手）**
+- 最小改动（**推荐**）：把 Render 的 `ALLOWED_ORIGIN` 从 `*` 改成实际前端来源白名单。
+  纯环境变量改动，**不改一行代码**，App 照常工作，浏览器端跨站读取即被关掉。
+  代价：以后加新前端域名要记得同步（已写进 `.env.example` 与回归锁的语境里）。
+- 更彻底：给 API 加一道共享密钥（前端 `X-Api-Key`）。能挡住直接 curl，
+  但要改前后端 + 所有调用方，动静大得多，对单人系统可能过度。
+- 不动：若认为「单用户系统、无鉴权、知道地址才能访问」的风险可接受，也可维持现状。
+  但请注意 **CORS 全开会把风险放大**：老师浏览任何网站时，该网站脚本都能读到这个 API。
+  收窄 CORS 是**零成本**的那一步。
+
+## 第 109 轮（2026-10-04）：只读运维巡检——全绿
+
+- health ok（bootAt 证明当前实例 = keep_backend 守护自愈拉起，守护实战生效）；
+- quota 无降级；任务管线全空：0 待复核 / 0 失败 / 0 进行中。
+- 巡检轮无代码改动，结果记录在案即完成。
+
+### 提案汇总（等负责人批，均未动手）
+
+| # | 提案 | 说明 |
+|---|---|---|
+| A | keep_backend 设为开机自启 | 现在守护是会话里手动拉起的分离进程，机器重启后失效；加入启动项后永久免疫（动负责人机器配置，需点头） |
+| B | 「生成再测卷」（学习诊断）与「生成重练卷」（错题中心）入口对齐 | 两者现已共用导出引擎，但文案/交互细节仍有差异；对齐后老师不用记两套说法 |
+| C | ③ IndexedDB 板书存储 | 负责人定的三四周观察期，到期主动呈报 |
