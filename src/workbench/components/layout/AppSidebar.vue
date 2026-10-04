@@ -6,7 +6,7 @@ const route=useRoute(),router=useRouter()
 // r101 收纳（负责人裁决②）：试卷答案库 / 我的题型库是「非常低频」入口，
 // 从顶级降到「练习册管理」下的二级项（URL 不变，收完仍从侧栏一键可达）。
 // r137（负责人裁决）：「我的讲义」属伪需求，入口与页面一并下线。
-const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook,children:[{label:'试卷答案库',path:'/paper'},{label:'我的题型库',path:'/question-bank'}]},{label:'周末班课件',path:'/weekend-ppt',icon:Files}]}]
+const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook,children:[{label:'试卷答案库',path:'/paper'},{label:'我的考法库',path:'/question-bank'}]},{label:'周末班课件',path:'/weekend-ppt',icon:Files}]}]
 const isActive=path=>path==='/'?route.path==='/':route.path.startsWith(path)
 const go=path=>{if(route.path!==path)router.push(path)}
 </script>

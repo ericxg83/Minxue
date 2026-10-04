@@ -156,6 +156,94 @@ router.post('/:id/ignore', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 
+/**
+ * GET /api/teaching-question-types/kp-questions?kpId=xxx&includeChildren=1&onlyWrong=0&days=0&limit=60
+ * 「按考点拉题」——考法库的核心出口：选中一个知识点（考点），把它下面挂的题目全拉出来，
+ * 带错次/错的学生，供老师勾选后送进周末班课件讲题。
+ *
+ * 口径说明（别和「章节」混）：
+ *   - 数据源是 question_knowledge（题目↔知识点多对多），不是 textbookCatalog（静态教材章节）。
+ *   - includeChildren=1（默认）会把选中节点递归展开到全部子孙 —— 选「函数」就能拉到
+ *     「一次函数/二次函数/…」下的题，这是「拉出众多题目」的关键。
+ *   - onlyWrong=0（默认）拉全部题；=1 只拉有人错过的题。
+ *   - days=0（默认）不限时段；>0 只统计最近 N 天内的错次。
+ * ⚠️ 错题里有一批 question_id 为空的练习册自包含错题，它们不在 question_knowledge 里，
+ *    因此永远不会被考点拉出来 —— 这是数据模型决定的，不是筛选漏了。
+ */
+router.get('/kp-questions', async (req, res) => {
+  try {
+    const kpId = String(req.query.kpId || '')
+    if (!kpId) return res.status(400).json({ success: false, error: '缺少 kpId' })
+    const includeChildren = String(req.query.includeChildren ?? '1') !== '0'
+    const onlyWrong = String(req.query.onlyWrong ?? '0') === '1'
+    const days = Math.min(Math.max(Number(req.query.days) || 0, 0), 365)
+    const limit = Math.min(Math.max(Number(req.query.limit) || 60, 1), 300)
+
+    const { rows } = await query(
+      `WITH RECURSIVE sub AS (
+         SELECT id, name, level FROM knowledge_points WHERE id = $1::uuid
+         UNION ALL
+         SELECT k.id, k.name, k.level FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
+       )
+       SELECT q.id AS question_id,
+              q.content, q.options, q.answer, q.analysis,
+              q.question_type, q.subject, q.difficulty, q.image_url,
+              COUNT(wq.id)::int AS wrong_count,
+              COUNT(DISTINCT wq.student_id)::int AS student_count,
+              COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') AS students,
+              COALESCE((SELECT jsonb_agg(jsonb_build_object('id', k2.id, 'name', k2.name))
+                          FROM question_knowledge qk2
+                          JOIN knowledge_points k2 ON k2.id = qk2.kp_id
+                         WHERE qk2.question_id = q.id), '[]'::jsonb) AS kps
+         FROM question_knowledge qk
+         JOIN sub sc ON sc.id = qk.kp_id
+         JOIN questions q ON q.id = qk.question_id AND q.is_complete = TRUE
+         LEFT JOIN wrong_questions wq
+           ON wq.question_id = q.id
+          AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
+          AND ($3::int = 0 OR wq.added_at >= now() - ($3::int * interval '1 day'))
+         LEFT JOIN students s ON s.id = wq.student_id
+        WHERE ($2::boolean OR sc.id = $1::uuid)
+        GROUP BY q.id
+        HAVING ($4::boolean = false OR COUNT(wq.id) > 0)
+        ORDER BY wrong_count DESC, student_count DESC, q.id
+        LIMIT $5::int`,
+      [kpId, includeChildren, days, onlyWrong, limit])
+
+    const { rows: kpRows } = await query(
+      `SELECT id, name, level FROM knowledge_points WHERE id = $1::uuid`, [kpId])
+    const { rows: subCount } = await query(
+      `WITH RECURSIVE sub AS (
+         SELECT id FROM knowledge_points WHERE id = $1::uuid
+         UNION ALL
+         SELECT k.id FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
+       ) SELECT COUNT(*)::int AS n FROM sub`, [kpId])
+
+    res.json({
+      success: true,
+      kp: kpRows[0] || null,
+      scope: { includeChildren, onlyWrong, days, expandedNodes: subCount[0]?.n || 0 },
+      questions: rows.map(r => ({
+        questionId: r.question_id,
+        content: r.content,
+        options: r.options,
+        answer: r.answer,
+        analysis: r.analysis,
+        questionType: r.question_type,
+        subject: r.subject,
+        difficulty: r.difficulty,
+        imageUrl: r.image_url,
+        wrongCount: r.wrong_count,
+        studentCount: r.student_count,
+        students: (r.students || []).slice(0, 30),
+        kps: r.kps || [],
+      })),
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 router.get('/candidates', async (req, res) => {
   try {
     const userId = userOrDefault(req)

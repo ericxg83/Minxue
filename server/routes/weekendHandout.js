@@ -19,6 +19,7 @@ import { buildHandout } from '../lib/weekendHandout.js'
 import { renderWeekendPptx } from '../services/weekendPptxService.js'
 import { buildChapterTree, getCatalogForGrade } from '../config/textbookCatalog.js'
 import { getPool } from '../config/neon.js'
+import { getKnowledgeTree } from '../services/knowledgeService.js'
 
 const router = Router()
 
@@ -41,6 +42,36 @@ router.get('/api/weekend-ppt/chapters', (req, res) => {
   })
 })
 
+/**
+ * GET /api/weekend-ppt/knowledge-points?subject=数学
+ * 知识点树（考点维度），供前端「考点」筛选使用。
+ * 与 /api/knowledge/tree 同源（knowledgeService.getKnowledgeTree），
+ * 这里只把 {id,name,children} 归一化成 el-tree-select 需要的 {value,label,children}。
+ * ⚠️ 章节（textbookCatalog）是静态教材目录，考点（knowledge_points）是题目实际关联的知识点，
+ *    两者不是一套东西，别互相替代。
+ */
+/**
+ * 知识点树 {id,name,children} → el-tree-select 需要的 {value,label,children}（纯函数，可测）。
+ * ⚠️ children 为空时必须给 undefined，否则 el-tree-select 会渲染出一个永远展开不了的空箭头。
+ */
+export function toTreeSelectOptions(nodes) {
+  return (nodes || []).map(n => ({
+    value: n.id,
+    label: n.name,
+    children: n.children?.length ? toTreeSelectOptions(n.children) : undefined,
+  }))
+}
+
+router.get('/api/weekend-ppt/knowledge-points', async (req, res) => {
+  const subject = String(req.query?.subject || '数学')
+  try {
+    const tree = await getKnowledgeTree(subject)
+    res.json({ success: true, subject, tree: toTreeSelectOptions(tree) })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 /** 参数归一化：只取认识的白名单字段，非法值回退默认 */
 function sanitizeParams(body = {}) {
   const num = (v, dft) => {
@@ -61,6 +92,9 @@ function sanitizeParams(body = {}) {
     mergeThin: num(body.mergeThin, 0),
     difficulty: str(body.difficulty),
     chapter: str(body.chapter),
+    // 考点（知识点）多选：前端 el-tree-select 传 id 数组；空数组 = 不限。
+    // 后端 buildHandout 会把选中节点递归展开到全部子孙后再过滤。
+    kpIds: arr(body.kpIds),
     // 讲过的题过滤：'' 全部（默认）/ 'untaught' 排除已讲 / 'taught' 只看已讲
     taught: ['untaught', 'taught'].includes(str(body.taught)) ? str(body.taught) : '',
     withAnswer: body.withAnswer !== false,

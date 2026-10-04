@@ -106,6 +106,29 @@
             />
           </div>
           <div class="param-field">
+            <label title="按「考点」筛选：只保留挂在这些知识点（含子考点）下的错题。与「章节」是两套维度，可叠加">
+              考点
+            </label>
+            <el-tree-select
+              v-model="params.kpIds"
+              :data="kpTreeOptions"
+              :props="{ label: 'label', children: 'children', value: 'value' }"
+              node-key="value"
+              show-checkbox
+              check-strictly
+              multiple
+              collapse-tags
+              collapse-tags-tooltip
+              filterable
+              clearable
+              :loading="kpOptionsLoading"
+              placeholder="按考点筛选（可搜考点名，选父节点含全部子考点）"
+              class="wb-tree-select"
+              style="width: 320px"
+              aria-label="按考点筛选"
+            />
+          </div>
+          <div class="param-field">
             <label>章节</label>
             <el-tree-select
               v-model="params.chapter"
@@ -338,7 +361,7 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Reading, Search } from '@element-plus/icons-vue'
 import { apiRequest, updateQuestion } from '../../services/apiService'
@@ -360,6 +383,7 @@ const TIER_COLORS = {
 }
 
 const router = useRouter()
+const route = useRoute()
 
 // ── 参数 ──
 // 默认口径（2026-09-23 用户指定）：年级初三 / 时段最近7天 / 学科数学 / 学生留空 /
@@ -376,6 +400,9 @@ const params = ref({
   difficulty: 'medium',
   chapter: '',
   taught: '',
+  // 考点（知识点 id 数组）：与「章节」是两套维度——章节来自静态教材目录，
+  // 考点来自 question_knowledge（题目实际关联的知识点）。两个可叠加使用。
+  kpIds: [],
 })
 const periodPreset = ref('days7')
 // 版本固定为讲义版（含参考答案，2026-09-23 用户指定）：界面不再提供切换，
@@ -415,6 +442,25 @@ const taughtOptions = [
 const chapterTreeOptions = ref([])
 const chapterOptionsLoading = ref(false)
 
+// ── 考点（知识点）树 ──
+// 来源 /api/weekend-ppt/knowledge-points（knowledgeService.getKnowledgeTree，数学 521 个节点 / 13 个板块）。
+// 选中父节点 = 选中整棵子树（后端递归展开），所以勾「函数」就能把一次函数/二次函数…的错题全拉出来。
+const kpTreeOptions = ref([])
+const kpOptionsLoading = ref(false)
+
+async function loadKpTree() {
+  kpOptionsLoading.value = true
+  try {
+    const subject = String(params.value.subject || '').trim() || '数学'
+    const res = await apiRequest(`/weekend-ppt/knowledge-points?subject=${encodeURIComponent(subject)}`)
+    kpTreeOptions.value = res?.tree || []
+  } catch (e) {
+    kpTreeOptions.value = []
+  } finally {
+    kpOptionsLoading.value = false
+  }
+}
+
 async function loadChapterTree() {
   chapterOptionsLoading.value = true
   try {
@@ -431,6 +477,12 @@ async function loadChapterTree() {
 watch(() => params.value.grade, () => {
   params.value.chapter = ''
   loadChapterTree()
+})
+
+// 学科决定知识点树（数学 521 个节点；其他学科目前树较稀疏），切学科要重拉。
+watch(() => params.value.subject, () => {
+  params.value.kpIds = []
+  loadKpTree()
 })
 
 function onPeriodPreset(val) {
@@ -460,7 +512,13 @@ const gradeOptions = computed(() => {
 })
 
 onMounted(async () => {
-  await loadChapterTree()
+  await Promise.all([loadChapterTree(), loadKpTree()])
+  // 从考法库「按考点进入周末班课件」跳转过来：/weekend-ppt?kpIds=<uuid>（可多个，逗号分隔）
+  const q = route.query?.kpIds
+  if (q) {
+    const ids = String(q).split(',').map(s => s.trim()).filter(Boolean)
+    if (ids.length) params.value.kpIds = ids
+  }
   try {
     const res = await apiRequest('/students')
     students.value = (res.students || []).filter(s => s.enrollment_status !== 'archived')
@@ -477,7 +535,13 @@ const selectedCount = computed(() => selected.value.size)
 const previewMeta = computed(() => {
   if (!handout.value) return ''
   const h = handout.value
-  return `时段 ${h.periodLabel} · ${h.stats.rawRows} 条错题 → ${h.stats.topics} 题 · ${h.stats.students} 名学生`
+  const base = `时段 ${h.periodLabel} · ${h.stats.rawRows} 条错题 → ${h.stats.topics} 题 · ${h.stats.students} 名学生`
+  const kf = h.stats?.kpFilter
+  if (!kf) return base
+  const names = (kf.names || []).slice(0, 3).join('、') + ((kf.names || []).length > 3 ? ' 等' : '')
+  // 练习册自含错题没有 question_id，挂不上考点，筛考点时会被排除 —— 必须如实告知，不能静默丢题。
+  const dropped = kf.unlinkedRows ? `（${kf.unlinkedRows} 条练习册自含错题无题目ID，挂不上考点已排除）` : ''
+  return `${base} · 考点「${names}」命中 ${kf.matchedRows} 条${dropped}`
 })
 
 function questionsOf(label) {
@@ -676,6 +740,7 @@ function buildParamsBody(extra = {}) {
     difficulty: params.value.difficulty || undefined,
     chapter: params.value.chapter || undefined,
     taught: params.value.taught || undefined,
+    kpIds: (params.value.kpIds || []).length ? params.value.kpIds : undefined,
     withAnswer: true,
     ...extra,
   }

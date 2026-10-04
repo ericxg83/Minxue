@@ -101,6 +101,19 @@ function chapterNodeIds(catalog, nodeId) {
  * @param {string} [opts.taught='']  讲题状态过滤：'' 全部 / 'untaught' 排除已讲 / 'taught' 只看已讲
  * @param {(msg:string)=>void} [opts.logger]
  */
+/**
+ * 按考点过滤错题行（纯函数，便于回归测试）。
+ * @param {Array} rawRows 错题行（含 q_id 字段）
+ * @param {Map<string,string[]>} kpsByQuestion question_id → kp_id[]
+ * @param {Set<string>} kpIdSet 展开后的考点集合（含全部子孙）
+ * @returns {Array} 命中的行
+ * ⚠️ q_id 为空的练习册自包含错题永远命中不了 —— 它们不在 question_knowledge 里，
+ *    这是数据模型决定的；调用方要把「排除条数」如实回传给前端，不能静默丢题。
+ */
+export function filterRowsByKp(rawRows, kpsByQuestion, kpIdSet) {
+  return rawRows.filter(r => (kpsByQuestion.get(r.q_id) || []).some(id => kpIdSet.has(id)))
+}
+
 export async function buildHandout(opts) {
   const {
     pool,
@@ -114,6 +127,8 @@ export async function buildHandout(opts) {
     mergeThin = 0,
     difficulty = '',
     chapter = '',
+    // 考点（知识点）筛选：kpIds 为空数组 = 不限；非空时自动展开「选中节点 + 全部子孙」
+    kpIds = [],
     withAnswer = true,
     taught = '',
     logger = () => {},
@@ -161,7 +176,7 @@ export async function buildHandout(opts) {
     subjectClause = ` AND COALESCE(NULLIF(q.subject,''), NULLIF(wq.subject,''), t.subject) = $${params.length}`
   }
 
-  const { rows } = await pool.query(
+  const { rows: rawRows } = await pool.query(
     `SELECT
        wq.id AS wq_id, wq.student_id, wq.question_id, wq.added_at, wq.error_count,
        wq.lifecycle_status, wq.is_blank, wq.error_type, wq.error_reason,
@@ -189,6 +204,45 @@ export async function buildHandout(opts) {
      ORDER BY wq.added_at DESC`,
     params
   )
+
+  // ── 考点（知识点）筛选（2026-10-05 考法库目标模式）────────────────────────
+  // 语义：kpIds 空 = 不限；非空 = 只保留挂在这些考点（含全部子孙节点）下的错题。
+  // 展开在 SQL 侧用递归 CTE 做，不把 500+ 节点拉进内存。
+  // ⚠️ 兼容性：练习册自包含错题 question_id 为空，无法定位考点，筛考点时会被排除，
+  //    数量单独计数回传（kpFilter.unlinkedRows），前端要如实告知老师，不能静默丢失。
+  let rows = rawRows
+  let kpFilter = null
+  if (Array.isArray(kpIds) && kpIds.length) {
+    const { rows: subRows } = await pool.query(
+      `WITH RECURSIVE sub AS (
+         SELECT id, name FROM knowledge_points WHERE id = ANY($1::uuid[])
+         UNION ALL
+         SELECT k.id, k.name FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
+       ) SELECT DISTINCT id, name FROM sub`, [kpIds])
+    const kpIdSet = new Set(subRows.map(r => r.id))
+    const qIds = [...new Set(rawRows.map(r => r.q_id).filter(Boolean))]
+    const kpsByQuestion = new Map()
+    if (qIds.length) {
+      const { rows: qkRows } = await pool.query(
+        `SELECT question_id, kp_id FROM question_knowledge WHERE question_id = ANY($1::uuid[])`, [qIds])
+      for (const r of qkRows) {
+        if (!kpsByQuestion.has(r.question_id)) kpsByQuestion.set(r.question_id, [])
+        kpsByQuestion.get(r.question_id).push(r.kp_id)
+      }
+    }
+    rows = filterRowsByKp(rawRows, kpsByQuestion, kpIdSet)
+    const unlinkedRows = rawRows.filter(r => !r.q_id).length
+    kpFilter = {
+      ids: kpIds,
+      names: subRows.map(r => r.name).sort(),
+      expandedNodes: kpIdSet.size,
+      matchedRows: rows.length,
+      droppedRows: rawRows.length - rows.length,
+      unlinkedRows,
+    }
+    log(`[0] 考点筛选: ${kpFilter.names.join('、')}（含子孙共 ${kpIdSet.size} 节点）→ 命中 ${rows.length}/${rawRows.length} 条错题（${unlinkedRows} 条无题目ID 无法判考点）`)
+  }
+
   const tasksById = new Map()
   {
     const taskIds = [...new Set(rows.map(r => r.last_wrong_task_id || r.q_task_id).filter(Boolean))]
@@ -1015,6 +1069,8 @@ export async function buildHandout(opts) {
       chapter: chapterNode?.id || null,
       chapterName: chapterNode?.name || null,
       taught: taught || null,
+      kpIds: kpFilter ? kpFilter.ids : null,
+      kpNames: kpFilter ? kpFilter.names : null,
     },
     stats: {
       rawRows: totalRows, topics: totalTopics, questionSlides: seq,
@@ -1023,6 +1079,7 @@ export async function buildHandout(opts) {
       limitDropped,
       unknownSubject,
       chapterSummary,
+      kpFilter,
     },
     overview: sections.map(d => ({
       label: d.mergedDays.length ? `${d.dayFrom} ~ ${d.day}` : d.day,

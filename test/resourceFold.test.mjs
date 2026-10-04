@@ -21,13 +21,18 @@ export function collectFailures(src) {
   // 二级入口存在（children 形态）
   bad('试卷答案库必须是练习册管理的二级项（children 内 path:/paper）',
     /children:\[[^\]]*\{label:'试卷答案库',path:'\/paper'\}/.test(src))
-  bad('我的题型库必须是练习册管理的二级项（children 内 path:/question-bank）',
-    /children:\[[^\]]*\{label:'我的题型库',path:'\/question-bank'\}/.test(src))
-  // 不得再以顶级形态出现（顶级项带 icon 字段；二级项没有）
   bad('试卷答案库不得再是顶级导航项（顶级项应有 icon，二级项没有）',
     !/\{label:'试卷答案库',path:'\/paper',icon:/.test(src))
-  bad('我的题型库不得再是顶级导航项',
-    !/\{label:'我的题型库',path:'\/question-bank',icon:/.test(src))
+  // ── 2026-10-05 r142：负责人裁决「我的题型库」改名「我的考法库」（题型=形式，考法=这道题在考哪套动作）。
+  //    判据不是放宽，是**换词继续守同一条约束**：入口仍必须是练习册管理的二级项、仍不得是顶级项。
+  //    ⛔ 别为了让自己变绿去删这两条 —— 它们守的是「收纳后仍可达」，跟名字无关。
+  //    旧文案「我的题型库」已随侧边栏改名失效，本锁同步跟进（改的是断言里的字符串，不是判据）。
+  for (const label of ['我的考法库']) {
+    bad(`${label}必须是练习册管理的二级项（children 内 path:/question-bank）`,
+      new RegExp(`children:\\[[^\\]]*\\{label:'${label}',path:'/question-bank'\\}`).test(src))
+    bad(`${label}不得再是顶级导航项（顶级项带 icon，二级项不带）`,
+      !new RegExp(`\\{label:'${label}',path:'/question-bank',icon:`).test(src))
+  }
   // 渲染层必须真渲染二级项（模板里有 nav-sublink 循环）
   bad('模板必须渲染二级入口（nav-sublink 循环缺失 = 只删不接）',
     /v-for="child in item\.children\|\|/.test(src))
