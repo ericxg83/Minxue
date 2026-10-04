@@ -1,3 +1,20 @@
+/**
+ * ⚠️ 本模块当前**无运行时调用方**（2026-10-04 全仓核实）。保留原因有二，**删前必读**：
+ *
+ * 1. `cropAndUploadQuestionRegion` —— **已于 2026-09-21 随「整题裁片下线」停用**
+ *    （见 `server/worker.js` 顶部注释、`server/lib/weekendHandout.js` 的 resolveWbImage 移除说明）。
+ *    它裁的是 `wrong_questions.question_image_url`（学生卷面上按 block_coordinates 裁的整题裁片），
+ *    该字段已在写入侧正式下线；白板题图改为「配图 figure → 无配图则不显示」，不再有回退路径。
+ *    ⛔ 不要因为它「还在」就把它接回题图回退 —— `test/blockBoxTrust.test.mjs` 有契约锁着这件事。
+ *
+ * 2. `isUnreliableBox` —— **被契约测试故意保留的「唯一判据参照实现」**
+ *    （`test/blockBoxTrust.test.mjs`「契约：cropAndUpload.isUnreliableBox 必须走 blockBoxTrust 的共用判据」）。
+ *    它必须继续 import `./blockBoxTrust.js` 并复用 `isOutOfRangeBox`；
+ *    ⛔ 禁止在别处另写一份「框可信度」判据 —— 这一份就是防漂移的锚。
+ *    另：本文件还在 `test/noProxyDownload.test.mjs` 的受保护调用点清单里（URL 取图必须带禁代理选项）。
+ *
+ * ⇒ 结论：**不要整文件删除**（会拆掉上面的契约锁）；要清理就只清 `cropAndUploadQuestionRegion` 本身。
+ */
 import sharp from 'sharp'
 import axios from 'axios'
 import { uploadImage } from '../services/ossService.js'
