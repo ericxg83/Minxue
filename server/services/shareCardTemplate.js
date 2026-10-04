@@ -220,11 +220,21 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   const avatarStyle = maskName ? 'filter:blur(6px);' : ''
   const grade = escapeHtml(student.grade || '')
 
-  // 周期徽章与时间段
+  // 周期徽章：**家长视角**的时间标签。
+  // 2026-10-04 改：此前周模式显示英文「WEEK 40」——那是内部口径（ISO 周数），
+  // 家长看不懂"第 40 周"指哪几天，而卡片下方本来就用中文写着「学习周期 09/27 ~ 10/04」，
+  // 属于又难懂又重复。改为按 offset 说人话。
+  // ⚠️ 必须按 offset 区分：老师也能翻看往期（offset>0），一律写"本周"会误导。
+  const _off = Number(period.offset || 0)
+  const _monthLabel = String(period.start || '').slice(5, 7).replace(/^0/, '')
   let badge = '成长记录'
-  if (mode === 'week' && period.weekNum) badge = `WEEK ${period.weekNum}`
-  else if (mode === 'month') badge = `${String(period.start || '').slice(5, 7).replace(/^0/, '')}月`
-  else if (mode === 'all') badge = '成长总览'
+  if (mode === 'week') {
+    badge = _off === 0 ? '本周' : _off === 1 ? '上周' : `${_off} 周前`
+  } else if (mode === 'month') {
+    badge = _off === 0 ? '本月' : _off === 1 ? '上月' : (_monthLabel ? `${_monthLabel}月` : '本月')
+  } else if (mode === 'all') {
+    badge = '成长总览'
+  }
   const fmtMD = (iso) => {
     const str = String(iso || '')
     return /^\d{4}-\d{2}-\d{2}/.test(str) ? str.slice(5, 10).replace('-', '/') : str
