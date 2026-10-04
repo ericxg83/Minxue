@@ -73,3 +73,63 @@ test('整张卡片不得出现英文残留（WEEK/MONTH 等口径词）', () => 
       `家长可见区域出现了英文口径或脏值：${p.mode}/${p.offset}`)
   }
 })
+
+
+// ── 趋势块：数据稀疏时不该画一张只剩一个点的空网格 ──────────────────────
+// 2026-10-04 亲眼看渲染图发现：整周只有 1 天批改过时（实测确有此数据：
+// 7 天里 6 天 count=0），仍画完整 7 天网格 + 坐标轴，图上只剩孤零零一个点，
+// 家长看着像"图坏了"。改为分三态：0 天占位 / 1 天一行实话 / ≥2 天完整图表。
+const ST = {
+  totalTasks: 1, completedTasks: 0, totalQuestions: 30, correctCount: 19,
+  wrongCount: 11, accuracy: 63.3, newWrongCount: 11, masteredCount: 0, pendingCount: 11,
+}
+const withTrend = (dailyTrend) => ({
+  student: { name: '测试', grade: '初二' },
+  period: { start: '2026-09-27', end: '2026-10-04', mode: 'week', offset: 0 },
+  stats: ST, dailyTrend,
+})
+const trendKind = (dailyTrend) => {
+  const html = buildShareCardHTML(withTrend(dailyTrend), { maskName: false })
+  // ⚠️ 判据必须看真实元素，不能用 includes('trend-single') —— 那会命中 CSS 样式定义（永远都在）。
+  //    2026-10-04 我就是被这个坑了一次，误以为四种情况都渲染成同一形态。
+  if (html.includes('<div class="trend-single">')) return 'single'
+  if (html.includes('<div class="trend-empty">')) return 'empty'
+  if (html.includes('<svg')) return 'chart'
+  return 'none'
+}
+
+test('趋势块三态：0 天占位 / 1 天一行实话 / ≥2 天完整图表', () => {
+  assert.equal(trendKind([{ date: '09-28', accuracy: null, count: 0 }]), 'empty', '0 天该是占位文案')
+  assert.equal(
+    trendKind([{ date: '09-28', accuracy: null, count: 0 }, { date: '10-02', accuracy: 63.3, count: 30 }, { date: '10-03', accuracy: null, count: 0 }]),
+    'single', '只有 1 天有数据时不该再画完整网格')
+  assert.equal(
+    trendKind([{ date: '09-28', accuracy: 50, count: 10 }, { date: '10-02', accuracy: 63.3, count: 30 }]),
+    'chart', '2 天有数据就该画趋势线')
+})
+
+test('一行实话要说清：哪天、几题、正确率多少', () => {
+  const html = buildShareCardHTML(withTrend([{ date: '10-02', accuracy: 63.3, count: 30 }]), { maskName: false })
+  const txt = (html.match(/<div class="trend-single">([\s\S]*?)<\/div>/) || [])[1] || ''
+  assert.match(txt.replace(/<[^>]+>/g, ''), /10-02/, '必须写出是哪一天')
+  assert.match(txt.replace(/<[^>]+>/g, ''), /30/, '必须写出批改了几题')
+  assert.match(txt.replace(/<[^>]+>/g, ''), /63\.3/, '必须写出正确率')
+})
+
+test('该天无正确率时不得显示 undefined/NaN', () => {
+  const html = buildShareCardHTML(withTrend([{ date: '10-02', accuracy: null, count: 30 }]), { maskName: false })
+  const txt = ((html.match(/<div class="trend-single">([\s\S]*?)<\/div>/) || [])[1] || '').replace(/<[^>]+>/g, '')
+  assert.doesNotMatch(txt, /undefined|NaN/, '无正确率时不能把空值渲染出来')
+  assert.match(txt, /30/, '仍应说清批改了几题')
+})
+
+test('标题随内容自适应：≤1 天不写「趋势」，避免家长以为漏图', () => {
+  const titleOf = (dt) => (buildShareCardHTML(withTrend(dt), { maskName: false })
+    .match(/block-title">([^<]*)</) || [])[1] || ''
+  assert.match(titleOf([{ date: '10-02', accuracy: 63.3, count: 30 }]), /批改记录/,
+    '1 天数据时标题不该叫「正确率趋势」')
+  assert.match(titleOf([{ date: '09-28', accuracy: null, count: 0 }]), /批改记录/,
+    '0 天数据时标题也不该叫「正确率趋势」')
+  assert.match(titleOf([{ date: '09-28', accuracy: 50, count: 10 }, { date: '10-02', accuracy: 63.3, count: 30 }]),
+    /正确率趋势/, '≥2 天确实是趋势，标题应保持「正确率趋势」')
+})

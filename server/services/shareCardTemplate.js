@@ -292,13 +292,30 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   }
 
   // 趋势（仅周模式；整周无批改时给占位文案）
-  const hasTrendData = (dailyTrend || []).some((d) => num(d.count) > 0)
+  // 2026-10-04 亲眼看渲染图发现：整周只有 1 天批改过时，仍画完整的 7 天网格 + 坐标轴，
+  // 结果图上只剩孤零零一个点，家长看着像"图坏了"（实测确有这种数据：7 天里 6 天 count=0）。
+  // 所以分三态：0 天 → 占位文案；1 天 → 一行实话（哪天、几题、正确率多少）；≥2 天 → 完整图表。
+  const _trendDays = (dailyTrend || []).filter((d) => num(d.count) > 0)
+  const hasTrendData = _trendDays.length > 0
+  let trendInner = ''
+  if (!hasTrendData) {
+    trendInner = '<div class="trend-empty">暂无分日批改数据</div>'
+  } else if (_trendDays.length === 1) {
+    const d = _trendDays[0]
+    const accTxt = d.accuracy == null ? '' : `，正确率 ${num(d.accuracy)}%`
+    trendInner = `<div class="trend-single">${periodWord}仅 <b>${escapeHtml(String(d.date || ''))}</b> 批改了 <b>${num(d.count)}</b> 题${escapeHtml(accTxt)}</div>`
+  } else {
+    trendInner = renderTrendChart(dailyTrend)
+  }
+  // 标题也跟着内容自适应：只有 1 天数据时，内容是一句话而非趋势线，
+  // 标题还写「正确率趋势」会让家长以为漏了图。
+  const trendTitle = _trendDays.length >= 2 ? `正确率趋势（${periodWord}）` : `批改记录（${periodWord}）`
   let trendHtml = ''
   if (mode === 'week') {
     trendHtml = `
     <div class="card-block">
-      <div class="block-title">正确率趋势（${periodWord}）</div>
-      ${hasTrendData ? renderTrendChart(dailyTrend) : `<div class="trend-empty">暂无分日批改数据</div>`}
+      <div class="block-title">${trendTitle}</div>
+      ${trendInner}
     </div>`
   }
 
@@ -367,6 +384,9 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
 
   /* 趋势 */
   .trend-empty{padding:48px 0;text-align:center;color:${T.textTer};font-size:12px}
+  /* 整周只有 1 天批改时：一行说清哪天、几题、正确率，避免画一张只剩一个点的空网格 */
+  .trend-single{padding:34px 8px;text-align:center;color:${T.textSec};font-size:14px;line-height:1.9}
+  .trend-single b{color:${T.primary};font-weight:800;font-size:17px}
 
   /* 学科正确率（月/全部模式的趋势替代块） */
   .subj-rows{display:flex;flex-direction:column;gap:12px;padding:2px 0 4px}
