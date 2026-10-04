@@ -40,15 +40,18 @@
 
 ## 四、当前系统状态（2026-10-04 实测，非记忆值）
 
-- **测试基线**：`npm test` **1536 全绿**（第 74 轮接手时 1453；r86 +0、r87 +9、r88 +4、r89 +12、r90 +21、r91 +11、r92 +5、r93 +6 例回归锁）。
-- **lint**：**14 errors（历史遗留，未动）+ 153 warnings**（接手时 190；第 82-83 轮死声明清理降到 153）。
+- **测试基线**：`npm test` **1582 全绿**（2026-10-04 实测；第 74 轮接手时为 1453）。
+  ⚠️ 该数字随每轮增长，**不要照抄本文档**——以当轮 `npm test` 实测为准（本文历史上多次写成过期值）。
+- **lint**：**9 errors（历史遗留，未动）+ 152 warnings**（接手时 190；第 82-83 轮死声明清理降一波，第 103 轮再降到 9 errors）。
+  ⚠️ 同样是实测值，别照抄。
 - **几何配图（实测）**：geometry_image 资产 501 个 = completed **457**、闸门拒绝 44、从未尝试 **0**、failed **0**、在途 0。
   展示层真相：completed 的 457 个里 **内联 SVG 384 / 只有已发布位图 URL 72 / 真在显示模糊裁片 0**。
 - **五条确定性通道**：函数图象 / 数轴 / **分数面积模型（新）** / DSL 构造 / 视觉目测。
 - **讲题白板（r86 后）**：工具 = pen / eraser / **laser**；快捷键 `1-4` `[` `]` `E` `L` `Y` `Z` `A` `O` `F` `U` `R` + 方向键/Home/End；
   有重做（`redoStack`）；清屏需二次确认（3s 窗口）。**激光笔走独立 `.dc-laser` canvas，绝不写 strokes**；
-  **样式 = 无拖尾 + 抬手即消（r93 改）**：只维护「当前那一个点」（柔光外圈 r13 + 实心红点 r5），
-  `endLaser` 同步丢点 + 立即重绘清空光点层（旧版是「220ms 按点龄衰减的拖尾线段」，抬手还会拖一小段）。
+  **样式 = 笔迹式激光 + 抬手 1 秒渐隐（r97 改；⚠️ 已覆盖 r93 的「无拖尾 + 抬手即消」）**：
+  激光像笔一样留下连续笔迹（`laserStrokes` 数组，各笔独立倒计时），抬手后 `LASER_FADE_MS = 1000` 内按 alpha 渐隐、到时整笔移除；
+  一秒内的连续多笔互不影响（画框时前面的笔迹不提前消失），正在书写的笔不参与倒计时。回归锁 `test/laserInkFade.test.mjs`。
   选中激光笔时手指归指针、横滑切题暂停。验证脚本 `_r85_board_verify.mjs`（gitignore 的根目录 `_*` 临时件）。
 - **白板导出板书图（r86 新修）**：题干不再以 LaTeX 源码印在图上。离屏 `.dc-export-render` 层用**屏幕同一个
   `MathRender`** 渲染 → `html2canvas` 光栅化（`onclone` 内联 `KATEX_CSS_WITH_FONTS` + `fixFractionLineInCloneDoc`）
@@ -116,7 +119,9 @@
   ⛔ **通用教训**：`0 控制台错误` 这个断言抓不到两类最常见的「点了没用」——
   「点了白屏」只打 vue-router warning、「点了没反应」只打 Vue warning，必须另加源码级入口锁。
   审计脚本 `_r92_route_audit.mjs` / `_r92_click_audit.mjs` 可随时重跑；反向自检 `_r92_lock_selfcheck.mjs` 7 条判红。
-- **白板激光笔改「无拖尾」（r93 新交付）**：负责人要求「无拖尾激光笔，抬起笔消失的那种样子」。
+- ⚠️ **【已被 r97 取代，仅作存档】白板激光笔改「无拖尾」（r93 交付）**：负责人当时要求「无拖尾激光笔，抬起笔消失的那种样子」。
+  2026-10-04 深夜负责人**推翻了该裁决**，改为「笔迹式激光 + 抬手 1 秒渐隐」——现行行为见上面「讲题白板」那条。
+  下面保留的是 r93 当时的实现与验证记录；其回归锁 `test/laserNoTrail.test.mjs` **已随 r97 删除**，现由 `test/laserInkFade.test.mjs` 接管。
   旧实现是「红点 + 220ms 按点龄衰减的拖尾线段」（`laserTrail` 点缓冲 + `LASER_TRAIL_MS` + `LASER_MAX_POINTS`
   + 逐段 `lineTo` 折线 + 抬手后让最后一段自然过期）。现在 `laserPoint` 只存**当前那一个点**，
   `drawLaser()` 不画折线、不遍历历史点，`endLaser()` 丢点 + `cancelAnimationFrame` + **立即重绘清空光点层**。
@@ -240,7 +245,7 @@ memory 日志、同名子串假阳性、CSS 注释提及）后全部判死删除
   **Memurai 服务**常驻 6379（`redis-cli` 不在 PATH，用 `Test-NetConnection -Port 6379` 探）。
   preview 代理连不上后端表现为全页 500 `/api/quota/status`。
 
-**四道闸**：`npm test` **1537/1537**（1536 − 1 摘除 + 2 新锁）｜ lint **14 errors / 150 warnings**
+**四道闸**：`npm test` **1582/1582**（2026-10-04 实测）｜ lint **9 errors / 152 warnings**
 （errors 持平，warnings −3 随死文件消失）｜ 构建 `dist_nightly_20261004r94` ｜ 真机冒烟
 `_r91_smoke 33/33`（×3，1 遍遇外部证书噪声 32/33，旧产物同款）+ `_r91_pc_verify 25/25` +
 `_r92_verify 12/12` + `_r93_laser_verify 15/15`（dev 与产物双跑）+ `_r94_render_smoke 8/8`。零写生产库。
@@ -319,7 +324,7 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 | 90 | `4fb0b85` | **任务自愈对老师完全无感**：自愈中的失败不再显示成失败（移动端任务页新增 `'self-healing'` 档、无按钮、转圈「正在处理」；首页落进「作业批改中」；PC 批改中心归为「AI 处理中」），手动重试与自动重捞不再撞车（`retryTaskById` 在途去重）。判定唯一实现 `pendingTaskRecovery.js#describeAutoRetry`（**照 SQL 判，不照设计意图**），前端 `src/domain/taskAutoRetry.js` 只翻译。回归锁 `test/taskAutoRetry.test.mjs`（21 例，含 SQL ILIKE 漂移锁，已反向自检 19/19）。四道闸全过，`_r90_autoretry_verify.mjs` 19/19 + `_r90_pc_verify.mjs` 6/6（dev 与隔离产物各一遍）+ `_r90_smoke.mjs` 27/27 |
 | 91 | `2cc8b1f` | **数据页合并 第 1 档 + 第 2 档**：成长中心（`/growth`）与错题中心（`/wrongbook`）两个页面下线，**家长成长卡搬进学习诊断输出条最右**（它是转发给家长的产出物，不能随页消失），**错题清单以组件自带的 `embedded` 形态嵌进学生档案页**（`#student-wrong` + 页内滚动 CTA），侧栏「教学工作」只剩 3 项，10 处入站链接改指，两条路由留 redirect 兜底，删掉错题中心那排**死勾选框**（勾了没有任何事发生）。⛔ 顺手抓到并修掉一个**静默失效**：`GrowthCardButton` 是多根节点组件，Vue 不透传 class ⇒ 定位类被丢弃、右对齐永远不生效（只有一条 `Extraneous non-props attributes` **warning**，不报错）——现把该 warning 当红、并用几何位置验对齐。回归锁 `test/dataPageMerge.test.mjs`（12 例，已反向自检 33/33）。四道闸全过，`_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
 | 92 | `4d23cba` | **工作台入口可达性闸门**：审计 88 个文件 / 48 个导航目标 + 71 个 SFC 的 `@click` 绑定，抓到两个真缺陷 —— ① **新学生档案页的主按钮点了整页白屏**（`to: '/upload'`，工作台没有上传页；vue-router 只打 warning，内容区整片空白，实测内容长度 545→77）；② **复核页「查看错题池」绑了不存在的 `goWrongBook`**（函数叫 `goToWrongBook`）⇒ 点了没反应。新增两道常驻闸门 `test/workbenchRouteTargets.test.mjs`（3 例）+ `test/workbenchClickHandlers.test.mjs`（2 例），均已反向自检（11 条判据 7 条判红）。四道闸全过，`_r92_verify.mjs` 12/12 + 回归 `_r91_pc_verify.mjs` 25/25 + `_r91_smoke.mjs` 33/33 |
-| 93 | 本轮 | **白板激光笔改「无拖尾 + 抬手即消」**：删掉旧的「红点 + 220ms 按点龄衰减拖尾线段」（`laserTrail` / `LASER_TRAIL_MS` / `LASER_MAX_POINTS` / 逐段 `lineTo`），`laserPoint` 只存当前那一个点，`drawLaser()` 不画折线，`endLaser()` 丢点 + 取消 rAF + **立即重绘清空**。⛔「激光笔不进 strokes」纪律未动（导出 PNG 只读 `localStrokes` ⇒ 天然不含光点）。回归锁 `test/laserNoTrail.test.mjs`（6 例，反向自检 25 条判据 / 旧版判红 12 条）。四道闸全过，`_r93_laser_verify.mjs` 15/15（dev + 隔离产物，像素级：拖动中光点外接框恒 26×26、抬手后立即 0 像素、strokes 无 laser、跟随偏差 0.5px）|
+| 93 | 本轮（⚠️ 行为已被第 97 轮取代）| **白板激光笔改「无拖尾 + 抬手即消」**：删掉旧的「红点 + 220ms 按点龄衰减拖尾线段」（`laserTrail` / `LASER_TRAIL_MS` / `LASER_MAX_POINTS` / 逐段 `lineTo`），`laserPoint` 只存当前那一个点，`drawLaser()` 不画折线，`endLaser()` 丢点 + 取消 rAF + **立即重绘清空**。⛔「激光笔不进 strokes」纪律未动（导出 PNG 只读 `localStrokes` ⇒ 天然不含光点）。回归锁 `test/laserNoTrail.test.mjs`（6 例，反向自检 25 条判据 / 旧版判红 12 条）。四道闸全过，`_r93_laser_verify.mjs` 15/15（dev + 隔离产物，像素级：拖动中光点外接框恒 26×26、抬手后立即 0 像素、strokes 无 laser、跟随偏差 0.5px）|
 
 ## 八、历史已交付索引（第 74 轮之前，勿重复建设）
 
