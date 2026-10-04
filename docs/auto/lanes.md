@@ -33,6 +33,25 @@
   （本机 safe-delete 对目录删不掉，见 HANDOFF 第九节），判据一行未改。
 - 四道闸：单测 1674/1674｜lint 我方 0 error｜`dist_nightly_20261005r132`｜render_smoke 8/8。
 - ⚠️ 未跟的同类（只提案，属移动端赛道）：`src/utils/weeklyReportGenerator.js` 仍是旧口径，见 backlog 提案①。
+**第 142 轮（2026-10-05，PC 工作台赛道）已交付：诊断页「专项重练卷」就地预览（commit `226d732` + `43afae6`）**
+- 起因：r141 把「发重练卷」改成了跳学生档案页，负责人验收时原话「**也没有很顺手的页面，体验很差**」——
+  档案页那 49 道题要自己在长列表里逐条勾，且勾选状态与本页的「49 道同类错因」毫无关系（等于把筛选重做一遍）。
+- 交付：新组件 `components/diagnosis/RetryPaperPreviewDialog.vue`（独立文件，避开 `dataPageMerge` 对
+  `WeeklyReportWorkbench.vue` 内「发重练卷」字符串的禁令）；三条动作改为 **emit scope 就地开弹窗**，
+  默认全选 + 逐题减选 + 全选/清空；档案页降级为次级文字出口。管线零新造，与 `WrongBookCenterRedesign` 同一套。
+- ⭐ **实测抓到的口径失真（比 r141 那两个更隐蔽）**：毛辰绮「计算错误」诊断页显示 49，
+  预筛命中也是 49（口径对齐 ✅），但其中 **8 道是练习册自包含错题（`question_id` 为空）**，
+  实际只能组出 **41 道**。按钮若写「生成重练卷（49）」而卷面只有 41，就是失真，且更难察觉（按钮是老师自己点的）。
+  ⇒ 新增 `examIds` 作「可组卷题单」唯一来源，按钮/计数条/提示条/footHint 全部改引它。
+  **通用教训：任何「N 道」都要问「这 N 个真能进下一步吗」，别直接用勾选数。**
+- 锁：纯逻辑抽 `retryPaperScope.js` 后**真跑** 11 条（源码锁看不见 `>= 2`→`> 2` 这类语义变化）
+  + 闭环 10 条源码锁。**反向自检实测：旧树 r141 喂进去 10 条全红。**
+- 四道闸：单测 1704/1704｜lint 我方 0｜三个 SFC 真编译 OK｜SSR 内存渲染 9/9。
+  ⛔ `vite build` 仍不可用（esbuild Go runtime `osinit()` 崩，**TEMP 绕法无效**，与 r131 那次
+  「Access is denied」是不同病因）；SSR 是替代不是等价，恢复后须补跑真机构建。
+- ⚠️ 并发实记：`226d732` 是并发会话在我 `git add` 前抢跑提交了同一份实现（NextActions +
+  弹窗 + WeeklyReportWorkbench + routeTargets 判据），我后补的 `43afae6` 是口径修正 + 纯函数模块 + 两个测试文件。
+
 | **流程沉淀与 skill 维护** | `~/.workbuddy/skills/minxue-*/SKILL.md`（调用名一律中文）、`docs/auto/backlog.md` 的勘误与止损记录、`.workbuddy/memory/**` | 常驻巡检会话（2026-10-04 认领） | 🟢 已认领 |
 
 **为什么选这条**：近 25 个提交的改动文件统计显示，`src/workbench/**` 被反复触碰，而移动端 `src/`（除 workbench）几乎没动过（`App.jsx` 仅 2 次、`apiService.js` 2 次）。
