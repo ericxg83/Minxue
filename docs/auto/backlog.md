@@ -921,3 +921,33 @@ EXPLAIN ANALYZE 实测两版：
 「数据库实际结构与静态 Schema 的差异未校验」至今未闭环。本轮的 3 个探针可直接收编进
 `server/scripts/`（只读），纳入每日 03:30 夜间巡检，避免盲区长期敞着。
 ⛔ 未动 `scripts/nightlyAudit.mjs`——「仓库卫生与门禁基线」是他人赛道，等其空闲再收编。
+
+### 提案⑪ 第二轮勘误与「无异常」留档（2026-10-04，常驻巡检赛道）
+
+**⑪-1 勘误：⑩-2 里 `judgements.task_id` 索引建议作废。**
+实测 `judgements` 实际列只有：
+`id / question_id(text) / student_id(text) / source / confidence / is_correct / content /
+answer / student_answer / ai_answer / analysis / metadata / created_at`——
+**根本没有 `task_id` 列**（与长期记忆铁律 33「judgements.question_id 是 TEXT」一致）。
+⑩-2 的索引探针是按列名匹配的，把「列不存在」误报成了「缺索引」。该建议作废，勿执行。
+`judgements` 现有索引 `(question_id, student_id, created_at DESC)`，按 question_id 走
+`ANY($n::text[])` 的查询能吃到前缀，**judgements 无需补索引**。
+⑩-2 剩余有效项仅：`tasks.created_at`、`questions.lifecycle`、`question_assets.status`。
+
+**⑪-2（提案，C 级）`LIFECYCLE_STATUS.REVIEW_2` 是不可达死状态。**
+`gradingFinalizer.getNextLifecycle`（第 344-363 行）里 `REVIEW_2` **只出现在入参分支**
+（答对 review_2→review_1、答错 review_2→new），**没有任何转移会产出 review_2**；
+生产库实测 lifecycle 分布也只有 new 1044 / review_1 74 / mastered 2，review_2 恒 0 条。
+判定为早期三阶段设计（new→review_1→review_2→mastered）简化为两阶段后的残留。
+无用户可见影响（永远不会被写入），但属生命周期语义，**按 C 级只提案不动手**。
+
+**⑪-3「无异常」留档（避免后续轮次重复排查）。**
+第二轮曾疑心「重练后 practice_count 不推进、掌握数只有 2」，实测**链路健康，非缺陷**：
+- practice_count 分布 0→938 / 1→153 / 2→24 / 3→5，累计 216 次练习；
+- 交叉核对：938 未练过、106 练过仍 new（答错）、74 进 review_1（答对）、2 已 mastered，
+  合计与 lifecycle 分布完全吻合，状态机自洽；
+- 26 张组卷中 9 张 `ungraded` 是**正常中间态**：这 9 张 `retry_task_id` 均为空、
+  对应 tasks 记录不存在（卷已生成但学生还没做、没进批改），其题目的 judgements 条数
+  来自其他卷，非本卷判题；
+- `tasks` 表 `status='failed'` 实测 **0 条**（日志里 BullMQ `failed=51` 是队列层历史作业，
+  与 tasks 表不是一回事，不要混）。
