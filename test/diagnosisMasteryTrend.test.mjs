@@ -87,9 +87,16 @@ test('⛔ 后端三处调用点必须全用 splitMasteryStates（防新增调用
   assert.ok(uses.length >= 4, `只找到 ${uses.length} 处，期望 ≥4（1 定义 + 3 调用）`)
   // 旧的「只判 mastered、else 全并 pendingCount」写法必须已消失。
   // splitMasteryStates 自身内部有且仅有一处合法判定，故先切掉函数体再扫。
+  // ⚠️ 切边界必须用正则匹配「行首的 }」而不是 indexOf('\n}\n')——
+  //    本仓 .vue/.js 可能是 CRLF 行尾（实测 weeklyReport.js 就是），
+  //    '\n}\n' 匹配不到会返回 -1，fnEnd 变成 2 ⇒ 切出来的「函数外」
+  //    反而包含了整个函数体 ⇒ 锁永远误报 1 处残留。r136 实测踩过。
   const fnStart = SERVER.indexOf('export function splitMasteryStates')
-  const fnEnd = SERVER.indexOf('\n}\n', fnStart) + 3
-  const outside = SERVER.slice(0, fnStart) + SERVER.slice(fnEnd)
+  assert.ok(fnStart > 0, '找不到 splitMasteryStates 定义')
+  const rest = SERVER.slice(fnStart)
+  const closer = rest.search(/\r?\n\}\r?\n/)   // 行首的 } （兼容 CRLF）
+  assert.ok(closer > 0, '找不到 splitMasteryStates 的结束花括号')
+  const outside = SERVER.slice(0, fnStart) + rest.slice(closer)
   const legacy = outside.match(/lifecycle_status\s*===\s*'mastered'/g) || []
   assert.equal(legacy.length, 0, `函数体之外仍有 ${legacy.length} 处旧口径残留`)
 })

@@ -392,6 +392,30 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       ? await fetchPeriodCompare(studentId, { ...prevPeriod, mode, offset: offset + 1 })
       : null
     const retryProgress = await fetchRetryProgress(studentId, periodStart, periodEnd)
+    // r136：逐份重练卷明细（进步证据页的时间线需要）。
+    //     此前 fetchRetryProgress 只返回**汇总**（几份卷、共几题、正确率），
+    //     画不出「每次重练答对率的起伏」—— 而那恰恰是家长最想看的进步过程。
+    //     铁律 9：slim 重练卷不写 questions 表，判题结果只信任 tasks.result。
+    const { rows: retryHistoryRows } = await query(
+      `SELECT
+         to_char(created_at AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD') AS date,
+         COALESCE((result->>'questionCount')::int, 0) AS question_count,
+         COALESCE((result->>'correctCount')::int, 0)  AS correct_count
+       FROM ${TABLES.TASKS}
+       WHERE student_id = $1
+         AND task_type = 'wrong_retry'
+         AND deleted_at IS NULL
+         AND (result->>'questionCount') IS NOT NULL
+         AND created_at >= $2
+         AND created_at < $3
+       ORDER BY created_at ASC`,
+      [studentId, periodStart, periodEnd]
+    )
+    const retryHistory = retryHistoryRows.map(r => ({
+      date: r.date,
+      questionCount: r.question_count,
+      correctCount: r.correct_count
+    }))
 
     const result = {
       success: true,
@@ -414,6 +438,9 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       // 页面粒度切换与 PDF 折线图共用，不补空日（没批改的天不出现）。
       dailyAccuracy,
       weeklyAccuracy,
+      // 2026-10-04（r136）：逐份重练卷明细（纯新增）——
+      // retryProgress 只有汇总，画不出「每次重练答对率的起伏」。
+      retryHistory,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,
       retryProgress

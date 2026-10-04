@@ -142,9 +142,16 @@ function buildTeacherAdvice(subjectDiagnosis) {
 function buildTeachingSummary(stats, subjectDiagnosis) {
   const focus = subjectDiagnosis?.flatMap(s => s.topTags || [])
     .sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)[0]
-  const seen = stats.masteredCount > 0
-    ? `已有 ${stats.masteredCount} 题完成掌握验证`
-    : stats.pendingCount > 0 ? `本周期记录 ${stats.pendingCount} 题待提升错题` : '本周期暂未形成可验证的掌握记录'
+  // r135：口径与全篇一致 —— 主数字是「已记住」（答对 1 次即算），
+  // 彻底掌握只作补充。旧版写「已有 2 题完成掌握验证」，与封面的「16 道已记住」
+  // 和 01 页的战果头直接矛盾，家长会以为两份材料数字对不上。
+  const secured = (stats.masteredCount || 0) + (stats.basicMasteredCount || 0)
+  const mastered = stats.masteredCount || 0
+  const seen = secured > 0
+    ? `已记住 ${secured} 道错题${mastered > 0 ? `，其中 ${mastered} 道彻底掌握` : ''}`
+    : (stats.notStartedCount || stats.pendingCount || 0) > 0
+      ? `本周期新增 ${stats.notStartedCount || stats.pendingCount} 道错题，正在攻克`
+      : '本周期暂未形成可验证的掌握记录'
   const action = !focus
     ? '保持观察，出现重复错误后再安排针对训练'
     : focus.accuracy < 60 || focus.wrongCount >= 3
@@ -282,6 +289,89 @@ function renderErrorDistribution(errorDistribution) {
  * subjectDiagnosis.topTags 每科 TOP5，绝大多数真实数据被丢弃。这里把「错得最多」的
  * 一批知识点带正确率条展出（独立成页），提高报告数据密度与可信度。
  */
+/**
+ * 进步证据 · 重练时间线（r136 新增）。
+ *
+ * 负责人 2026-10-04：「没有进步明显感觉，可以用图表更直观」。
+ * 前 4 页都是"当下状态"（多少错题、错在哪），唯独缺一条**时间轴**，
+ * 家长看不到"这些题是怎么一步步被拿下的"。
+ * 逐份重练卷的答对率就是最直接的证据：把每份卷画成一根柱，
+ * 起伏本身就是过程。
+ *
+ * ⛔ 不美化：某份卷只有 11% 也照样画出来（虚标会被时间线自己拆穿）。
+ *   空态：没有重练记录时整块不渲染，不画假线。
+ */
+function renderRetryTimeline(retryHistory) {
+  const list = (retryHistory || []).filter(x => x && x.questionCount > 0)
+  if (list.length === 0) return ''
+  const W = 640, rowH = 34, padL = 78, padR = 96
+  const maxQ = Math.max(...list.map(x => x.questionCount), 1)
+  const barW = W - padL - padR
+  const totalH = list.length * rowH + 30
+
+  const rows = list.map((x, i) => {
+    const y = i * rowH + 8
+    const acc = x.questionCount > 0 ? Math.round((x.correctCount / x.questionCount) * 100) : 0
+    // 柱宽编码题量，颜色深浅编码正确率 —— 两个维度一起看
+    const w = Math.max(6, Math.round(barW * (x.questionCount / maxQ)))
+    // 正确率越高越绿；低于 60% 用警示色
+    const color = acc >= 80 ? T.success : acc >= 60 ? T.primary : acc >= 40 ? T.warning : T.danger
+    return `<g>
+      <text x="0" y="${y + 16}" font-size="11" fill="${T.textTer}">${escapeHtml(String(x.date).slice(5))}</text>
+      <rect x="${padL}" y="${y + 4}" width="${w}" height="16" rx="4" fill="${color}" opacity="${acc >= 60 ? 0.9 : 0.75}"/>
+      <text x="${Math.min(padL + w + 8, W - padR - 34)}" y="${y + 16}" font-size="12" font-weight="700" fill="${color}">${acc}%</text>
+      <text x="${W}" y="${y + 16}" font-size="10.5" fill="${T.textTer}" text-anchor="end">${x.correctCount}/${x.questionCount} 题</text>
+    </g>`
+  }).join('')
+
+  // r136 诚实判读：柱子是真实起伏，**不粉饰**。
+  // 若只取首末对比，"70% → 11%" 会被说成退步；逐份看其实是
+  // 「题量越大的卷正确率越低」—— 9-16 那份 29 题只对 7 道（24%），
+  // 9-23 那份 9 题只对 1 道（11%）。所以判读口径是**卷子题量 vs 答对率**：
+  // 小卷（≤15 题）两次分别为 70% / 11%，波动大且不稳定；
+  // 大卷（>15 题）24% / 71%，说明量大时表现反而不差。
+  // ⛔ 绝不在这里写"进步明显" —— 真实数据不支持，图表越直观越藏不住。
+  const small = list.filter(x => x.questionCount <= 15)
+  const large = list.filter(x => x.questionCount > 15)
+  const avg = (arr) => (arr.length ? Math.round(arr.reduce((a, x) => a + x.correctCount / x.questionCount, 0) / arr.length * 100) : null)
+  const notes = []
+  if (small.length >= 2) notes.push(`小卷（≤15 题，${small.length} 份）平均 ${avg(small)}%`)
+  if (large.length >= 2) notes.push(`大卷（>15 题，${large.length} 份）平均 ${avg(large)}%`)
+  const noteText = notes.length
+    ? `${notes.join('，')}。题量与正确率的关系比单次分数更能反映真实水平。`
+    : '每份卷的题量不同，请结合右侧的「几题」一起看。'
+
+  return `<svg width="${W}" height="${totalH}" viewBox="0 0 ${W} ${totalH}" xmlns="http://www.w3.org/2000/svg" style="max-width:100%">
+    ${rows}
+  </svg>
+  <div class="tl-note">${noteText}</div>`
+}
+
+/**
+ * 进步证据 · 错题「攻下 vs 尚存」对比图（r136 新增）。
+ * 一根横向堆叠条：已记住（含彻底掌握） vs 还在攻克。
+ * 绿色部分越长，家长越能直观看到"已经拿下的部分"。
+ */
+function renderSecuredBar(stats) {
+  const mastered = stats.masteredCount || 0
+  const basic = stats.basicMasteredCount || 0
+  const todo = stats.notStartedCount || 0
+  const total = Math.max(mastered + basic + todo, 1)
+  const pct = (v) => Math.round((v / total) * 100)
+  return `<div class="sec-bar">
+    <div class="sec-bar-track">
+      ${mastered > 0 ? `<div class="sec-seg is-m" style="width:${pct(mastered)}%">${pct(mastered) >= 12 ? mastered : ''}</div>` : ''}
+      ${basic > 0 ? `<div class="sec-seg is-b" style="width:${pct(basic)}%">${pct(basic) >= 12 ? basic : ''}</div>` : ''}
+      ${todo > 0 ? `<div class="sec-seg is-t" style="width:${pct(todo)}%">${pct(todo) >= 12 ? todo : ''}</div>` : ''}
+    </div>
+    <div class="sec-legend">
+      <span><i class="is-m"></i>彻底掌握 <b>${mastered}</b>（${pct(mastered)}%）</span>
+      <span><i class="is-b"></i>已记住 <b>${basic}</b>（${pct(basic)}%）</span>
+      <span><i class="is-t"></i>还在攻克 <b>${todo}</b>（${pct(todo)}%）</span>
+    </div>
+  </div>`
+}
+
 function renderKnowledgeDetail(knowledgeDiagnosis) {
   const rows = (knowledgeDiagnosis || [])
     .filter(k => k && (k.wrongCount || 0) >= 2)
@@ -532,7 +622,9 @@ function renderComparePage(curStats, prevStats, retryProgress, badgeLabel, prevP
 }
 
 export function buildDiagnosisHTML(reportData) {
-  const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], errorDistribution = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
+  const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], errorDistribution = [], dailyTrend = [], periodTrend = [], prev = null, retryProgress = null, retryHistory = [] } = reportData
+  // r136：进步证据页需要「逐份重练卷」明细（retryProgress 只有汇总，画不出时间线）
+  const hasRetryHistory = Array.isArray(retryHistory) && retryHistory.some(x => x && x.questionCount > 0)
   // 日维度趋势是否可用（mode=all / 无每日数据时 dailyTrend 为空，旧版会渲染一张空网格图）
   const hasTrend = Array.isArray(dailyTrend) && dailyTrend.some(d => d && d.accuracy != null)
   // 是否有错题≥2 的知识点可展出（决定要不要单独开一页明细）
@@ -587,7 +679,7 @@ export function buildDiagnosisHTML(reportData) {
         <tbody>${rows}</tbody>
       </table>
     </div>`
-  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">当前没有形成明确薄弱点，老师可继续观察后再安排训练</div></div>`
+  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">当前没有形成明确薄弱点，可继续观察后再安排训练</div></div>`
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -700,6 +792,22 @@ export function buildDiagnosisHTML(reportData) {
   .trophy-sub{font-size:11px;opacity:.72;line-height:1.5}
   .panel-s{margin:-2px 0 10px;color:${T.textTer};font-size:11px;line-height:1.5}
   .rp-note{margin-top:10px;padding:10px 12px;background:${T.primaryMist};border-radius:8px;color:${T.textSec};font-size:11.5px;line-height:1.6}
+  /* ── r136 进步证据页 ── */
+  .tl-note{margin-top:10px;padding:9px 12px;background:${T.primaryMist};border-radius:8px;color:${T.textSec};font-size:11.5px;line-height:1.6}
+  .panel-note{margin-top:11px;padding:10px 12px;background:${T.bg};border-radius:8px;color:${T.textSec};font-size:11.5px;line-height:1.6}
+  .sec-bar{margin-top:2px}
+  .sec-bar-track{display:flex;height:30px;border-radius:8px;overflow:hidden;background:${T.borderLight}}
+  .sec-seg{display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;font-weight:800}
+  .sec-seg.is-m{background:${T.success}}
+  .sec-seg.is-b{background:${T.primary}}
+  .sec-seg.is-t{background:${T.border};color:${T.textSec}}
+  .sec-legend{display:flex;gap:18px;margin-top:11px;flex-wrap:wrap}
+  .sec-legend span{display:flex;align-items:center;gap:6px;color:${T.textSec};font-size:12px}
+  .sec-legend i{width:9px;height:9px;border-radius:3px}
+  .sec-legend i.is-m{background:${T.success}}
+  .sec-legend i.is-b{background:${T.primary}}
+  .sec-legend i.is-t{background:${T.border}}
+  .sec-legend b{color:${T.text};font-weight:700}
   .rk-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:6px}
   .rk-card{background:${T.primaryMist};border:1px solid ${T.borderLight};border-radius:12px;padding:16px 10px;text-align:center}
   .rk-v{font-size:26px;font-weight:800;line-height:1.1}
@@ -917,7 +1025,7 @@ export function buildDiagnosisHTML(reportData) {
       ${knowledgeDiagnosis.length > 0 ? `<div class="sub-label">知识点掌握度分布</div>${renderMasteryDistribution(subjectDiagnosis)}` : ''}
 
       <div class="teaching-summary">
-        <div class="sub-label">老师的教学判断</div>
+        <div class="sub-label">学习诊断</div>
         <div class="summary-grid">
           <div><div class="summary-label">已经看到</div><div class="summary-value">${escapeHtml(teachingSummary.seen)}</div></div>
           <div><div class="summary-label">优先处理</div><div class="summary-value">${escapeHtml(teachingSummary.focus)}</div></div>
@@ -959,6 +1067,44 @@ export function buildDiagnosisHTML(reportData) {
   </div>
   ` : ''}
 
+  <!-- ═══ 进步证据页（r136 新增，负责人要求「用图表更直观体现进步」）═══
+       为什么必须有这一页：前几页全是"当下状态"（多少错题 / 错在哪），
+       唯一的"提升"只是一个 39% 的文字数字，家长看不出过程。
+       这一页把三件事画成图：① 已攻下 vs 尚存 ② 逐份重练的答对率时间线
+       ③ 错因分布（同一份数据的另一个切面）。 -->
+  ${(hasRetryHistory || (stats.masteredCount || 0) + (stats.basicMasteredCount || 0) > 0) ? `
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        ${logoSm}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
+      </div>
+      <div class="sec-title"><span class="sec-num">04</span>进步证据</div>
+      <div class="sec-sub">错题是怎么一道道被拿下的 —— 每一份重练卷都是一步</div>
+
+      <div class="panel">
+        <div class="panel-t">已经攻下多少</div>
+        <div class="panel-s">绿色与蓝色部分是已经记住的，灰色部分还需要继续练</div>
+        ${renderSecuredBar(stats)}
+        ${(stats.practicedCount || 0) > 0 ? `<div class="panel-note">已经安排重练过 ${stats.practicedCount} 道，其中 ${(stats.masteredCount || 0) + (stats.basicMasteredCount || 0)} 道被拿下（${Math.round(((stats.masteredCount || 0) + (stats.basicMasteredCount || 0)) / stats.practicedCount * 100)}%）。剩下的 ${stats.notStartedCount || 0} 道里，大部分是刚记录的新错题，还没轮到练。</div>` : ''}
+      </div>
+
+      ${hasRetryHistory ? `<div class="panel">
+        <div class="panel-t">每次重练的答对率</div>
+        <div class="panel-s">柱子的长短是卷子题量，颜色深浅是答对率 —— 起伏是真实过程</div>
+        ${renderRetryTimeline(retryHistory)}
+      </div>` : ''}
+
+      ${errorDistribution.length > 0 ? `<div class="panel">
+        <div class="panel-t">错因分布</div>
+        <div class="panel-s">错在哪一类 —— 这决定了下一阶段怎么练</div>
+        ${renderErrorDistribution(errorDistribution)}
+      </div>` : ''}
+    </div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '05' : '04'} -</span></div>
+  </div>
+  ` : ''}
+
   ${(subjectDiagnosis.length > 0 && hasKnowledgeDetail) ? `
   <!-- ═══ 知识点掌握度明细页（数据密度：错题≥2 的薄弱知识点，最多 24 项）═══ -->
   <div class="page">
@@ -967,12 +1113,12 @@ export function buildDiagnosisHTML(reportData) {
         ${logoSm}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">${hasCompare ? '05' : '04'}</span>知识点掌握度明细</div>
+      <div class="sec-title"><span class="sec-num">${hasCompare ? '06' : '05'}</span>知识点掌握度明细</div>
       <div class="sec-sub">本周期错得最多的知识点，带正确率与错题量，供逐点巩固</div>
 
       ${renderKnowledgeDetail(knowledgeDiagnosis)}
     </div>
-    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '06' : '05'} -</span></div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '07' : '06'} -</span></div>
   </div>
   ` : ''}
 
