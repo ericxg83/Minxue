@@ -1,5 +1,5 @@
 <template>
-  <el-button type="success" size="default" :loading="loading" @click="open">
+  <el-button type="success" size="default" :loading="loading" :disabled="!studentId" @click="open">
     家长分享卡
   </el-button>
   <el-dialog v-model="visible" title="家长分享卡（原图发家长 · 转发版名字打码）" width="480px" append-to-body>
