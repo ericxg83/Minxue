@@ -1337,3 +1337,42 @@ grep -rnE "requireAuth|apiKey|Bearer|passport" server/index.js   # → 无任何
   create-by-url 对 imageUrl 零校验（仅 startsWith('http')）→ SSRF 探内网 +
   无凭证烧 AI 额度。其建议最小修复集（域名白名单 + 私网拦截，均只加校验不改批改主流程，
   带反向自检锁）技术上成立。等负责人点头后执行。
+
+### 提案⑲⛔ 评审 r112 的 urlGuard：第二道防线**没盖住批改主链路**（第 17 轮）
+
+**结论：`server/utils/urlGuard.js` 本身写得不错**（双层防线、IPv4 网段含 CGN
+`100.64.0.0/10` 与元数据 `169.254.0.0/16`、IPv6 前缀、DNS 解析后判断、
+域名后缀匹配 `endsWith('.'+h)` 正确防住 `evil-aliyuncs.com` 这类混淆、
+`IMAGE_URL_ALLOW_PRIVATE=1` 逃生门），**但接入点漏了最关键的那条路。**
+
+**⛔ 缺口（已逐处核对，非推测）：**
+第二道防线 `assertNotPrivateUrl` 只加在 `server/utils/noProxyHttp.js:35`
+的 `downloadImageBufferNoProxy` 封装里。而该封装的调用点**只有两个**：
+- `server/geometryWorker.js:132`
+- `server/tikzWorker.js:19`
+
+**批改主链路完全没被覆盖：**
+- ⛔ **`server/worker.js:950`** 是**直接** `axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)`，
+  **不走那个封装**；且本轮 `git status` 显示 `worker.js` **完全未被改动**。
+  而 `POST /api/tasks/create-by-url` 入队后，真正去抓图的正是 worker.js:950 ——
+  **SSRF 最需要拦的那一步没拦。**
+- ⛔ `server/utils/cropAndUpload.js:30` 同样直接 `axios.get`。
+- ⛔ `server/rerunGeometry.js:50` 同样直接 `axios.get`。
+
+**为什么这不只是"少一处调用"**：端点层白名单只管**新进来**的 URL，
+而库里**已存量**的 `image_url` 可能是修复前被写入的任意地址。
+下载器层正是为这批存量兜底的第二道防线，而它现在恰好漏掉了批改主路径。
+
+**建议修法（二选一，都很小）**
+1. **推荐：让 worker.js:950 改走封装**。它现在的两行
+   `const response = await axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)` +
+   `const buf = Buffer.from(response.data)` 与封装函数体**行为完全一致**，
+   换成 `const buf = await downloadImageBufferNoProxy(imageUrl)` 即可，
+   顺带消除重复、以后修选项也只改一处。**属"只改调用点不改行为"。**
+2. 或在 worker.js:950 / cropAndUpload.js:30 / rerunGeometry.js:50 三处
+   各加一行 `await assertNotPrivateUrl(url)`（改动面更大，但更显式）。
+
+**建议补一条回归锁**：`server/utils/urlGuard.js` 之外，锁住
+「凡 `axios.get(<url>, NO_PROXY_DOWNLOAD_OPTS)` 的调用点必须先经 `assertNotPrivateUrl`」——
+即用源码扫描断言「直接 axios 抓图的点」数量为 0，否则以后再新增又会漏。
+⛔ 未动手：`server/worker.js` 属批改主流程（C 级），等负责人/该会话确认。
