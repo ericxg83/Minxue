@@ -84,6 +84,24 @@ async function tick() {
   }
 }
 
-await log(`守护启动（每 ${INTERVAL_MS / 1000}s 探活 ${HEALTH_URL}）`)
+// ── 单实例守卫：开机自启（r110）后若手动再启会双跑，用 pid 文件互斥 ──
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs'
+const PID_FILE = resolve(ROOT, 'server/scripts/logs/keep_backend.pid')
+try {
+  if (existsSync(PID_FILE)) {
+    const old = Number(readFileSync(PID_FILE, 'utf8').trim())
+    if (old && old !== process.pid) {
+      try {
+        process.kill(old, 0) // 还活着 → 已有守护在跑，本实例退出
+        console.log(`keep_backend 已在运行（PID ${old}），本实例退出`)
+        process.exit(0)
+      } catch { /* 旧进程已死，残留 pid 文件，接管 */ }
+    }
+  }
+  writeFileSync(PID_FILE, String(process.pid))
+  process.on('exit', () => { try { if (readFileSync(PID_FILE, 'utf8').trim() === String(process.pid)) unlinkSync(PID_FILE) } catch { /* 忽略 */ } })
+} catch { /* pid 守卫失败不阻断守护主职能 */ }
+
+await log(`守护启动（每 ${INTERVAL_MS / 1000}s 探活 ${HEALTH_URL}，PID ${process.pid}）`)
 setInterval(tick, INTERVAL_MS)
 tick()

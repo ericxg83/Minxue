@@ -410,7 +410,7 @@
         <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('week')">生成本周报告</ActionButton>
         <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('month')">生成本月报告</ActionButton>
         <ActionButton @click="handleExportHandout">生成讲义</ActionButton>
-        <ActionButton variant="primary" @click="handleDistributeExam">生成再测卷</ActionButton>
+        <ActionButton variant="primary" @click="handleDistributeExam">发重练卷</ActionButton>
         <!-- 家长成长卡（第 91 轮从「成长中心」搬来）：这是老师转发给家长的产出物，
              成长中心下线后不能跟着消失。未选学生时点它会提示「请先选择学生」。
              ⛔ 类名必须挂在外层 span 上，不能直接挂到 <GrowthCardButton>：
@@ -993,20 +993,21 @@ async function handleExportHandout() {
 }
 
 async function handleDistributeExam() {
-  // 重构：底部输出条"生成再测卷"按钮直接调用此函数展示两条发卷路径，
-  // 教师确认后关闭对话框（不再就地触发批量生成，进度改由 toast 反馈）。
+  // r110（负责人批准的对齐）：统一叫「重练卷」，指路文案更新到现状——
+  // 路径 B 原来只指移动端，现在 PC 学生档案的错题清单已能直接勾选组卷出 PDF（第 102 轮）。
   try {
     const { ElMessageBox } = await import('element-plus')
     await ElMessageBox.confirm(
       '<div style="line-height: 1.7;">' +
-      '<p style="font-weight: 600; margin: 4px 0;">针对本轮共性错题，有两条发卷路径：</p>' +
-      '<p style="margin: 6px 0;"><b style="color: #6366F1;">路径 A · 每周自动（推荐）</b><br/>' +
-      '「周学习诊断报告」已内含每位学生的错题再测卷，点击下方按钮一键生成全部学生，下载打印即可发卷。</p>' +
-      '<p style="margin: 6px 0;"><b style="color: var(--wb-success);">路径 B · 移动端临时卷</b><br/>' +
-      '需要针对个别学生或某个知识点单独补练时，打开移动端 App「错题本」，勾选错题（最多 30 题）即可生成临时再测卷。</p>' +
-      '<p style="color: var(--wb-text-tertiary); font-size: 12px; margin: 6px 0;">零组卷开发：两条路径均为系统既有能力，按需选用即可。</p>' +
+      '<p style="font-weight: 600; margin: 4px 0;">给学生发重练卷，有三条路：</p>' +
+      '<p style="margin: 6px 0;"><b style="color: #6366F1;">① 周报自动（推荐，全量）</b><br/>' +
+      '周学习诊断报告已内含每位学生的错题重练卷，点「生成本周/本月报告」一键生成全部学生，下载打印即可发卷。</p>' +
+      '<p style="margin: 6px 0;"><b style="color: var(--wb-success);">② 错题清单勾选（按需）</b><br/>' +
+      '打开学生档案页，在下方错题清单勾选题目，点「生成重练卷」直接下载可打印 PDF（卷上带扫码答题二维码）。</p>' +
+      '<p style="margin: 6px 0;"><b style="color: var(--wb-text-secondary);">③ 移动端现场</b><br/>' +
+      '晚托现场用手机时，打开 App「错题本」勾选错题（最多 30 题）即可生成临时重练卷。</p>' +
       '</div>',
-      '发「错题再测卷」',
+      '发「错题重练卷」',
       {
         confirmButtonText: '知道了',
         cancelButtonText: '关闭',

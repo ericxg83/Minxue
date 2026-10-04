@@ -127,7 +127,7 @@
               <span v-if="exam.status === 'graded'" class="retry-count">{{ exam.correct_count }} 对 / {{ exam.wrong_count }} 错</span>
             </div>
           </div>
-          <EmptyState v-else title="还没有重练卷" description="在学习诊断里点「生成再测卷」，或在手机错题本里创建第一份吧" />
+          <EmptyState v-else title="还没有重练卷" description="在下方错题清单里勾选题目，点「生成重练卷」就能出第一份；或在学习诊断点「发重练卷」看全部发卷方式" />
         </ContentCard>
       </section>
 
