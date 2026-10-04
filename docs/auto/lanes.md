@@ -33,6 +33,27 @@
   （本机 safe-delete 对目录删不掉，见 HANDOFF 第九节），判据一行未改。
 - 四道闸：单测 1674/1674｜lint 我方 0 error｜`dist_nightly_20261005r132`｜render_smoke 8/8。
 - ⚠️ 未跟的同类（只提案，属移动端赛道）：`src/utils/weeklyReportGenerator.js` 仍是旧口径，见 backlog 提案①。
+**第 134 轮（2026-10-05 02:28–，本赛道）已交付：家长分享卡中文全是方框（豆腐块）—— 服务端渲染补上中文字体**
+- 生产 POST /api/share-card（学生 虞晨熙）出图一眼看见：「敏学成长中心 / 本周 / 完成作业 /
+  批改题量 / 新增错题 / 已记住 / 还在攻克 / 老师寄语」**全是空心方框**，只有数字与拉丁字母正常。
+  家长分享卡是老师**唯一转发给家长**的输出物 ⇒ 家长拿到的是一张看不懂的图。
+- 根因：服务端 Chromium 是 @sparticuz/chromium（AWS Lambda 风格的 Alpine 精简构建），
+  **容器里一个中文字体都没有**；模板 font-family 只写了 Microsoft YaHei / PingFang SC / Noto Sans SC，
+  三个名字在容器里全不存在 ⇒ 中文全部回落 sans-serif ⇒ 豆腐块。
+- 修：新增 server/services/renderFontFace.js，加载 server/assets/fonts/NotoSansSC-Common.woff2
+  （Noto Sans SC 按 **GB2312 全字库 6763 字** 子集化，945KB；SIL OFL 1.1，OFL.txt 随字体提交），
+  渲染前以 @font-face 内联 base64（page.setContent 没有 base URL，相对路径 url() 解析不到）。
+  examPdfRenderer 的 PDF / PNG 两条路径都走它 ⇒ **一处根因，分享卡与重练卷 PDF 同时受益**。
+- 字族 MinxueCJK **排在字体栈最后**，不是最前：拉丁数字沿用原字体（版式零变化），只给中文兜底字形。
+- 幂等判据用「注入标记」而不是字族名：模板 body 本来就写了 MinxueCJK 这个名字，
+  判族名会让第一次就不注入（本轮自己踩的坑），锁里专门加了一条判据盯死它。
+- 锁 test/shareCardCjkFont.test.mjs 6 条（真跑渲染断言，非源码 grep）；
+  **反向自检旧树实测 4 红 / 新树 6/6**（旧树 = git HEAD 的旧模板 + 不注入的旧渲染器桩）。
+- 四道闸：单测 **1716/1717 fail 1**（那 1 红是另一会话 in-flight 把 AppSidebar 的「我的题型库」
+  改名成「我的考法库」撞红他自己的 resourceFold 锁，与本轮无关，未删未放宽）｜
+  lint 正式改动文件 **0 error**（1 条既存 warning）｜dist_nightly_20261005r134 **36.47s**｜
+  preview:5271 + 读 DOM 冒烟 **8/8**。
+
 **第 133 轮（2026-10-05，本赛道）已交付：家长分享卡「空周期」文案不再把老学生说成刚起步**
 - 起因是**真出图肉眼验**（不是读代码想象）：拿真实数据 POST `/api/share-card` 出 PNG 看，
   本周（10/04~10/11）21/21 名学生 `totalQuestions` 全是 0，卡片一律输出老师寄语
