@@ -861,3 +861,23 @@ git checkout 还原后改逐行带闭合引号正则重做 —— **改代码的
 - 四道闸全过；产物实测 modelscope 端点零命中（仅剩 QuotaBanner 供应商标签键，属服务端契约）。
 - ⚠️ 交接给负责人：.env.development 曾含真 key（ms-***）且已被 git 跟踪——历史里仍可见，
   **建议去魔搭控制台作废该 key**（应用侧引用已全部移除，作废无副作用）。
+
+### 提案⑨ 后端深度审查发现（2026-10-04，第 104 轮巡检追加，均 C 级需拍板）
+
+第 104 轮对 server/ 做了全量只读审查（worker.js / weeklyReport.js / queue.js /
+gradingFinalizer.js / neonService.js 等），P1-1（weeklyReport.js:419 `ai_tags != ''`）
+经**生产库只读实测排除**：`questions.ai_tags` 生产实际类型是 **text**（schema 写 JSONB 但
+历史演进成 text），比较合法、周报正常。以下为确认的 C 级缺陷（全部涉及批改主流程/公共
+API/数据库约束，按要求只提案不动手）：
+
+| # | 位置 | 问题 | 影响 | 建议修复 |
+|---|---|---|---|---|
+| ⑨-1 | worker.js L5884/7252/7694 `deleteQuestionsByTaskId` | 任务重跑先删 questions，此前结算落库的 wrong_questions 被外键置 question_id=NULL 变「自包含孤儿」，随后新 UUID 题再结算 → 同题两条 | 错题列表同题重复、周报 newWrongCount 翻倍；compensateWrongBook 只补不清理兜不住 | 删除前先 `DELETE FROM wrong_questions WHERE question_id IN (SELECT id FROM questions WHERE task_id=$1)`，judgements 一并清 |
+| ⑨-2 | neonService.js:243 `batchUpdateQuestionTags` | 硬编码 tags_source='ai'，与 worker.js:7969 意图（q.tags_source='local'）矛盾 → 本地规则标签全标成 'ai' | 标签来源语义错误（影响 tag 筛选/统计口径） | 函数接受 update.tags_source 并写入，调用方传 'local' |
+| ⑨-3 | queue.js:81-335 `initQueue` | 失败后 initPromise 不重置，catch 只清 taskQueue/worker → getTaskQueue() 永久命中已 settled 的失败结果，队列停在同步兜底 | 队列降级永久化（除非 quota 熔断恰好触发 rebuild） | catch 里 initPromise=null |
+| ⑨-4 | worker.js:7643 vs 7737 | cropGeometryFigures 在 refineStoredImageBoxes 之前执行（注释却写「必须在 cropGeometryFigures 之前」）→ 裁剪读的是未实测的模型 image_bbox | geometry_image_url 裁片可能仍含题干文字「满宽带」，与库内 refined image_bbox 不一致 | 把 refineStoredImageBoxes 移到 cropGeometryFigures 之前（需调整裁剪入队逻辑） |
+| ⑨-5 | gradingFinalizer.js:371-579 `finalizeGeneratedExamResults` | 幂等判据（settlement_key）先读后写、无锁无唯一约束 → 并发双提交致 practice_count/error_count 双倍推进 + 审计重复行 | 掌握度/错误次数被双倍累计（同类错题集中在双发场景） | 对 (question_id, metadata->>'settlement_key') 建部分唯一索引兜底 |
+| ⑨-6 | worker.js:8080 `finalizeGradingBatch` | 不 await（fire-and-forget），DONE 落库后进程立即崩溃 → 错题本/掌握度缺失且无重试 | 偶发错题缺失（已知设计取舍） | finalize 提前到 DONE 之前 await，或加恢复兜底 |
+
+建议优先级：⑨-1（数据重复，老师可见）> ⑨-5（双倍累计）> ⑨-2/⑨-3/⑨-4 > ⑨-6。
+—— 等负责人裁决后逐项执行（每项独立一轮 + 回归锁）。
