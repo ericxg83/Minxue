@@ -131,6 +131,9 @@ export function collectFailures(dir) {
     if (lm >= 0 && !app.slice(lm, lm + 300).includes('Toast.show')) fails.push('App.jsx: 错题 loadMore 失败必须 Toast（静默失败会让老师以为「就这些题」）')
     const wb = app.indexOf("console.error('加载错题失败:', error)")
     if (wb >= 0 && !app.slice(wb, wb + 400).includes('Toast.show')) fails.push('App.jsx: 首页无缓存时错题本加载失败必须 Toast')
+    // r110q：作业列表无缓存时加载失败也必须 Toast（与错题本同口径，不得停在「暂无任务」）
+    const lt = app.indexOf("console.error('加载任务失败:', error)")
+    if (lt >= 0 && !app.slice(lt, lt + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存时作业列表加载失败必须 Toast')
   }
 
   const api = file(join('services', 'apiService.js'))

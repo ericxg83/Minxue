@@ -445,7 +445,12 @@ export default function App() {
       setTasks(mergeTempTasks(taskList, studentId))
     } catch (error) {
       console.error('加载任务失败:', error)
-      // Don't clear tasks on failure — keep showing existing data
+      // Don't clear tasks on failure — keep showing existing data；
+      // 但若连缓存都没上屏（hasCache=false），页面会停在「暂无任务」——
+      // 必须告诉老师是加载失败而不是真没任务（与错题本同口径）
+      if (!hasCache) {
+        Toast.show({ message: '作业列表加载失败，请检查网络后重试', type: 'error', duration: 3000 })
+      }
     } finally {
       setIsLoadingTasks(false)
     }
