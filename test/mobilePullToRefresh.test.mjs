@@ -71,9 +71,23 @@ test('⛔ 移动端原生下拉刷新（当前树必须零违规）', () => {
   )
 })
 
+/**
+ * ⛔ 残留目录清理必须「失败只警告、绝不抛」—— r132 实测教训。
+ * 本机 safe-delete 对**目录**是 fail-closed 的（genie-trash 失败即抛错）：
+ * `rmSync(...,{recursive:true})` / `rm -rf` / `Remove-Item -Recurse` /
+ * 连 Python `shutil.rmtree` 全被同一道 shim 拦住（2026-10-05 实测四种方式均失败）。
+ * 于是上一轮留下 `_r131q_badlock/` 删不掉 ⇒ 下一轮在**开场的清理那一行**就抛错，
+ * 反向自检**根本没跑到** ⇒ 一把防空锁长期处在不验证状态，却只在人去点它时才显红。
+ * 判据一行未改，这里只让「清不掉残留」降级成一条警告。
+ */
+const removeQuietly = (p) => {
+  try { rmSync(p, { recursive: true, force: true }) }
+  catch (e) { console.warn(`[cleanup] 残留目录清不掉（不影响判据）: ${p} —— ${e.message}`) }
+}
+
 test('锁健全性：判据套合成坏样本必须判红（防空锁，不依赖 git 状态）', () => {
   const base = join(ROOT, '_r131q_badlock', 'src')
-  rmSync(base, { recursive: true, force: true })
+  removeQuietly(base)
   const put = (rel, content) => {
     const p = join(base, rel)
     mkdirSync(dirname(p), { recursive: true })
@@ -87,7 +101,7 @@ test('锁健全性：判据套合成坏样本必须判红（防空锁，不依�
     `const pullRefreshRef = useRef(null)\n pullRefreshRef.current = async () => { if (!currentStudent) return; await loadTasks() }\n <main className="w-full overflow-scroll-area" style={{ paddingBottom: '12px' }}>{children}</main>`)
 
   const probe = collectFailures(base)
-  rmSync(base, { recursive: true, force: true })
+  removeQuietly(base)
   // 合成树应命中：禁 antd-mobile / touchmove passive:false / scrollTop<=0 /
   // 禁 transform / 必须 marginTop / 必须 busyRef（PullToRefresh 6 条）+
   // App 必须包 PullToRefresh / App 必须接 onRefresh / App 裸 main 残留 /

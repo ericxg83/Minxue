@@ -212,7 +212,13 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
     accuracy: num(stats.accuracy),
     newWrongCount: num(stats.newWrongCount),
     masteredCount: num(stats.masteredCount),
-    pendingCount: num(stats.pendingCount)
+    basicMasteredCount: num(stats.basicMasteredCount),
+    notStartedCount: num(stats.notStartedCount),
+    pendingCount: num(stats.pendingCount),
+    // 「已记住」= 完全掌握 + 基本掌握（答对过一次就算记住了，现实里没时间每道题都做两遍）。
+    // 旧版模板只认 masteredCount 一个字段，把答对过一次的 14 道全并进「待提升错题」——
+    // 家长拿到的卡片会显示「完全掌握 2 题 / 待提升 72 题」，实际已记住 16 题。
+    securedCount: num(stats.masteredCount) + num(stats.basicMasteredCount)
   }
 
   const name = escapeHtml(student.name || '同学')
@@ -263,7 +269,7 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
     const items = [
       compareItem('正确率', s.accuracy, num(prevStats.accuracy), true, '%'),
       compareItem('新增错题', s.newWrongCount, num(prevStats.newWrongCount), false, ' 题'),
-      compareItem('待提升错题', s.pendingCount, num(prevStats.pendingCount), false, ' 题'),
+      compareItem('还在攻克', s.notStartedCount, num(prevStats.notStartedCount), false, ' 题'),
       compareItem('完成题量', s.totalQuestions, num(prevStats.totalQuestions), true, ' 题')
     ]
     compareHtml = `
@@ -465,7 +471,7 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
             </div>
             <div class="kpi-row2">
               <div class="kpi"><div class="kpi-v" style="color:${T.warning}">${s.newWrongCount}<small> 题</small></div><div class="kpi-l">新增错题</div></div>
-              <div class="kpi"><div class="kpi-v" style="color:${T.success}">${s.masteredCount}<small> 题</small></div><div class="kpi-l">完全掌握</div></div>
+              <div class="kpi"><div class="kpi-v" style="color:${T.success}">${s.securedCount}<small> 题</small></div><div class="kpi-l">已记住</div></div>
             </div>
           </div>
         </div>
@@ -476,8 +482,8 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
 
       <div class="tri-row">
         <div class="tri" style="background:${T.warningSoft}"><div class="tri-v" style="color:${T.warning}">${s.newWrongCount}<small> 题</small></div><div class="tri-l" style="color:${T.warning}">新增错题</div></div>
-        <div class="tri" style="background:${T.successSoft}"><div class="tri-v" style="color:${T.success}">${s.masteredCount}<small> 题</small></div><div class="tri-l" style="color:${T.success}">完全掌握</div></div>
-        <div class="tri" style="background:${T.primaryMist}"><div class="tri-v" style="color:${T.primary}">${s.pendingCount}<small> 题</small></div><div class="tri-l" style="color:${T.primaryDark}">待提升错题</div></div>
+        <div class="tri" style="background:${T.successSoft}"><div class="tri-v" style="color:${T.success}">${s.securedCount}<small> 题</small></div><div class="tri-l" style="color:${T.success}">已记住</div></div>
+        <div class="tri" style="background:${T.primaryMist}"><div class="tri-v" style="color:${T.primary}">${s.notStartedCount}<small> 题</small></div><div class="tri-l" style="color:${T.primaryDark}">还在攻克</div></div>
       </div>
 
       ${compareHtml}
