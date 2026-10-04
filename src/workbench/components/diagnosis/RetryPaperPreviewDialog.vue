@@ -39,7 +39,8 @@
         <button type="button" class="rp-bar__link" @click="selectedKeys = []">清空</button>
         <span class="rp-bar__count">
           已选 <b>{{ selectedItems.length }}</b> / {{ scopedItems.length }} 道
-          <em v-if="overCap">· 一次 {{ selectedItems.length }} 道偏多，可先取消一些</em>
+          <em v-if="examIds.length">· 可组卷 {{ examIds.length }} 道</em>
+          <em v-if="overCap">· 一次 {{ examIds.length }} 道偏多，可先取消一些</em>
         </span>
       </div>
 
@@ -59,7 +60,7 @@
             <span class="rp-row__stem">{{ item.stem }}</span>
             <span class="rp-row__tags">
               <i v-if="item.subject">{{ item.subject }}</i>
-              <i v-if="item.errorType" :class="['is-error', toneOf(item.errorType)]">{{ item.errorType }}</i>
+              <i v-if="item.errorType" :class="['is-error', errorTypeTone(item.errorType)]">{{ item.errorType }}</i>
               <i v-if="!item.questionId" class="is-warn">练习册自包含题</i>
             </span>
           </label>
@@ -67,7 +68,8 @@
       </ul>
 
       <p v-if="droppedCount" class="rp-note">
-        其中 {{ droppedCount }} 道是练习册自包含错题，尚未关联到题库题目，进不了重练批改链路 —— 已自动排除。
+        命中的 {{ scopedItems.length }} 道里有 <b>{{ droppedCount }} 道</b>是练习册自包含错题，尚未关联到题库题目，
+        进不了重练批改链路 —— 已自动排除，实际组出 <b>{{ examIds.length }}</b> 道。
       </p>
     </template>
 
@@ -76,7 +78,7 @@
         <span class="rp-foot__hint">{{ footHint }}</span>
         <el-button :disabled="creating" @click="visible = false">取消</el-button>
         <el-button type="primary" :loading="creating" :disabled="!canSubmit" @click="submit">
-          生成重练卷<template v-if="selectedItems.length">（{{ selectedItems.length }}）</template>
+          生成重练卷<template v-if="examIds.length">（{{ examIds.length }}）</template>
         </el-button>
       </div>
     </template>
@@ -133,7 +135,7 @@ const picked = ref([]) // 归一化后的候选题目
 const selectedKeys = ref([])
 
 /** 组卷引擎与周报再测卷同口径（RETRY_CAP 30）；只提示不拦 —— 老师明确勾的就是要练的 */
-const overCap = computed(() => selectedItems.value.length > 30)
+const overCap = computed(() => examIds.value.length > 30)
 
 const dialogTitle = computed(() => {
   if (props.scope?.kind === 'error-cause') return `专项重练卷 · ${props.scope.errorType || '同类错因'}`
@@ -150,7 +152,7 @@ const dialogSubtitle = computed(() => {
 
 const footHint = computed(() => {
   if (loading.value) return '读取中…'
-  if (!selectedItems.value.length) return '至少选 1 道才能组卷'
+  if (!examIds.value.length) return selectedItems.value.length ? '所选都是未关联题库的自包含错题，组不了卷' : '至少选 1 道才能组卷'
   return '确认后直接生成卷子并下载 PDF，学生扫码即可作答'
 })
 
@@ -162,7 +164,11 @@ const allSelected = computed(() => scopedItems.value.length > 0 && selectedItems
 const someSelected = computed(() => selectedItems.value.length > 0 && !allSelected.value)
 // 预筛命中但组不进卷的题数（练习册自包含错题）—— 必须让老师看见，口径才不失真
 const droppedCount = computed(() => toExamQuestionIds(scopedItems.value).dropped)
-const canSubmit = computed(() => toExamQuestionIds(selectedItems.value).questionIds.length > 0 && !creating.value)
+// ⚠️ 按钮与提示上的数字必须用这个「真正能组卷的数」，不能用 selectedItems.length ——
+//    实测毛辰绮「计算错误」命中 49 道、其中 8 道是自包含错题，组出来只有 41 道；
+//    按钮写「49」而卷面只有 41，就是口径失真。
+const examIds = computed(() => toExamQuestionIds(selectedItems.value).questionIds)
+const canSubmit = computed(() => examIds.value.length > 0 && !creating.value)
 
 async function load() {
   if (!props.studentId) {
@@ -229,7 +235,6 @@ async function submit() {
       console.error('[RetryPaperPreview] 重练卷 PDF 生成失败:', paperError?.message || paperError)
       paperMessage = `PDF 生成失败：${paperError?.message || '未知错误'}（卷已建好，可从学生档案「最近重练」重打）`
     }
-    const dropped = selectedItems.value.length - validItems.length
     ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${dropped ? `（${dropped} 道未关联题目已剔除）` : ''}${paperMessage ? ' · ' + paperMessage : ''}`)
     emit('created', exam)
     visible.value = false
