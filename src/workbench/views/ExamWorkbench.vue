@@ -26,7 +26,10 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="grade" label="年级" width="100" />
+      <el-table-column label="年级" width="100">
+        <!-- r116-UX：历史资源多未填年级，空单元格显示「—」而非整列空白 -->
+        <template #default="{ row }">{{ row.grade || '—' }}</template>
+      </el-table-column>
       <el-table-column prop="subject" label="科目" width="100" />
       <el-table-column label="答案数" width="90">
         <template #default="{ row }">{{ row.answer_count || 0 }} 题</template>
