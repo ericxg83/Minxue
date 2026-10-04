@@ -51,11 +51,13 @@ export function buildRetryProgress(taskRows) {
 /**
  * 获取单个学生的周期学习报告数据（与 GET /:studentId 完全同口径）。
  * 原逻辑抽取自路由 handler（2026-10-04），供分享卡等服务端产出物复用，
- * 口径变更只改这一处。query 参数与 GET 相同（mode/offset/weeks）。
+ * 口径变更只改这一处。options 参数与 GET 相同（mode/offset/weeks）。
  * 学生不存在时抛 statusCode=404 的 Error。
+ * ⚠️ 参数名不能叫 query：文件顶部已从 neon.js 导入 query 函数，同名会把
+ *    数据层调用遮蔽成「query is not a function」（r105 实证，分享卡 500）。
  */
-export async function fetchStudentWeeklyReport(studentId, query = {}) {
-  const { periodStart, periodEnd, mode, offset } = parsePeriod(query)
+export async function fetchStudentWeeklyReport(studentId, options = {}) {
+  const { periodStart, periodEnd, mode, offset } = parsePeriod(options)
   const isWeekMode = mode === 'week'
 
   // 1. 获取学生信息
