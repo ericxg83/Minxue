@@ -1,100 +1,105 @@
 <template>
   <el-button type="success" size="default" :loading="loading" @click="open">
-    家长成长卡
+    家长分享卡
   </el-button>
-  <el-dialog v-model="visible" title="本周成长卡（保存图片后可微信转发家长）" width="470px" append-to-body>
-    <div ref="cardRef" class="growth-card" v-loading="loading">
-      <div class="growth-card__head">
-        <div class="growth-card__avatar">{{ (studentName || '学')[0] }}</div>
-        <div>
-          <div class="growth-card__name">{{ studentName || '同学' }}</div>
-          <div class="growth-card__period">{{ periodText }}</div>
-        </div>
-      </div>
-      <div class="growth-card__grid">
-        <div class="growth-card__cell">
-          <div class="growth-card__num">{{ data?.stats?.newWrongCount ?? '—' }}</div>
-          <div class="growth-card__label">新入册错题</div>
-        </div>
-        <div class="growth-card__cell growth-card__cell--good">
-          <div class="growth-card__num">{{ data?.stats?.masteredCount ?? '—' }}</div>
-          <div class="growth-card__label">消灭错题</div>
-        </div>
-        <div class="growth-card__cell">
-          <div class="growth-card__num">{{ data?.stats?.accuracy ? data.stats.accuracy + '%' : '—' }}</div>
-          <div class="growth-card__label">练习正确率</div>
-        </div>
-      </div>
-      <div class="growth-card__row">
-        <span>重练任务</span>
-        <strong>{{ data?.stats?.completedTasks ?? 0 }} / {{ data?.stats?.totalTasks ?? 0 }} 完成</strong>
-      </div>
-      <div class="growth-card__foot">敏学 · 老师本周观察 · {{ today }}</div>
+  <el-dialog v-model="visible" title="家长分享卡（原图发家长 · 转发版名字打码）" width="480px" append-to-body>
+    <div v-loading="loading" class="share-card-wrap">
+      <el-segmented v-model="variant" :options="variantOptions" class="variant-switch" :disabled="loading" @change="loadPng" />
+      <img v-if="pngUrl" :src="pngUrl" class="share-card-img" alt="家长分享卡预览" />
+      <div v-else-if="!loading" class="share-card-empty">生成失败或该时段暂无学习数据</div>
     </div>
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
-      <el-button type="primary" :loading="exporting" :disabled="!data" @click="exportPng">保存图片</el-button>
+      <el-button type="primary" :loading="exporting" :disabled="!pngUrl" @click="savePng">保存图片</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import html2canvas from 'html2canvas'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
-import { getWeeklyReport } from '../../services/apiService.js'
 
-// 家长成长卡（提案 2，2026-10-01）：复用既有 /weekly-report/:studentId 聚合接口，
-// 只读渲染为一张可转发的紧凑卡片图。零写链路、零批改链路改动。
-// 色板全部取自工作台既有用色（#6366f1 主色 / #16a34a 成功 / slate 灰阶），不引入新色值。
+// 家长分享卡（2026-10-04 升级，替换旧 html2canvas 成长卡）：
+// 服务端按「敏学成长中心」品牌渲染 750×1334 竖版 PNG（Playwright 截图），
+// 数据与周报完全同源（fetchStudentWeeklyReport）。两态：
+//   - 转发版（默认）：姓名/头像打码烘焙进图片，适合发群/朋友圈；
+//   - 原图：全名，单独发给家长本人。
+// 图片不落 OSS、不落库，即用即生成。旧版三个数字的紧凑卡被本卡完整覆盖。
 const props = defineProps({
   studentId: { type: String, default: '' },
-  studentName: { type: String, default: '' }
+  studentName: { type: String, default: '' },
+  mode: { type: String, default: 'week' },
+  offset: { type: Number, default: 0 }
 })
 
 const visible = ref(false)
 const loading = ref(false)
 const exporting = ref(false)
-const data = ref(null)
-const cardRef = ref(null)
-const periodText = ref('')
-const today = dayjs().format('YYYY-MM-DD')
+const variant = ref('masked')
+const pngUrl = ref('')
+const variantOptions = [
+  { label: '转发版（名字打码）', value: 'masked' },
+  { label: '原图（全名）', value: 'full' }
+]
+let pngBlob = null
+
+watch(visible, (v) => {
+  if (!v) releaseUrl()
+})
 
 async function open() {
   if (!props.studentId) {
     ElMessage.warning('请先选择学生')
     return
   }
-  loading.value = true
+  variant.value = 'masked'
   visible.value = true
-  data.value = null
+  await loadPng()
+}
+
+async function loadPng() {
+  releaseUrl()
+  loading.value = true
   try {
-    const resp = await getWeeklyReport(props.studentId, { mode: 'week', offset: 0 })
-    if (!resp?.success) throw new Error(resp?.error || '获取周数据失败')
-    data.value = resp
-    const p = resp.period || {}
-    periodText.value = p.start && p.end
-      ? `${p.start} ~ ${p.end}${p.weekNum ? ` · 第 ${p.weekNum} 周` : ''}`
-      : '本周'
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const resp = await fetch(`${API_BASE}/share-card`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentId: props.studentId,
+        mode: props.mode,
+        offset: props.offset,
+        maskName: variant.value === 'masked'
+      })
+    })
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}))
+      throw new Error(data.error || `生成失败（${resp.status}）`)
+    }
+    pngBlob = await resp.blob()
+    pngUrl.value = URL.createObjectURL(pngBlob)
   } catch (e) {
-    ElMessage.error(`获取周数据失败：${e?.message || '未知错误'}`)
-    visible.value = false
+    pngBlob = null
+    ElMessage.error(e?.message || '分享卡生成失败')
   } finally {
     loading.value = false
   }
 }
 
-async function exportPng() {
-  if (!cardRef.value) return
+function releaseUrl() {
+  if (pngUrl.value) URL.revokeObjectURL(pngUrl.value)
+  pngUrl.value = ''
+  pngBlob = null
+}
+
+async function savePng() {
+  if (!pngBlob) return
   exporting.value = true
   try {
-    const canvas = await html2canvas(cardRef.value, { scale: 2, backgroundColor: '#ffffff', useCORS: true })
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))
-    saveAs(blob, `成长卡-${props.studentName || '学生'}-${dayjs().format('MMDD')}.png`)
-  } catch (e) {
-    ElMessage.error('生成图片失败：' + (e?.message || '未知错误'))
+    const suffix = variant.value === 'masked' ? '转发版' : '原图'
+    saveAs(pngBlob, `分享卡-${props.studentName || '学生'}-${suffix}-${dayjs().format('MMDD')}.png`)
   } finally {
     exporting.value = false
   }
@@ -102,39 +107,24 @@ async function exportPng() {
 </script>
 
 <style scoped>
-.growth-card {
-  width: 400px;
-  margin: 0 auto;
-  padding: 24px;
-  border: 1px solid #e2e8f0;
-  border-radius: 16px;
-  background: linear-gradient(180deg, #eef2ff 0%, #ffffff 34%);
+.share-card-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  min-height: 220px;
 }
-.growth-card__head { display: flex; align-items: center; gap: 12px; }
-.growth-card__avatar {
-  width: 44px; height: 44px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  background: #6366f1; color: #fff; font-size: 18px; font-weight: 600;
+.variant-switch {
+  flex-shrink: 0;
 }
-.growth-card__name { font-size: 17px; font-weight: 600; color: #1e293b; }
-.growth-card__period { font-size: 12px; color: #64748b; margin-top: 2px; }
-.growth-card__grid { display: flex; gap: 10px; margin: 18px 0 14px; }
-.growth-card__cell {
-  flex: 1; text-align: center; padding: 14px 4px;
-  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+.share-card-img {
+  width: 340px;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
-.growth-card__cell--good { background: #f0fdf4; border-color: #bbf7d0; }
-.growth-card__num { font-size: 26px; font-weight: 700; color: #1e293b; }
-.growth-card__cell--good .growth-card__num { color: #16a34a; }
-.growth-card__label { font-size: 12px; color: #64748b; margin-top: 4px; }
-.growth-card__row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 12px; border-radius: 10px;
-  background: #f8fafc; border: 1px solid #e2e8f0;
-  font-size: 13px; color: #1e293b;
-}
-.growth-card__foot {
-  margin-top: 16px; padding-top: 12px; border-top: 1px dashed #e2e8f0;
-  font-size: 11px; color: #94a3b8; text-align: center;
+.share-card-empty {
+  padding: 60px 0;
+  color: var(--wb-text-tertiary, #94a3b8);
+  font-size: 13px;
 }
 </style>

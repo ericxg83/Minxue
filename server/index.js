@@ -109,6 +109,7 @@ import { processTask, generateAnswerForQuestion, extractAnswerFromAnalysis, norm
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN, isDegradedAnswerEngine } from './config/ai.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
+import shareCardRouter from './routes/shareCard.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
 import teachingRouter from './routes/teaching.js'
@@ -4515,6 +4516,8 @@ app.get('/api/resources/exam-papers', async (req, res) => {
 
 // 周学习诊断报告
 app.use('/api/weekly-report', weeklyReportRouter)
+// 家长分享卡（品牌竖版 PNG，数据与周报同源；转发版默认姓名打码）
+app.use('/api/share-card', shareCardRouter)
 app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
 app.use('/api/teaching', teachingRouter)

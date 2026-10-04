@@ -49,27 +49,25 @@ export function buildRetryProgress(taskRows) {
 }
 
 /**
- * GET /api/weekly-report/:studentId
- * 获取学生本周学习统计数据
- * Query params:
- *   - mode: 'week' | 'month' | 'all'，默认 week
- *   - offset: 偏移量，0=当前，1=上一个...
- *   - weeks: (兼容旧参数) 周数，默认 1（本周），2 表示近两周
+ * 获取单个学生的周期学习报告数据（与 GET /:studentId 完全同口径）。
+ * 原逻辑抽取自路由 handler（2026-10-04），供分享卡等服务端产出物复用，
+ * 口径变更只改这一处。query 参数与 GET 相同（mode/offset/weeks）。
+ * 学生不存在时抛 statusCode=404 的 Error。
  */
-router.get('/:studentId', async (req, res) => {
-  try {
-    const { studentId } = req.params
-    const { periodStart, periodEnd, mode, offset } = parsePeriod(req.query)
-    const isWeekMode = mode === 'week'
+export async function fetchStudentWeeklyReport(studentId, query = {}) {
+  const { periodStart, periodEnd, mode, offset } = parsePeriod(query)
+  const isWeekMode = mode === 'week'
 
-    // 1. 获取学生信息
-    const { rows: studentRows } = await query(
-      `SELECT id, name, grade FROM ${TABLES.STUDENTS} WHERE id = $1`,
-      [studentId]
-    )
-    if (studentRows.length === 0) {
-      return res.status(404).json({ error: '学生不存在' })
-    }
+  // 1. 获取学生信息
+  const { rows: studentRows } = await query(
+    `SELECT id, name, grade FROM ${TABLES.STUDENTS} WHERE id = $1`,
+    [studentId]
+  )
+  if (studentRows.length === 0) {
+    const err = new Error('学生不存在')
+    err.statusCode = 404
+    throw err
+  }
 
     // 2. 本周作业任务统计
     const { rows: taskRows } = await query(
@@ -258,8 +256,25 @@ router.get('/:studentId', async (req, res) => {
       retryProgress
     }
 
+    return result
+}
+
+/**
+ * GET /api/weekly-report/:studentId
+ * 获取学生本周学习统计数据
+ * Query params:
+ *   - mode: 'week' | 'month' | 'all'，默认 week
+ *   - offset: 偏移量，0=当前，1=上一个...
+ *   - weeks: (兼容旧参数) 周数，默认 1（本周），2 表示近两周
+ */
+router.get('/:studentId', async (req, res) => {
+  try {
+    const result = await fetchStudentWeeklyReport(req.params.studentId, req.query)
     res.json(result)
   } catch (error) {
+    if (error.statusCode === 404) {
+      return res.status(404).json({ error: error.message })
+    }
     console.error('获取周学习报告失败:', error)
     res.status(500).json({ error: error.message })
   }

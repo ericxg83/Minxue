@@ -101,6 +101,53 @@ export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = 
 }
 
 /**
+ * 渲染 PNG 截图（固定尺寸竖版卡片用，如家长分享卡）
+ * 与 renderExamPDF 共用常驻 browser；高清输出靠 deviceScaleFactor（默认 2x）。
+ * @param {Object} opt
+ * @param {string} opt.html - 完整 HTML 字符串（卡片本身自带背景与固定尺寸）
+ * @param {number} [opt.width=750] - 视口宽（CSS 像素）
+ * @param {number} [opt.height=1334] - 视口高（CSS 像素）
+ * @param {number} [opt.scale=2] - deviceScaleFactor（输出物理像素 = CSS × scale）
+ * @returns {Promise<Buffer>} PNG buffer
+ */
+export async function renderHtmlPNG({ html, width = 750, height = 1334, scale = 2 }) {
+  if (!html) throw new Error('renderHtmlPNG: html 不能为空')
+
+  const browser = await getBrowser()
+  let page = null
+  let context = null
+  try {
+    const firstPage = await browser.newPage()
+    if (typeof firstPage.setViewport === 'function') {
+      // puppeteer：viewport 自带 deviceScaleFactor
+      page = firstPage
+      await page.setViewport({ width, height, deviceScaleFactor: scale })
+    } else {
+      // playwright：deviceScaleFactor 只能在 context 层设置
+      await firstPage.close()
+      context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale })
+      page = await context.newPage()
+    }
+    await page.setContent(html, { waitUntil: 'load' })
+
+    await page.evaluate(async () => {
+      if (document.fonts && document.fonts.ready) {
+        await document.fonts.ready
+      }
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      await new Promise((r) => setTimeout(r, 120))
+    })
+
+    // 视口截图 = 恰好一张卡片（物理尺寸 width*scale × height*scale）
+    const shot = await page.screenshot({ type: 'png' })
+    return Buffer.from(shot)
+  } finally {
+    if (page) await page.close().catch(() => {})
+    if (context) await context.close().catch(() => {})
+  }
+}
+
+/**
  * 关闭 browser（用于 graceful shutdown）
  */
 export async function closeBrowser() {

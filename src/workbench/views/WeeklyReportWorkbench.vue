@@ -29,6 +29,25 @@
       </FilterBar>
 
       <template v-if="viewMode === 'single'">
+        <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
+             与家长分享卡同构，正确率圆环 + 关键 KPI 一眼读数） -->
+        <section v-if="!selectedStudentId && reportsWithData.length" class="hero-strip" aria-label="全班学习概览">
+          <div class="hero-ring-wrap">
+            <div class="hero-ring" :style="heroRingStyle(aggregateStats.accuracy)"><b :class="accuracyTone(aggregateStats.accuracy)">{{ aggregateStats.accuracy }}%</b></div>
+            <span class="hero-ring-label">全班整体正确率</span>
+          </div>
+          <div class="hero-main">
+            <div class="hero-caption"><strong>全班概览</strong><span>{{ periodLabel }} · 共 {{ summaryData?.reports?.length || 0 }} 名学生</span></div>
+            <div class="hero-kpis">
+              <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
+              <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
+              <div class="hero-kpi"><b class="good">{{ aggregateStats.masteredCount }}</b><span>完全掌握</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.pendingCount }}</b><span>待重练</span></div>
+            </div>
+          </div>
+        </section>
+
         <section v-if="!selectedStudentId" class="diagnosis-layout">
           <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
             <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
@@ -49,6 +68,24 @@
         </section>
 
         <template v-else>
+          <!-- 单生学习概览 hero：选中学生后的第一眼数字（与分享卡 hero 同构） -->
+          <section v-if="singleHero" class="hero-strip" aria-label="学生学习概览">
+            <div class="hero-ring-wrap">
+              <div class="hero-ring" :style="heroRingStyle(singleHero.acc)"><b :class="accuracyTone(singleHero.acc)">{{ singleHero.accText }}</b></div>
+              <span class="hero-ring-label">整体正确率</span>
+            </div>
+            <div class="hero-main">
+              <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
+              <div class="hero-kpis">
+                <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
+                <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
+                <div class="hero-kpi"><b class="good">{{ singleHero.masteredCount }}</b><span>完全掌握</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.pendingCount }}</b><span>待提升</span></div>
+              </div>
+            </div>
+          </section>
+
           <section v-if="currentStudentDetail?.stats" class="diagnosis-layout student-detail-layout">
             <ContentCard title="发现问题" :description="`${currentStudentName} · ${periodLabel}`">
               <div class="teaching-judgement">
@@ -380,7 +417,7 @@
              该组件是「按钮 + 弹窗 + Teleport」多根节点，Vue 无法透传 class
              （运行时会告警 "Extraneous non-props attributes"），margin-left:auto 会静默失效。 -->
         <span class="output-bar__growth">
-          <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudentName || ''" />
+          <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudentName || ''" :mode="periodMode" :offset="periodOffset" />
         </span>
       </section>
     </div>
@@ -1157,10 +1194,42 @@ const aggregateStats = computed(() => {
   }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0 })
   return {
     accuracy: totals.questions ? Math.round((totals.correct / totals.questions) * 1000) / 10 : 0,
+    totalQuestions: totals.questions,
     newWrongCount: totals.newWrong,
     pendingCount: totals.pending,
     masteredCount: totals.mastered,
     studentCount: reports.length
+  }
+})
+
+// ── 学习概览 hero（2026-10-04）：正确率圆环 + KPI 一排，与家长分享卡同构。
+//    色板只用工作台既有 token（success/warning/danger/border-light），不引入新色值。 ──
+function accuracyTone(acc) {
+  if (acc == null) return ''
+  return acc >= 80 ? 'good' : acc >= 60 ? 'warn' : 'bad'
+}
+function heroRingStyle(acc) {
+  const v = Math.max(0, Math.min(100, Number(acc) || 0))
+  const color = acc == null
+    ? 'var(--wb-text-tertiary)'
+    : acc >= 80 ? 'var(--wb-success)' : acc >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)'
+  return { background: `conic-gradient(${color} ${v * 3.6}deg, var(--wb-border-light) 0)` }
+}
+// 单生 hero 数据视图：批改题量为 0 时正确率无意义，显示 — 并用中性灰圆环
+const singleHero = computed(() => {
+  const s = currentStudentDetail.value?.stats
+  if (!s) return null
+  const hasQuestions = (s.totalQuestions || 0) > 0
+  return {
+    acc: hasQuestions ? s.accuracy : null,
+    accText: hasQuestions ? `${s.accuracy}%` : '—',
+    correctLine: `答对 ${s.correctCount || 0}/${s.totalQuestions || 0} 题`,
+    completedTasks: s.completedTasks || 0,
+    totalTasks: s.totalTasks || 0,
+    totalQuestions: s.totalQuestions || 0,
+    newWrongCount: s.newWrongCount || 0,
+    masteredCount: s.masteredCount || 0,
+    pendingCount: s.pendingCount || 0
   }
 })
 const overviewStats = computed(() => selectedStudentId.value && currentStudentDetail.value?.stats ? currentStudentDetail.value.stats : aggregateStats.value)
@@ -1261,6 +1330,29 @@ function knowledgeLevel(row) {
 .expand-label{flex-shrink:0;width:96px;color:var(--wb-text-tertiary);font-size:11px}
 .student-chips{display:flex;flex-wrap:wrap;gap:4px}
 .error-mini{display:flex;flex-wrap:wrap;gap:8px;font-size:11px}
+
+/* ── 学习概览 hero（2026-10-04）：数字一览，色板全取工作台既有 token ── */
+.hero-strip{display:flex;align-items:center;gap:22px;margin-bottom:16px;padding:16px 22px;border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}
+.hero-ring-wrap{display:flex;flex-direction:column;align-items:center;gap:7px;flex-shrink:0}
+.hero-ring{width:100px;height:100px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+.hero-ring::before{content:'';position:absolute;width:72px;height:72px;border-radius:50%;background:var(--wb-bg-card)}
+.hero-ring b{position:relative;z-index:1;font-size:20px;font-weight:750;color:var(--wb-text)}
+.hero-ring b.good{color:var(--wb-success)}
+.hero-ring b.warn{color:var(--wb-warning)}
+.hero-ring b.bad{color:var(--wb-danger)}
+.hero-ring-label{color:var(--wb-text-tertiary);font-size:10px}
+.hero-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.hero-caption{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.hero-caption strong{font-size:14px;color:var(--wb-text)}
+.hero-caption span{color:var(--wb-text-tertiary);font-size:11px}
+.hero-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
+.hero-kpi{background:var(--wb-bg-elevated);border:1px solid var(--wb-border-light);border-radius:8px;padding:10px 8px;text-align:center}
+.hero-kpi b{display:block;font-size:20px;font-weight:750;color:var(--wb-text);line-height:1.15}
+.hero-kpi b small{font-size:12px;font-weight:500;color:var(--wb-text-tertiary)}
+.hero-kpi b.good{color:var(--wb-success)}
+.hero-kpi b.warn{color:var(--wb-warning)}
+.hero-kpi span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:10px}
+@media(max-width:900px){.hero-strip{flex-direction:column;align-items:stretch}.hero-kpis{grid-template-columns:repeat(3,1fr)}}
 
 /* ── 年级备课建议（grade view） ── */
 .grade-suggestions-section{margin-bottom:16px}
