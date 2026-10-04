@@ -1056,7 +1056,7 @@ export function buildDiagnosisHTML(reportData) {
       <div class="tri-row">
         <div class="tri" style="background:${T.warningSoft};border-color:#FDE68A"><div class="tri-v" style="color:${T.warning}">${stats.newWrongCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#92400E">新增错题</div></div>
         <div class="tri" style="background:${T.successSoft};border-color:#A7F3D0"><div class="tri-v" style="color:${T.success}">${(stats.masteredCount || 0) + (stats.basicMasteredCount || 0)}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:#065F46">已记住的错题</div></div>
-        <div class="tri" style="background:${T.primaryMist};border-color:${T.primarySoft}"><div class="tri-v" style="color:${T.primary}">${stats.pendingCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:${T.primaryDark}">待提升错题</div></div>
+        <div class="tri" style="background:${T.primaryMist};border-color:${T.primarySoft}"><div class="tri-v" style="color:${T.primary}">${stats.notStartedCount || 0}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:${T.primaryDark}">还在攻克</div></div>
       </div>
 
       <div class="sub-label">${hasTrend ? '正确率趋势（本周期）' : '各学科正确率'}</div>

@@ -378,6 +378,9 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   .ring-l{font-size:12px;color:${T.textSec}}
   .kpi-col{flex:1;display:flex;flex-direction:column;gap:10px}
   .kpi-row2{display:flex;gap:10px}
+  /* 三态行（新增错题/已记住/还在攻克）—— r132 与下方 tri-row 合并去重后由顶部统一承载，
+     同一张卡片上每个数字只出现一次，不再上下重复。 */
+  .kpi-row3{display:flex;gap:10px}
   .kpi{flex:1;background:${T.bg};border:1px solid ${T.borderLight};border-radius:8px;padding:12px 8px;text-align:center}
   .kpi-v{font-size:24px;font-weight:800;color:${T.primary};line-height:1.1}
   .kpi-v small{font-size:13px;font-weight:500;color:${T.textTer}}
@@ -402,12 +405,8 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   .subj-fill{display:block;height:100%;border-radius:5px}
   .subj-acc{width:54px;flex-shrink:0;text-align:right;font-size:14px;font-weight:800}
 
-  /* 三色卡 */
-  .tri-row{display:flex;gap:10px}
-  .tri{flex:1;border-radius:8px;padding:13px 8px;text-align:center}
-  .tri-v{font-size:25px;font-weight:800;line-height:1.1}
-  .tri-v small{font-size:13px;font-weight:500}
-  .tri-l{font-size:11px;margin-top:4px;font-weight:500}
+  /* ⛔ 「三色卡」(tri-row/.tri) 已于 r132 随三格大格一起删掉 —— 三态数字合并进顶部 kpi-row3。
+     此处样式不留死代码。若哪天要恢复三格大格，记得这里也要一起加回来。 */
 
   /* 对比 */
   .cmp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:9px}
@@ -469,9 +468,10 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
               <div class="kpi"><div class="kpi-v">${s.completedTasks}<small> 次</small></div><div class="kpi-l">完成作业</div></div>
               <div class="kpi"><div class="kpi-v">${s.totalQuestions}<small> 题</small></div><div class="kpi-l">批改题量</div></div>
             </div>
-            <div class="kpi-row2">
+            <div class="kpi-row3">
               <div class="kpi"><div class="kpi-v" style="color:${T.warning}">${s.newWrongCount}<small> 题</small></div><div class="kpi-l">新增错题</div></div>
               <div class="kpi"><div class="kpi-v" style="color:${T.success}">${s.securedCount}<small> 题</small></div><div class="kpi-l">已记住</div></div>
+              <div class="kpi"><div class="kpi-v" style="color:${T.primary}">${s.notStartedCount}<small> 题</small></div><div class="kpi-l">还在攻克</div></div>
             </div>
           </div>
         </div>
@@ -479,12 +479,6 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
 
       ${trendHtml}
       ${subjectHtml}
-
-      <div class="tri-row">
-        <div class="tri" style="background:${T.warningSoft}"><div class="tri-v" style="color:${T.warning}">${s.newWrongCount}<small> 题</small></div><div class="tri-l" style="color:${T.warning}">新增错题</div></div>
-        <div class="tri" style="background:${T.successSoft}"><div class="tri-v" style="color:${T.success}">${s.securedCount}<small> 题</small></div><div class="tri-l" style="color:${T.success}">已记住</div></div>
-        <div class="tri" style="background:${T.primaryMist}"><div class="tri-v" style="color:${T.primary}">${s.notStartedCount}<small> 题</small></div><div class="tri-l" style="color:${T.primaryDark}">还在攻克</div></div>
-      </div>
 
       ${compareHtml}
       ${retryHtml}
