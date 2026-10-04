@@ -15,6 +15,11 @@
  * 用法：
  *   node scripts/check-skill-refs.mjs            # 报告 + 有问题时退出码 1
  *   SKILLS_DIR=<path> node scripts/check-skill-refs.mjs
+ *
+ * ⚠️ 本机存在**两份**技能库（2026-10-04 核实）：
+ *   - `~/.workbuddy-ai/skills/` —— WorkBuddy AI 会话实际加载的那份（`<available_skills>` 指向它）
+ *   - `~/.workbuddy/skills/`    —— 另一套（含大量本文库没有的 minxue-* 技能，部分与本文库重名但内容不同）
+ *   两者**部分重名、内容不同**，极易混淆。默认两份都扫；`SKILLS_DIR` 只扫指定的那一份。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -22,8 +27,12 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(__dirname, '..')
-const SKILLS_DIR = process.env.SKILLS_DIR
-  || path.join(process.env.USERPROFILE || process.env.HOME || '', '.workbuddy-ai', 'skills')
+const HOME = process.env.USERPROFILE || process.env.HOME || ''
+const DEFAULT_DIRS = [
+  path.join(HOME, '.workbuddy-ai', 'skills'),
+  path.join(HOME, '.workbuddy', 'skills'),
+]
+const SKILLS_DIRS = process.env.SKILLS_DIR ? [process.env.SKILLS_DIR] : DEFAULT_DIRS
 
 // 占位符 / 刻意示例，不算失效引用（例：0NN_xxx.js、useXxx.js、_diag_xxx.mjs、xxx.test.mjs）
 const PLACEHOLDER = /xxx|0nn|placeholder|example/i
@@ -59,11 +68,15 @@ for (const f of repoFiles) {
 }
 const relSet = new Set([...byBase.values()].flat())
 
-const skillDirs = fs.existsSync(SKILLS_DIR)
-  ? fs.readdirSync(SKILLS_DIR, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
-  : []
-
 const problems = { prefix: [], missing: [], oob: [], ambiguous: [] }
+const scanned = []
+
+for (const SKILLS_DIR of SKILLS_DIRS) {
+  if (!fs.existsSync(SKILLS_DIR)) continue
+  // 目录标签带上父目录名，否则两份技能库里的同名技能（如 minxue-product-review）无法区分
+  const dirLabel = path.basename(path.dirname(SKILLS_DIR)) + '/' + path.basename(SKILLS_DIR)
+  const skillDirs = fs.readdirSync(SKILLS_DIR, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => d.name)
+  scanned.push(`${dirLabel}(${skillDirs.length})`)
 
 for (const skill of skillDirs) {
   const file = path.join(SKILLS_DIR, skill, 'SKILL.md')
@@ -80,7 +93,7 @@ for (const skill of skillDirs) {
   }
 
   lines.forEach((line, i) => {
-    const where = `${skill}/SKILL.md:${i + 1}`
+    const where = `${dirLabel}/${skill}/SKILL.md:${i + 1}`
     const marked = MARKED.test(line)
 
     for (const m of line.matchAll(TOKEN_RE)) {
@@ -119,6 +132,7 @@ for (const skill of skillDirs) {
     }
   })
 }
+}
 
 const sections = [
   ['① 路径前缀写错（提示：补 server/ 前缀即可）', problems.prefix],
@@ -127,7 +141,7 @@ const sections = [
   ['④ 同名歧义（提示：裸名有多份，建议写全路径）', problems.ambiguous],
 ]
 
-console.log(`技能引用体检  技能目录: ${SKILLS_DIR}  技能数: ${skillDirs.length}\n`)
+console.log(`技能引用体检  扫描目录: ${scanned.join(' ｜ ') || '（无）'}\n`)
 for (const [title, list] of sections) {
   console.log(`${title}：${list.length} 处`)
   for (const l of list) console.log('   - ' + l)
