@@ -1669,3 +1669,9 @@ npm test 1626/1626｜lint 9e/155w｜构建 r128｜route_sweep 0/16 + render_smok
 `rm -rf` / `Remove-Item -Recurse` / `rmdir -p` 均被拦 → 临时对比目录改为**逐文件 `rm -f`**（成功），
 只剩空目录（`_*` 已 gitignore，不入库）。后续做旧树对跑请直接用 `tmp/` 或逐文件清理。
 
+
+## 第 129 轮（2026-10-04）：例行巡检——全绿（多脉冲积压接管收尾）
+
+积压多个脉冲 + 负责人「继续」指令，接管 running/129 收尾。
+工作区有并行会话 5 个在制文件（+77 行，不碰不提交），当前树含在制态全量
+npm test **1642/1642**｜lint 9e/155w｜构建 r129｜route_sweep 0/16 + render_smoke 8/8。
