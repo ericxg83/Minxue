@@ -797,9 +797,15 @@ export function buildDiagnosisHTML(reportData) {
 
   /* 知识点掌握度分布 */
   .mdist-row{display:flex;gap:12px;margin-bottom:22px}
-  .mdist-cell{flex:1;border-radius:12px;padding:14px 10px;text-align:center}
-  .mdist-v{font-size:26px;font-weight:800;line-height:1.1}
-  .mdist-l{font-size:12px;margin-top:5px;font-weight:600}
+  /* r137 收敛：灰阶打底 + 仅「待加强」上琥珀。
+     ⚠️ 上一版只改了 JSX（去掉行内 style）却忘了同步 CSS，导致三格变成无样式的
+        裸数字 —— 实图复核才发现。这类「结构与样式必须同步」的改动要一起做。 */
+  .mdist-cell{flex:1;border-radius:10px;padding:14px 10px;text-align:center;background:${T.bg};border:1px solid ${T.borderLight}}
+  .mdist-cell.is-strong{background:${T.warningSoft};border-color:#FCD9A0}
+  .mdist-v{font-size:26px;font-weight:800;line-height:1.1;color:${T.text}}
+  .mdist-cell.is-strong .mdist-v{color:${T.warning}}
+  .mdist-l{font-size:12px;margin-top:5px;font-weight:600;color:${T.textSec}}
+  .mdist-cell.is-strong .mdist-l{color:${T.warning}}
 
   /* 提升总览页：面板 / 漏斗 / 堆叠 / 重练 KPI */
   .panel{background:${T.card};border:1px solid ${T.borderLight};border-radius:14px;padding:18px 20px;margin-bottom:16px}
