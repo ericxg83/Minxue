@@ -43,7 +43,14 @@
 
 **第 107q 轮（2026-10-04，本赛道）已交付：初始化/通知失败不再伪装正常空态 + 非法嵌套修正**
 - App.jsx 冷启动拉不到学生名单/初始化失败只进 console，首页停在「暂无学生」误导为名单丢了 → 两处补 useToast 可见提示（App 用自家 ToastProvider，非 antd-mobile）。
-- NotificationsPanel 加载失败被渲染成「暂无新通知」（铃铛里的「识别失败」提醒正是老师需要看的）→ 新增错误态 + 重试按钮；load 提为组件级 useCallback（active 改用 ref，卸载后不再 setState）。⚠️ 首轮把它直接写在 useEffect 作域内被 lint 抓到 no-undef，已收线。
+- NotificationsPanel 加载失败被渲染成「暂无新通知」（铃铛里的「识别失败」提醒正是老师需要看的）→ 新增错误态 + 重试按钮；load 提为组件级 useCallback（active 改用 ref，卸载后不再 setState）。⚠️ 首轮把它直接写在 useEffect 作用域内被 lint 抓到 no-undef，已收线。
 - WorksheetPicker 列表行 button 嵌 button（HTML 非法，部分 WebView 会把内层星标点击归并给外层导致误选）→ 外层改 div[role=button]，行为不变。
 - 锁扩判据：新增「禁 button 嵌 button（线性深度扫描）/ App 初始化失败必须 Toast / 通知面板必须错误态+重试」；旧树（=r105q 已推树）实测 5 红、新树 0。
 - 四道闸：单测 1567/1567（排除他人 in-flight）｜lint 我方 0｜`dist_nightly_20261004r107q`｜preview:5235 冒烟全绿（含 6 条新文案进包实测）。运维事件：会话间 4000 后端被他模型操作弄死，本轮按分离进程规范拉起（日志 `_r107q_backend.log`，仍在跑）；5227–5234 被旧 preview 占满，后续冒烟用 5235+ 并先探测。
+
+**第 108q 轮（2026-10-04，本赛道）已交付：周报页错误态 + 错题分页失败反馈**
+- WeeklyReport：`loadSummary` 失败与「真没数据」都渲染成「暂无学习数据」——周报是要转发家长的输出物，误导代价高 → 新增 `summaryError` 态（红字+原因+重试按钮），空态仅在非 loading 非 error 时显示。
+- App.jsx 错题本：首页加载失败且无缓存时停在「暂无错题」误导 → Toast；`loadMoreWrongQuestions` 静默失败会让老师以为「就这些题」（总数口径错不得）→ Toast。
+- 锁扩判据 4 条（WeeklyReport 错误态×2 + App 错题分页×2）；旧树实测 4 红/新树 0；ScanQR:66 实测**非缺陷**（已有 setScanError 可见渲染），不重复处理。
+- 四道闸：单测 1572/1572（排除他人 in-flight）｜lint 我方 0｜`dist_nightly_20261004r108q`｜preview:5236 冒烟全绿（9 条可见化文案全部进包实测）。
+- 109q 候选：①`loadTasks`（App.jsx:443）/`loadGeneratedExams`（576）失败无反馈（有缓存兑底，优先级低）②首屏偶发 400 抢跑定位③ExamReview 页错误可见性审计。

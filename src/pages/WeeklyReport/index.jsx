@@ -61,6 +61,9 @@ export default function WeeklyReport() {
   const [generating, setGenerating] = useState(false)
   const [reportData, setReportData] = useState(null)
   const [loadingSummary, setLoadingSummary] = useState(false)
+  // 加载失败态：此前接口失败与「真没数据」都渲染成「暂无学习数据」，
+  // 网络抖动时老师会误信学生本周真的没数据（周报是要转发给家长的输出物，误导代价高）
+  const [summaryError, setSummaryError] = useState(null)
 
   const [periodMode, setPeriodMode] = useState('week')
   const [periodOffset, setPeriodOffset] = useState(0)
@@ -92,9 +95,11 @@ export default function WeeklyReport() {
       // 与 PC 端报告模块同源：单学生接口返回 stats + knowledgeDiagnosis + subjectDiagnosis
       const data = await getWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
       setReportData(data?.success ? data : null)
+      setSummaryError(null)
     } catch (err) {
       console.warn('加载周报告失败:', err)
       setReportData(null)
+      setSummaryError(err?.message || '加载学习数据失败')
     } finally {
       setLoadingSummary(false)
     }
@@ -300,9 +305,23 @@ export default function WeeklyReport() {
                     </div>
                   </div>
                 </>
+              ) : summaryError ? (
+                <div style={{ textAlign: 'center', padding: '20px', fontSize: 'var(--fs-13)' }}>
+                  <div style={{ color: T.danger, fontWeight: 600 }}>学习数据加载失败</div>
+                  <div style={{ color: T.textTer, marginTop: '4px' }}>{summaryError}</div>
+                  <button
+                    onClick={loadSummary}
+                    style={{
+                      marginTop: '12px', padding: '8px 20px', borderRadius: 'var(--radius-sm)',
+                      background: T.primary, color: '#fff', fontSize: 'var(--fs-13)', fontWeight: 600, border: 'none'
+                    }}
+                  >
+                    重试
+                  </button>
+                </div>
               ) : (
                 <div style={{ textAlign: 'center', padding: '20px', color: T.textTer, fontSize: 'var(--fs-13)' }}>
-                  {currentStudent ? '暂无学习数据' : '请选择学生'}
+                  {currentStudent ? (loadingSummary ? '加载中…' : '暂无学习数据') : '请选择学生'}
                 </div>
               )}
             </div>

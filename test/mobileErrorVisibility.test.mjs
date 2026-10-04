@@ -115,6 +115,20 @@ export function collectFailures(dir) {
     if (!np.includes('通知加载失败') || !np.includes('重试')) fails.push('NotificationsPanel: 错误态必须带可见文案与重试入口')
   }
 
+  // r108q：周报页与错题本分页的失败不得伪装成「暂无数据」
+  const wr = file(join('pages', 'WeeklyReport', 'index.jsx'))
+  if (wr !== null) {
+    if (!wr.includes('setSummaryError')) fails.push('WeeklyReport: 加载失败必须有错误态（周报是转发家长的输出物，不得误导为「本周没数据」）')
+    if (!wr.includes('学习数据加载失败')) fails.push('WeeklyReport: 错误态必须带可见文案与重试')
+  }
+
+  if (app !== null) {
+    const lm = app.indexOf("console.error('加载更多错题失败:', error)")
+    if (lm >= 0 && !app.slice(lm, lm + 300).includes('Toast.show')) fails.push('App.jsx: 错题 loadMore 失败必须 Toast（静默失败会让老师以为「就这些题」）')
+    const wb = app.indexOf("console.error('加载错题失败:', error)")
+    if (wb >= 0 && !app.slice(wb, wb + 400).includes('Toast.show')) fails.push('App.jsx: 首页无缓存时错题本加载失败必须 Toast')
+  }
+
   const api = file(join('services', 'apiService.js'))
   if (api !== null) {
     for (const fn of ['createStudent', 'updateStudent', 'deleteStudent']) {
@@ -142,8 +156,7 @@ test('锁健全性：判据套修复前旧树必须判红（反向自检）', ()
   const oldDir = join(ROOT, '_r105q_old', 'src')
   if (!existsSync(oldDir)) return // 旧树未导出时跳过（CI 环境），主锁仍生效
   const probe = collectFailures(oldDir)
-  // 旧树（= r105q 已推树，前四条已修因此只剩 5）：WorksheetPicker 按钮嵌套
-  // + 2×App.jsx（名单/初始化无 Toast）+ 2×NotificationsPanel（无错误态/无重试文案）；
-  // 再往前（r105q 前）另有 12 条，同一判据共 17 条。阈值留余量
-  assert.ok(probe.length >= 4, `判据套旧树应报 ≥4 处，实际 ${probe.length} —— 锁可能被掏空`)
+  // 旧树每轮重导（= 上一轮已推树）；r108q 实测旧树 4 红（2×WeeklyReport +
+  // 2×App 错题分页）；再往前每轮叠加，r105q 前共 17 条。阈值留余量
+  assert.ok(probe.length >= 3, `判据套旧树应报 ≥3 处，实际 ${probe.length} —— 锁可能被掏空`)
 })

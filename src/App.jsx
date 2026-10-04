@@ -532,7 +532,12 @@ export default function App() {
       writeCache(`wrong_questions_cache_${studentId}`, deduped)
     } catch (error) {
       console.error('加载错题失败:', error)
-      // 网络失败时保留已展示的缓存数据
+      // 网络失败时保留已展示的缓存数据；但若连缓存都没有，页面会停在
+      // 「暂无错题」——必须告诉老师是加载失败而不是真没错题
+      const cachedFallback = peekCache(`wrong_questions_cache_${studentId}`)
+      if (!Array.isArray(cachedFallback) || cachedFallback.length === 0) {
+        Toast.show({ message: '错题本加载失败，请检查网络后下拉重试', type: 'error', duration: 3000 })
+      }
     }
   }
 
@@ -556,6 +561,8 @@ export default function App() {
       writeCache(`wrong_questions_cache_${studentId}`, merged)
     } catch (error) {
       console.error('加载更多错题失败:', error)
+      // 静默失败会让老师以为「就这些题」，实际是没加载完——总数口径错不得
+      Toast.show({ message: '加载更多错题失败，请上滑重试', type: 'error', duration: 2500 })
     } finally {
       setWrongBookLoading(false)
     }
