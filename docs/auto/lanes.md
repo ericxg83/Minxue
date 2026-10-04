@@ -96,6 +96,18 @@
 - ❕ 遗留提案（B 级需拍板）：PDF 本体用墨绿 #0F6B6D“成长绿”体系（weeklyReportGenerator.js 注释显示是刻意设计），与 App 蓝不一致——整份报告是否改统一品牌蓝，属跨文档品牌决策，只提不擅改。
 - 四道闸：单测 1579/1579｜lint 0｜`dist_nightly_20261004r114q`｜preview:5250 冒烟全绿。
 
+**第 115q 轮（2026-10-04，本赛道）已交付：【PDF 产出物】只读可视化质检 + 修空白趋势图 + 加掌握度分布**
+- 负责人授权①只读可视化：建 `_r115q_pdf_preview.mjs`（dev server 动态 import 纯函数 `buildDiagnosisHTML` + headless 全页截图），拉真实 GET 数据渲染成 PNG 肉眼质检。**零写库**（不碰 generateWeeklyReport 的建卷路径）。实测发现（学生陆晨曦 298 题 mode=all）：
+  - ❶ **正确率趋势图完全空白**（只有网格线）——mode=all 时 `dailyTrend` 为空，旧版无条件渲染空折线图，看起来像坏掉。
+  - ❷ 数据密度低，页底大片留白。
+- 修复（`weeklyReportGenerator.js`，纯渲染）：
+  - `hasTrend=false`（无日维度数据）时，概览页用新增的 **`renderSubjectBarChart`（各学科正确率横向条形图）** 替代空折线图；有趋势数据（week）仍走折线。
+  - 新增 **`renderMasteryDistribution`（知识点掌握度分布：待加强/需关注/需巩固 计数）** 填充概览页、提高数据密度。
+  - 补 `.bar-chart/.mdist-row` CSS；修 buildDiagnosisHTML 未解构 `knowledgeDiagnosis` 的引用。
+- 重渲染自检：空白趋势图已变学科正确率条 + 掌握度分布 4/1/0——数据密度上来、不再像坏掉。
+- ❕ 数据边界（提案）：payload **无「章节/错因」字段**（knowledgeDiagnosis 只有 subject/tag/wrongCount/accuracy）——要加章节/错因需改后端 `weeklyReport.js`（对方在飞）+ DB 查询，属 C 级，只提不擅做。学科诊断页只展 TOP5（后端 buildSubjectDiagnosis 截断），同样需后端才能扩。
+- 四道闸：单测 1589/1589｜lint 0 error（仅 2 条既存 warning）｜`dist_nightly_20261004r115q`｜可视化渲染自检 PNG 实测（对 PDF 产出物，真机 PNG 即最贴切冒烟）。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到

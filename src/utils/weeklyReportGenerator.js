@@ -180,6 +180,50 @@ function renderTrendChart(dailyTrend) {
   </svg>`
 }
 
+/**
+ * 学科正确率横向条形图（HTML/CSS，非 SVG）。
+ * 用于日维度趋势为空时（mode=all / 无每日数据）的替代可视化：
+ * 旧版直接渲染一张只有网格的空折线图，看起来像坏掉——改为恒有数据的学科正确率对比。
+ */
+function renderSubjectBarChart(subjectDiagnosis) {
+  const rows = (subjectDiagnosis || []).filter(s => s && s.accuracy != null)
+  if (rows.length === 0) return ''
+  const max = 100
+  const bars = rows.map(s => {
+    const c = colorForAccuracy(s.accuracy)
+    const w = Math.max(2, Math.min(100, s.accuracy))
+    return `<div class="bar-row">
+      <div class="bar-name">${escapeHtml(s.subject)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(w / max) * 100}%;background:${c}"></div></div>
+      <div class="bar-val" style="color:${c}">${s.accuracy}%</div>
+    </div>`
+  }).join('')
+  return `<div class="bar-chart">${bars}</div>`
+}
+
+/**
+ * 知识点掌握度分布（待加强 / 需关注 / 需巩固 计数）。
+ * 从 subjectDiagnosis 各 topTags 的 masteryLabel 聚合，给家长一眼看清薄弱结构。
+ */
+function renderMasteryDistribution(subjectDiagnosis) {
+  const buckets = { '待加强': 0, '需关注': 0, '需巩固': 0 }
+  let total = 0
+  for (const s of (subjectDiagnosis || [])) {
+    for (const t of (s.topTags || [])) {
+      const lab = t.masteryLabel
+      if (lab in buckets) { buckets[lab]++; total++ }
+    }
+  }
+  if (total === 0) return ''
+  const cell = (label, count, color, bg) =>
+    `<div class="mdist-cell" style="background:${bg}"><div class="mdist-v" style="color:${color}">${count}</div><div class="mdist-l" style="color:${color}">${label}</div></div>`
+  return `<div class="mdist-row">
+    ${cell('待加强', buckets['待加强'], T.danger, T.dangerSoft)}
+    ${cell('需关注', buckets['需关注'], T.warning, T.warningSoft)}
+    ${cell('需巩固', buckets['需巩固'], T.accent, T.accentSoft)}
+  </div>`
+}
+
 /** 价值点图标（简洁线性 SVG） */
 const VALUE_ICONS = {
   find: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="${T.primary}" stroke-width="2"/><path d="M16 16l4 4" stroke="${T.primary}" stroke-width="2" stroke-linecap="round"/></svg>`,
@@ -254,7 +298,9 @@ function renderComparePage(curStats, prevStats, retryProgress, badgeLabel, prevP
 }
 
 export function buildDiagnosisHTML(reportData) {
-  const { student, period, stats, subjectDiagnosis = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
+  const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
+  // 日维度趋势是否可用（mode=all / 无每日数据时 dailyTrend 为空，旧版会渲染一张空网格图）
+  const hasTrend = Array.isArray(dailyTrend) && dailyTrend.some(d => d && d.accuracy != null)
   const mode = period.mode || 'week'
   const weekNum = period.weekNum || (mode === 'week' ? dayjs(period.start).isoWeek() : null)
   const badgeLabel = mode === 'month'
@@ -379,6 +425,20 @@ export function buildDiagnosisHTML(reportData) {
   /* 趋势卡 */
   .chart-card{background:#fff;border:1px solid ${T.border};border-radius:14px;padding:18px 16px 8px;margin-bottom:22px}
   .chart-card svg{display:block;width:100%;height:auto}
+
+  /* 学科正确率条形图（趋势为空时的替代可视化） */
+  .bar-chart{display:flex;flex-direction:column;gap:14px;padding:8px 4px 14px}
+  .bar-row{display:flex;align-items:center;gap:12px}
+  .bar-name{width:64px;flex-shrink:0;font-size:13px;font-weight:600;color:${T.text}}
+  .bar-track{flex:1;height:14px;border-radius:7px;background:${T.borderLight};overflow:hidden}
+  .bar-fill{height:100%;border-radius:7px}
+  .bar-val{width:48px;flex-shrink:0;text-align:right;font-size:13px;font-weight:700}
+
+  /* 知识点掌握度分布 */
+  .mdist-row{display:flex;gap:12px;margin-bottom:22px}
+  .mdist-cell{flex:1;border-radius:12px;padding:14px 10px;text-align:center}
+  .mdist-v{font-size:26px;font-weight:800;line-height:1.1}
+  .mdist-l{font-size:12px;margin-top:5px;font-weight:600}
 
   /* 教学判断卡 */
   .teaching-summary{background:#fffaf0;border:1px solid #FDE68A;border-radius:14px;padding:16px 18px;margin-bottom:16px}
@@ -533,8 +593,9 @@ export function buildDiagnosisHTML(reportData) {
         <div class="tri" style="background:${T.primaryMist};border-color:${T.primarySoft}"><div class="tri-v" style="color:${T.primary}">${stats.pendingCount}<span style="font-size:14px"> 题</span></div><div class="tri-l" style="color:${T.primaryDark}">待提升错题</div></div>
       </div>
 
-      <div class="sub-label">正确率趋势（本周）</div>
-      <div class="chart-card">${renderTrendChart(dailyTrend.length ? dailyTrend : [])}</div>
+      <div class="sub-label">${hasTrend ? '正确率趋势（本周期）' : '各学科正确率'}</div>
+      <div class="chart-card">${hasTrend ? renderTrendChart(dailyTrend) : (renderSubjectBarChart(subjectDiagnosis) || `<div style="text-align:center;color:${T.textTer};font-size:13px;padding:24px 0">本周期暂无可展示的学科正确率数据</div>`)}</div>
+      ${knowledgeDiagnosis.length > 0 ? `<div class="sub-label">知识点掌握度分布</div>${renderMasteryDistribution(subjectDiagnosis)}` : ''}
 
       <div class="teaching-summary">
         <div class="sub-label">老师的教学判断</div>
