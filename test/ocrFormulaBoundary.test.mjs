@@ -40,17 +40,6 @@ test('server/worker.js 的 workbookPrompt 和 answerBankPrompt 各含一份规�
   assert.ok(src.includes(NEGATIVE_EXAMPLE), 'workbookPrompt/answerBankPrompt 应含反例')
 })
 
-test('src/config/ai.js 的 buildOCRPrompt 含分数边界规则（前端拍照路径）', () => {
-  // src/config/ai.js 用了 import.meta.env（Vite 专属），不能直接 import，
-  // 但作为静态字符串源文件，可读文件+正则验证。
-  const src = readFileSync(resolve(ROOT, 'src/config/ai.js'), 'utf8')
-  // buildOCRPrompt 是客户端识别入口，必须有这条规则；学生拍照走的是它。
-  assert.ok(src.includes(RULE_MARKER), 'src/config/ai.js 应包含"分数与紧邻自变量字符的边界"')
-  assert.ok(src.includes(POSITIVE_EXAMPLE), '客户端 prompt 应含正例')
-  assert.ok(src.includes(NEGATIVE_EXAMPLE), '客户端 prompt 应含反例')
-  // 客户端之前完全没【数学符号识别规范】一节，规则必须落在 buildOCRPrompt
-  // 模板字符串内（而不是另一个 prompt 函数）。
-  const ocrPromptBlock = src.match(/export const buildOCRPrompt[\s\S]*?(?=\nexport const build)/)
-  assert.ok(ocrPromptBlock, '应能定位到 buildOCRPrompt 模板字符串块')
-  assert.ok(ocrPromptBlock[0].includes(RULE_MARKER), '规则必须在 buildOCRPrompt 内，不在别的 prompt')
-})
+// r103：原第三条「src/config/ai.js 的 buildOCRPrompt（前端拍照路径）」已随前端直调 AI
+// 整体删除而失效——学生拍照批改一直由服务端 worker 精简管线/通用管线完成，
+// 上方两条服务端断言（server/config/ai.js + server/worker.js 双 prompt）是权威防线。

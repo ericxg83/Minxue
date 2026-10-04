@@ -3,11 +3,10 @@ import dayjs from 'dayjs'
 import { useTaskStore, useStudentStore } from '../store'
 import { useToast } from '../components/ToastProvider'
 import { taskService } from '../services/taskService'
-import { recognizeQuestions, compressImage, saveRecognitionResult } from '../services/aiService'
 import { detectQRCode, parseRetryExamId } from '../services/qrDetectionService'
 import { compressImagesForUpload, describeUploadFailure } from '../utils/imageUtils'
 import { dataURLtoFile, rotateImageByUrl } from '../utils/imageOptimizer'
-import { apiRequest, addWrongQuestions, clearStudentCaches, invalidateCache } from '../services/apiService'
+import { apiRequest, clearStudentCaches, invalidateCache } from '../services/apiService'
 import { takePhotoFiles, pickPhotoFiles, isNativeCameraAvailable, describeCameraError } from '../services/nativeCamera'
 import {   resetNetworkHealth   } from '../services/httpCore'
 import { __pendingUploadStore } from '../features/upload/pendingUploadStore'
@@ -517,7 +516,9 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
           id: updatedTask.id,
           generatedExamId: updatedTask.generated_exam_id || examId
         })
-        processTask(updatedTask)
+        // r103（负责人裁决⑧）：前端直调 AI 识别已删除。批改统一由服务端 worker
+        // 精简管线（processSlimGrading：OCR + 题库答案确定性比对 + 0.8 置信度门禁）
+        // 完成，任务状态经既有轮询/刷新同步 —— 与普通作业上传同一条状态链。
       }
 
       retryToast.dismiss()
@@ -754,58 +755,11 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
   // 它原本逐张走「前端直传 + 建任务 + 本地识别」的兜底链，但全仓没有任何调用方——
   // 真正在用的是服务端批量上传那一条。保留一份没人调用的上传路径只会误导改动，
   // 真要恢复兜底请看 git 历史（那里一行不少）。
-
-  // Process task (AI recognition)
-  const processTask = async (task) => {
-    const recognizeToast = Toast.show({ message: '正在识别题目...', type: 'loading', duration: 0 })
-    try {
-      updateTaskInStore(task.id, 'processing')
-
-      const compressedImage = await compressImage(task.image_url)
-      const result = await recognizeQuestions(compressedImage)
-
-      if (result.questions && result.questions.length > 0) {
-        const questions = result.questions.map((q) => ({
-          task_id: task.id,
-          student_id: currentStudent.id,
-          content: q.content,
-          options: q.options || [],
-          answer: q.answer,
-          analysis: q.analysis,
-          question_type: q.question_type || 'choice',
-          subject: q.subject,
-          is_correct: q.is_correct,
-          // 判题域硬规则：is_correct === null 是"AI 未判定"，不是错。
-          // 原先用 q.is_correct 的真值性分桶，null 会被当成 wrong 送进错题本。
-          status: q.is_correct === false ? 'wrong' : 'pending',
-          image_url: q.image_url,
-          ai_tags: q.ai_tags || [],
-          tags_source: 'ai'
-        }))
-
-        await saveRecognitionResult(task.id, currentStudent.id, questions)
-        updateTaskInStore(task.id, 'done', result)
-
-        // 只有明确判错的题进错题本；判不出来的题等老师复核，不能自动入册
-        const wrongQuestions = questions.filter(q => q.is_correct === false)
-        if (wrongQuestions.length > 0) {
-          await addWrongQuestions(currentStudent.id, wrongQuestions.map(q => q.id))
-        }
-
-        recognizeToast.dismiss()
-        Toast.show({ message: '识别完成，共 ' + questions.length + ' 道题，' + wrongQuestions.length + ' 道错题', type: 'success', duration: 2000 })
-      } else {
-        updateTaskInStore(task.id, 'failed', { error: '未识别到题目' })
-        recognizeToast.dismiss()
-        Toast.show({ message: '未识别到题目，请重新上传', type: 'error' })
-      }
-    } catch (error) {
-      console.error('识别失败:', error)
-      updateTaskInStore(task.id, 'failed', { error: error.message })
-      recognizeToast.dismiss()
-      Toast.show({ message: '识别失败，请重试', type: 'error' })
-    }
-  }
+  //
+  // 原「Process task (AI recognition)」`processTask`（前端直调魔搭识别重练卷作答）已于
+  // 2026-10-04 随裁决⑧删除：生产包里烤的是占位符 key，该调用每次 401（假「识别失败」
+  // toast 的根因）；开发环境的识别也与服务端精简管线重复批改。批改统一走
+  // worker processSlimGrading，状态经既有轮询同步。需要时看 git 历史。
 
   return {
     // 上传类型 / flow

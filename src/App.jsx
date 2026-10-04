@@ -14,7 +14,6 @@ import {     apiRequest,     getStudents,     getTasksByStudent,     getGenerate
 import { warmUpConnection, getNetworkHealth } from './services/httpCore'
 import { initNotifications, startNotificationPolling, onNotificationTap } from './services/notificationService'
 import { dedupeWrongQuestions } from './domain/questionIdentity'
-import { usePaperBank } from './features/PaperBank/index.jsx'
 import { useUploadFlow } from './hooks/useUploadFlow'
 import { usePolling } from './hooks/usePolling'
 import { __pendingUploadStore } from './features/upload/pendingUploadStore'
@@ -174,9 +173,6 @@ export default function App() {
 
   // Toast
   const Toast = useToast()
-
-  // Paper Bank 自包含模块
-  const paperBank = usePaperBank()
 
   // Initialize students - fast path: load cache first, then refresh in background
   useEffect(() => {
@@ -1176,16 +1172,11 @@ export default function App() {
 
     return (
       <ToastProvider>
-        {/* PC端 + 试卷入库校对/结果时，全屏显示，跳出手机模拟器 */}
-        {!isMobile && paperBank.paperBankStep === 'proofread' ? (
-          <div className="min-h-screen flex flex-col" style={{ background: 'var(--bg)' }}>
-            {appContent}
-          </div>
-        ) : (
-          <div className="min-h-screen" style={{ background: isMobile ? 'var(--bg)' : 'var(--border-light)' }}>
-            {appContent}
-          </div>
-        )}
+        {/* r103：原「PaperBank 校对全屏」分支已随前端直调 AI 删除（该功能 UI 从未可达，
+            生产上其识别路径也从未成功）。统一渲染原 else 分支。 */}
+        <div className="min-h-screen" style={{ background: isMobile ? 'var(--bg)' : 'var(--border-light)' }}>
+          {appContent}
+        </div>
       </ToastProvider>
     )
 }
