@@ -341,8 +341,6 @@
         </div>
       </template>
 
-
-
       <!-- 底部输出条：只保留家长侧报告（成长卡已搬到页头，见 PageHeader actions）。
            ⛔ r137 裁决：讲义 / 错题卷 / 发重练卷属被下线的功能，已移除
              （后端 /teaching/wrong-paper 等路由同批删除，调用代码曾残留导致
@@ -360,7 +358,9 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Close, PieChart, User, Collection, Reading, Download, WarningFilled } from '@element-plus/icons-vue'
+// r141：图标随「按年级」视图与知识点下钻抽屉一并精简。
+// 只留模板里真正还在用的两个：ArrowRight（学生行右箭头）、WarningFilled（加载失败空态）。
+import { ArrowRight, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import DataTable from '../components/ui/DataTable.vue'
@@ -581,29 +581,6 @@ async function loadStudentSuggestions() {
     console.warn('加载单生备课建议失败:', e)
   } finally {
     loadingStudentSuggestions.value = false
-  }
-}
-
-async function retryGradeSuggestions() {
-  await loadGradeSuggestions()
-}
-
-async function openDrill(row) {
-  if (!row) return
-  drawerTag.value = row.tag
-  drawerVisible.value = true
-  drawerDetail.value = null
-  loadingDetail.value = true
-  try {
-    const data = await getTeachingDiagnosisDetail(row.tag, {
-      mode: periodMode.value,
-      offset: periodOffset.value
-    })
-    drawerDetail.value = data.success ? data : null
-  } catch (e) {
-    ElMessage.error('加载知识点详情失败')
-  } finally {
-    loadingDetail.value = false
   }
 }
 
@@ -959,7 +936,7 @@ function knowledgeLevel(row) {
 </script>
 
 <style scoped>
-.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,84px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:10px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:17px;font-weight:750;line-height:1.2;font-variant-numeric:tabular-nums}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.header-share-card{display:inline-flex;align-items:center}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
+.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,84px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:10px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:17px;font-weight:750;line-height:1.2;font-variant-numeric:tabular-nums}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.header-share-card{display:inline-flex;align-items:center}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
 
 /* ── r135：.picker-row 样式随学生横排选择器删除 ── */
 /* ── r134 诊断页两列骨架（按 03-mockup-v2）──
@@ -1043,32 +1020,11 @@ function knowledgeLevel(row) {
 .hero-kpi span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:10px}
 @media(max-width:900px){.hero-strip{flex-direction:column;align-items:stretch}.hero-kpis{grid-template-columns:repeat(3,1fr)}.hero-kpi:nth-child(3n+1){border-left:0;padding-left:0}}
 
-/* ── 年级备课建议（grade view） ── */
-.grade-suggestions-section{margin-bottom:16px}
-.grade-suggestion-list{display:grid;gap:14px}
-.grade-suggestion-card{padding:18px 20px;border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}
-.card-header{display:flex;gap:14px;align-items:flex-start;margin-bottom:14px}
+/* ── 单生备课建议（紧凑卡片） ──
+   r141：原上方「年级备课建议（grade view）」样式块整段删除 —— 视图与后端接口均已下线。
+   .rank-pill 仍被下面这张单生卡使用，故保留。 */
 .rank-pill{display:grid;flex-shrink:0;width:30px;height:30px;place-items:center;color:#fff;background:var(--wb-primary);border-radius:50%;font-size:13px;font-weight:650}
 .rank-pill.small{width:22px;height:22px;font-size:11px}
-.kp-name-block{flex:1;min-width:0}
-.kp-name-block h3{margin:0 0 6px;font-size:14px;font-weight:650}
-.kp-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--wb-text-secondary);font-size:10px}
-.kp-meta .meta-item b{color:var(--wb-text);font-weight:600;font-size:11px}
-.card-section{padding:12px 0;border-top:1px solid var(--wb-border-light)}
-.card-section:first-of-type{border-top:0;padding-top:0}
-.card-section label{display:block;margin-bottom:8px;color:var(--wb-text-tertiary);font-size:10px;font-weight:600}
-.error-bars{display:grid;gap:10px}
-.error-bar-row{display:flex;align-items:center}
-.error-bar-row .error-type{width:90px;font-size:11px}
-.error-bar-row .error-count{color:var(--wb-text-tertiary);font-size:10px;min-width:74px;text-align:right}
-.sample-item{padding:10px 12px;background:var(--wb-bg-elevated);border-radius:6px;margin-bottom:8px}
-.sample-item:last-child{margin-bottom:0}
-.sample-q{font-size:12px;line-height:1.6}
-.sample-meta,.sample-reason{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;color:var(--wb-text-secondary);font-size:10px}
-.card-footer{display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 14px;background:var(--wb-primary-soft);border-radius:6px;color:var(--wb-text);font-size:11px}
-.card-footer strong{color:var(--wb-primary);font-weight:600}
-
-/* ── 单生备课建议（single view 内的紧凑卡片） ── */
 .student-suggestions{margin-bottom:16px}
 .student-suggestion-list{display:grid;gap:12px}
 .student-suggestion-card{padding:14px 16px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-card)}

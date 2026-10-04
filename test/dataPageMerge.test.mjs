@@ -89,6 +89,50 @@ test('学习诊断的输出能力只剩家长侧产出（r137：备课输出条�
   }
 })
 
+// ─────────────────── ①bis 「按年级」视图下线（r141） ───────────────────
+
+test('⛔ 学习诊断只剩单生视图：「按年级」切换与年级备课 UI 不得回流', () => {
+  // 背景：r137 已删后端 /teaching/grades、/teaching/grade-suggestions 路由，
+  // 但前端 el-segmented 上的「按年级」选项一直留着 —— 老师点进去只会看到一个
+  // 永远加载不出来的空页面（fetch 404 → resp.json() 抛错 → 整块卡在骨架屏）。
+  // r141 负责人裁决「按年级意义不大 + 备课关联已要求删除」，前端一并清干净。
+  const code = stripComments(DIAG_SRC)
+  for (const gone of ['按年级', 'viewMode', 'selectedGrade', 'gradeSuggestions', 'loadGradeSuggestions', 'loadGrades']) {
+    assert.ok(!code.includes(gone), `「${gone}」属已下线的年级视图，不应再出现在学习诊断`)
+  }
+  // 反向自检：内联一份「旧版坏样本」，同一判据必须判红，否则这把锁是空锁
+  const bad = `
+    const viewMode = ref('single')
+    const viewModeOptions = [{ label: '按年级', value: 'grade' }]
+    async function loadGradeSuggestions() {}
+  `
+  for (const gone of ['按年级', 'viewMode', 'loadGradeSuggestions']) {
+    assert.ok(bad.includes(gone), `坏样本构造有误：${gone}`)
+  }
+})
+
+test('⛔ 已下线接口不得只剩 no-op 占位（r141：连占位一并删，信息留在注释里）', () => {
+  const code = stripComments(DIAG_SRC)
+  // r138 的处理是「留4 个显式 no-op 并提示」；r141 补完：UI 入口全摘掉之后，
+  // 这4 个函数只剩「将来能看出接哪个接口」的价值，而那份信息已在注释里。
+  // 留着就是纯死代码（lint 报未使用），也让「接口已下线」这件事看起来像还能用。
+  for (const gone of ['OFFLINE_API_MESSAGE', 'getTeachingDiagnosis', 'getTeachingWrongPaper', 'exportWrongPaper']) {
+    assert.ok(!code.includes(gone), `「${gone}」是已下线接口的 no-op 占位，应删除而不是长期留存`)
+  }
+  // 但接口名必须留在注释里 —— 否则将来真要恢复时无从查证删的是哪几个
+  const comments = DIAG_SRC
+  for (const keep of ['/teaching/diagnosis', '/teaching/wrong-paper']) {
+    assert.ok(comments.includes(keep), `注释里应保留已删除的接口路径：${keep}`)
+  }
+})
+
+test('⛔ 知识点下钻抽屉（openDrill）不得复活：它依赖已删除的 /teaching/diagnosis/:tag', () => {
+  const code = stripComments(DIAG_SRC)
+  for (const gone of ['openDrill', 'drawerVisible', 'drawerDetail', '知识点下钻抽屉']) {
+    assert.ok(!code.includes(gone), `「${gone}」的接口已随班级备课下线，抽屉是无入口死 UI`)
+  }
+})
+
 // ─────────────────── ② 页面真的下线了 ───────────────────
 
 test('侧栏「教学工作」只剩 3 项，成长中心与错题中心都不在菜单里', () => {
