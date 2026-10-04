@@ -351,6 +351,14 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 - 移动端首屏偶发一次 `400 Bad Request`（疑似首次 `/api/tasks` 抢跑）：第 79 轮抓到，第 80、83 轮同口径冒烟**均未复现**，暂定偶发不立案。
 - `no-unused-vars` 还剩 72 条（14 条同行 import 形态收益不抵风险；其余是函数参数/含副作用初始化/复杂形态），已分类入库。
 - 等比刻度线（tick）已建图元，但**采用率靠模型自愿**（实测 1 中 1 不中）；负责人裁决⑩ = 不加硬要求。
+- **⛔ 第 130 轮（2026-10-04 16:40 起）本机 `vite build` / `vite preview` 全部不可用**：
+  `node_modules/@esbuild/win32-x64/esbuild.exe` 在 Go `osinit()` 阶段崩溃
+  （`fatal error: winmm.dll not found`，`--version` 即崩，与仓库代码无关）。
+  r129 产物 16:19 还正常 ⇒ 会话中途系统侧 DLL 加载被拦（重启本机或 `npm rebuild esbuild` 可解）。
+  ⇒ **闸 3（隔离构建）与闸 4（preview 真机冒烟）在恢复前无法执行**，接手轮须知：
+  可改用 `vue/compiler-sfc` 真编译 + `vue/server-renderer` 内存 SSR 渲染作为替代验证
+  （r130 已用此法覆盖 19 项，见 `_r130_build_ssr.mjs` / `_r130_sfc_verify.mjs`），
+  但**替代验证不能替代真机冒烟**，恢复后仍需补跑。
 
 ## 十、给接手模型的三句话
 
