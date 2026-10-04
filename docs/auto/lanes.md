@@ -75,6 +75,13 @@
 - Grading 完成按钮核查：发现已有 `disabled={{isSaving}}`，重练批改提交不会双发，**无缺陷未动**（该页属批改红线，只读确认）。
 - 四道闸：单测 1577/1577｜lint 我方 0｜`dist_nightly_20261004r111q`｜preview:5244 冒烟全绿（12 条可见化文案进包实测）。
 
+**第 112q 轮（2026-10-04，本赛道）已修复：错题本「切换学生竞态」（他会话移交的提案⑱-2）**
+- 缺陷（PC stores 赛道第 105 轮深审发现并移交移动端赛道）：`loadWrongBookData`/`loadMoreWrongQuestions` 发起时捕获 studentId，但 await 落地前不校验当前学生——错题请求在途时换学生，晚到的 A 生响应会覆写全局 `wrongQuestions/bankCounts/offset`，展示层按 B 过滤后为空→卡「这个分类暂时没有错题」空态且 bankCounts 串成 A 的计数，**不自愈**。
+- 修复（A 级行为保持）：两函数 await 后、写全局 state 前加 `if (useStudentStore.getState().currentStudent?.id !== studentId) return` 丢弃旧响应；首屏加载先 `writeCache` 到 A 自己的 key（切回 A 可秒开）再守卫。
+- 锁扩判据 2 条（两函数均必须含守卫）；旧树（=r111q）实测 2 红/新树 0（反向自检已实测）。
+- 验证层级说明：race 本体未做真机驱动（本机后端连生产库、无 store handle、时序易飘），依仓内「点击不可抓时上源码锁」纪律，以「守卫文本存在 + 位置在 await 后/setWrongQuestions 前」的源码锁 + 四页渲染冒烟兼顾。
+- 四道闸：单测 1577/1577｜lint 我方 0｜`dist_nightly_20261004r112q`｜preview:5246 冒烟全绿（回归：12 条前序文案仍在包）。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到

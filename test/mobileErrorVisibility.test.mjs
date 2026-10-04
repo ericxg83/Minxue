@@ -137,6 +137,13 @@ export function collectFailures(dir) {
     // r111q：试卷首次加载且无缓存时失败也必须 Toast（轮询失败不弹，防噪）
     const le = app.indexOf("console.error('加载试卷失败:', error)")
     if (le >= 0 && !app.slice(le, le + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存首次加载试卷失败必须 Toast')
+
+    // r112q（提案⑱-2）：错题本两个加载函数落地前必须校验当前学生，防串数据
+    const GUARD = 'useStudentStore.getState().currentStudent?.id !== studentId'
+    const wbFn = app.slice(app.indexOf('const loadWrongBookData'), app.indexOf('const loadMoreWrongQuestions'))
+    if (wbFn.length > 0 && !wbFn.includes(GUARD)) fails.push('App.jsx: loadWrongBookData 缺「切换学生竞态」守卫（⑱-2）')
+    const lmFn = app.slice(app.indexOf('const loadMoreWrongQuestions'), app.indexOf('// Exam: Load generated exams'))
+    if (lmFn.length > 0 && !lmFn.includes(GUARD)) fails.push('App.jsx: loadMoreWrongQuestions 缺「切换学生竞态」守卫（⑱-2）')
   }
 
   const api = file(join('services', 'apiService.js'))

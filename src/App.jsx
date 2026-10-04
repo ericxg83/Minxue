@@ -530,11 +530,15 @@ export default function App() {
     try {
       const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: 0 })
       const deduped = dedupeWrongQuestions(rawList)
+      // 按本次请求的 studentId 自己的 key 存，切回该生可秒开（即使现在已切走）
+      writeCache(`wrong_questions_cache_${studentId}`, deduped)
+      // ⚠️ 竞态守卫（提案⑱-2）：在途响应落地时若已切换学生，晚到的旧生响应
+      // 不得覆写全局 state（否则 A 的错题串到 B 名下，展示层过滤后为空→卡空态不自愈）
+      if (useStudentStore.getState().currentStudent?.id !== studentId) return
       setWrongQuestions(deduped)
       setBankCounts(counts)
       setWrongBookOffset(rawList.length)
       setWrongBookHasMore(rawList.length < total)
-      writeCache(`wrong_questions_cache_${studentId}`, deduped)
     } catch (error) {
       console.error('加载错题失败:', error)
       // 网络失败时保留已展示的缓存数据；但若连缓存都没有，页面会停在
@@ -553,6 +557,8 @@ export default function App() {
     setWrongBookLoading(true)
     try {
       const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: wrongBookOffset })
+      // ⚠️ 竞态守卫（提案⑱-2）：分页在途时换学生，晚到的旧生响应不得追写新生列表/计数
+      if (useStudentStore.getState().currentStudent?.id !== studentId) return
       if (!Array.isArray(rawList) || rawList.length === 0) {
         setWrongBookHasMore(false)
         return
