@@ -828,3 +828,25 @@ Windows 上 TaskStop 杀不干净 preview 的 node 子进程：`netstat -ano | g
 ⚠️ r100 教训：批量正则跨行贪婪把单引号串改成「反引号开单引号关」未闭合串（构建即红），
 git checkout 还原后改逐行带闭合引号正则重做 —— **改代码的正则必须匹配完整字面串含闭合符**。
 ⚠️ r102 真机验证刻意不点「生成重练卷」：本机后端连生产库，真点 = 写生产数据（C 级红线）。
+
+### 提案⑧ 调查结论（2026-10-04 深夜追加）：前端直连 AI「在用但从没成功过」
+
+负责人问「前端直连 AI 还在用吗」——查证结果（全链路证据）：
+
+1. **两条活路径**（浏览器 → 直调魔搭 api-inference.modelscope.cn，key 烤在 JS 包里）：
+   - A：`useUploadFlow.processTask`（useUploadFlow.js:765）——重练卷作答上传成功后触发
+     `recognizeQuestions`，失败无兜底，任务本地标 failed + 弹「识别失败，请重试」；
+   - B：移动端试卷答案库导入（App.jsx usePaperBank → paperBankAIService.processMultiPagePaperLayout）。
+2. **生产从未成功**：线上 minxue.pages.dev 的 JS 包（本轮实测抓取）烤的是占位符
+   `your-ai-api-key` → 生产上这两处调用**每次 401 失败**。真正的批改一直是服务端
+   worker（server/config/ai.js，key 只在服务端）在做的。
+3. **开发环境是通的**：`.env.development` 有真 key（ms-***，39 位）——本地 dev 里前端
+   识别能跑通，这大概是「感觉在用」的来源。
+4. **推论（生产 bug）**：负责人每次拍重练卷作答，都会先弹一个假的「识别失败」、
+   任务先显示失败，服务端批完、任务列表刷新后才恢复真实状态。真正的数据（题目/
+   错题/审计）由服务端写入，未被污染。
+5. **建议（C 级，涉及任务状态机显示，须专门一轮）**：删除前端直调识别
+   （recognizeQuestions/processTask 调用与 paperBankAIService、taggingService 死导出、
+   config/ai.js），前端只依赖服务端任务状态；上线后 VITE_AI_API_KEY/VITE_AI_ENDPOINT/
+   VITE_AI_MODEL 从 env 全家桶退役。同时修掉「上传成功却弹识别失败」的假错。
+   —— 等负责人点头后执行。
