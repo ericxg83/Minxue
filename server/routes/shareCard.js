@@ -33,6 +33,21 @@ router.post('/', async (req, res) => {
       throw e
     }
 
+    // ⛔ 取数失败时必须明确失败，绝不能继续渲染（2026-10-04 修）
+    // fetchStudentWeeklyReport 的异常分支返回的是 `{ student, stats: null, error }`，
+    // **不抛错**。若不拦，模板会把它画成一张「暂无数据」的正常卡片并返回 HTTP 200，
+    // 于是：老师看到「生成成功」→ 转发给家长 → 家长看到「孩子这周什么都没做」。
+    // 报错老师会重试，错误数据会被当真——后者严重得多。
+    // 前端 GrowthCardButton 已有 `!resp.ok → 抛错 + 提示` 分支，这里返回 503 即可，
+    // **前端无需改动**。周报接口（weeklyReport.js:297）存在同样问题，已一并记入 backlog。
+    if (reportData && reportData.error) {
+      console.error(`[shareCard] 取数失败，拒绝渲染 student=${studentId}: ${reportData.error}`)
+      return res.status(503).json({
+        error: '数据读取失败，这次没有生成卡片，请稍后重试',
+        detail: reportData.error,
+      })
+    }
+
     const pngBuffer = await generateShareCardPNG(reportData, { maskName: !!maskName })
 
     const dt = Date.now() - t0
