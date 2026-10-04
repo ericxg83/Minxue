@@ -1680,3 +1680,30 @@ npm test **1642/1642**｜lint 9e/155w｜构建 r129｜route_sweep 0/16 + render_
 
 npm test 1644/1644（并行会话又 +2）｜lint 9e/153w｜构建 r130｜route_sweep 0/16 +
 render_smoke 8/8。并行会话清理死 store 已合流。
+
+### 提案⑳ 取数失败「静默变成功」整类缺陷（r130，已修一处+排除一处）
+
+**⑳-1 已修（`e4e1f41`）分享卡：取数失败仍返回 200 + PNG，家长看到假数据。**
+`weeklyReport.js` 的异常分支返回 `{student, stats:null, error}` **不抛错**，
+`shareCard.js` 只 try/catch 了抛错路径 ⇒取数失败时继续渲染并返回 200。
+后果：老师看到"生成成功"→ 转发给家长 → 家长看到"孩子这周什么都没做"。
+**报错会重试，错误数据会被当真**，后者严重得多。
+修法：渲染前判 `reportData.error` → 503 + 人话提示；前端已有 `!resp.ok` 分支，
+**前端零改动**。锁 `test/shareCardNoFakeSuccess.test.mjs` 5项（含"判位置"与"保留模板兜底"）。
+⚠️ **这是第19 轮 a61d3f8 的「另一半」**：那轮只修"别崩"（降级成"暂无数据"），
+真正该修的是"这种情况根本不该生成成功"。只修前者等于把崩溃换成静默错数据，更隐蔽更糟。
+
+**⑳-2 已排除（不是缺陷，别再查）：`GET /api/weekly-report/:studentId` 返回体带 error。**
+实测前端**已妥善处理**：`WeeklyReportWorkbench.vue:67/72/99/1177` 用
+`hasStats(report)` / `v-if="...?.stats"` 判空，取数失败时显示「暂无足够数据」占位，
+**不会把 0 当成真实指标展示**。三处消费方（apiService.js、weeklyReportGenerator.js、
+WeeklyReportWorkbench.vue）语义一致。⛔ 该视图属他人赛道，本就不该动。
+
+**⑳-3 本类缺陷的通用判据（供后续巡检复用）：**
+凡是「上游用 `{...数据, error}` 而非抛错表达失败」+「下游只 try/catch 抛错路径」的组合，
+就会产生静默假成功。查法：`grep -rn "error:" <service>.js | grep -v throw`
+找到返回体里带 error 的分支，再逐个看消费方**有没有判这个 error**。
+已扫过的：`shareCard.js`（已修）、`weeklyReport.js`（前端已判）。
+⛔ 别再用"探针扫空值形态"去找这类缺陷——2026-10-04 实测该方法在讲义侧报3 处，
+逐个核实后**全部是误报**（`rows` 来自 SQL 成功结果、`rawSections` 是本地数组字面量，
+永远不会是 null），详见 `server/_diag_handout_robust_1004.mjs` 的教训。
