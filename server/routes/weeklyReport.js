@@ -417,19 +417,12 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       correctCount: r.correct_count
     }))
 
-    // 8b. 该学生是否**曾经**被批改过（不限周期，只判有没有历史）。
-    //     用途：家长分享卡要区分「本周期 0 题 = 新学生」还是「这周没作业的老学生」——
-    //     2026-10-05 r133 实测 21/21 名学生本周期全 0，卡片却一律写「学习记录刚起步」，
-    //     而陆晨曦累计已批 298 题（正确率 77.5%）⇒ 家长收到的措辞完全说反。
-    //     纯 SELECT、不写库；整份 result 增量加字段，向后兼容。
-    const { rows: everGradedRows } = await query(
-      `SELECT COUNT(*)::int AS total
-       FROM ${TABLES.QUESTIONS}
-       WHERE student_id = $1
-         AND is_complete = TRUE`,
-      [studentId]
-    )
-    const hasEverGraded = Number(everGradedRows[0]?.total) > 0
+    // ⛔ 注意：这里**故意不加**「曾经被批改过」的查询。
+    //    r133 曾加过（供家长分享卡区分新/老学生），实测让周报接口**稳定多花 0.24s**
+    //    （旧实例 1.094s / 新实例 1.333s，6 轮交错采样一致；改用 EXISTS 早退后仍 +0.1s）。
+    //    周报接口是热路径（移动端/工作台/PDF 每次加载都调），不该为一张分享卡的文案
+    //    多付一条查询 ⇒ 该查询放在分享卡链路（routes/shareCard.js），只有点"生成分享卡"
+    //    时才付一次。见 shareCard.js 的 hasEverGraded 注释。
 
     const result = {
       success: true,
@@ -457,9 +450,7 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       retryHistory,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,
-      retryProgress,
-      // 2026-10-05 r133：是否曾经被批改过（家长分享卡空周期文案分层的判据，见 8b）
-      hasEverGraded
+      retryProgress
     }
 
     return result

@@ -12,6 +12,30 @@
 import express from 'express'
 import { fetchStudentWeeklyReport } from './weeklyReport.js'
 import { generateShareCardPNG } from '../services/shareCardService.js'
+import { query, TABLES } from '../config/neon.js'
+
+/**
+ * 该学生是否**曾经**被批改过（不限周期，只判有没有历史）。
+ * 用途：家长分享卡要分两层措辞 ——
+ *   本周期 0 题是「新学生刚起步」还是「老学生这周没作业」。
+ *   2026-10-05 r133 实测：周一早 21/21 名学生本周期全 0，旧卡片一律写
+ *   「学习记录刚起步，先完成一次作业」，而陆晨曦累计已批 298 题、正确率 77.5%
+ *   ⇒ 家长看到的措辞完全说反。
+ * ⚠️ 两个刻意为之的选择：
+ *   ① EXISTS + LIMIT 1 早退，不用 COUNT(*) —— COUNT 要数完全部历史行，实测慢一倍；
+ *   ② **只在分享卡链路查**，不塞进 fetchStudentWeeklyReport —— 周报接口是热路径，
+ *      为一张分享卡的文案让它每次多花 0.1~0.24s 不划算（r133 实测数据见该文件注释）。
+ */
+async function fetchHasEverGraded(studentId) {
+  const { rows } = await query(
+    `SELECT EXISTS (
+       SELECT 1 FROM ${TABLES.QUESTIONS}
+       WHERE student_id = $1 AND is_complete = TRUE LIMIT 1
+     ) AS hit`,
+    [studentId]
+  )
+  return rows[0]?.hit === true
+}
 
 const router = express.Router()
 
@@ -47,6 +71,9 @@ router.post('/', async (req, res) => {
         detail: reportData.error,
       })
     }
+
+    // 空周期文案要分新老学生 ⇒ 渲染前补上「有没有历史」（查询见 fetchHasEverGraded）
+    reportData.hasEverGraded = await fetchHasEverGraded(studentId)
 
     const pngBuffer = await generateShareCardPNG(reportData, { maskName: !!maskName })
 
