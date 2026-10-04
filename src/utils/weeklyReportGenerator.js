@@ -601,6 +601,10 @@ export function buildDiagnosisHTML(reportData) {
   .value-t{font-size:14px;color:${T.primary}}
   .value-d{font-size:11px;color:${T.textSec}}
   .slogan{color:${T.primary};font-size:14px;margin-top:33px;letter-spacing:.5px}
+  .cover-metrics{display:flex;gap:10px;margin-top:26px}
+  .cm-cell{flex:1;background:#fff;border:1px solid ${T.border};border-radius:4px;padding:14px 8px;text-align:center}
+  .cm-v{font-size:24px;font-weight:800;color:${T.primary};line-height:1.1}
+  .cm-l{font-size:11px;color:${T.textSec};margin-top:5px}
   .wave{display:none}
   .kpi,.tri,.chart-card,.teaching-summary,.subj-card{border-radius:4px;box-shadow:none;border-color:${T.border}}
   .kpi{border-top:3px solid ${T.primary};padding:16px}
@@ -636,6 +640,12 @@ export function buildDiagnosisHTML(reportData) {
           <div class="value-item"><div class="value-icon">${VALUE_ICONS.grow}</div><div class="value-t">持续进步</div><div class="value-d">在过程记录中观察学习变化</div></div>
         </div>
         <div class="slogan">发现问题 · 提供支持 · 记录变化</div>
+        <div class="cover-metrics">
+          <div class="cm-cell"><div class="cm-v" style="color:${accColor}">${stats.accuracy}%</div><div class="cm-l">整体正确率</div></div>
+          <div class="cm-cell"><div class="cm-v">${stats.totalQuestions}</div><div class="cm-l">记录题量</div></div>
+          <div class="cm-cell"><div class="cm-v" style="color:${T.warning}">${stats.newWrongCount}</div><div class="cm-l">新增错题</div></div>
+          <div class="cm-cell"><div class="cm-v" style="color:${T.success}">${stats.masteredCount}</div><div class="cm-l">完全掌握</div></div>
+        </div>
       </div>
       <div class="wave">${waveSvg}</div>
     </div>
