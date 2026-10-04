@@ -791,9 +791,26 @@ export const useReviewStore = defineStore('review', () => {
             }
           }
         })
-        .catch(e =>
-          console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e.message)
-        )
+        .catch(e => {
+          // [2026-10-04 修复] 判定写库失败必须回滚本地状态并提示，杜绝「假成功」：
+          // 此前 .catch 只 console.error，老师看到已判定（review_status 已在内存置好）
+          // 就继续批改，完成复核后库里该题判定仍是 null、错题强入也没发生
+          // —— 与 2026-09-14「假成功」事故同源的逐题层版本。
+          // 回滚用 reviewUndoStack 栈顶快照（本判定刚 push 的 prevStatus）。
+          console.error(`review_status 持久化失败 q=${questionId.substring(0, 8)}:`, e?.message || e)
+          const q = allQuestions.value.find(item => item.id === questionId)
+          if (q) {
+            const last = reviewUndoStack.value[reviewUndoStack.value.length - 1]
+            if (last && last.questionId === questionId) {
+              if (last.prevStatus) q.review_status = last.prevStatus
+              else delete q.review_status
+            }
+          }
+          saveError.value = {
+            message: e?.response?.data?.error || e?.message || '判定保存失败，请重试',
+            at: Date.now()
+          }
+        })
     )
 
     // [P0-1 判定即过 2026-09-27] 判定落库成功后自动前进到下一个未确认题（环绕一圈）。
@@ -803,14 +820,24 @@ export const useReviewStore = defineStore('review', () => {
       // 全卷已确认 → 自动完成复核 + 进入下一份（内部先走 prepareWrongGate 错题门禁）
       reviewStatus.value = 'completed'
       // 延迟触发自动保存和跳转，让 UI 先更新
-      setTimeout(() => autoCompleteAndAdvance(), 300)
+      // [2026-10-04 修复] 闭包捕获当时这份卷：300ms 内老师可能已切到下一份 / 手动
+      // 点了「下一份」/ 改了下拉。若不校验，定时器会去 persistTaskCompletion 一份
+      // 「已经不是当前卷」的新卷（无声完成并跳走），或与手动 completeTaskReview
+      // 对同一卷双跑（paper 模式 gradeGeneratedExam 执行两次）。
+      const task = currentTask.value
+      setTimeout(() => autoCompleteAndAdvance(task), 300)
     }
   }
 
   // 仅写入 source_type（留给错题重练模式标记复核来源）
   // 自动完成复核并跳转到下一份试卷
-  const autoCompleteAndAdvance = async () => {
+  const autoCompleteAndAdvance = async (capturedTask) => {
+    // [2026-10-04 守卫] 触发时校验「仍是判定时那份卷、且尚未完成复核」：
+    // 300ms 内切卷（currentTask 已换）或该卷已被手动完成（status==='reviewed'）
+    // 都必须早退，否则会误完成新卷 / 双跑 gradeGeneratedExam。
     if (!currentTask.value) return
+    if (capturedTask && currentTask.value.id !== capturedTask.id) return
+    if (capturedTask?.status === 'reviewed') return
     // 门禁：存在未入册错题则拦截，弹清单等用户处理（不标记复核、不跳转）
     // 先等在途复核写入落库 + 以库中错题本为准重拉，避免用旧快照误报
     const list = await prepareWrongGate()
