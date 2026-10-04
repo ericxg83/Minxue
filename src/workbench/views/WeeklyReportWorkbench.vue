@@ -54,13 +54,13 @@
             <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
             <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
             <div v-else class="student-diagnosis-list">
-              <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${report.stats ? `${report.stats.accuracy}%` : '暂无数据'}，${report.stats?.newWrongCount ?? 0} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
+              <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
                 <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
                 <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
                 <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
                 <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
-                <div class="student-metrics"><span><b>{{ report.stats ? `${report.stats.accuracy}%` : '-' }}</b>正确率</span><span><b>{{ report.stats?.newWrongCount ?? '-' }}</b>新增错题</span><span><b>{{ report.stats?.pendingCount ?? '-' }}</b>待重练</span></div>
-                <div class="student-next"><span>建议动作</span><strong>{{ !report.stats ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
+                <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? report.stats.pendingCount : '—' }}</b>待重练</span></div>
+                <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
                 <el-icon class="row-arrow"><ArrowRight /></el-icon>
               </article>
             </div>
@@ -1247,6 +1247,13 @@ const trendSummary = computed(() => {
   if (change < 0) return { label: `下降 ${Math.abs(change)}%`, description: '周期内首末有效学习日对比', tone: 'danger' }
   return { label: '保持平稳', description: '周期内首末有效学习日持平', tone: 'primary' }
 })
+// r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0
+// （该生本周期没有任何作答）不等于正确率 0%，指标一律显示「—」，避免家长/老师误读。
+function hasStats(report) {
+  const stats = report?.stats
+  return Boolean(stats && stats.totalQuestions)
+}
+
 function studentRiskLevel(report) {
   const stats = report?.stats
   if (!stats || !stats.totalQuestions) return { key: 'normal', label: '暂无数据' }
