@@ -951,3 +951,20 @@ answer / student_answer / ai_answer / analysis / metadata / created_at`——
   来自其他卷，非本卷判题；
 - `tasks` 表 `status='failed'` 实测 **0 条**（日志里 BullMQ `failed=51` 是队列层历史作业，
   与 tasks 表不是一回事，不要混）。
+
+### 提案⑫ N+1 全仓扫描结果与一处刻意的「不优化」（2026-10-04，常驻巡检赛道）
+
+**⑫-1 全仓相关子查询扫描：学生列表是唯一一处，已在 ccb00a0 修掉。**
+扫描 `server/index.js` + `server/routes/*.js` 全部 `(SELECT ... WHERE ... = <外层别名>.id)`
+形态，**只剩 1 处**：`server/index.js:1810` 的
+`(SELECT MAX(t.created_at) FROM tasks t WHERE t.student_id = s.id AND t.deleted_at IS NULL)`。
+其余端点无同类形态，**不要重复扫**。
+
+**⑫-2 刻意保留 SubPlan 1 不再优化（决策记录，别下轮又去动它）。**
+改写后实测 1.002ms / 297 buffers，其中该子查询占 **200 buffers（67%）**、
+`Heap Blocks: exact=179`（Bitmap Index Scan on idx_tasks_student_id，索引本身健康）。
+若把它也改成第二个预聚合 LEFT JOIN，预计再省约 100 buffers、耗时降到 ~0.8ms。
+**决定不做的理由**：① 该端点有 5 分钟 TTL 缓存，只在工作台打开时调用，
+1.0ms 与 0.8ms 的差异用户完全感知不到；② 多一个 LEFT JOIN 会扩大改动面，
+与 AGENTS.md「小而美、修改范围最小」相悖；③ 收益纯属微观指标，不构成真实用户价值。
+若将来该端点去掉缓存或被高频调用，再回来做。
