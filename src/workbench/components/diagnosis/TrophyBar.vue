@@ -89,12 +89,17 @@ const segments = computed(() => [
 .trophy__pace b{color:var(--wb-status-info-fg);font-weight:var(--wb-fw-semibold)}
 .trophy__track{display:flex;gap:2px;height:10px;border-radius:var(--wb-radius-pill);overflow:hidden;background:var(--wb-bg-mist)}
 .trophy__seg{display:block;min-width:3px;height:100%}
-.is-mastered{background:var(--wb-status-success-fg)}
-.is-basic{background:var(--wb-status-info-fg)}
-.is-todo{background:var(--wb-status-warning-fg)}
+/* 色类只作用在色条段上（scoped 到 .trophy__seg）——
+   裸写 .is-mastered 会同时命中图例 <li>，把整块背景刷成色块（r133 首版实测踩到）。 */
+.trophy__seg.is-mastered{background:var(--wb-status-success-fg)}
+.trophy__seg.is-basic{background:var(--wb-status-info-fg)}
+.trophy__seg.is-todo{background:var(--wb-status-warning-fg)}
 .trophy__legend{display:flex;gap:var(--wb-space-5);margin:var(--wb-space-2) 0 0;padding:0;list-style:none;flex-wrap:wrap}
 .trophy__legend li{display:flex;align-items:center;gap:var(--wb-space-2);font-size:var(--wb-fs-caption);color:var(--wb-text-secondary)}
 .trophy__legend i{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
+/* ⛔ 只给图例里的圆点上色。r133 首版把 .is-* 用在 <li> 上，
+   结果继承了 .is-mastered{background} 的整块背景，图例变成三个色块、文字糊掉。
+   修饰类名必须区分「色条」与「图例」两种用途。 */
 .trophy__legend .is-mastered i{background:var(--wb-status-success-fg)}
 .trophy__legend .is-basic i{background:var(--wb-status-info-fg)}
 .trophy__legend .is-todo i{background:var(--wb-status-warning-fg)}

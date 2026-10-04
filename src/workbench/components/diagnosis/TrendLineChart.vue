@@ -67,8 +67,11 @@ const xLabels = computed(() => {
 })
 // r132：点数变多（按天最多几十个）后，每个点都标数值会糊成一片。
 // 稀疏时全标；密集时只标「首 / 末 / 最高 / 最低」四个关键点。
+// r133：**低样本天不标数值** —— 2 道题全错标出「0%」比不标更糟，
+//   它会成为整张图最抢眼的元素，而它其实没有统计意义。
 const valueLabels = computed(() => {
-  const cs = coords.value
+  const cs = coords.value.filter(c => !isLowSample(c))
+  if (cs.length === 0) return []
   if (cs.length <= 8) return cs
   const highest = cs.reduce((a, b) => (b.accuracy > a.accuracy ? b : a))
   const lowest = cs.reduce((a, b) => (b.accuracy < a.accuracy ? b : a))
@@ -77,9 +80,14 @@ const valueLabels = computed(() => {
 })
 // 一天的标签太宽（'2026-09-10'），只留 MM-DD
 const shortDate = (d) => String(d || '').slice(5) || d
+// ⛔ 整体色调只按「可信样本」判定（题量 ≥10 的天）。
+//   否则蔡怡希 09-24 的 2 题全错（0%）会把整条线判成「大幅下坠」——
+//   真机实测确认过：最后一个低样本点让全线变红、终点还标着 0%，是明显的误导。
+//   低样本点仍画在图上（真实数据不删），只是不参与趋势方向的判定。
+const solidCoords = computed(() => coords.value.filter(c => !isLowSample(c)))
 const tone = computed(() => {
-  const cs = coords.value
-  if (cs.length < 2) return 'default'
+  const cs = solidCoords.value.length >= 2 ? solidCoords.value : coords.value
+  if (cs.length < 2) return 'flat'
   const delta = cs[cs.length - 1].accuracy - cs[0].accuracy
   if (delta >= 3) return 'up'
   if (delta <= -3) return 'down'
