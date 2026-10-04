@@ -113,16 +113,33 @@
             </div>
           </section>
 
-          <section v-if="currentStudentDetail?.stats" class="diagnosis-layout student-detail-layout">
-            <ContentCard title="发现问题" :description="`${currentStudentName} · ${periodLabel}`">
-              <div class="teaching-judgement">
-                <div><span>已经看到</span><strong>{{ studentProgressText }}</strong></div>
-                <div class="focus"><span>优先处理</span><strong>{{ topWeakTags || '本周期暂无明确薄弱知识点，继续观察' }}</strong></div>
-                <div><span>下一步验证</span><strong>{{ nextActionText }}</strong></div>
-              </div>
+          <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）。
+               放在 hero 正下方（第一屏）而不是趋势图之后 —— 实测两列卡片原本落在
+               1281px，第一屏完全看不到，等于白做。叙事顺序也更像诊断：
+               先「已拿下多少」→ 再「为什么错」→ 再「接下来做什么」→ 最后才是趋势与明细。 -->
+          <div class="diag-two-col">
+            <ContentCard
+              title="错因分布：为什么错"
+              :description="currentStudentDetail?.errorDistribution?.length
+                ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 点任一项可筛出对应题目`
+                : '错因会在每周一凌晨自动回填'"
+            >
+              <ErrorCauseBars
+                :items="currentStudentDetail?.errorDistribution || []"
+                @select="onErrorCauseClick"
+              />
             </ContentCard>
-          </section>
 
+            <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干">
+              <NextActions
+                :error-causes="currentStudentDetail?.errorDistribution || []"
+                :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
+                :basic-count="singleHero?.basicMasteredCount || 0"
+                :todo-count="singleHero?.notStartedCount || 0"
+                :zero-accuracy-tags="zeroAccuracyTags"
+              />
+            </ContentCard>
+          </div>
           <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
                它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
                point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
@@ -158,32 +175,6 @@
             </p>
           </ContentCard>
 
-          <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）
-               位置放在趋势图之后、知识点表之前 —— 先「发现问题」（错了什么），
-               再「决定动作」（接下来做什么），最后才是「知识点明细」（备课时看）。 -->
-          <div class="diag-two-col">
-            <ContentCard
-              title="错因分布：为什么错"
-              :description="currentStudentDetail?.errorDistribution?.length
-                ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 点任一项可筛出对应题目`
-                : '错因会在每周一凌晨自动回填'"
-            >
-              <ErrorCauseBars
-                :items="currentStudentDetail?.errorDistribution || []"
-                @select="onErrorCauseClick"
-              />
-            </ContentCard>
-
-            <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干">
-              <NextActions
-                :error-causes="currentStudentDetail?.errorDistribution || []"
-                :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
-                :basic-count="singleHero?.basicMasteredCount || 0"
-                :todo-count="singleHero?.notStartedCount || 0"
-                :zero-accuracy-tags="zeroAccuracyTags"
-              />
-            </ContentCard>
-          </div>
 
           <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
           <ContentCard
@@ -1244,31 +1235,12 @@ function knowledgeChange(row) {
 const retryProgress = computed(() => currentStudentDetail.value?.retryProgress || null)
 const retryProgressVisible = computed(() => !!retryProgress.value && retryProgress.value.examCount > 0)
 
-const topWeakTags = computed(() => {
-  if (!currentStudentDetail.value?.knowledgeDiagnosis?.length) return ''
-  const top3 = [...currentStudentDetail.value.knowledgeDiagnosis]
-    .sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)
-    .slice(0, 3)
-  return top3.map(k => `「${k.tag}」${k.wrongCount}次错误，正确率${k.accuracy}%`).join('；')
-})
-
-const studentProgressText = computed(() => {
-  const stats = currentStudentDetail.value?.stats
-  if (!stats) return '暂无足够数据'
-  if (stats.masteredCount > 0 && stats.pendingCount > 0) return `已有${stats.masteredCount}题完成掌握验证，仍有${stats.pendingCount}题需要继续跟进`
-  if (stats.masteredCount > 0) return `已有${stats.masteredCount}题完成掌握验证`
-  if (stats.pendingCount > 0) return `本周期记录${stats.pendingCount}题待提升错题，先处理高频问题`
-  return '本周期暂未形成可验证的错题掌握记录'
-})
-
-const nextActionText = computed(() => {
-  const diagnosis = currentStudentDetail.value?.knowledgeDiagnosis || []
-  if (!diagnosis.length) return '保持观察，出现重复错误后再安排针对训练'
-  const focus = [...diagnosis].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy)[0]
-  if (focus.accuracy < 60) return `先讲清「${focus.tag}」的解题方法，再用相近变式独立复测`
-  if (focus.wrongCount >= 2) return `安排「${focus.tag}」错题重练，重点观察是否还需要提示`
-  return `安排「${focus.tag}」相近题复测，确认能否迁移`
-})
+// r133：原「发现问题」三栏文字卡（studentProgressText / topWeakTags / nextActionText）
+// 已删除 —— 它把「已看到什么」用三段长句复述一遍，而这三个问题现在分别由
+// 战果条（已拿下多少）、错因横条（为什么错）、NextActions（接下来做什么）更直接地回答。
+// 三段文案在页面上是全大段文字，实测占了 240px 高度却没给任何可操作项。
+// 「优先处理哪三��知识点」的信息也没丢：错因条下方与知识点表仍在，
+// 且 NextActions 会把全错知识点合并成一条「合并讲一节」。
 
 function getDiagnosisAction(row) {
   if (row.accuracy < 60 || row.wrongCount >= 3) return '优先讲解，次日重练'
@@ -1486,7 +1458,7 @@ function knowledgeLevel(row) {
 </script>
 
 <style scoped>
-.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.student-select{width:220px}.offset-select,.subject-select{width:120px}.student-option{display:flex;align-items:center;gap:8px}.student-option small{margin-left:auto;color:var(--wb-text-tertiary)}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.teaching-judgement{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--wb-border-light);border-radius:8px}.teaching-judgement>div{min-height:88px;padding:14px;border-right:1px solid var(--wb-border-light)}.teaching-judgement>div:last-child{border-right:0}.teaching-judgement .focus{background:#fffaf2}.teaching-judgement span{display:block;margin-bottom:7px;color:var(--wb-text-tertiary);font-size:10px}.teaching-judgement strong{font-size:11px;line-height:1.65}.trend-result{font-size:11px;font-weight:600}.trend-result.success{color:var(--wb-success)}.trend-result.danger{color:var(--wb-danger)}.trend-result.primary{color:var(--wb-primary)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.teaching-judgement{grid-template-columns:1fr}.teaching-judgement>div{border-right:0;border-bottom:1px solid var(--wb-border-light)}.output-bar{flex-wrap:wrap}}
+.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
 
 /* ── 周末讲题错题卷（grade view） ── */
 .picker-row{margin-bottom:var(--wb-space-4)}
