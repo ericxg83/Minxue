@@ -1471,3 +1471,13 @@ server/.env.example 已写明。不改代码，纯后台操作。
 - 注意：移动端与 PC 工作台**共用** `apiService.js`，改公共函数签名前必须查两端调用方
 
 **相关记录**：提案⑰（CORS，已修）、提案⑱（SSRF，已修）、提案⑲（抓图收口，已修）。
+
+## 第 114 轮（2026-10-04）：⑰+⑱ 安全整改闭环确认 ✅
+
+负责人已在 Render 后台把 ALLOWED_ORIGIN 改为 https://minxue.pages.dev。
+生产实测三态验证（只读 GET /api/students）：
+- Origin: https://minxue.pages.dev → 200 + ACAO 正确回显（工作台正常）；
+- Origin: https://evil.com → **500 + 无 ACAO 头**（服务端直接拒绝，浏览器必拦）；
+- 无 Origin（Capacitor 原生 App）→ 200（现场使用不受影响）。
+至此：跨域读学生数据（⑰）、无凭证烧 AI 额度 + SSRF（⑱）全部封死。
+脉冲频率已按负责人要求从 30 分钟提到 5 分钟（锁互斥防重跑）。
