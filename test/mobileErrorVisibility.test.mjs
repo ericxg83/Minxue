@@ -15,7 +15,7 @@
  *
  * 反向自检：harness 套在修复前旧文件（_r105q_old/）上必须判红，否则是空锁。
  */
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -169,11 +169,43 @@ test('⛔ 移动端错误可见化 + 学生写操作禁重试（当前树必须�
   )
 })
 
-test('锁健全性：判据套修复前旧树必须判红（反向自检）', () => {
-  const oldDir = join(ROOT, '_r105q_old', 'src')
-  if (!existsSync(oldDir)) return // 旧树未导出时跳过（CI 环境），主锁仍生效
-  const probe = collectFailures(oldDir)
-  // 旧树每轮重导（= 上一轮已推树），红数 = 本轮新增判据数；r109q 实测 1 红
-  // （删除防连点）；历史各轮叠加共 17+ 条。阈值为「本轮必须有新增锁」
-  assert.ok(probe.length >= 1, `判据套旧树应报 ≥1 处，实际 ${probe.length} —— 本轮新判据可能是空锁`) 
+test('锁健全性：判据套合成坏样本必须判红（防空锁，不依赖 git 状态）', () => {
+  // 早期用 _r105q_old（每轮从 HEAD 重导）做反向自检；但历史修复已合入 HEAD 后，
+  // HEAD 对所有旧规则都已合规→旧树 0 红，阈值会误报。改为内联构造一份「全坏」
+  // 合成树，永远能触发全部判据，永久证明探测器非空锁。
+  const base = join(ROOT, '_r113q_baddir', 'src')
+  const put = (rel, content) => {
+    const p = join(base, rel)
+    mkdirSync(dirname(p), { recursive: true })
+    writeFileSync(p, content, 'utf8')
+  }
+  put(join('components', 'StudentSwitcher', 'index.jsx'),
+    `const handleDelete = async () => { setStudents(x); await deleteStudent(id); }
+     const loadStudents = async () => { try {} catch (error) { console.error('加载学生列表失败:', error) } }
+     const isFormValid = 1`)
+  put(join('components', 'ImageCropper', 'index.jsx'),
+    `} catch (error) { alert('裁剪失败，请重试') }`)
+  put(join('components', 'WorksheetPicker', 'index.jsx'),
+    `const loadWorksheets = async () => { try {} catch (e) { console.error('加载练习册失败:', e) } }
+     const handleSetDefault = async () => { try {} catch (e) { console.error('设置默认失败:', e) } }
+     <button className="row"><button onClick={star}>star</button></button>`)
+  put(join('components', 'NotificationsPanel.jsx'), `const load = () => { try {} catch (e) { console.error('加载通知失败:', e) } }`)
+  put(join('pages', 'WeeklyReport', 'index.jsx'), `const loadSummary = async () => { try {} catch (err) { console.warn('加载周报告失败:', err) } }`)
+  put(join('services', 'apiService.js'),
+    `export const createStudent = async (d) => { const data = await apiRequest('/students', { method: 'POST', body: b })\n}
+     export const updateStudent = async (i, d) => { const data = await apiRequest('/x', { method: 'PUT' })\n}
+     export const deleteStudent = async (i) => { await apiRequest('/x', { method: 'DELETE' })\n}`)
+  put('App.jsx',
+    `const a = getStudents(false).catch(err => { console.error('获取学生数据失败:', err) })
+     const b = () => { try {} catch (error) { console.error('初始化失败:', error) } }
+     const c = () => { try {} catch (error) { console.error('加载任务失败:', error) } }
+     const d = () => { try {} catch (error) { console.error('加载错题失败:', error) } }
+     const e2 = () => { try {} catch (error) { console.error('加载更多错题失败:', error) } }
+     const f = () => { try {} catch (error) { console.error('加载试卷失败:', error) } }`)
+
+  const probe = collectFailures(base)
+  // 合成树故意踩遍全部判据，实际命中应 ≥14（学生 3catch+antd+删除顺序+防连点
+  // =6，裁图 2，练习册 Toast×2+按钮嵌套=3，通知 2，周报 2，App 名单/初始化/任务/错题/loadMore/试卷=6，
+  // api 3）；阈值留较大余量防某条判据微调后仍非空锁
+  assert.ok(probe.length >= 14, `判据套合成坏样本应报 ≥14 处，实际 ${probe.length} —— 锁可能是空锁`)
 })

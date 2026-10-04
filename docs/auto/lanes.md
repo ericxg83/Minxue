@@ -82,6 +82,13 @@
 - 验证层级说明：race 本体未做真机驱动（本机后端连生产库、无 store handle、时序易飘），依仓内「点击不可抓时上源码锁」纪律，以「守卫文本存在 + 位置在 await 后/setWrongQuestions 前」的源码锁 + 四页渲染冒烟兼顾。
 - 四道闸：单测 1577/1577｜lint 我方 0｜`dist_nightly_20261004r112q`｜preview:5246 冒烟全绿（回归：12 条前序文案仍在包）。
 
+**第 113q 轮（2026-10-04，本赛道）已交付：【新靶子】周学习诊断报告「空数据闸」（PDF 产出物质量）**
+- 负责人新方向：移动端打印/PDF 产出物。定位到「学习诊断」=移动端 `src/pages/WeeklyReport` + `src/utils/weeklyReportGenerator.js`。
+- 产出物缺陷：两端下载入口（移动 `WeeklyReport` / PC `WeeklyReportWorkbench.vue:1059`）都写了 `if (!result) 提示「暂无学习数据」`，但 `generateWeeklyReport` 成功时从不返 null → 那条分支是死的 → 对 0 题学生也能牛出一份全 0/全空的家长转发物。
+- 修复：生成器拉到数据后、渲染前 `totalQuestions===0 → return null`（接上两端死分支，不碰 PC 赛道文件）；移动端额外加 `hasReportData` 前置拦截 + 下载按钮空数据禁用（显示「本周期无学习数据」）。
+- 新锁 `test/weeklyReportEmptyGuard.test.mjs`；**同时修正了两把锁的反向自检设计**：旧树每轮从 HEAD 重导，历史修复合入 HEAD 后旧树会 0 红误报 → 改为内联合成坏样本（永久触发全部判据，不依赖 git）。
+- 四道闸：单测 1579/1579｜lint 我方 0 error（仅 2 条既存 warning：buildPaperCSS/isProd 未用，非本引入）｜`dist_nightly_20261004r113q`｜preview:5248 冒烟全绿（14 条文案进包，含新增两条周报空数据文案）。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到

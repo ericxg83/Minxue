@@ -105,9 +105,17 @@ export default function WeeklyReport() {
     }
   }
 
+  const hasReportData = !!reportData?.stats && (reportData.stats.totalQuestions || 0) > 0
+
   const handleDownloadPDF = async () => {
     if (!currentStudent) {
       Toast.show('请先选择学生')
+      return
+    }
+    // 空数据闸（产出物质量）：本周期没有任何批改题量时，报告只会是一份
+    // 全 0/全空的家长转发物——不如不生成。明确提示而不是静默产出垃圾 PDF。
+    if (!hasReportData) {
+      Toast.show({ icon: 'fail', content: '本周期暂无学习数据，无需生成报告', duration: 2600 })
       return
     }
     if (generating) return
@@ -438,16 +446,16 @@ export default function WeeklyReport() {
           <div style={{ padding: '0 12px 20px' }}>
             <button
               onClick={handleDownloadPDF}
-              disabled={generating || !currentStudent}
+              disabled={generating || !currentStudent || !hasReportData}
               style={{
                 width: '100%', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid ' + T.borderLight,
                 background: T.card, color: T.textSec, fontSize: 'var(--fs-14)', fontWeight: 500,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px',
-                cursor: generating || !currentStudent ? 'not-allowed' : 'pointer', opacity: generating || !currentStudent ? 0.5 : 1
+                cursor: generating || !currentStudent || !hasReportData ? 'not-allowed' : 'pointer', opacity: generating || !currentStudent || !hasReportData ? 0.5 : 1
               }}
             >
               {generating ? '生成中...' : <Download size={16} />}
-              {generating ? '正在生成 PDF...' : '下载完整报告 PDF'}
+              {generating ? '正在生成 PDF...' : (hasReportData ? '下载完整报告 PDF' : '本周期无学习数据')}
             </button>
           </div>
         </>

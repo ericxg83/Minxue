@@ -802,6 +802,14 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   const reportData = await resp.json()
   if (!reportData.success) throw new Error(reportData.error || '获取周统计数据失败')
 
+  // 空数据闸（产出物质量）：本周期没有任何批改题量 → 返回 null，交调用方提示。
+  // 两端调用方（移动端 WeeklyReport / PC WeeklyReportWorkbench）都已有 `if (!result)`
+  // 分支展示「该时段暂无学习数据」——以前生成器从不返 null，那条分支是死的；现在接上。
+  // 避免产出一份全 0/全空、发给家长没有意义的 PDF。
+  if (!reportData.stats || (reportData.stats.totalQuestions || 0) === 0) {
+    return null
+  }
+
   // 2 & 3. 并行渲染：诊断报告 + 错题再测卷（两个都要建 hidden iframe + 跑 KaTeX + 等字体，可并行）
   const studentName = reportData.student?.name || '学生'
   // 错题再测卷只取「本周最该重练」的前 RETRY_CAP 道（后端已按学科均衡 + 错误次数排序）。
