@@ -417,6 +417,20 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       correctCount: r.correct_count
     }))
 
+    // 8b. 该学生是否**曾经**被批改过（不限周期，只判有没有历史）。
+    //     用途：家长分享卡要区分「本周期 0 题 = 新学生」还是「这周没作业的老学生」——
+    //     2026-10-05 r133 实测 21/21 名学生本周期全 0，卡片却一律写「学习记录刚起步」，
+    //     而陆晨曦累计已批 298 题（正确率 77.5%）⇒ 家长收到的措辞完全说反。
+    //     纯 SELECT、不写库；整份 result 增量加字段，向后兼容。
+    const { rows: everGradedRows } = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM ${TABLES.QUESTIONS}
+       WHERE student_id = $1
+         AND is_complete = TRUE`,
+      [studentId]
+    )
+    const hasEverGraded = Number(everGradedRows[0]?.total) > 0
+
     const result = {
       success: true,
       student: studentRows[0],
@@ -443,7 +457,9 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       retryHistory,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,
-      retryProgress
+      retryProgress,
+      // 2026-10-05 r133：是否曾经被批改过（家长分享卡空周期文案分层的判据，见 8b）
+      hasEverGraded
     }
 
     return result

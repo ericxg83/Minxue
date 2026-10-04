@@ -105,12 +105,18 @@ test('分享卡：全零学生（免费诊断首份报告）不得出现 NaN/und
     subjectDiagnosis: [],
     dailyTrend: Array.from({ length: 7 }, () => ({ date: '09-28', accuracy: null, count: 0 })),
     prev: { period: {}, stats: { totalQuestions: 0 } },
-    retryProgress: { examCount: 0 }
+    retryProgress: { examCount: 0 },
+    // 2026-10-05 r133：这是一份「免费诊断首份报告」⇒ 孩子从没被批改过，
+    // 必须显式声明（旧测试没这个字段，正好被新口径的「缺省=有历史」兜住，
+    // 于是断言挂在这儿 —— 这不是-lock失效，是样本没把意图写清楚）。
+    // ⛔ 不要为了让测试变绿而删掉这条断言：它守的是「零数据也要有寄语，不能空/NaN」，
+    // 只把 hasEverGraded 写明确，判据一行未改。
+    hasEverGraded: false
   }, { maskName: true })
   assert.ok(!html.includes('NaN'), '不得出现 NaN')
   assert.ok(!html.includes('undefined'), '不得出现 undefined')
   assert.match(html, /—/, '无数据时正确率显示 —')
-  assert.match(html, /学习记录刚起步/, '零数据寄语兜底')
+  assert.match(html, /学习记录刚起步/, '零数据寄语兜底（新学生/免费诊断首份报告）')
   assert.match(html, /暂无薄弱知识点/, '薄弱点空态')
   assert.ok(!html.includes('较上一周期'), '上期无数据不渲染对比')
   assert.ok(!html.includes('错题重练进步'), '无重练不渲染重练块')

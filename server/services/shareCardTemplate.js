@@ -72,8 +72,22 @@ function renderLogo() {
 }
 
 /** 学习寄语（依据统计自动拼装，口径同周报 buildTeacherComment，另兜底零数据） */
-function buildShareComment(stats, weakestTag, periodWord) {
-  if (!stats.totalQuestions) return '学习记录刚起步，先完成一次作业，成长就会被看见！'
+function buildShareComment(stats, weakestTag, periodWord, ctx = {}) {
+  // ⚠️「本周期 0 题」≠「新学生」（2026-10-05 r133 实测踩坑）。
+  // 周一早上 21/21 名学生本周期都是 0 题，旧口径一律输出「学习记录刚起步，先完成一次作业」，
+  // 而陆晨曦累计已批 298 题、正确率 77.5% —— 家长只看这一句，等于把老学生当成刚入学。
+  // 家长只看这张卡（老师唯一的转发物），说反的代价极高：
+  // 要么让老家长以为孩子一直没学，要么让新家长等一个根本不会来的"起步"。
+  // ⇒ 有历史就说「这段时间没批改记录」，没历史才是新学生话术。
+  if (!stats.totalQuestions) {
+    // 默认当「有历史」：宁可少给一句鼓励，也不能把老学生说成刚起步
+    if (ctx.hasEverGraded !== false) {
+      return ctx.isCurrentPeriod
+        ? `${periodWord}还没有新的批改记录，孩子的学习一直在积累，作业批完就会更新`
+        : `${periodWord}没有批改记录，孩子的学习记录会一直保留在这里`
+    }
+    return '学习记录刚起步，先完成一次作业，成长就会被看见！'
+  }
   const parts = []
   const completeRate = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0
   if (completeRate >= 0.8) parts.push(`${periodWord}学习态度认真，作业完成情况良好`)
@@ -184,7 +198,8 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
     subjectDiagnosis: rawSubjectDiagnosis,
     dailyTrend: rawDailyTrend,
     prev = null,
-    retryProgress = null
+    retryProgress = null,
+    hasEverGraded
   } = reportData || {}
 
   // ⚠️ 解构默认值**只对 undefined 生效，对 null 不生效**（JS 语义，容易踩）。
@@ -344,7 +359,11 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
     </div>`
   }
 
-  const comment = buildShareComment(s, weakTags[0]?.tag || '', periodWord)
+  const comment = buildShareComment(s, weakTags[0]?.tag || '', periodWord, {
+    // 往期卡片（老师翻看上周/上月）不该说"还没有新的"
+    hasEverGraded,
+    isCurrentPeriod: Number(period.offset || 0) === 0
+  })
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
