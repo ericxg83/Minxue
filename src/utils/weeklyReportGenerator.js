@@ -248,12 +248,16 @@ function renderMasteryDistribution(subjectDiagnosis) {
     }
   }
   if (total === 0) return ''
-  const cell = (label, count, color, bg) =>
-    `<div class="mdist-cell" style="background:${bg}"><div class="mdist-v" style="color:${color}">${count}</div><div class="mdist-l" style="color:${color}">${label}</div></div>`
+  // r137 收敛：旧版是 红/橙/黄 三格警示梯度（负责人反馈「红红绿绿有点过」）。
+  // 三格都上色 ⇒ 读起来像"到处都是警告"，反而看不出哪格真的严重。
+  // 现在：中性灰阶打底，**只有「待加强」上琥珀色**（唯一值得马上处理的），
+  // 其余两格用灰 —— 颜色重新变成"信号"，而不是"底噪"。
+  const cell = (label, count, strong) =>
+    `<div class="mdist-cell${strong ? ' is-strong' : ''}"><div class="mdist-v">${count}</div><div class="mdist-l">${label}</div></div>`
   return `<div class="mdist-row">
-    ${cell('待加强', buckets['待加强'], T.danger, T.dangerSoft)}
-    ${cell('需关注', buckets['需关注'], T.warning, T.warningSoft)}
-    ${cell('需巩固', buckets['需巩固'], T.accent, T.accentSoft)}
+    ${cell('待加强', buckets['待加强'], true)}
+    ${cell('需关注', buckets['需关注'], false)}
+    ${cell('需巩固', buckets['需巩固'], false)}
   </div>`
 }
 
@@ -262,22 +266,42 @@ function renderMasteryDistribution(subjectDiagnosis) {
  * 数据来自后端 weekly-report 的 errorDistribution（聚合 diagnosisService 已回填的
  * wrong_questions.error_type）。错因是老师/家长最关心的“为什么错”，比“错了几题”更可行动。
  */
+/**
+ * 错因配色（r137 收敛）。
+ * 旧版给 10 种错因各配一个饱和色（红/蓝/青/橙/黄/紫），实测一页里 8 个色相互相打架，
+ * 且「计算错误 36 道」被涂成**红色**—— 但它不是错误，是占比最高的学习数据。
+ * 现在：默认主蓝（=常态），只有**占比第一名**用琥珀（=唯一值得先抓的），
+ * 「未分析」用中性灰。红色不再出现在错因里。
+ */
 const ERROR_TYPE_COLORS = {
-  计算错误: T.danger, 概念不理解: T.primary, 审题错误: T.teal,
-  步骤遗漏: T.accent, 粗心: T.warning, 不会分析: T.purple,
-  单位错误: T.warning, 概念错误: T.primary, 誊写错误: T.purple, 未分析: T.textTer,
+  未分析: T.textTer,
 }
 function renderErrorDistribution(errorDistribution) {
-  const rows = (errorDistribution || []).filter(e => e && e.count > 0)
-  if (rows.length === 0) return ''
+  const all = (errorDistribution || []).filter(e => e && e.count > 0)
+  if (all.length === 0) return ''
+  // r137：实测 8 条时最后一条被页脚压住（内容延伸到 y=1110，页脚在 1070，溢出 40px）。
+  // 家长视角里「1次·1%」的错因没有决策价值 —— 最多列 6 条，
+  // 其余合并成「其他 N 类」，既不溢出也不丢信息。
+  const MAX_ROWS = 6
+  const rest = all.slice(MAX_ROWS - 1)
+  const rows = all.length <= MAX_ROWS
+    ? all
+    : [...all.slice(0, MAX_ROWS - 1), {
+        errorType: `其他 ${rest.length} 类`,
+        count: rest.reduce((s, e) => s + e.count, 0),
+        ratio: rest.reduce((s, e) => s + (e.ratio || 0), 0)
+      }]
   const maxCount = Math.max(...rows.map(r => r.count), 1)
+  const top = rows.reduce((a, b) => (b.count > a.count ? b : a))
   const bars = rows.map(e => {
-    const c = ERROR_TYPE_COLORS[e.errorType] || T.primary
+    // r137：只有第一名用琥珀（值得先抓），其余主蓝；数值统一用 textSec 不再跟着变色
+    const isTop = e.errorType === top.errorType
+    const c = ERROR_TYPE_COLORS[e.errorType] || (isTop ? T.warning : T.primary)
     const w = Math.max(3, Math.round((e.count / maxCount) * 100))
-    return `<div class="bar-row">
+    return `<div class="bar-row${isTop ? ' is-top' : ''}">
       <div class="bar-name" style="width:80px">${escapeHtml(e.errorType)}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${w}%;background:${c}"></div></div>
-      <div class="bar-val" style="color:${c};width:72px">${e.count}次 · ${e.ratio}%</div>
+      <div class="bar-val" style="width:72px">${e.count}次 · ${e.ratio}%</div>
     </div>`
   }).join('')
   return `<div class="bar-chart">${bars}</div>`
@@ -314,8 +338,10 @@ function renderRetryTimeline(retryHistory) {
     const acc = x.questionCount > 0 ? Math.round((x.correctCount / x.questionCount) * 100) : 0
     // 柱宽编码题量，颜色深浅编码正确率 —— 两个维度一起看
     const w = Math.max(6, Math.round(barW * (x.questionCount / maxQ)))
-    // 正确率越高越绿；低于 60% 用警示色
-    const color = acc >= 80 ? T.success : acc >= 60 ? T.primary : acc >= 40 ? T.warning : T.danger
+    // r137 收敛：≥60% 主蓝（常态）、40~60% 灰蓝、<40% 才用警示橙。
+    // 旧版 4 档色（绿/蓝/橙/红）让「一次低分」变成整页最刺眼的元素。
+    // 红色只留给真正需要立刻看的（<40%），且不再用纯红（纯红是"错误"，此处是"需关注"）。
+    const color = acc >= 60 ? T.primary : acc >= 40 ? T.textTer : T.warning
     return `<g>
       <text x="0" y="${y + 16}" font-size="11" fill="${T.textTer}">${escapeHtml(String(x.date).slice(5))}</text>
       <rect x="${padL}" y="${y + 4}" width="${w}" height="16" rx="4" fill="${color}" opacity="${acc >= 60 ? 0.9 : 0.75}"/>
@@ -376,17 +402,21 @@ function renderKnowledgeDetail(knowledgeDiagnosis) {
   const rows = (knowledgeDiagnosis || [])
     .filter(k => k && (k.wrongCount || 0) >= 2)
     .sort((a, b) => (b.wrongCount - a.wrongCount) || (a.accuracy - b.accuracy))
-    .slice(0, 24)
+    .slice(0, 18)
   if (rows.length === 0) return ''
+  // r137 收敛：旧版每行按正确率上色（红/橙/绿/蓝四档），24 行 = 24 个彩色条，
+  // 实测占全文 32% 的彩色元素（221/688）—— 附录页本该是最安静的部分。
+  // 现在：统一主蓝，**只有正确率 < 50%**（真正需要立刻关注的）才标红。
   const trs = rows.map(k => {
-    const c = colorForAccuracy(k.accuracy)
+    const low = k.accuracy < 50
+    const c = low ? T.danger : T.primary
     const w = Math.max(2, Math.min(100, k.accuracy))
     return `<tr>
       <td class="kd-sub">${escapeHtml(k.subject)}</td>
       <td class="kd-tag">${escapeHtml(k.tag)}</td>
       <td class="kd-c kd-wrong">${k.wrongCount}/${k.totalCount}</td>
       <td class="kd-barcell"><div class="kd-bar-track"><div class="kd-bar-fill" style="width:${w}%;background:${c}"></div></div></td>
-      <td class="kd-c kd-acc" style="color:${c}">${k.accuracy}%</td>
+      <td class="kd-c kd-acc">${k.accuracy}%</td>
     </tr>`
   }).join('')
   return `<div class="kd-card">
@@ -757,6 +787,9 @@ export function buildDiagnosisHTML(reportData) {
   /* 学科正确率条形图（趋势为空时的替代可视化） */
   .bar-chart{display:flex;flex-direction:column;gap:14px;padding:8px 4px 14px}
   .bar-row{display:flex;align-items:center;gap:12px}
+  /* r137：数值统一中性色，只有占比第一行加粗 —— 减少整页彩色噪点 */
+  .bar-row.is-top .bar-name{color:${T.text};font-weight:700}
+  .bar-row.is-top .bar-val{color:${T.text};font-weight:700}
   .bar-name{width:64px;flex-shrink:0;font-size:13px;font-weight:600;color:${T.text}}
   .bar-track{flex:1;height:14px;border-radius:7px;background:${T.borderLight};overflow:hidden}
   .bar-fill{height:100%;border-radius:7px}
