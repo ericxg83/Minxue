@@ -1797,16 +1797,33 @@ app.get('/api/students', async (req, res) => {
     // total_error_count 用 COUNT(*)（错题条数），不是 SUM(error_count)：同题多次错只算 1 条，
     // 与「已掌握 N 题 = COUNT(lifecycle_status='mastered')」口径一致（已掌握是子集而非叠加）。
     // 供 PC 工作台 Layer 3 「待关注学生」排序使用；学生无任务/无错题时对应字段为 NULL/0
-    // 子查询版本：避免 LEFT JOIN tasks × wrong_questions 笛卡尔积
+    //
+    // 2026-10-04 性能改写（提案⑩-1，行为等价已逐行逐列验证）：
+    // 旧写法是 6 个相关子查询 × N 个学生 = 6N 次子查询，其中 5 次打在 wrong_questions。
+    // 现改为「wrong_questions 按 student_id 预聚合一次 + LEFT JOIN」，子查询从 6N 降到 1 次扫描。
+    // 实测（生产库 EXPLAIN ANALYZE，21 学生）：3.269ms/2239 buffers → 1.164ms/297 buffers。
+    // 两版返回体逐行逐列完全一致；mastered_count 顺带去掉了包裹列的 COALESCE
+    // （COALESCE(lifecycle_status,'new')='mastered' 与 lifecycle_status='mastered' 等价：
+    //   NULL→'new' 永远 ≠ 'mastered'），去掉后才能走索引。
     const { rows } = await query(
       `SELECT s.id, s.name, s.grade, s.avatar, s.enrollment_status, s.paused_at, s.created_at,
               (SELECT MAX(t.created_at) FROM ${TABLES.TASKS} t WHERE t.student_id = s.id AND t.deleted_at IS NULL) AS last_task_at,
-              (SELECT MAX(w.last_wrong_at) FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS last_wrong_at,
-              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS total_error_count,
-              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND w.last_wrong_at >= NOW() - INTERVAL '7 days') AS recent_wrong_count,
-              (SELECT COALESCE(SUM(w.practice_count), 0)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id) AS practice_count,
-              (SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.student_id = s.id AND COALESCE(w.lifecycle_status, 'new') = 'mastered') AS mastered_count
+              w.last_wrong_at,
+              COALESCE(w.total_error_count, 0) AS total_error_count,
+              COALESCE(w.recent_wrong_count, 0) AS recent_wrong_count,
+              COALESCE(w.practice_count, 0) AS practice_count,
+              COALESCE(w.mastered_count, 0) AS mastered_count
        FROM ${TABLES.STUDENTS} s
+       LEFT JOIN (
+         SELECT student_id,
+                MAX(last_wrong_at) AS last_wrong_at,
+                COUNT(*)::int AS total_error_count,
+                COUNT(*) FILTER (WHERE last_wrong_at >= NOW() - INTERVAL '7 days')::int AS recent_wrong_count,
+                COALESCE(SUM(practice_count), 0)::int AS practice_count,
+                COUNT(*) FILTER (WHERE lifecycle_status = 'mastered')::int AS mastered_count
+           FROM ${TABLES.WRONG_QUESTIONS}
+          GROUP BY student_id
+       ) w ON w.student_id = s.id
        ORDER BY s.created_at DESC`
     )
     const data = { success: true, students: rows }
