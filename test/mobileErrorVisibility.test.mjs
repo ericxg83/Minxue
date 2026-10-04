@@ -80,6 +80,10 @@ export function collectFailures(dir) {
     if (iDel < 0 || iLocal < 0 || iDel > iLocal) {
       fails.push('StudentSwitcher: 删除必须「先服务端成功、后动本地」（setStudents 不得在 await deleteStudent 之前）')
     }
+    // r109q：确认弹窗的删除键必须有防连点态（DELETE 重发有副作用风险）
+    if (!sw.includes('setDeleting') || !/disabled=\{deleting\}/.test(sw)) {
+      fails.push('StudentSwitcher: 删除确认键必须防连点（deleting 态 + disabled）')
+    }
   }
 
   const crop = file(join('components', 'ImageCropper', 'index.jsx'))
@@ -156,7 +160,7 @@ test('锁健全性：判据套修复前旧树必须判红（反向自检）', ()
   const oldDir = join(ROOT, '_r105q_old', 'src')
   if (!existsSync(oldDir)) return // 旧树未导出时跳过（CI 环境），主锁仍生效
   const probe = collectFailures(oldDir)
-  // 旧树每轮重导（= 上一轮已推树）；r108q 实测旧树 4 红（2×WeeklyReport +
-  // 2×App 错题分页）；再往前每轮叠加，r105q 前共 17 条。阈值留余量
-  assert.ok(probe.length >= 3, `判据套旧树应报 ≥3 处，实际 ${probe.length} —— 锁可能被掏空`)
+  // 旧树每轮重导（= 上一轮已推树），红数 = 本轮新增判据数；r109q 实测 1 红
+  // （删除防连点）；历史各轮叠加共 17+ 条。阈值为「本轮必须有新增锁」
+  assert.ok(probe.length >= 1, `判据套旧树应报 ≥1 处，实际 ${probe.length} —— 本轮新判据可能是空锁`) 
 })

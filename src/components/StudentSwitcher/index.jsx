@@ -17,6 +17,8 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
   const [editingStudent, setEditingStudent] = useState(null)
   const [formData, setFormData] = useState({ name: '', grade: '', class: '' })
   const [submitting, setSubmitting] = useState(false)
+  // 删除防抖：确认弹窗的「删除」此前无禁用态，连点会重发 DELETE
+  const [deleting, setDeleting] = useState(false)
   const nameInputRef = useRef(null)
 
   useEffect(() => {
@@ -122,6 +124,8 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
   }
 
   const handleDelete = async (student) => {
+    if (deleting) return
+    setDeleting(true)
     try {
       // 先删服务端、成功才动本地：此前是先删本地再 catch，
       // 失败时前端列表与库里分叉，且确认框卡死无任何提示。
@@ -138,6 +142,8 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
     } catch (error) {
       console.error('删除学生失败:', error)
       Toast.show({ content: error?.message || '删除失败，请重试', icon: 'fail', duration: 2500 })
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -256,6 +262,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                         type="text"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && formData.name.trim() && formData.grade) handleSave() }}
                         placeholder="请输入学生姓名"
                         className="w-full p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-light)] text-[13px] focus:outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary-soft)] transition-all"
                       />
@@ -280,6 +287,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                         type="text"
                         value={formData.class}
                         onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === 'Enter' && formData.name.trim() && formData.grade) handleSave() }}
                         placeholder="请输入班级（选填）"
                         className="w-full p-3 bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-light)] text-[13px] focus:outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-[var(--primary-soft)] transition-all"
                       />
@@ -340,9 +348,10 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                     <div className="w-px bg-[var(--border-light)]" />
                     <button
                       onClick={() => handleDelete(showDeleteConfirm)}
-                      className="flex-1 py-3.5 text-[14px] font-semibold text-[var(--danger)] active:bg-[var(--danger-soft)] transition-colors"
+                      disabled={deleting}
+                      className="flex-1 py-3.5 text-[14px] font-semibold text-[var(--danger)] active:bg-[var(--danger-soft)] transition-colors disabled:opacity-40"
                     >
-                      删除
+                      {deleting ? '删除中…' : '删除'}
                     </button>
                   </div>
                 </motion.div>

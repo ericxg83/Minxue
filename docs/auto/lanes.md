@@ -53,4 +53,11 @@
 - App.jsx 错题本：首页加载失败且无缓存时停在「暂无错题」误导 → Toast；`loadMoreWrongQuestions` 静默失败会让老师以为「就这些题」（总数口径错不得）→ Toast。
 - 锁扩判据 4 条（WeeklyReport 错误态×2 + App 错题分页×2）；旧树实测 4 红/新树 0；ScanQR:66 实测**非缺陷**（已有 setScanError 可见渲染），不重复处理。
 - 四道闸：单测 1572/1572（排除他人 in-flight）｜lint 我方 0｜`dist_nightly_20261004r108q`｜preview:5236 冒烟全绿（9 条可见化文案全部进包实测）。
-- 109q 候选：①`loadTasks`（App.jsx:443）/`loadGeneratedExams`（576）失败无反馈（有缓存兑底，优先级低）②首屏偶发 400 抢跑定位③ExamReview 页错误可见性审计。
+- 109q 候选：①`loadTasks`（App.jsx:443）/`loadGeneratedExams（576）失败无反馈（有缓存兑底，优先级低）②首屏偶发 400 抢跑定位③ExamReview 页错误可见性审计。
+
+**第 109q 轮（2026-10-04，本赛道）已交付：首屏 400 取证（未复现）+ 学生删除防连点/表单 Enter 提交**
+- 先做只读取证：`_r109q_400_probe.mjs` 在隔离产物上冷启动移首页 + 错题本两轮，逐 GET/POST 记录 4xx/5xx → **0 个 4xx**，lanes 里挂的「首屏偶发 400」本轮实测不复现（r79 抓到、r80/83/109q 未复现），建议从接手提示降为“待观察”。
+- 静默吞错全移端普查（`.catch(()=>{})`）：命中的都是有意为之的降级路径（缓存写入失败/卸载取消监听/健康探测），无需动。
+- 顺手化（交互专业度）：StudentSwitcher 确认弹窗的「删除」无禁用态，连点会重发 DELETE → 新增 `deleting` 态 + disabled + “删除中…”反馈（finally 必清）；姓名/班级输入框补 Enter 提交（与已有表单校验一致）。ImageCropper 本身是模态一次性确认，不动。
+- 锁扩判据 1 条（删除防连点 deleting+disabled）；旧树（=r108q）实测 1 红/新树 0；反向自检阈值调为≥（旧树每轮重导，红数=本轮新增数）。
+- 四道闸：单测 1572/1572（排除他人 in-flight）｜lint 我方 0｜`dist_nightly_20261004r109q`｜preview:5240 冒烟全绿（含新增「删除中…」共 10 条可见化文案进包实测）。
