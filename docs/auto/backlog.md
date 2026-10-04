@@ -1264,3 +1264,43 @@ grep -rnE "requireAuth|apiKey|Bearer|passport" server/index.js   # → 无任何
 会把敏学工作台的访问直接锁死。**所以这一项宁可等确认，也绝不能猜。**
 ⇒ 需负责人告知：工作台是本地 `localhost` 打开的，还是部署在 Cloudflare Pages？若是 Pages，域名是？
 ⛔ 在拿到答案前不动生产环境变量。
+
+### 提案⑱⛔⛔ 无鉴权写接口 + 校验不足的 URL 抓取（SSRF 风险）（第 15 轮，待拍板）
+
+**本轮只读代码取证，⛔ 未向生产发任何写请求、未做任何利用验证。**
+
+**⑱-1 问题链（四环相扣，任意一环单独存在只是小问题）**
+1. **全站零鉴权**：`grep requireAuth|apiKey|Bearer|passport` 在 `server/index.js` 零命中，
+   44 个 `app.post/delete/put` 写端点全部无凭证可调。
+2. **`POST /api/tasks/create-by-url`（server/index.js:604）对 `imageUrl` 零校验**：
+   直接 `INSERT INTO tasks ... VALUES ($1,$2,...)` 并 `queue.add('process-task')`，触发 AI 批改。
+   没有域名白名单、没有 URL 解析、没有私网/回环地址判断。
+3. **worker 无条件抓取该 URL**：`server/worker.js:950` `axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)`。
+   该 opts（`server/utils/noProxyHttp.js:20`）只有 `responseType/timeout/proxy:false/httpsAgent:false`，
+   **是「不走代理」的网络选项，不是安全控制**。
+4. **唯一的"校验"是 `startsWith('http')`**：`worker.js:4983`、`:7483`。
+   ⇒ `http://169.254.169.254/...`、`http://127.0.0.1:<port>/...`、`http://10.x.x.x/...` 全部放行。
+
+**⑱-2 后果（按严重度）**
+- **SSRF**：能让服务端去访问内网/回环/元数据地址。Render 上可探测同实例内其他服务端口。
+- **烧钱**：无凭证即可无限创建任务并触发 OCR/AI 批改，直接消耗魔搭/百炼/SenseNova 额度
+  （长期记忆铁律 40/40b：kimi-k3 免费但严重限流，qwen3.8-flash 是**付费**）。
+- **数据污染**：垃圾任务会出现在老师的作业列表里，需要人工清理。
+- 叠加提案⑰（CORS 全开 ⇒ 任意网站脚本都能在老师浏览器里发这些请求，无需攻击者自己发包）。
+
+**⑱-3 建议修法（分层，按性价比排序；⛔ 均属 C 级，未动手）**
+1. **最省事、立刻见效**：给 `create-by-url` 的 `imageUrl` 加**域名白名单**
+   （只允许自家 OSS/CDN 域 + 可选的自建图床）。同时可要求 `studentId` 必须存在于 students 表
+   （现在是任意 uuid 都能塞）。这一步就能同时掐死 SSRF 与大部分烧钱路径，**不动 worker 主流程**。
+2. **给 worker 抓图加一道私网/回环/元数据地址拦截**（`isPrivateIP` / DNS 解析后判断），
+   放在 `downloadImageBufferNoProxy` 里最合适——它是统一的抓图入口，**只加不改**，
+   符合「只许加规则/测试、不许放宽门禁」的纪律。
+3. **写接口加一道共享密钥**（前端 `X-Api-Key`）或至少给 `/api/admin/*` 加。
+   覆盖 44 个端点里最危险的那批（`admin/data-cleanup` 删数据、
+   `admin/tasks/:taskId/convert-route` 不可逆删 judgements/wrong_questions/questions、
+   `questions/:id/rejudge`、`admin/backfill-*` 批处理、`/api/upload` 直传 OSS）。
+4. `admin/*` 前缀整体加门禁，并考虑收窄为「只在非生产可用」或加 `RENDER` 环境判断
+   （`neonService.js:1381` 已有 `if (!process.env.RENDER)` 的先例可循）。
+
+**⑱-4 修 1 和修 2 是我建议的最小充分集**：不动批改主流程、不改公共 API 形状、
+纯加校验，且都能带反向自检的回归锁。修 3 覆盖面最大但要改前端所有调用方。
