@@ -134,6 +134,9 @@ export function collectFailures(dir) {
     // r110q：作业列表无缓存时加载失败也必须 Toast（与错题本同口径，不得停在「暂无任务」）
     const lt = app.indexOf("console.error('加载任务失败:', error)")
     if (lt >= 0 && !app.slice(lt, lt + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存时作业列表加载失败必须 Toast')
+    // r111q：试卷首次加载且无缓存时失败也必须 Toast（轮询失败不弹，防噪）
+    const le = app.indexOf("console.error('加载试卷失败:', error)")
+    if (le >= 0 && !app.slice(le, le + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存首次加载试卷失败必须 Toast')
   }
 
   const api = file(join('services', 'apiService.js'))

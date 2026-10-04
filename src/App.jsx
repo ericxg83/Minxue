@@ -581,16 +581,19 @@ export default function App() {
       setGeneratedExams(mockGeneratedExams.filter(e => e.student_id === studentId))
       return
     }
-    if (showCachedFirst) {
-      const cached = peekCache(generatedExamsCacheKey(studentId))
-      if (Array.isArray(cached) && cached.length > 0) setGeneratedExams(cached)
-    }
+    const cachedExams = showCachedFirst ? peekCache(generatedExamsCacheKey(studentId)) : null
+    const hadCachedExams = Array.isArray(cachedExams) && cachedExams.length > 0
+    if (hadCachedExams) setGeneratedExams(cachedExams)
     try {
       const examList = await getGeneratedExamsByStudent(studentId, useCache)
       if (Array.isArray(examList)) setGeneratedExams(examList)
     } catch (error) {
       console.error('加载试卷失败:', error)
-      // 网络失败时保留已展示的数据
+      // 网络失败时保留已展示的数据；轮询刷新（showCachedFirst=false）失败不打扰（
+      // 15s 后自恢）；仅首次加载且无缓存可上屏时才提示，否则页面会停在「暂无试卷」误导
+      if (showCachedFirst && !hadCachedExams) {
+        Toast.show({ message: '试卷列表加载失败，请检查网络后重试', type: 'error', duration: 3000 })
+      }
     }
   }
 

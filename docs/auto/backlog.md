@@ -1145,13 +1145,13 @@ _pool = new Pool({
 - 布局档结论：bug/专业度/布局三层审计全绿。UI 美化（品味级）属 B 级提案，
   需负责人给方向（哪个页面、什么风格），不擅自动。
 
-### 提案⑰ 复核工作台与移动端的两处异步竞态（2026-10-04，第 105 轮深审发现，待拍板）
+### 提案⑱ 复核工作台与移动端的两处异步竞态（2026-10-04，第 105 轮深审发现，待拍板）
 
 第 105 轮对 `reviewStore.js`（1786 行全文）+ 移动端 `src/App.jsx` 做了只读深审。
 P1-1（判定失败回滚）/ P1-2（自动完成卷身份守卫）已由第 107 轮落地（9d25ba0）。
 以下为本轮深审剩余的真实发现，**按赛道归属分别提案**：
 
-**⑰-1（PC 工作台 stores 赛道，建议 A 级修复）`selectTask` / `loadStudentTasks` /
+**⑱-1（PC 工作台 stores 赛道，建议 A 级修复）`selectTask` / `loadStudentTasks` /
 `autoSelectPendingTask` 无请求序号保护（reviewStore.js:907/1115/600；ReviewTopBar.vue:488-502）**
 - 问题：快速连选试卷/学生时，慢返回的旧请求最后覆写 `allQuestions`/`currentTaskId`，
   与 `currentTask` 错配；旧学生 `loadStudentTasks(A)` 慢返回还会在 `currentStudent=B`
@@ -1162,7 +1162,7 @@ P1-1（判定失败回滚）/ P1-2（自动完成卷身份守卫）已由第 107
   （旧响应不得写 state）。改动面：reviewStore.js 一处 + ReviewTopBar 无改动（调 store 函数即可）。
 - ⛔ 注意：reviewStore 刚被 r107 收尾过，修复前先 `git log` 确认无 in-flight 改动。
 
-**⑰-2（移动端赛道，提名 Quest 会话核实）App.jsx 错题本「切换学生竞态」
+**⑱-2（移动端赛道，提名 Quest 会话核实）App.jsx 错题本「切换学生竞态」
 （loadWrongBookData L506-533 / loadMoreWrongQuestions L536-558 / 触发 effect L288-292）**
 - 问题：两处都在**发起时**捕获 `studentId`，结果落地前不校验当前学生身份。错题本请求
   在途时换学生，晚到的 A 学生响应执行 `setWrongQuestions/setBankCounts/setWrongBookOffset`
@@ -1174,7 +1174,7 @@ P1-1（判定失败回滚）/ P1-2（自动完成卷身份守卫）已由第 107
 - ⛔ 属移动端赛道（Quest 会话），本讲只记录不代修；r108q/r109q 已做的是「失败 Toast」，
   **与本竞态是两回事**（后者是成功响应串学生，不是失败反馈），不要混淆。
 
-**⑰-3（已核实，半误报）`nextTask/prevTask` 完成后索引回绕（reviewStore.js:1334-1352）**
+**⑱-3（已核实，半误报）`nextTask/prevTask` 完成后索引回绕（reviewStore.js:1334-1352）**
 - 复核完成流程（autoCompleteAndAdvance L883 附近）先 `markTaskReviewedLocally`（task 标
   reviewed 从 pendingTasks 移除）再 `nextTask()` → `findIndex=-1` → 返回 `pendingTasks[0]`
   （回卷首）。**核实结论：完成当前卷后「回到列表第一份待复核」正是期望行为**，且
@@ -1182,7 +1182,7 @@ P1-1（判定失败回滚）/ P1-2（自动完成卷身份守卫）已由第 107
 - 唯一边界：手动按 T 时 currentTask 已被外部清空的缝隙——实际极少触发，**判定为低价值，
   不修**。留档防后续轮次重复排查。
 
-**⑰-4（已核实，低价值）exclude 后撤销按钮可用但无效（reviewStore.js:197-217, 746-759）**
+**⑱-4（已核实，低价值）exclude 后撤销按钮可用但无效（reviewStore.js:197-217, 746-759）**
 - exclude 把题 splice 出 allQuestions 后 `undoLastReview` 的 `find` 恒 undefined 无法恢复，
   但 `undoHint` 仍显示可点。答案：exclude 不设 undoHint 或禁用撤销按钮。
 - 老师场景：误排除一道题会立即点「撤销」——现点了没反应（题已消失且撤销无效），
