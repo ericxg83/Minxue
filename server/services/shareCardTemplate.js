@@ -178,14 +178,28 @@ function compareItem(label, cur, prev, goodWhenUp, unit = '') {
  */
 export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   const {
-    student = {},
-    period = {},
-    stats = {},
-    subjectDiagnosis = [],
-    dailyTrend = [],
+    student: rawStudent,
+    period: rawPeriod,
+    stats: rawStats,
+    subjectDiagnosis: rawSubjectDiagnosis,
+    dailyTrend: rawDailyTrend,
     prev = null,
     retryProgress = null
   } = reportData || {}
+
+  // ⚠️ 解构默认值**只对 undefined 生效，对 null 不生效**（JS 语义，容易踩）。
+  // weeklyReport.js 的异常分支返回的是 `{ student, stats: null, error }`，
+  // 于是下面 `num(stats.totalTasks)` 会抛
+  // 「Cannot read properties of null (reading 'totalTasks')」，
+  // 让整张分享卡渲染失败、接口回 500 —— 老师点"生成分享卡"直接报错，
+  // 看起来像功能坏了，其实只是这一次取数失败。
+  // 数组同理：null 之后 .map / .length 会炸。
+  // 这里统一兜住，让"取不到数据"降级成"显示暂无数据"，而不是整体崩掉。
+  const student = rawStudent || {}
+  const period = rawPeriod || {}
+  const stats = rawStats || {}
+  const subjectDiagnosis = Array.isArray(rawSubjectDiagnosis) ? rawSubjectDiagnosis : []
+  const dailyTrend = Array.isArray(rawDailyTrend) ? rawDailyTrend : []
 
   const mode = period.mode || 'week'
   const periodWord = mode === 'month' ? '本月' : '本周'
