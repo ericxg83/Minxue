@@ -96,7 +96,7 @@ const emit = defineEmits(['update:strokes', 'pinchstart', 'pinchend'])
 
 const tool = defineModel('tool', { type: String, default: 'pen' })
 const color = defineModel('color', { type: String, default: '#E11D48' })
-const size = defineModel('size', { type: Number, default: 3 })
+const size = defineModel('size', { type: Number, default: 3.5 })
 
 const wrapRef = ref(null)
 const canvasRef = ref(null)
