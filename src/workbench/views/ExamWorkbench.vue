@@ -73,7 +73,17 @@
       </el-table-column>
     </el-table>
 
-    <el-empty v-if="!loading && exams.length === 0" description="暂无试卷答案库，请先在 AI 批改复审中心审核后存档" />
+    <EmptyState
+      v-if="!loading && loadError"
+      :icon="WarningFilled"
+      title="试卷答案库加载失败"
+      :description="`${loadError}。请检查网络后重试 —— 这不代表资源为空。`"
+    >
+      <template #actions>
+        <el-button size="small" type="primary" @click="loadExams">重试</el-button>
+      </template>
+    </EmptyState>
+    <el-empty v-else-if="!loading && exams.length === 0" description="暂无试卷答案库，请先在 AI 批改复审中心审核后存档" />
 
     <el-dialog v-model="showCreateDialog" title="新建试卷答案库" width="420px">
       <el-form :model="createForm" label-width="60px">
@@ -139,15 +149,19 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { Edit, Plus } from '@element-plus/icons-vue'
+import { Edit, Plus, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { getResources, getTasksByResource, createResource, deleteResource, updateResource } from '../../services/apiService.js'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 
 const router = useRouter()
 const exams = ref([])
 const loading = ref(false)
+// 加载失败必须与「真的没有资源」区分（第 129 轮）：此前失败后 exams 保持 []，
+// 页面直接渲染「暂无试卷答案库…」，老师会以为整个库空了
+const loadError = ref('')
 const creating = ref(false)
 const showCreateDialog = ref(false)
 const createForm = ref({ name: '', subject: '', grade: '' })
@@ -165,10 +179,13 @@ const subjectOptions = [
 
 const loadExams = async () => {
   loading.value = true
+  loadError.value = ''
   try {
     exams.value = await getResources({ type: 'exam' })
   } catch (e) {
     console.error('加载试卷答案库失败:', e)
+    loadError.value = e?.message || '加载失败'
+    ElMessage.error('加载试卷答案库失败，请检查网络后重试')
   }
   loading.value = false
 }
@@ -183,6 +200,7 @@ const handleCreate = async () => {
     loadExams()
   } catch (e) {
     console.error('创建失败:', e)
+    ElMessage.error(e?.message || '创建失败，请重试')
   }
   creating.value = false
 }
@@ -245,12 +263,13 @@ const enterTaskReview = (task) => {
 }
 
 const handleToggleStatus = async (row) => {
+  const newStatus = row.status === 'published' ? 'draft' : 'published'
   try {
-    const newStatus = row.status === 'published' ? 'draft' : 'published'
     await updateResource(row.id, { status: newStatus })
     loadExams()
   } catch (e) {
     console.error('切换状态失败:', e)
+    ElMessage.error(e?.message || (newStatus === 'published' ? '发布失败，请重试' : '撤回失败，请重试'))
   }
 }
 
@@ -260,6 +279,7 @@ const handleDelete = async (row) => {
     loadExams()
   } catch (e) {
     console.error('删除失败:', e)
+    ElMessage.error(e?.message || '删除失败，请重试')
   }
 }
 

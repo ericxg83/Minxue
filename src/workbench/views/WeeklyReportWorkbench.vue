@@ -52,6 +52,16 @@
           <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
             <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
             <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
+            <EmptyState
+              v-else-if="summaryError"
+              :icon="WarningFilled"
+              title="学习诊断数据加载失败"
+              :description="`${summaryError}。请检查网络后重试 —— 这不代表本周期没有批改数据。`"
+            >
+              <template #actions>
+                <el-button size="small" type="primary" @click="loadSummary">重试</el-button>
+              </template>
+            </EmptyState>
             <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
             <div v-else class="student-diagnosis-list">
               <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
@@ -510,7 +520,7 @@
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, Close, PieChart, User, Collection, Reading, Download } from '@element-plus/icons-vue'
+import { ArrowRight, Close, PieChart, User, Collection, Reading, Download, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import DataTable from '../components/ui/DataTable.vue'
@@ -536,6 +546,9 @@ const selectedStudentId = ref('')
 const studentList = ref([])
 const summaryData = ref(null)
 const loadingSummary = ref(false)
+// 加载失败必须与「本周期真的没有批改数据」区分（第 129 轮）：此前失败后 summaryData
+// 保持 null，页面渲染「暂无可诊断的学生数据」，老师会误以为这周白干了
+const summaryError = ref('')
 const generating = ref(false)
 const currentStudentDetail = ref(null)
 const checkedIds = ref([])
@@ -756,11 +769,14 @@ async function loadStudents() {
 
 async function loadSummary() {
   loadingSummary.value = true
+  summaryError.value = ''
   try {
     const data = await getAllWeeklyReports({ mode: periodMode.value, offset: periodOffset.value })
     if (data.success) summaryData.value = data
+    else summaryError.value = data.error || '加载失败'
   } catch (e) {
     console.warn('加载周统计失败:', e)
+    summaryError.value = e?.message || '加载失败'
   } finally {
     loadingSummary.value = false
   }

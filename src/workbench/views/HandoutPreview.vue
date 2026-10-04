@@ -72,6 +72,19 @@
       <el-skeleton :rows="20" animated />
     </div>
 
+    <!-- 加载失败（与「真的没有内容」区分） -->
+    <div v-else-if="loadError" class="handout-empty">
+      <EmptyState
+        :icon="WarningFilled"
+        title="讲义加载失败"
+        :description="`${loadError}。请检查网络后重试 —— 这不代表没有讲义内容。`"
+      >
+        <template #actions>
+          <el-button size="small" type="primary" @click="loadHandout">重试</el-button>
+        </template>
+      </EmptyState>
+    </div>
+
     <!-- 空状态 -->
     <div v-else-if="!handout" class="handout-empty">
       <el-empty description="暂无讲义数据" />
@@ -743,18 +756,22 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Download, Printer, Document, CopyDocument, MagicStick, Collection, WarningFilled } from '@element-plus/icons-vue'
 import { apiRequest, apiRequestBlob, getKnowledgeTree } from '../../services/apiService'
 import { normalizeOptions } from '../../utils/optionText'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
+import EmptyState from '../components/ui/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
 
 const loading = ref(true)
+// 第 129 轮：加载失败必须落到可见错误态 —— 原先失败后只弹一次 toast 就停在
+// 「暂无讲义数据」，老师分不清是「生成失败」还是「本来就还没讲义」
+const loadError = ref('')
 const exporting = ref(false)
 const saving = ref(false)
 const duplicating = ref(false)
@@ -1342,7 +1359,9 @@ async function loadLectureFromDb(id) {
   return false
 }
 
-onMounted(async () => {
+async function loadHandout() {
+  loading.value = true
+  loadError.value = ''
   try {
     currentSubject.value = String(route.query.subject || '')
     await loadTemplates(currentSubject.value)
@@ -1371,11 +1390,14 @@ onMounted(async () => {
     if (handout.value?.template) selectedTemplate.value = handout.value.template
   } catch (e) {
     console.error('加载讲义失败:', e)
+    loadError.value = e?.message || '加载失败'
     ElMessage.error('加载讲义失败')
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(loadHandout)
 
 onBeforeUnmount(() => {
   if (noteSaveTimer) clearTimeout(noteSaveTimer)
@@ -1400,9 +1422,14 @@ async function loadFromDiagnosis() {
     if (response.success && response.handout) {
       handout.value = response.handout
       dirty.value = true
+    } else {
+      throw new Error(response?.error || '未生成讲义内容')
     }
   } catch (e) {
+    // 第 129 轮：必须往上抛 —— 原先只 console.error 把异常吞掉，调用方（loadHandout）
+    // 的 catch 永不触发，页面停在「暂无讲义数据」，失败被伪装成「没有内容」
     console.error('从诊断生成讲义失败:', e)
+    throw e
   }
 }
 </script>

@@ -140,3 +140,16 @@
   （成功响应串学生 vs 失败反馈），尚未被覆盖，建议下轮核实修复（落地前校验 currentStudent.id）。
 - 移动端其他接手提示（历史）：首屏 400 已由 r109q 取证不复现 → 降为「待观察」；
   PullToRefresh 回归前查 `vite.config.js online manualChunks`；首页直达上传按钮被负责人否决，勿重提。
+
+**第 129 轮（2026-10-04，PC 工作台赛道）已交付：静默失败 / 失败伪装成空态 整类修复**
+- 为什么落在 PC 工作台赛道：r120–r128 连续 9 轮按文件巡检 0 发现；改按**缺陷类**扫后，
+  命中的 8 处全在 `src/workbench/views/**`（ExamWorkbench / WeeklyReportWorkbench /
+  HandoutPreview / WrongBookCenterRedesign）——移动端同类已由 r105q–r111q 收干净，PC 侧此前没扫过。
+- 改动仅 4 个 views 文件（+26/-1、+33/-3、+18/-1、+2/-1 行级），零逻辑变更：只补
+  `ElMessage.error` 与「错误态 + 重试」（复用既有 `EmptyState` 组件）。
+- 回归锁 `test/workbenchSilentFailure.test.mjs`（16 条；反向自检内联合成坏样本，不依赖 git）；
+  旧树对跑 8 红/8 绿、新树 16/16 绿。
+- 四道闸：单测 1642/1642｜lint 9e/155w（与基线一致）｜`dist_nightly_20261004r129`｜
+  render_smoke 8/8 + 定向页探针 14/14（讲义页用 route.abort 拦生成请求，零写库）。
+- 本赛道待办（未动，留接手）：`WeeklyReportWorkbench.loadStudents/loadGrades` catch 只 warn（影响低）。
+- ⚠️ 在制区未碰：`QuestionDetailPanel.vue` + `test/reviewExcludeNoUndo.test.mjs`（另一会话，仍为未提交态）。

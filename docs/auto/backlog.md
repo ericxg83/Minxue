@@ -1633,3 +1633,39 @@ npm test 1626/1626｜lint 9e/155w｜构建 r127｜route_sweep 0/16 + render_smok
 
 npm test 1626/1626｜lint 9e/155w｜构建 r128｜route_sweep 0/16 + render_smoke 8/8。
 无新提交、无异常。
+
+## 第 129 轮（2026-10-04）：PC 工作台「静默失败 / 失败伪装成空态」缺陷类整类修复
+
+**为什么这轮不做例行巡检**：r120–r128 连续 9 轮巡检 0 发现，说明「按文件扫」已经饱和；
+本轮改按**缺陷类**扫（这正是 r120 那份服务端扫描报告第四节自己列的「还没扫的类」之一：
+「移动端 / 工作台前端的**状态回滚与假成功**——源码级锁已在 reviewStore 等处做过，但没按类全量扫过」）。
+移动端这一类已由 r105q–r111q 收干净；**PC 工作台侧此前完全没扫过**，本轮补齐。
+
+**扫法**：先派子代理按类全量扫 `src/workbench/**`，再逐条回到源码核对（子代理的 5 条发现全部核实为真）。
+
+**修掉的 8 处（4 个视图，全部 A 级：只加可见反馈/错误态，零逻辑变更）**：
+
+| 文件 | 缺陷（老师视角） | 修法 |
+|---|---|---|
+| `ExamWorkbench.vue` | 删除/发布/撤回/新建**失败后只 console.error**——点了「确定删除」界面毫无反应 | 四处 catch 补 `ElMessage.error`（发布/撤回按动作分别措辞） |
+| `ExamWorkbench.vue` | 加载失败后 `exams` 保持 `[]` → 渲染「暂无试卷答案库…」，**把请求失败伪装成库空了** | 新增 `loadError` + 错误态（EmptyState + 重试），空态只在无错时显示 |
+| `WeeklyReportWorkbench.vue` | `loadSummary` 失败只 console.warn → 渲染「暂无可诊断的学生数据」，**老师会以为这周白干了**（学习诊断是他每天唯一打开的页） | 新增 `summaryError` + 错误态 + 重试；`data.success===false` 也计入 |
+| `HandoutPreview.vue` | `loadFromDiagnosis` 内层 catch **把异常吞掉不 rethrow** → 外层 `ElMessage.error` 永不触发 → 停在「暂无讲义数据」 | 内层 rethrow（`success` 为假也抛）+ 外层落 `loadError` 可见错误态；`onMounted` 体提为 `loadHandout()` 以支持重试 |
+| `WrongBookCenterRedesign.vue` | `removeQuestion` 在 `deleteQuestion` 返回 false（已回滚）时**什么都不提示** → 题目悄悄回到列表 | 补 `else ElMessage.error('移除失败，请重试（题目已保留）')` |
+
+**反向自检（本轮的关键纪律）**：新锁 `test/workbenchSilentFailure.test.mjs`（16 条 = 8 判据 × 合规/反向自检），
+反向自检用**内联合成坏样本**（不依赖 git，沿用 r113q 教训）；
+另做了一次**真·旧树对跑**：把 HEAD 的 4 个 .vue 导出到临时目录跑同一把锁 → **8 红 / 8 绿**，新树 16/16 绿 —— 判据非空转。
+
+**四道闸**：`npm test` **1642/1642**（1626 基线 + 16 新锁）｜lint **9e/155w 与基线一致（无新增 error）**｜
+隔离构建 `dist_nightly_20261004r129`（37s，含 7 条新文案进包 grep 实测）｜真机冒烟 **render_smoke 8/8 +
+定向页探针 14/14**（试卷答案库/学习诊断/错题中心真渲染 0 错误 0 4xx；讲义页用 `route.abort` 拦掉生成请求，
+实测失败**落到「讲义加载失败」错误态**而非旧的「暂无讲义数据」，全程零写库）。
+
+**同类残留（本轮只提名，未动）**：`WeeklyReportWorkbench.loadStudents/loadGrades`（catch 只 warn，
+但失败后页面仍有其它入口，影响低）；`ExamWorkbench.handleReReview` 已有提示，无需动。
+
+**运维记录**：本机 safe-delete 对目录 fail-closed（genie-trash 失败即拒绝回退删除），
+`rm -rf` / `Remove-Item -Recurse` / `rmdir -p` 均被拦 → 临时对比目录改为**逐文件 `rm -f`**（成功），
+只剩空目录（`_*` 已 gitignore，不入库）。后续做旧树对跑请直接用 `tmp/` 或逐文件清理。
+

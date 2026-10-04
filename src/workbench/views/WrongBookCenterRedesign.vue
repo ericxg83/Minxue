@@ -307,7 +307,7 @@ function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; fu
   }
 }
 // r102：createRetryFor 删除（其「单题组卷」场景被「勾选一道 + 生成重练卷」覆盖，不留第二个死函数）
-async function markMastered(item) { const ok = await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); if (ok) ElMessage.success('已标记为完全掌握'); else ElMessage.error('保存失败，请重试') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } } catch {} }
+async function markMastered(item) { const ok = await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); if (ok) ElMessage.success('已标记为完全掌握'); else ElMessage.error('保存失败，请重试') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } else { ElMessage.error('移除失败，请重试（题目已保留）') } } catch { /* 取消确认弹窗：用户主动放弃，无需提示 */ } }
 onMounted(async () => {
   try {
     if (embedded.value && props.studentId) {
