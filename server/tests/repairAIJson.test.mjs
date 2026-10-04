@@ -50,7 +50,7 @@ const v = JSON.parse(repairAIJson(`{"block_coordinates": {"x": 60, 200, 650, 27}
 const bc = v.block_coordinates
 const valuesOk = bc.x === 60 && bc.y === 200 && bc.width === 650 && bc.height === 27
 console.log(valuesOk ? '✅ 坐标值保留正确' : `❌ 坐标值错误: ${JSON.stringify(bc)}`)
-valuesOk ? pass++ : fail++
+if (valuesOk) pass++; else fail++
 
 // ── salvageTruncatedJson：max_tokens 截断抢救 ──
 // 线上真实形态：30483.jpg 报 "Unterminated string in JSON at position 5392 (line 88)"，

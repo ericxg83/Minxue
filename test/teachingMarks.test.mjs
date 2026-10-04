@@ -144,7 +144,7 @@ test('判定用单次最长停留而不是累计停留（防反复回看凑够�
 })
 
 test('宁可不标：中间态不写标记，且自动判定不覆盖既有状态', () => {
-  const judge = MARKS_SRC.match(/function judge\(s\) \{[\s\S]*?\n  \}/)
+  const judge = MARKS_SRC.match(/function judge\(s\) \{[\s\S]*?\n {2}\}/)
   assert.ok(judge, '找到 judge')
   // 已有状态（含手动 skip）不被自动判定推翻
   assert.ok(
@@ -243,7 +243,7 @@ test('self: 兜底不得用 worksheet#题号#题面 这种组合当身份（会�
 
 test('跨天去重必须按「题目身份键」兜底合并，否则同题出两条且共享锚点', () => {
   // dedupeTopics 必须同时维护 合并键索引 与 题目身份键(t.key)索引
-  const dt = LIB_SRC.match(/function dedupeTopics\(topics, keyOf\) \{[\s\S]*?\n  \}/)
+  const dt = LIB_SRC.match(/function dedupeTopics\(topics, keyOf\) \{[\s\S]*?\n {2}\}/)
   assert.ok(dt, '找到 dedupeTopics')
   assert.ok(dt[0].includes('aliasMap'), 'dedupeTopics 必须维护题目身份键索引')
   assert.ok(
@@ -251,7 +251,7 @@ test('跨天去重必须按「题目身份键」兜底合并，否则同题出�
     '必须把 aliasMap 传给 mergeTopicInto'
   )
   // mergeTopicInto 必须在合并键未命中时按 t.key 再找一次
-  const mt = LIB_SRC.match(/function mergeTopicInto\(map, t, keyOf, aliasMap\) \{[\s\S]*?\n  \}/)
+  const mt = LIB_SRC.match(/function mergeTopicInto\(map, t, keyOf, aliasMap\) \{[\s\S]*?\n {2}\}/)
   assert.ok(mt, '找到 mergeTopicInto')
   assert.ok(
     mt[0].includes('aliasMap.get(t.key)'),

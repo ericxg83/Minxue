@@ -79,7 +79,7 @@ for (const [group, ids] of [['R1', R1], ['R2', R2]]) {
     if (group === 'R1' && !row.has_svg) { console.log(`↷ ${id8}: SVG 已为空，跳过`); skip++; continue }
     if (group === 'R2' && !row.has_svg && !row.has_url) { console.log(`↷ ${id8}: SVG/URL 均已为空，跳过`); skip++; continue }
     console.log(`${APPLY ? '✔' : '◌'} [${group}] ${row.id} has_svg=${row.has_svg} has_url=${row.has_url}`)
-    if (!APPLY) { group === 'R1' ? n1++ : n2++; continue }
+    if (!APPLY) { if (group === 'R1') n1++; else n2++; continue }
     if (group === 'R1') {
       await pool.query(`UPDATE questions SET clean_geometry_svg = NULL, updated_at = NOW() WHERE id = $1`, [row.id])
       await pool.query(`UPDATE question_assets SET clean_geometry_svg = NULL, updated_at = NOW() WHERE question_id = $1 AND asset_type = 'geometry_image'`, [row.id])

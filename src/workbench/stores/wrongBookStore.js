@@ -384,18 +384,30 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
   // 更新生命周期状态
   const updateLifecycleStatus = async (wqId, lifecycleStatus) => {
     const wq = wrongQuestions.value.find(w => w.id === wqId)
-    if (wq) {
-      wq.lifecycle_status = lifecycleStatus
-      wq.status = lifecycleStatus === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+    if (!wq) return false
 
-      // [P0-3e] 持久化生命周期状态
-      updateWrongQuestionStatus(wqId, wq.status, {
+    // 记录旧值，接口失败时回滚 —— 曾 fire-and-forget（.catch 只打日志不回滚），
+    // 老师看到「已标记为完全掌握」而库里没写成功，污染错题掌握状态（长期学习数据）。
+    // 与 batchUpdateStatus 的回滚纪律保持一致（2026-10-04 巡检发现）。
+    const prevLifecycle = wq.lifecycle_status
+    const prevStatus = wq.status
+
+    // 乐观更新：立即反映到本地
+    wq.lifecycle_status = lifecycleStatus
+    wq.status = lifecycleStatus === LIFECYCLE_STATUS.MASTERED ? 'mastered' : 'pending'
+
+    try {
+      await updateWrongQuestionStatus(wqId, wq.status, {
         lifecycle_status: lifecycleStatus
-      }).catch(e => console.error(`[P0-3e] 生命周期状态持久化失败 wq=${wqId.substring(0, 8)}:`, e.message))
-
+      })
       return true
+    } catch (e) {
+      console.error(`[P0-3e] 生命周期状态持久化失败，回滚 wq=${wqId.substring(0, 8)}:`, e.message)
+      // 回滚：恢复旧状态
+      wq.lifecycle_status = prevLifecycle
+      wq.status = prevStatus
+      return false
     }
-    return false
   }
 
   // 删除错题（带乐观更新）
