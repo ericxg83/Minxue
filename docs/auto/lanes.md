@@ -33,3 +33,9 @@
 1. 移动端首屏偶发一次 `400 Bad Request`（疑似首次 `/api/tasks` 在学生 id 就绪前抢跑）——第 79 轮抓到、第 80/83 轮未复现，属本赛道，值得定位。
 2. PullToRefresh 回归（antd-mobile 曾致 vendor 分包断裂白屏，已回滚）——回归前必须先查 `vite.config.js` 的 `manualChunks`，也属本赛道。
 3. 首页上传「直达按钮」已被负责人**否决**，保持首页→上传→选类型→相机，`UploadOptionsModal` 维持两卡布局——不要重提。
+
+**第 105q 轮（2026-10-04，本赛道）已交付：移动端错误可见化 + 学生写操作禁重试**
+- StudentSwitcher 增/删/改失败只进 console（表单静默关闭、删除失败确认框卡死且本地与库分叉）→ 全部补 antd-mobile Toast，删除改「先服务端成功后动本地」；ImageCropper 原生 alert → Toast；WorksheetPicker 加载/设默认失败被吞 → Toast。
+- `createStudent/updateStudent/deleteStudent` 补 `retries=1`（仓内写操作不重试既有约定；POST /students 纯 INSERT 无去重，默认 3 次会重放出重复学生）。⚠️ apiService 与工作台共用：retries=1 对 StudentsWorkbench.vue 的调用方同样是语义改善，无签名变更。
+- 同类残留（本轮只提名未动，属本赛道待办）：App.jsx 初始化链（237/250）、NotificationsPanel.jsx:62、ScanQR:66、WeeklyReport:96 的 catch 只进 console；WorksheetPicker 存在 button 嵌 button（HTML 非法，点击事件已 stopPropagation，风险低）。
+- 回归锁 `test/mobileErrorVisibility.test.mjs`（旧树 12 红/新树 0，反向自检已实测）；产物 `dist_nightly_20261004r105q`；四道闸全绿（1560/1560，排除他人 in-flight 的 reviewStoreFailureRollback 其当时自身红）。

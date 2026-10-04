@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { Toast } from 'antd-mobile'
 import {    X,    Plus,    CheckCircle2,    Trash2,    Pencil    } from 'lucide-react'
 import { useStudentStore } from '../../store'
 import { createStudent, getStudents, deleteStudent, updateStudent } from '../../services/apiService'
@@ -44,6 +45,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
       setStudents(loadedStudents)
     } catch (error) {
       console.error('加载学生列表失败:', error)
+      Toast.show({ content: error?.message || '加载学生列表失败', icon: 'fail', duration: 2500 })
     }
   }
 
@@ -111,6 +113,9 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
       resetForm()
     } catch (error) {
       console.error(editingStudent ? '更新学生失败:' : '添加学生失败:', error)
+      // 失败必须让老师看见：此前只进 console，表单静默关闭，
+      // 老师以为建好了实际上库里没有。保留表单供重试。
+      Toast.show({ content: error?.message || (editingStudent ? '保存失败，请重试' : '添加失败，请重试'), icon: 'fail', duration: 2500 })
     } finally {
       setSubmitting(false)
     }
@@ -118,17 +123,21 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
 
   const handleDelete = async (student) => {
     try {
+      // 先删服务端、成功才动本地：此前是先删本地再 catch，
+      // 失败时前端列表与库里分叉，且确认框卡死无任何提示。
       if (!USE_MOCK_DATA) {
         await deleteStudent(student.id)
       }
-      setStudents((Array.isArray(students) ? students : []).filter(s => s.id !== student.id))
+      const remaining = (Array.isArray(students) ? students : []).filter(s => s.id !== student.id)
+      setStudents(remaining)
       if (currentStudent?.id === student.id) {
-        const remaining = (Array.isArray(students) ? students : []).filter(s => s.id !== student.id)
         setCurrentStudent(remaining.length > 0 ? remaining[0] : null)
       }
       setShowDeleteConfirm(null)
+      Toast.show({ content: '已删除', icon: 'success', duration: 1500 })
     } catch (error) {
       console.error('删除学生失败:', error)
+      Toast.show({ content: error?.message || '删除失败，请重试', icon: 'fail', duration: 2500 })
     }
   }
 

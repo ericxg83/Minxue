@@ -1,5 +1,6 @@
 import { useRef, useState, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { Toast } from 'antd-mobile'
 
 /**
  * 自由框选裁剪器（上传前裁掉不需要录入的题目区域）
@@ -85,7 +86,8 @@ export default function ImageCropper({ image, onCropComplete, onCancel, title = 
       onCropComplete(dataUrl)
     } catch (error) {
       console.error('裁剪失败:', error)
-      alert('裁剪失败，请重试')
+      // 原生 alert 在 Android WebView 里形态不可控（仓内移动端统一用 antd-mobile Toast）
+      Toast.show({ content: '裁剪失败，请重试', icon: 'fail', duration: 2000 })
     }
   }
 

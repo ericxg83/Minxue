@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { Toast } from 'antd-mobile'
 import {   Search,   BookOpen,   Star   } from 'lucide-react'
 import { getWorksheets, getStudentWorksheetSetting, upsertStudentWorksheetSetting } from '../../services/apiService'
 import { useStudentStore } from '../../store'
@@ -31,6 +32,8 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
       setWorksheets(filtered)
     } catch (e) {
       console.error('加载练习册失败:', e)
+      // 失败不能只进 console：列表会空成「暂无已发布的练习册」，老师会误以为真没练习册
+      Toast.show({ content: e?.message || '加载练习册失败', icon: 'fail', duration: 2500 })
     }
     setLoading(false)
   }
@@ -63,6 +66,7 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
       setDefaultId(worksheetId)
     } catch (e) {
       console.error('设置默认失败:', e)
+      Toast.show({ content: e?.message || '设为默认失败，请重试', icon: 'fail', duration: 2500 })
     }
   }
 

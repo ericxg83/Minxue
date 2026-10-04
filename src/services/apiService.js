@@ -150,6 +150,8 @@ export const getStudentById = async (id) => {
 }
 
 export const createStudent = async (studentData) => {
+  // 写操作禁重试（retries=1，仓内既有约定）：服务端 POST /students 是纯 INSERT 无去重，
+  // 默认 3 次重试在 5xx/超时时会把「添加中」转圈重放出重复学生。
   const data = await apiRequest('/students', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -158,12 +160,13 @@ export const createStudent = async (studentData) => {
       grade: studentData.grade || null,
       avatar: studentData.avatar || null
     })
-  })
+  }, 1)
   clearCache('students_cache')
   return data.student
 }
 
 export const updateStudent = async (id, updates) => {
+  // 写操作禁重试（同上）：PUT 重放会重复覆盖 enrollment_status 等字段的时间语义。
   const data = await apiRequest(`/students/${id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
@@ -173,13 +176,14 @@ export const updateStudent = async (id, updates) => {
       avatar: updates.avatar,
       enrollmentStatus: updates.enrollmentStatus
     })
-  })
+  }, 1)
   clearCache('students_cache')
   return data.student
 }
 
 export const deleteStudent = async (id) => {
-  await apiRequest(`/students/${id}`, { method: 'DELETE' })
+  // 写操作禁重试（同上）：失败直接报错给调用方，避免重放 DELETE。
+  await apiRequest(`/students/${id}`, { method: 'DELETE' }, 1)
   clearCache('students_cache')
   return true
 }
