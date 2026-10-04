@@ -38,7 +38,7 @@ stem:{归一化题干}                        -- 以上两者都缺时的兜底
 - 合并时取组内最高 `lifecycle_status`，一条 `mastered` 会让同组真实未掌握的错题从错题本消失；
 - OCR 漏字造成的编辑距离与真实不同题的编辑距离区间完全重叠，字符距离无法区分二者。
 
-因此 OCR 漏字导致的重复错题属于 OCR 侧问题，应在识别与拆题环节治理，或提供复核台人工合并，不得在读取侧用相似度兜底。`src/utils/questionDedup.js` 的 `calculateSimilarity` 等函数仅可用于人工合并的候选提示，不得接入自动去重路径。
+因此 OCR 漏字导致的重复错题属于 OCR 侧问题，应在识别与拆题环节治理，或提供复核台人工合并，不得在读取侧用相似度兜底。（原 `src/utils/questionDedup.js` 及其 `calculateSimilarity` **已随 2026-10-02 死代码清理删除**；现存同名的 `calculateSimilarity` 是 `server/services/neonService.js` 内部的**非导出**函数，只用于缓存命中判断，与本口径无关，⛔ 不得接入自动去重路径。）
 
 该口径下错题条数可能多于旧实现，这是把此前被误合并隐藏的错题还原，不是缺陷。
 
@@ -80,17 +80,32 @@ block_coordinates
 worksheet_id
 ```
 
+> ⚠️ 上表里的 `question_image_url`（整题裁片）**已于 2026-09-21 随「整题裁片下线」停用**：
+> 字段仍在表结构上、upsert 语句里也还带着它，但**写入侧已不再产该值**
+> （见 `server/worker.js` 的说明与 `server/lib/weekendHandout.js` 的 resolveWbImage 移除记录）。
+> 排查「题图」请走 `questions.geometry_image_url`（配图 figure），不要再依赖这个字段。
+
 练习册错题通常按 `(student_id, worksheet_id, question_no)` 去重，并保存题干、答案、学生答案、图片、页码、题号和坐标等信息。
 
 ## 生命周期
 
-当前确认的典型生命周期为：
+当前**生效**的生命周期为：
 
 ```text
-new -> review_1 -> review_2 -> mastered
+new -> review_1 -> mastered
 ```
 
-重练答对时推进生命周期；答错时回到 `new`，并增加错误次数。`practice_count`、`error_count`、`last_wrong_at` 和 `mastered_at` 共同记录练习历史。
+推进判据唯一实现在 `getNextLifecycle`（`server/services/gradingFinalizer.js`）：
+
+- 答对：`new` / `review_2` → `review_1`；`review_1` → `mastered`；`mastered` 保持
+- 答错：`review_1` / `review_2` → `new`；`mastered` → `review_1`
+
+⚠️ **`review_2` 是历史残留枚举，已不再被写入** —— `getNextLifecycle` 只把它当**入参**消费、
+永不返回它；库里存量数据仍可能带该值，前端按 `review_1` 语义展示
+（见 `src/components/WrongQuestionDetailModal.jsx`、`src/pages/Grading/index.jsx` 的状态映射）。
+旧版本这里写的是 `new -> review_1 -> review_2 -> mastered`，与现状不符。
+
+`practice_count`、`error_count`、`last_wrong_at` 和 `mastered_at` 共同记录练习历史。
 
 ## 重练和组卷
 
