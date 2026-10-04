@@ -83,4 +83,13 @@ services:
       - key: CONCURRENCY
         value: 2
       - key: ALLOWED_ORIGIN
+        # ⚠️ 这里填实际前端来源白名单，多个用英文逗号分隔，**不要带路径与结尾斜杠**。
+        #    ⛔ 不要填 `*`：本 API 没有鉴权中间件，填 `*` 等于把全部学生数据
+        #       （姓名/年级/错题数/掌握情况/任务文件名）对全互联网开放。
+        #       2026-10-04 实测：生产当时就是 `*`，无凭证 curl 即可读全部数据。
+        #    ⚠️ 留空也不行：server/index.js 的兜底只有 localhost 白名单，
+        #       已部署的网页会被浏览器 CORS 拦掉，表现为「前端报网络错误但后端日志全 200」。
+        #    原生 App（Capacitor android/）走原生 fetch 不受 CORS 约束；
+        #    本地 vite dev/preview 的 localhost 已在代码兜底里。
+        #    详见 server/.env.example 的「CORS 允许来源」段。
         sync: false

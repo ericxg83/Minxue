@@ -183,9 +183,29 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   })
 }
 
-const allowedOrigins = process.env.ALLOWED_ORIGIN 
+const allowedOrigins = process.env.ALLOWED_ORIGIN
   ? process.env.ALLOWED_ORIGIN.split(',')
   : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3001']
+
+// ── CORS 暴露面自检（2026-10-04 提案⑰，只报警不改变行为）──────────────────
+// 为什么需要：ALLOWED_ORIGIN 配成 `*` 时**不会报任何错**，跨站来源照常 echo，
+// 日志里全是 200，肉眼完全看不出来。2026-10-04 实测生产就是 `*`，
+// 而 API 全站无鉴权 ⇒ 任何人可读全部学生姓名/年级/错题数。
+// 这里把「静默全开」变成「启动即报警」；是否收窄由负责人决定（改环境变量即可，零代码）。
+if (allowedOrigins.includes('*')) {
+  console.warn(
+    '[CORS] ⚠️ ALLOWED_ORIGIN 含 `*` ⇒ 对全互联网开放。\n' +
+    '        本 API 没有鉴权中间件，任何人可无凭证读全部学生数据（实测确认）。\n' +
+    '        收窄方式：把 Render 的 ALLOWED_ORIGIN 改成实际前端来源白名单，' +
+    '多个用英文逗号分隔，零代码改动。详见 server/.env.example 的「CORS 允许来源」段。'
+  )
+} else if (!process.env.ALLOWED_ORIGIN) {
+  console.warn(
+    '[CORS] ⚠️ 未设置 ALLOWED_ORIGIN，已回退到 localhost 白名单。\n' +
+    '        若本服务对外提供服务，已部署的网页会被浏览器拦掉，' +
+    '表现为「前端报网络错误而后端日志全是 200」，极难排查。'
+  )
+}
 
 app.use(cors({
   origin: (origin, callback) => {
