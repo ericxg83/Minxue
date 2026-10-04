@@ -141,6 +141,14 @@
 - 真机 PNG 自检：从“3页大片空白、趋势图坏”→“navy+gold 专业仪表盘、漏斗讲清提升”。四道闸：单测 1657/1657｜lint 0 error｜`dist_nightly_20261004r120q`｜PNG 渲染自检。
 - 待反馈：具体色/漏斗样式若需微调，改 `T` 或 renderErrorFunnel 即可。
 
+**第 131q 轮（2026-10-04，本赛道）已交付：【移动端】原生下拉刷新（裁决④落地，负责人拍板走 B 路线）**
+- 前情：flow-audit 粗糙点#4/裁决④「移动端要下拉刷新」在 backlog 被误标 `[x]`（登记≠交付）；antd-mobile `PullToRefresh` 曾因进 manualChunks vendor 块致分包断裂白屏（接手提示#2）→ 回滚后 App 一直没有真正的下拉手势，但错误文案 [App.jsx:548] 却写着「请检查网络后**下拉重试**」、冷启动注释写「下拉可重试」——**承诺了一个不存在的动作**。
+- 修复（新增 `src/components/PullToRefresh.jsx`，纯原生 Touch，零新依赖、零分包影响）：接管唯一滚动容器 `main.overflow-scroll-area`（body 不滚）；仅 `scrollTop<=0` 才接管下拉（不抢列表纵向滚动）；`touchmove` 用原生 `addEventListener(...,{passive:false})`（React 合成 touch 在 WebView 下 preventDefault 失效）；位移用 **margin-top 而非 transform**（transform 会给错题本底部 `position:fixed` 多选栏建参考系带偏它）；`busyRef` 并发锁防反复下拉重放；阻尼 PULL_THRESHOLD=56/PULL_MAX=88。
+- App.jsx：`<main>` 换成 `<PullToRefresh onRefresh={handlePullRefresh} disabled={任一弹层开}>`；`handlePullRefresh` 用 `pullRefreshRef` 承载最新闭包对外暴露稳定 useCallback（防监听器每帧重挂）。刷新按当前页分流：processing=任务+错题计数、tasks=任务、wrongbook=错题重置分页、exam=试卷，均先 `invalidateCache` 打网络；**并补「无学生时下拉重取名名单」恢复分支**——兑现冷启动失败文案，网络恢复后不必刷新页面即可重拉。
+- 新锁 `test/mobilePullToRefresh.test.mjs`（6 条源码判据：禁 antd-mobile / touchmove passive:false / scrollTop<=0 / 禁 transform 必 marginTop / busyRef / App 包 PullToRefresh+接 onRefresh+裸 main 不得残留+学生恢复分支；合成坏样本反向自检内联 10 红，不依赖 git）。
+- 四道闸：单测 1666/1666｜lint 我方 3 文件 0｜`dist_nightly_20261004r131`（antd-mobile 仍独立 464KB chunk，佐证无分包断裂）｜preview:5253 真机级冒烟：合成 TouchEvent 驱动下拉 → 触发 3 个 /api 刷新请求、四 tab 渲染正常、0 页面错误（截图 `_r131_pull_smoke.png`）。
+- ⚠️ 运维：本机 `vite build` 命中 r130 记录的 esbuild 临时文件 `Access is denied`（OS %TEMP% 被 AV 锁）——把 `TEMP/TMP/TMPDIR` 指到 `tmp/esbtmp` 即绕过，非代码问题。手势本体用合成 TouchEvent 驱动（非纯肉眼截图），符合「点击不可抓时上源码锁」纪律。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到

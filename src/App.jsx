@@ -34,6 +34,7 @@ import WrongBookPage from './pages/WrongBookPage'
 import ExamPage from './pages/ExamPage'
 import WorksheetPicker from './components/WorksheetPicker'
 import ConfirmDialogHost from './components/ConfirmDialog'
+import PullToRefresh from './components/PullToRefresh'
 
 import { useToast, ToastProvider } from './components/ToastProvider'
 import dayjs from 'dayjs'
@@ -604,6 +605,38 @@ export default function App() {
   }
 
 
+  // 下拉刷新（裁决④）：现场改完作业/网络刚恢复时，老师想立刻看结果，不该干等 30s 轮询。
+  // 用 ref 承载最新闭包（loadTasks 等每帧重建），对外只暴露稳定的 useCallback，
+  // 避免 PullToRefresh 的原生监听器每次渲染都重挂。
+  const pullRefreshRef = useRef(null)
+  pullRefreshRef.current = async () => {
+    // 无学生时（冷启动没拉到名单）：下拉先重取名名单——这正是 App.jsx 错误文案
+    // 「下拉可重试」承诺的主场景（网络刚恢复后不必刷新页面即可重拉）。
+    if (!currentStudent) {
+      const r = await getStudents(false).catch(() => null)
+      const list = (r?.data || []).filter(Boolean)
+      if (list.length > 0) {
+        setStudents(list)
+        const lastId = localStorage.getItem('lastStudentId')
+        setCurrentStudent(list.find((s) => s.id === lastId) || list[0])
+      }
+      await getTasksSummary(false).then((d) => { if (d?.success) setNotifSummary(d.summary) }).catch(() => {})
+      return
+    }
+    const sid = currentStudent.id
+    // 缓存失效：下拉必须打网络，不回读「秒开」用的旧缓存
+    invalidateCache('tasks', sid)
+    const jobs = []
+    if (currentPage === 'processing' || currentPage === 'tasks') jobs.push(loadTasks(false))
+    if (currentPage === 'wrongbook' || currentPage === 'processing') jobs.push(loadWrongBookData())
+    if (currentPage === 'exam') jobs.push(loadGeneratedExams(false, false))
+    // 通知红点顺手刷新（各页都受益、成本低）
+    jobs.push(getTasksSummary(false).then((d) => { if (d?.success) setNotifSummary(d.summary) }).catch(() => {}))
+    await Promise.all(jobs)
+  }
+  const handlePullRefresh = useCallback(() => pullRefreshRef.current?.(), [])
+
+
   // Filter tasks
   const filteredTasks = useMemo(() => (Array.isArray(tasks) ? tasks : []).filter(t => {
     if (t.student_id !== currentStudent?.id) return false
@@ -848,8 +881,13 @@ export default function App() {
           notificationCount={notifSummary?.totalNotifications || 0}
         />
 
-        {/* Main Content */}
-        <main className="w-full overflow-scroll-area" style={{ paddingBottom: '12px' }}>
+        {/* Main Content — 唯一滚动容器交给 PullToRefresh 接管（裁决④原生下拉刷新）。
+            任意全屏弹层开启时禁用下拉，避免与弹层内手势抢事件。 */}
+        <PullToRefresh
+          onRefresh={handlePullRefresh}
+          disabled={showStaging || showUploadOptions || showWorksheetPicker || showExamChoice || showScanQR || showGrading || showExamReview || showPrintPreview || showReprint || showStudentSwitcher || showDeleteConfirm || showNotifications || showLearningReport || showImageViewer || !!wrongBookDetail}
+          style={{ paddingBottom: '12px' }}
+        >
           {/* 上传队列提示 — Claude style */}
           {uploadQueue.length > 0 && (
             <div className="sticky top-11 z-40 px-4 py-2.5 animate-fade-in" style={{ background: 'var(--warning-soft)', borderBottom: '1px solid rgba(232,168,56,0.2)' }}>
@@ -962,7 +1000,7 @@ export default function App() {
             )}
 
           </AnimatePresence>
-        </main>
+        </PullToRefresh>
 
         {/* Bottom Navigation — Claude Style */}
         <nav className="sticky bottom-0 z-50 glass border-t" style={{ borderColor: 'rgba(232,229,224,0.6)' }}>
