@@ -122,17 +122,26 @@
 
       <section class="management-workspace">
         <ContentCard class="question-manager" flush>
-          <template #header><div class="section-heading"><h2>错题记录</h2><p>按错误频次、重练状态和新增时间管理</p></div></template>
-          <!-- ⛔ 第 91 轮删掉「全选本页」勾选框：它与每行的勾选框一起构成**死 UI** ——
-               勾选只写进 wrongBookStore.selectedQuestions，全仓没有任何消费者，
-               老师可以勾一堆错题然后什么都不发生。真正能组重练卷的入口在移动端错题本
-               （WrongBookPage「生成重练」）与学习诊断的「生成再测卷」。
-               底层的 createRetry / createRetryFor 暂时保留（未引用），等负责人决定
-               是「把按钮接回来」还是「连函数一起删」—— 两选一，见第 91 轮报告。 -->
+          <template #header>
+            <div class="section-heading"><h2>错题记录</h2><p>按错误频次、重练状态和新增时间管理</p></div>
+          </template>
+          <template #actions>
+            <!-- r102（负责人裁决①）：勾选框接回 —— 勾选的错题由下方「生成重练卷」消费，
+                 组卷后直接调移动端同一导出引擎（exportWrongBookPDF）出可打印重练卷。
+                 「全选本页」保持删除（低频且放大误选面）。 -->
+            <ActionButton :disabled="!selectedQuestions.length || creatingExam" @click="createRetry">
+              生成重练卷{{ selectedQuestions.length ? `（${selectedQuestions.length}）` : '' }}
+            </ActionButton>
+          </template>
+          <!-- ⛔ 第 91 轮曾删「全选本页」与勾选框（当时勾选无任何消费者 = 死 UI）。
+               第 102 轮按负责人裁决接回「生成重练卷」按钮作为消费者，勾选框随之恢复；
+               消费链路：勾选 → wrongBookStore.selectedQuestions → createRetry →
+               createGeneratedExam + exportWrongBookPDF（移动端同一导出引擎）。 -->
           <div v-if="wrongBookStore.loading" class="loading-list"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
           <EmptyState v-else-if="!paginatedQuestions.length" :icon="CircleCheck" title="当前筛选下没有错题" description="可以切换状态或重置筛选，继续查看该学生的其他错题记录。"><template #actions><ActionButton @click="resetFilters">重置筛选</ActionButton></template></EmptyState>
           <div v-else class="question-records">
             <article v-for="item in paginatedQuestions" :key="item.id" :class="['question-record', { current: selectedQuestion?.id === item.id }]" @click="selectedQuestion = item">
+              <el-checkbox :model-value="isSelected(item)" :aria-label="`选择错题：${titleOf(item)}`" @click.stop @change="wrongBookStore.toggleSelection(item)" />
               <div class="record-main">
                 <div class="record-topline">
                   <span class="subject-label">{{ subjectOf(item) }}</span>
@@ -194,6 +203,8 @@ import StatsCard from '../components/ui/StatsCard.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getStudents, createGeneratedExam, getGeneratedExamsByStudent } from '../../services/apiService'
+import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
+import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
 import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
 import { useWrongBookStore } from '../stores/wrongBookStore'
 // 多小问（题组）共享题干展示口径：与移动端、重练卷共用同一套实现
@@ -266,7 +277,26 @@ function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; fu
     const exam = await createGeneratedExam({ student_id: student.id, name: examName, question_ids: questionIds })
     if (!exam?.id) throw new Error('创建重练卷失败')
     const suffix = droppedCount ? `（${droppedCount} 道练习册自包含错题未纳入重练）` : ''
-    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}`)
+    // r102（负责人裁决①）：直接接移动端的重练卷模块 —— 组卷后调同一个统一导出引擎
+    // exportWrongBookPDF（移动端错题本「生成重练」同一条管线：服务端 Chromium 渲染
+    // 矢量 PDF 并自动下载，二维码指向 /retry-task/{id}，两侧同源构造）。
+    // PDF 失败不回滚组卷（卷已入「最近重练」，老师可从历史重打），单独提示。
+    let paperMessage = ''
+    try {
+      const paper = await exportWrongBookPDF({
+        studentId: student.id,
+        studentName: student.name,
+        questionIds,
+        title: `${student.name || '学生'} - ${examName}`,
+        showAnswers: false,
+        qrContent: buildRetryTaskUrl(exam.id),
+      })
+      paperMessage = paper?.message || ''
+    } catch (paperError) {
+      console.error('[WrongBookCenter] 重练卷 PDF 生成失败:', paperError?.message || paperError)
+      paperMessage = `PDF 生成失败：${paperError?.message || '未知错误'}（重练卷已创建，可从学生档案「最近重练」重打）`
+    }
+    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}${paperMessage ? ' · ' + paperMessage : ''}`)
     wrongBookStore.clearSelection()
     emit('exam-created', exam)
     if (!embedded.value) router.push({ path: '/students/' + student.id, query: { tab: 'retry' } })
@@ -276,7 +306,8 @@ function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; fu
     creatingExam.value = false
   }
 }
-function createRetryFor(item) { wrongBookStore.clearSelection(); wrongBookStore.toggleSelection(item); createRetry() }; async function markMastered(item) { await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); ElMessage.success('已标记为完全掌握') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } } catch {} }
+// r102：createRetryFor 删除（其「单题组卷」场景被「勾选一道 + 生成重练卷」覆盖，不留第二个死函数）
+async function markMastered(item) { await wrongBookStore.updateLifecycleStatus(item.id, 'mastered'); ElMessage.success('已标记为完全掌握') }; async function removeQuestion(item) { try { await ElMessageBox.confirm('移除后，这道题将不再出现在当前学生的错题列表中。', '移除错题', { confirmButtonText: '确认移除', cancelButtonText: '取消', type: 'warning' }); if (await wrongBookStore.deleteQuestion(item.id)) { selectedQuestion.value = null; ElMessage.success('错题已移除') } } catch {} }
 onMounted(async () => {
   try {
     if (embedded.value && props.studentId) {

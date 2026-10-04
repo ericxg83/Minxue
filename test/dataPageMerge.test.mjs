@@ -139,16 +139,32 @@ test('错题清单以 embedded 形态嵌进学生档案页，并给了可滚动/
     '错题组件嵌入时应去掉外层 wb-page')
 })
 
-test('⛔ 错题组件里的死勾选框必须已删（勾了没有任何事情发生）', () => {
+test('⛔ 错题勾选框必须有真消费者（r102 接回「生成重练卷」后的新口径）', () => {
   const code = stripComments(WRONGCENTER_SRC)
   assert.ok(!code.includes('全选本页'),
-    '「全选本页」还在 —— 勾选只写进 wrongBookStore.selectedQuestions，全仓没有消费者，是死 UI')
-  // 勾选框整个不该再出现在模板里（死 UI 的载体）。底层的 createRetry/createRetryFor
-  // 暂时保留未引用，等负责人决定「接回按钮」还是「连函数一起删」，故这里只锁 UI 层。
-  assert.ok(!/<el-checkbox/.test(code), '模板里还有勾选框 —— 勾了不会发生任何事')
+    '「全选本页」仍应删除 —— 低频且放大误选面（r102 只接回了勾选+按钮的最小链路）')
+  // r91 曾删光勾选框（当时勾了没有任何事情发生）。r102 负责人裁决①接回按钮后，
+  // 勾选框恢复是合法的，但**必须带真消费者**：每行勾选绑定 toggleSelection，
+  // 且「生成重练卷」按钮必须真调 createRetry（组卷 + 移动端导出引擎）。
+  assert.match(code, /wrongBookStore\.toggleSelection\(item\)/,
+    '勾选框回来了但没绑定 toggleSelection —— 又是死 UI')
+  assert.match(code, /@click="createRetry"/, '「生成重练卷」按钮必须接到 createRetry')
+  assert.ok(!/createRetryFor/.test(code),
+    'createRetryFor 应已删除（单题组卷场景被「勾一道+按钮」覆盖，不留死函数）')
   // 但真正有用的两个动作必须留着
   assert.match(code, /markMastered/, '「标记完全掌握」是错题中心独有的动作，不能一起删掉')
   assert.match(code, /removeQuestion/, '「移除」是错题中心独有的动作，不能一起删掉')
+})
+
+test('⛔ 「生成重练卷」必须直接接移动端的重练卷模块（不许重新造轮子）', () => {
+  const code = stripComments(WRONGCENTER_SRC)
+  // 移动端模块 = 统一导出引擎 exportWrongBookPDF（PrintPreview 同款管线：组卷 + 服务端
+  // Chromium PDF + /retry-task 二维码）。PC 侧组卷后必须调它，而不是自己实现 PDF。
+  assert.match(code, /exportWrongBookPDF\(/, 'createRetry 必须调用移动端同一导出引擎 exportWrongBookPDF')
+  assert.match(code, /buildRetryTaskUrl\(exam\.id\)/, '二维码入口必须用共享口径 buildRetryTaskUrl（与移动端同源）')
+  const exporter = readFileSync(join(ROOT, 'src/pages/PrintPreview/index.jsx'), 'utf8')
+  assert.match(exporter, /import \{ buildRetryTaskUrl \} from '\.\.\/\.\.\/utils\/retryTaskUrl'/,
+    '移动端 PrintPreview 应引用共享的 buildRetryTaskUrl（两端同源，不许各自维护）')
 })
 
 test('学生档案页「最近重练」空态也不再指向做不到的入口', () => {

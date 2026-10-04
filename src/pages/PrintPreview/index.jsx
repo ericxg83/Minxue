@@ -5,6 +5,7 @@ import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
+import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
 import dayjs from 'dayjs'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { triggerBrowserPrint } from '../../utils/browserPrint'
@@ -159,14 +160,8 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 二维码只承载唯一 task 定位，不再绑定具体批改页面
   // Capacitor App 内 window.location.origin 是 https://localhost，外部相机无法解析；
   // 仅在真实公网域名部署时用 origin，本地/App 环境一律回退到配置的公网基址。
-  const getRetryTaskUrl = (id) => {
-    const origin = window.location.origin
-    const isLocalOrigin = !origin || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(origin)
-    const base = isLocalOrigin
-      ? (import.meta.env.VITE_APP_BASE_URL || 'https://minxue.pages.dev')
-      : origin
-    return `${base}/retry-task/${id.toUpperCase()}`
-  }
+  // r102：实现上提到 src/utils/retryTaskUrl.js（PC 错题中心组卷同源共用），这里只留引用。
+  const getRetryTaskUrl = buildRetryTaskUrl
 
   // 计算二维码内容：优先任务入口 URL，兜底旧 JSON
   const getQrContent = () => {
