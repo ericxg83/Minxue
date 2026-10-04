@@ -1149,57 +1149,9 @@ export const getAllWeeklyReports = async (opts = {}) => {
   return apiRequest(`/weekly-report?${buildPeriodParams(opts)}`)
 }
 
-/**
- * 获取跨学生共性错题聚合（教学诊断）
- * @param {Object} opts - { mode, offset, subject? }
- */
-export const getTeachingDiagnosis = async (opts = {}) => {
-  const { mode = 'week', offset = 0, subject } = opts
-  const params = new URLSearchParams({ mode, offset })
-  if (subject) params.set('subject', subject)
-  return apiRequest(`/teaching/diagnosis?${params.toString()}`)
-}
-
-/**
- * 单个知识点下钻：涉及学生 + 错因分布
- * @param {string} tag
- * @param {Object} opts - { mode, offset }
- */
-export const getTeachingDiagnosisDetail = async (tag, opts = {}) => {
-  const { mode = 'week', offset = 0 } = opts
-  return apiRequest(`/teaching/diagnosis/${encodeURIComponent(tag)}?mode=${mode}&offset=${offset}`)
-}
-
-/**
- * 周末讲题错题卷：按年级按题维度聚合（学生数口径错误率）
- * @param {Object} opts - { grade, mode, offset, subject? }
- */
-export const getTeachingWrongPaper = async (opts = {}) => {
-  const { grade, mode = 'week', offset = 0, subject } = opts
-  const params = new URLSearchParams({ grade, mode, offset: String(offset) })
-  if (subject) params.set('subject', subject)
-  return apiRequest(`/teaching/wrong-paper?${params.toString()}`)
-}
-
-/**
- * 导出错题卷为 Word 文件（流式下载）。
- * 后端直接返回 docx 二进制，所以这里不走 apiRequest 走 fetch + Blob。
- * @param {Object} body - { grade, mode, studentId?, studentName?, subject?, periodMode?, periodOffset?, periodStart?, periodEnd? }
- * @returns {Promise<Blob>}
- */
-export const exportWrongPaper = async (body) => {
-  const url = `${API_BASE}/handout/export-wrong-paper`
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  })
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: resp.statusText }))
-    throw new Error(err.error || `导出失败: ${resp.status}`)
-  }
-  return resp.blob()
-}
+// r137（负责人裁决）：「班级备课」与「我的讲义」属伪需求，
+// 原 getTeachingDiagnosis / getTeachingDiagnosisDetail / getTeachingWrongPaper /
+// exportWrongPaper 四个调用侧（仅工作台年级视图使用）随视图一并删除。
 
 // ─────────────────────────────────────────────
 // 白板讲题状态（teaching_marks）
@@ -1212,7 +1164,7 @@ export const exportWrongPaper = async (body) => {
  * knowledge_mastery）与判分字段（questions.review_status / is_correct）。
  * 老师标记「讲过」不等于学生会了。
  *
- * 读侧没有对应接口：白板题单由 buildHandout 产出时已把标记挂在每张 slide 的
+ * 读侧没有对应接口：白板题单由 lib/weekendHandout 的 buildHandout 产出时已把标记挂在每张 slide 的
  * `mark` / `reworkDue` 上，打开一次就拿到了。
  *
  * @param {Object} body - { grade, subject?, scopeKey?, marks: Array }
@@ -1243,7 +1195,7 @@ export const saveTeachingMarks = async (body, opts = {}) => {
 }
 
 // ─────────────────────────────────────────────
-// 知识点驱动学习数据层（成长中心 / 讲义引擎）
+// 知识点驱动学习数据层（成长中心）
 // ─────────────────────────────────────────────
 
 /**

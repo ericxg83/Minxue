@@ -136,40 +136,9 @@ router.post('/auto-organize', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 
-router.post('/auto-handout', async (req, res) => {
-  try {
-    const userId = userOrDefault(req)
-    const limit = Math.min(Math.max(Number(req.body?.limit) || 8, 1), 16)
-    const { rows } = await query(
-      `SELECT id FROM teaching_question_types
-       WHERE user_id = $1 AND subject = $2 AND status IN ('draft', 'active')
-       ORDER BY CASE WHEN status = 'draft' THEN 0 ELSE 1 END, (auto_summary->>'wrongCount')::int DESC NULLS LAST, updated_at DESC
-       LIMIT $3`, [userId, subject, limit])
-    const types = []
-    for (const row of rows) { const type = await getTypeDetail(row.id, userId); if (type) types.push(type) }
-    if (!types.length) return res.json({ success: true, handout: null, message: '先自动整理近期错题，才能生成周末讲义初稿' })
-    const pages = [{ name: 'cover', blocks: [{ type: 'cover-title', content: '本周数学周末课讲义' }, { type: 'cover-subtitle', content: '来源：近期错题自动整理' }, { type: 'cover-info', content: `已选 ${types.length} 个高频题型` }, { type: 'cover-date', content: `生成日期：${new Date().toLocaleDateString('zh-CN')}` }] }, { name: 'toc', blocks: [{ type: 'section', content: '目录' }] }]
-    const byKnowledge = new Map()
-    for (const type of types) { if (!byKnowledge.has(type.knowledge_name)) byKnowledge.set(type.knowledge_name, []); byKnowledge.get(type.knowledge_name).push(type) }
-    for (const [knowledgeName, entries] of byKnowledge) {
-      const blocks = [{ type: 'kp-section', content: knowledgeName }, { type: 'kp-key-points', content: ['先回顾知识点的条件、定义与核心方法。'] }]
-      for (const type of entries) {
-        blocks.push({ type: 'type-section', content: type.name, sourceTypeId: type.id, knowledgePointId: type.kp_id })
-        if (type.teaching_notes) blocks.push({ type: 'lecture-guidance', content: type.teaching_notes })
-        if (type.common_mistakes) blocks.push({ type: 'error-cause', content: type.common_mistakes })
-        for (const example of type.examples || []) {
-          const snapshot = example.snapshot || {}
-          blocks.push({ type: 'question', content: snapshot.content || '题目内容不可用', options: snapshot.options || [], questionType: snapshot.questionType || '代表题', imageUrls: [snapshot.imageUrl].filter(Boolean), sourceTypeId: type.id, sourceExampleId: example.id })
-          if (snapshot.answer) blocks.push({ type: 'answer', content: '课堂作答后揭晓', correctAnswer: snapshot.answer })
-          if (snapshot.analysis) blocks.push({ type: 'analysis', content: snapshot.analysis })
-        }
-        pages[1].blocks.push({ type: 'toc-item', content: `${knowledgeName} · ${type.name}`, sub: true })
-      }
-      pages.push({ name: `${knowledgeName} · 本周重点`, blocks })
-    }
-    res.json({ success: true, handout: { title: '本周数学周末课讲义', subject, periodText: `近 ${DEFAULT_DAYS} 天自动整理`, template: 'lecture_prep', pages, baseDiagnosis: [], generatedAt: new Date().toISOString() } })
-  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
-})
+// r137（负责人裁决）：原 POST /auto-handout（把已确认题型编排成「周末课讲义初稿」再
+// 推进「我的讲义」编辑页）属伪需求，随讲义子系统一并下线；题型库只保留自动整理、
+// 确认与代表题快照能力。
 
 router.post('/:id/confirm', async (req, res) => {
   try {

@@ -101,22 +101,25 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
-    path: '/handout',
-    name: 'HandoutPreview',
-    component: () => import('../views/HandoutPreview.vue'),
-    meta: { requiresPC: false }
-  },
-  {
-    path: '/handouts',
-    name: 'HandoutList',
-    component: () => import('../views/HandoutList.vue'),
-    meta: { requiresPC: false }
-  },
-  {
     path: '/weekend-ppt',
     name: 'WeekendHandout',
     component: () => import('../views/WeekendHandout.vue'),
     meta: { requiresPC: false }
+  },
+  // 第 137 轮（负责人裁决）：「我的讲义」页面（/handouts 列表 + /handout 编辑）属伪需求，
+  // 整条链路（页面、模板引擎、docx 导出、/api/handout* 路由）已下线。
+  // 按「页面下线 ≠ 老书签 404」既有约定留 redirect：落到老师侧仍在用的「周末班课件」。
+  {
+    path: '/handouts',
+    redirect: '/weekend-ppt'
+  },
+  {
+    path: '/handout',
+    redirect: '/weekend-ppt'
+  },
+  {
+    path: '/handout/:catchAll(.*)',
+    redirect: '/weekend-ppt'
   },
   {
     path: '/weekend-ppt/board',

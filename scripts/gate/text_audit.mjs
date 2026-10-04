@@ -20,7 +20,7 @@ const ROUTES = [
   ['wb:学生档案', '/workbench.html#/students/bd31776e-6673-474c-ae1f-8a22d69cbd46'],
   ['wb:练习册管理', '/workbench.html#/worksheets'],
   ['wb:试卷答案库', '/workbench.html#/paper'],
-  ['wb:我的讲义', '/workbench.html#/handouts'],
+  ['wb:老书签/handouts', '/workbench.html#/handouts'],
   ['wb:周末班课件', '/workbench.html#/weekend-ppt'],
   ['wb:我的题型库', '/workbench.html#/question-bank'],
 ]

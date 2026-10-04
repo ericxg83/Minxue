@@ -173,6 +173,8 @@ dist_tmcheck/
 dist_tmcheck2/
 # 夜间巡检的校验构建产物（巡检写死到独立目录，不碰 dist/）
 dist_nightly_*/
+# 单轮改动的隔离校验构建产物（同上，不碰 dist/）
+dist_r137/
 __nightly_lint.json
 # 排障临时目录（含下载的 PDF、环境密钥清单等，绝不入库）
 tmp/

@@ -1476,7 +1476,12 @@ const handleReview = async (result) => {
   setTimeout(() => { animatingBtn.value = '' }, 400)
   // [④ 撤销 snackbar] 判定成功 → 底部持久可撤销提示（替代一闪而过的 toast）；
   // 点「撤销」或按 ⌘Z/Ctrl+Z 回退上一笔（仅本页内存，不反向写库）。
-  store.undoHint = { text: resultText[result], questionId: question.id }
+  // [2026-10-04 修复] exclude（删除）不设置撤销提示：删除后题目已从列表 splice，
+  // undoLastReview 的 find 恒 undefined 无法恢复（注释 L1391-1395 是已知设计，
+  // 靠二次确认弹窗挡住误触）——此前仍显示「撤销」按钮可点但点了无效，误导老师。
+  if (result !== 'exclude') {
+    store.undoHint = { text: resultText[result], questionId: question.id }
+  }
 }
 const nextQ = () => { store.nextQuestion() }
 const prevQ = () => { store.prevQuestion() }

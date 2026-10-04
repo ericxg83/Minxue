@@ -5,7 +5,8 @@
  * 而 apiService 走 `VITE_API_URL || '/api'` —— 隔离构建产物里两套口径并存：
  * apiService 打生产、裸 fetch 打本地代理。r95 已把构建强制本地化，本轮把口径归一：
  *  - 轮询/上传改走 apiService（QuotaBanner → apiRequest；QuestionDetailPanel → 既有 uploadImage）；
- *  - blob 下载新增 apiService.apiRequestBlob（HandoutPreview 讲义 Word 导出）；
+ *  - blob 下载新增 apiService.apiRequestBlob（原为 HandoutPreview 讲义导出，该页已于 r137 下线，
+ *    工具函数保留给其余 blob 下载场景）；
  *  - 诊断页批量端点（WorksheetManagement）统一 `fetch(`${API_BASE}/...`)`。
  *
  * 本锁：src/workbench 下**不得再出现字面 '/api' 的裸 fetch**（fetch(`/api… 或 fetch('/api…）。

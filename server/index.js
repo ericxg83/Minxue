@@ -114,8 +114,6 @@ import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
 import teachingRouter from './routes/teaching.js'
 import variantsRouter from './routes/variants.js'
-import handoutRouter from './routes/handout.js'
-import handoutLectureRouter from './routes/handoutLecture.js'
 import teachingQuestionTypesRouter from './routes/teachingQuestionTypes.js'
 import weaknessRouter from './routes/weakness.js'
 import examPdfRouter from './routes/examPdf.js'
@@ -4625,8 +4623,9 @@ app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
 app.use('/api/teaching', teachingRouter)
 app.use('/api/variants', variantsRouter)
-app.use('/api/handout', handoutRouter)
-app.use('/api/handout', handoutLectureRouter)
+// r137（负责人裁决）：「我的讲义」/「班级备课」属伪需求，
+// /api/handout* 不再生成（讲义模板引擎、docx 导出、提词器、备课 CRUD 已下线）。
+// 存量 handout_lectures / handout_lecture_notes 数据保留在库中不动（不删表、不清数据）。
 app.use('/api/teaching-question-types', teachingQuestionTypesRouter)
 app.use('/api/weakness', weaknessRouter)
 app.use('/api/exam-pdf', examPdfRouter)

@@ -9,8 +9,8 @@ import { classifyQuestionLocally } from '../utils/localTagger.js'
 //
 // 调用方：
 //   - variantService：按 englishQuestionType 决定生成哪种变式
-//   - handoutService：英语讲义模板按 englishQuestionType 选不同排版
 //   - knowledgeService.normalizeQuestionTags：补全英语 ai_tags（与 SUBJECT_KNOWLEDGE 对齐）
+//     （原 handoutService 英语讲义模板已于 r137 随「我的讲义」下线）
 // ============================================================
 
 /**

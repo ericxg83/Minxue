@@ -33,9 +33,10 @@ sub_no
 
 AI 草稿、教师审核答案和官方审核答案的状态不同，不能混为同一可信等级。
 
-## 讲义
+## 讲义（已于 2026-10-04 r137 下线）
 
-讲义相关路由和服务包括：
+负责人裁决：「我的讲义」与学习诊断页的「班级备课」属伪需求，基本用不上，决定不开发了。
+以下路由、服务与模板引擎已随之下线：
 
 ```text
 server/routes/handout.js
@@ -47,16 +48,10 @@ server/services/handoutScriptService.js
 server/services/handoutDocxService.js
 ```
 
-讲义输入来自教学诊断、错题、知识点和变式题。已支持：
+曾提供的能力（讲义生成、Word 导出、讲课脚本、讲义 CRUD/复制/笔记/模板）不再对外可调；
+工作台页面 `HandoutList.vue`（/handouts）与 `HandoutPreview.vue`（/handout）已删除。
 
-- 按时间范围生成讲义；
-- 按知识点生成讲义；
-- AI 生成知识点解释；
-- Word 导出；
-- 讲课脚本；
-- 讲义 CRUD、复制、笔记和模板。
-
-持久化表包括：
+持久化表：
 
 ```text
 handout_lectures
@@ -64,7 +59,11 @@ handout_lecture_notes
 handout_lecture_templates
 ```
 
-`handout_lectures.blocks` 使用 JSONB 持久化，当前数据结构需要保持历史兼容。
+存量数据**保留在库中不删**（不删表、不清数据），只断开读写侧；`handout_lectures.blocks`
+的 JSONB 结构因此仍按原样存在，将来若要恢复需重建服务层而非改表。
+
+老师侧「讲题」能力由**周末班课件**（`/weekend-ppt`，`server/lib/weekendHandout.js` +
+`server/routes/weekendHandout.js`）承担，与本节下线的讲义子系统不是同一条链路，**不要误删**。
 
 ## 变式题
 
@@ -77,7 +76,7 @@ inverse
 context_shift
 ```
 
-**变式题仅作为讲义教学素材，不进入错题重练与组卷。** 当前产品口径是「只练错题」：`generated_exams.question_ids` 必须来自 `wrong_questions` 指向的真实做错题目，不得混入 `variant_questions` 的内容。详见 `docs/wrong-question-system.md` 的「重练范围限制」。
+**变式题仅作为讲义/题型素材，不进入错题重练与组卷。**（讲义子系统已于 r137 下线，变式题现存于 `variant_questions` 供题型库「生成变式练习」使用，仍不进重练卷。） 当前产品口径是「只练错题」：`generated_exams.question_ids` 必须来自 `wrong_questions` 指向的真实做错题目，不得混入 `variant_questions` 的内容。详见 `docs/wrong-question-system.md` 的「重练范围限制」。
 
 ## 组卷和重练
 

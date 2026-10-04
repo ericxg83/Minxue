@@ -1,11 +1,12 @@
 <template><aside class="app-sidebar"><button class="brand" type="button" @click="go('/')"><span class="brand-mark">敏</span><span><strong>敏学</strong><small>教师工作台</small></span></button><nav aria-label="主导航"><section v-for="group in navGroups" :key="group.label" class="nav-group"><div v-if="group.label" class="group-label">{{ group.label }}</div><template v-for="item in group.items" :key="item.path"><button type="button" :class="['nav-link',{'is-active':isActive(item.path)}]" @click="go(item.path)"><el-icon><component :is="item.icon" /></el-icon><span>{{ item.label }}</span></button><button v-for="child in item.children||[]" :key="child.path" type="button" :class="['nav-sublink',{'is-active':isActive(child.path)}]" @click="go(child.path)"><span>{{ child.label }}</span></button></template></section></nav><div class="sidebar-footer"><div class="avatar">师</div><span><strong>管理员</strong><small>教学负责人</small></span><el-icon><MoreFilled /></el-icon></div></aside></template>
 <script setup>
 import {useRoute,useRouter} from 'vue-router'
-import {DataAnalysis,DocumentChecked,Files,HomeFilled,MoreFilled,Notebook,Reading,User} from '@element-plus/icons-vue'
+import {DataAnalysis,DocumentChecked,Files,HomeFilled,MoreFilled,Notebook,User} from '@element-plus/icons-vue'
 const route=useRoute(),router=useRouter()
 // r101 收纳（负责人裁决②）：试卷答案库 / 我的题型库是「非常低频」入口，
 // 从顶级降到「练习册管理」下的二级项（URL 不变，收完仍从侧栏一键可达）。
-const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook,children:[{label:'试卷答案库',path:'/paper'},{label:'我的题型库',path:'/question-bank'}]},{label:'我的讲义',path:'/handouts',icon:Reading},{label:'周末班课件',path:'/weekend-ppt',icon:Files}]}]
+// r137（负责人裁决）：「我的讲义」属伪需求，入口与页面一并下线。
+const navGroups=[{label:'',items:[{label:'工作台',path:'/',icon:HomeFilled}]},{label:'教学工作',items:[{label:'批改中心',path:'/grade',icon:DocumentChecked},{label:'学习诊断',path:'/weekly-report',icon:DataAnalysis},{label:'学生管理',path:'/students',icon:User}]},{label:'教学资源',items:[{label:'练习册管理',path:'/worksheets',icon:Notebook,children:[{label:'试卷答案库',path:'/paper'},{label:'我的题型库',path:'/question-bank'}]},{label:'周末班课件',path:'/weekend-ppt',icon:Files}]}]
 const isActive=path=>path==='/'?route.path==='/':route.path.startsWith(path)
 const go=path=>{if(route.path!==path)router.push(path)}
 </script>

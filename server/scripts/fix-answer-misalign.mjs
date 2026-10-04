@@ -159,7 +159,7 @@ for (const r of all) {
   touchedIds.push(r.q_id)
 
   // 2) wrong_questions：不再展示错答案；原 error_type（"计算错误"）是错因误判 → 置空
-  //    （周报侧已有 `error_type || '未标注'` 兜底，见 wrongPaperService.js:115）
+  //    （周报侧已有 `error_type || '未标注'` 兜底；原引用点 wrongPaperService.js 已于 r137 随「班级备课」错题卷下线）
   const b = await pool.query(
     `UPDATE wrong_questions
         SET correct_answer = NULL,

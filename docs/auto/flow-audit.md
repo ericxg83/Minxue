@@ -8,15 +8,15 @@
 |---|---|---|---|
 | 工作台 | DashboardWorkbench | 在用 | 今日概览：待复核/新增错题/待消化/趋势/待关注学生 |
 | 批改中心 | GradeCenterWorkbench | 高频核心 | 复核减负已做过三轮优化（自动放行/撤销/命令面板） |
-| 学习诊断 | WeeklyReportWorkbench | 在用 | 周报 PDF（服务端 Playwright 出图） |
+| 学习诊断 | WeeklyReportWorkbench | 在用 | 周报 PDF（服务端 Playwright 出图）+ 家长成长卡；r137 已删「班级备课」年级视图，只剩单生诊断一条主线 |
 | 成长中心 | GrowthWorkbench | 在用 | 渲染炸弹已根治（第 17 轮）；假数据/假趋势已清（第 18、35 轮）；重复导出按钮已删（提案 5） |
 | 错题中心 | WrongBookCenterRedesign | 高频核心 | 两处学生加载经核实为互斥分支（健康，第 28 轮） |
 | 学生管理 | StudentsWorkbench | 在用 | — |
 | 练习册管理 | worksheets | 在用 | 答案质量闸重点区 |
 | 试卷答案库 | paper | ? | 使用频率待负责人确认 |
-| 我的讲义 | handouts | 在用 | 讲义生成链 |
+| ~~我的讲义~~ | handouts | **已下线（r137）** | 负责人裁决伪需求：页面/路由/`/api/handout*` 服务全链路移除，存量 `handout_lectures` 数据保留不删；讲题能力由周末班课件承担 |
 | 周末班课件 | weekend-ppt | 在用 | 白板/课件链 |
-| 我的题型库 | question-bank | ? | 使用频率待负责人确认 |
+| 我的题型库 | question-bank | ? | 使用频率待负责人确认；r137 已摘掉「生成周末讲义初稿」按钮（下游讲义页已下线） |
 
 ## 一之二、移动端流程地图（src/，React，负责人晚托班现场操作）
 

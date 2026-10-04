@@ -118,7 +118,10 @@ function collectDeadHandlers() {
 
 test('⛔ 工作台模板里绑的处理函数必须在 script 里存在（防「按钮点了没反应」）', () => {
   const { out, scanned } = collectDeadHandlers()
-  assert.ok(scanned > 50, `只扫到 ${scanned} 个 SFC，提取器疑似失效`)
+  // 地板值只防「提取器整体失效」，不是组件数量配额：
+  // r137（负责人裁决）「我的讲义」两个 SFC（HandoutList / HandoutPreview）下线，
+  // 工作台 SFC 从 52 降到 50；地板随之从 >50 调为 >=45（仍远高于半途失效的常见读数）。
+  assert.ok(scanned >= 45, `只扫到 ${scanned} 个 SFC，提取器疑似失效`)
   assert.deepEqual(
     out.map((f) => `${f.file}:${f.line} ${f.name} ← @event="${f.expr}"`),
     [],

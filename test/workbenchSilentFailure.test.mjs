@@ -23,9 +23,11 @@ const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8')
 const FILES = {
   exam: read('src/workbench/views/ExamWorkbench.vue'),
   weekly: read('src/workbench/views/WeeklyReportWorkbench.vue'),
-  handout: read('src/workbench/views/HandoutPreview.vue'),
   wrong: read('src/workbench/views/WrongBookCenterRedesign.vue'),
 }
+
+// r137（负责人裁决）：原FILES.handout（HandoutPreview.vue「我的讲义」编辑页）
+// 及其两条规则随页面删除；「讲义子系统不得回流」的守卫在 dataPageMerge.test.mjs 。
 
 /** 取锚点之后的窗口：把断言限定在某个函数体内，避免整文件里别处的 ElMessage.error 造成误判通过 */
 function windowAfter(src, anchor, size = 700) {
@@ -136,37 +138,6 @@ const RULES = [
     `,
   },
   {
-    id: 'handout-loadFromDiagnosis-异常必须上抛（不得吞掉）',
-    probe: (s) => {
-      const w = windowAfter(s, 'async function loadFromDiagnosis()', 1200)
-      return w !== null && /throw e/.test(w)
-    },
-    bad: `
-      async function loadFromDiagnosis() {
-        try {
-          const response = await apiRequest('/handout/from-diagnosis', { method: 'POST' })
-          if (response.success && response.handout) {
-            handout.value = response.handout
-            dirty.value = true
-          }
-        } catch (e) {
-          console.error('从诊断生成讲义失败:', e)
-        }
-      }
-    `,
-  },
-  {
-    id: 'handout-loadError-加载失败不伪装「暂无讲义数据」',
-    probe: (s) =>
-      /const loadError = ref\(''\)/.test(s) &&
-      /v-else-if="loadError"/.test(s) &&
-      /@click="loadHandout"/.test(s),
-    bad: `
-      const loading = ref(true)
-      <!-- 空状态 --><div v-else-if="!handout" class="handout-empty"><el-empty description="暂无讲义数据" /></div>
-    `,
-  },
-  {
     id: 'wrong-removeQuestion-移除失败必须提示（不得静默回滚）',
     probe: (s) => {
       const w = windowAfter(s, 'async function removeQuestion(item)', 900)
@@ -184,8 +155,6 @@ const SOURCE_OF = {
   'exam-handleToggleStatus-发布撤回失败必须提示': () => FILES.exam,
   'exam-handleCreate-创建失败必须提示': () => FILES.exam,
   'weekly-loadSummary-加载失败不伪装「暂无可诊断的学生数据」': () => FILES.weekly,
-  'handout-loadFromDiagnosis-异常必须上抛（不得吞掉）': () => FILES.handout,
-  'handout-loadError-加载失败不伪装「暂无讲义数据」': () => FILES.handout,
   'wrong-removeQuestion-移除失败必须提示（不得静默回滚）': () => FILES.wrong,
 }
 

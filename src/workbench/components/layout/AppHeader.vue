@@ -25,8 +25,7 @@ const routes = {
   '/worksheets': ['练习册', '管理练习册内容与答案状态'],
   '/paper': ['试卷答案库', '审核 AI 批改自动沉淀的试卷答案'],
   '/students': ['学生管理', '查看学生状态并进入学习记录'],
-  '/handouts': ['我的讲义', '管理备课内容并继续编辑'],
-  '/handout': ['讲义编辑', '编辑、预览与展示讲义内容']
+  '/weekend-ppt': ['周末班课件', '按年级聚合共性错题，出课件与白板讲题']
 }
 const meta = computed(() => Object.entries(routes).find(([path]) => path === '/' ? route.path === '/' : route.path.startsWith(path))?.[1] || ['教师工作台', '敏学教学工作系统'])
 const count = computed(() => store.totalCount > 99 ? '99+' : store.totalCount || '')

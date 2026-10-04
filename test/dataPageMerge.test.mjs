@@ -68,15 +68,24 @@ test('⛔ 家长成长卡必须搬到学习诊断（成长中心下线不能带�
   // ⛔ GrowthCardButton 是「按钮 + 弹窗 + Teleport」多根节点组件，Vue 无法透传 class：
   //    直接把定位类挂在它身上会被静默丢弃（只在控制台留一条 Extraneous non-props attributes 告警），
   //    右对齐就永远不生效。定位类必须挂在外层元素上。
-  assert.match(DIAG_SRC, /<span class="output-bar__growth">\s*<GrowthCardButton/,
+  //    r137：成长卡从底部「备课操作」输出条搬到页头（output-bar 随「班级备课」下线），
+  //    外层包裹由 output-bar__growth 改为 header-share-card，本意不变。
+  assert.match(DIAG_SRC, /<span class="header-share-card">\s*<GrowthCardButton/,
     '成长卡的定位类要挂在外层 span 上（多根节点组件收不到 class）')
   assert.ok(!/<GrowthCardButton[^>]*\sclass=/.test(DIAG_SRC),
     '不能把 class 直接传给 GrowthCardButton：它是多根节点组件，class 会被丢弃')
 })
 
-test('学习诊断仍然保留自己的输出能力（不是把成长中心的东西搬过来换掉了）', () => {
-  for (const label of ['生成本周报告', '生成本月报告', '生成讲义', '发重练卷']) {
-    assert.ok(DIAG_SRC.includes(label), `学习诊断的输出条少了「${label}」`)
+test('学习诊断的输出能力只剩家长侧产出（r137：备课输出条已随「班级备课」下线）', () => {
+  for (const label of ['导出家长报告']) {
+    assert.ok(DIAG_SRC.includes(label), `学习诊断页头少了「${label}」`)
+  }
+  assert.ok(/<GrowthCardButton/.test(DIAG_SRC), '家长成长卡是页面上唯一的图片产出入口，不能丢')
+  // r137（负责人裁决）：班级备课 / 我的讲义 属伪需求，以下入口不得再回到本页
+  // （只比对去注释后的代码，r137 的裁决说明写在注释里，不算命中）
+  const diagCode = stripComments(DIAG_SRC)
+  for (const gone of ['生成讲义', '发重练卷', '班级备课', '导出全班讲义卷', '本周错题卷清单']) {
+    assert.ok(!diagCode.includes(gone), `「${gone}」已随「班级备课」下线，不应再出现在学习诊断`)
   }
 })
 

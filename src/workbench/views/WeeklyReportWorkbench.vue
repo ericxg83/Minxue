@@ -12,7 +12,14 @@
             :disabled="!selectedStudentId"
             :loading="generating"
             @click="handleGenerateCurrent"
-          >生成报告</ActionButton>
+          >导出家长报告</ActionButton>
+        <!-- 说明：r137 裁决把「备课视图」判为伪需求并下线，讲义/ 错题卷 / 发重练卷
+             三个入口随之移除（后端 /teaching/wrong-paper 等路由同批删除）。
+             页面曾残留对已删 API 的调用代码，导致 Vite import 解析失败、整页打不开，
+             r138 已把残留调用与对应 UI 一并清除。
+             ⛔ GrowthCardButton 的class 必须挂外层 span —— 它是「按钮 + 弹窗 + Teleport」
+               多根节点组件，Vue 无法透传 class（会告警 Extraneous non-props attributes），
+               margin-left:auto 会静默失效。 -->
         </template>
       </PageHeader>
 
@@ -408,160 +415,18 @@
         </ContentCard>
       </section>
 
-      <!-- 周末讲题错题卷：按"具体题"维度聚合，错误率排序 -->
-      <section v-if="viewMode === 'grade'" class="wrong-paper-section">
-        <ContentCard
-          class="wrong-paper-card"
-          :title="`「${selectedGrade || '年级'}」本周错题卷清单`"
-          :description="wrongPaperDescription"
-          flush
-        >
-          <template #actions>
-            <ActionButton :loading="exportingWrongPaper" :disabled="wrongPaperItems.length === 0" @click="handleExportWrongPaperAll">
-              <el-icon><Download /></el-icon>导出全班讲义卷
-            </ActionButton>
-            <ActionButton :loading="loadingWrongPaper" @click="loadWrongPaper">
-              <el-icon><Refresh /></el-icon>刷新
-            </ActionButton>
-          </template>
 
-          <div v-if="loadingWrongPaper" class="loading-stack">
-            <el-skeleton v-for="i in 4" :key="i" :rows="2" animated />
-          </div>
-          <EmptyState
-            v-else-if="!wrongPaperItems.length"
-            :icon="Reading"
-            title="该年级本周暂无错题"
-            description="切换时间范围或学科继续查看，或等待新批改数据进入。"
-          />
-          <DataTable
-            v-else
-            :data="wrongPaperItems"
-            row-key="identityKey"
-            :expand-row-keys="Array.from(expandedWrongRows)"
-            :default-expand-all="false"
-            size="small"
-            empty-text=" "
-            class="wrong-paper-table"
-          >
-            <el-table-column type="expand">
-              <template #default="{ row }">
-                <div class="wrong-paper-expand">
-                  <div class="expand-row">
-                    <span class="expand-label">正确答案</span>
-                    <strong>{{ row.correctAnswer || '—' }}</strong>
-                  </div>
-                  <div v-if="row.involvedStudents?.length" class="expand-row">
-                    <span class="expand-label">错的学生（{{ row.involvedStudents.length }} 人）</span>
-                    <div class="student-chips">
-                      <el-tag
-                        v-for="s in row.involvedStudents"
-                        :key="s.id"
-                        :type="s.wrongTimes > 1 ? 'danger' : 'info'"
-                        effect="plain"
-                        size="small"
-                      >
-                        {{ s.name }}{{ s.wrongTimes > 1 ? ` ×${s.wrongTimes}` : '' }}
-                      </el-tag>
-                    </div>
-                  </div>
-                  <div v-if="row.errorDistribution?.length" class="expand-row">
-                    <span class="expand-label">错因分布</span>
-                    <div class="error-mini">
-                      <span v-for="e in row.errorDistribution" :key="e.errorType" :style="{ color: errorTypeColor(e.errorType) }">
-                        {{ e.errorType }} {{ e.count }}次 · {{ e.ratio }}%
-                      </span>
-                    </div>
-                  </div>
-                  <div v-if="row.knowledgeTags?.length" class="expand-row">
-                    <span class="expand-label">知识点</span>
-                    <span>
-                      <el-tag v-for="t in row.knowledgeTags.slice(0, 4)" :key="t" type="info" effect="plain" size="small" style="margin-right: 4px;">
-                        {{ t }}
-                      </el-tag>
-                    </span>
-                  </div>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="row" width="48" align="center">
-              <template #default="{ row, $index }">
-                <span :class="['rank-num', { 'is-top': $index < 3 }]">{{ $index + 1 }}</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="题目" min-width="280">
-              <template #default="{ row }">
-                <div class="wrong-q-cell">
-                  <span class="wrong-q-content">{{ row.content }}</span>
-                  <span v-if="row.knowledgeTags?.length" class="wrong-q-tags">
-                    <el-tag
-                      v-for="t in row.knowledgeTags.slice(0, 2)"
-                      :key="t"
-                      type="info"
-                      effect="plain"
-                      size="small"
-                    >{{ t }}</el-tag>
-                  </span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="错误率" width="110" align="center" sortable :sort-method="(a, b) => a.errorRate - b.errorRate">
-              <template #default="{ row }">
-                <div :class="['error-rate', errorRateTone(row.errorRate)]">
-                  <strong>{{ row.errorRate }}%</strong>
-                  <small>{{ row.studentCount }}/{{ wrongPaperMeta?.totalStudentCount || '-' }}</small>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="错题次数" width="86" align="center">
-              <template #default="{ row }"><span>{{ row.wrongCount }}</span></template>
-            </el-table-column>
-            <el-table-column label="错因" min-width="160">
-              <template #default="{ row }">
-                <div v-if="row.errorDistribution?.length" class="error-tags">
-                  <StatusTag
-                    v-for="e in row.errorDistribution.slice(0, 2)"
-                    :key="e.errorType"
-                    :tone="errorTypeToTone(e.errorType)"
-                    size="small"
-                  >{{ e.errorType }} {{ e.ratio }}%</StatusTag>
-                  <span v-if="row.errorDistribution.length > 2" class="muted">+{{ row.errorDistribution.length - 2 }}</span>
-                </div>
-                <span v-else class="muted">—</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="140" align="center" fixed="right">
-              <template #default="{ row }">
-                <div class="row-actions">
-                  <el-button text size="small" @click="toggleWrongRow(wrongPaperRowKey(row))">
-                    {{ isWrongRowExpanded(wrongPaperRowKey(row)) ? '收起' : '详情' }}
-                  </el-button>
-                  <el-button
-                    text
-                    type="primary"
-                    size="small"
-                    :disabled="!row.involvedStudents?.length"
-                    @click="handleExportWrongPaperStudent(row)"
-                  >个人卷</el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </DataTable>
-        </ContentCard>
-      </section>
-
-      <!-- 底部输出条：把诊断结论直接转化为下一步教学动作（替代原 report-output 大面板） -->
+      <!-- 底部输出条：只保留家长侧产出（周/月报告 + 成长卡）。
+           ⛔ r137 裁决：讲义/ 错题卷 / 发重练卷属「班级备课」伪需求，已下线；
+             r138 收尾把这三个入口从前端彻底移除（后端 /teaching/wrong-paper 等
+             路由同批删除，调用代码曾残留导致 Vite import 解析失败、页面打不开）。
+           ⛔ GrowthCardButton 的class 必须挂外层 span —— 它是「按钮 + 弹窗 + Teleport」
+             多根节点组件，Vue 无法透传 class（会告警 Extraneous non-props attributes），
+             margin-left:auto 会静默失效。 -->
       <section class="output-bar" aria-label="诊断输出">
         <span class="output-bar__label">输出</span>
         <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('week')">生成本周报告</ActionButton>
         <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('month')">生成本月报告</ActionButton>
-        <ActionButton @click="handleExportHandout">生成讲义</ActionButton>
-        <ActionButton variant="primary" @click="handleDistributeExam">发重练卷</ActionButton>
-        <!-- 家长成长卡（第 91 轮从「成长中心」搬来）：这是老师转发给家长的产出物，
-             成长中心下线后不能跟着消失。未选学生时点它会提示「请先选择学生」。
-             ⛔ 类名必须挂在外层 span 上，不能直接挂到 <GrowthCardButton>：
-             该组件是「按钮 + 弹窗 + Teleport」多根节点，Vue 无法透传 class
-             （运行时会告警 "Extraneous non-props attributes"），margin-left:auto 会静默失效。 -->
         <span class="output-bar__growth">
           <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudentName || ''" :mode="periodMode" :offset="periodOffset" />
         </span>
@@ -671,7 +536,34 @@ import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
 import ErrorCauseBars from '../components/diagnosis/ErrorCauseBars.vue'
 import NextActions from '../components/diagnosis/NextActions.vue'
 import ParentOutputCard from '../components/diagnosis/ParentOutputCard.vue'
-import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
+import { getStudents, getAllWeeklyReports, getWeeklyReport } from '../../services/apiService'
+
+/**
+ * ⛔ r137 已下线、r138 收尾清理：以下4 个 API 在「班级备课」下线时
+ *    连同后端 /teaching/diagnosis、/diagnosis/:tag、/wrong-paper 路由一起删掉了，
+ *    但本页面的调用代码与 UI 按钮一直留着 —— Vite 对「import 不存在的导出」只在
+ *    transform 阶段报 Failed to resolve import，页面能加载，点到按钮才炸。
+ *    这段残留在 HEAD 里已存在（不是最近某轮改出来的），今天页面彻底打不开才暴露。
+ *
+ *负责人裁决（2026-10-04）：**删前端残留，不补后端**。
+ *    对应 UI（年级备课视图、错题卷清单、知识点下钻抽屉）一并移除入口，
+ *    保留单生「学习诊断」主线。下方函数保留为显式 no-op 并提示，
+ *    而不是直接删干净 —— 这样将来若要恢复功能，能一眼看出该接哪个接口。
+ */
+const OFFLINE_API_MESSAGE = '该功能已下线，当前不可用'
+
+const getTeachingDiagnosis = async () => {
+  throw new Error(OFFLINE_API_MESSAGE)
+}
+const getTeachingDiagnosisDetail = async () => {
+  throw new Error(OFFLINE_API_MESSAGE)
+}
+const getTeachingWrongPaper = async () => {
+  throw new Error(OFFLINE_API_MESSAGE)
+}
+const exportWrongPaper = async () => {
+  throw new Error(OFFLINE_API_MESSAGE)
+}
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -727,12 +619,9 @@ const drawerDetail = ref(null)
 const loadingDetail = ref(false)
 
 // ── 周末讲题错题卷 State（年级视图） ──
-const wrongPaperItems = ref([])
-const wrongPaperMeta = ref(null) // {totalStudentCount, wrongStudentCount, period}
-const loadingWrongPaper = ref(false)
-const wrongPaperError = ref('')
-const exportingWrongPaper = ref(false)
-const expandedWrongRows = ref(new Set()) // Set<identityKey>
+// ⛔ r138 收尾：错题卷清单 UI 已整块移除（该功能随「班级备课」于 r137 下线，
+//    后端 /teaching/wrong-paper 路由同步删除）。相关 state / computed / 方法一并清掉，
+//    只保留 apiService 那 4 个显式 no-op 占位（见文件上方 import 处注释）。
 
 const allChecked = computed(() =>
   summaryData.value?.reports?.length > 0 &&
@@ -832,59 +721,24 @@ const filterNoteText = computed(() => {
     : `${reportsWithData.value.length} 名学生有数据`
 })
 
-// 错题卷区块描述：年级 · 时段 · 学科 · 总人数 · 本周错题学生数 · 加载失败原因
-const wrongPaperDescription = computed(() => {
-  if (!selectedGrade.value) return '请选择年级'
-  const meta = wrongPaperMeta.value
-  const total = meta?.totalStudentCount ?? '-'
-  const wrongStu = meta?.wrongStudentCount ?? '-'
-  return `${selectedGrade.value} · ${periodLabel.value} · ${diagSubject.value || '数学'} · 共 ${total} 名学生 · ${wrongStu} 人本周错题${wrongPaperError.value ? ` · 加载失败：${wrongPaperError.value}` : ''}`
-})
-
-// 错误率档位（视觉强化）
-function errorRateTone(rate) {
-  if (rate >= 40) return 'is-critical'
-  if (rate >= 20) return 'is-warning'
-  if (rate >= 10) return 'is-info'
-  return 'is-normal'
-}
-
-// 错因 → StatusTag tone（与已有 errorTypeColor 视觉一致）
-function errorTypeToTone(type) {
-  if (!type || type === '未标注') return 'default'
-  if (/计算|运算/.test(type)) return 'danger'
-  if (/审题/.test(type)) return 'warning'
-  if (/公式|概念/.test(type)) return 'primary'
-  if (/步骤|单位/.test(type)) return 'info'
-  if (/方法|分析/.test(type)) return 'success'
-  if (/抄写|粗心/.test(type)) return 'default'
-  return 'default'
-}
+// ⛔ r138 收尾：错题卷区块的描述文案、错误率档位、错因→tone 映射
+//    随该区块一并移除（三者只被错题卷模板使用）。
 
 // ── Watch period changes to refresh data ──
 
 watch([periodMode, periodOffset], () => {
   loadSummary()
-  if (viewMode.value === 'grade' && selectedGrade.value) {
-    loadGradeSuggestions()
-    loadWrongPaper()
-  }
+  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
   if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
 })
 
 watch(viewMode, (val) => {
-  if (val === 'grade' && selectedGrade.value) {
-    loadGradeSuggestions()
-    loadWrongPaper()
-  }
+  if (val === 'grade' && selectedGrade.value) loadGradeSuggestions()
   if (val === 'single' && selectedStudentId.value) loadStudentSuggestions()
 })
 
 watch(selectedGrade, () => {
-  if (viewMode.value === 'grade' && selectedGrade.value) {
-    loadGradeSuggestions()
-    loadWrongPaper()
-  }
+  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
 })
 
 watch(selectedStudentId, (id) => {
@@ -1021,97 +875,6 @@ async function retryGradeSuggestions() {
   await loadGradeSuggestions()
 }
 
-// ── 错题卷（年级视图） ──
-async function loadWrongPaper() {
-  if (!selectedGrade.value) return
-  loadingWrongPaper.value = true
-  wrongPaperError.value = ''
-  try {
-    const data = await getTeachingWrongPaper({
-      grade: selectedGrade.value,
-      mode: periodMode.value,
-      offset: periodOffset.value,
-      subject: diagSubject.value || undefined,
-    })
-    if (data.success) {
-      wrongPaperItems.value = data.items || []
-      wrongPaperMeta.value = data
-    } else {
-      wrongPaperError.value = data.error || '获取错题卷失败'
-      wrongPaperItems.value = []
-      wrongPaperMeta.value = null
-    }
-  } catch (e) {
-    wrongPaperError.value = e.message || '获取错题卷失败'
-    console.error('loadWrongPaper 异常:', e)
-  } finally {
-    loadingWrongPaper.value = false
-  }
-}
-
-function toggleWrongRow(key) {
-  const set = expandedWrongRows.value
-  if (set.has(key)) set.delete(key)
-  else set.add(key)
-}
-
-function isWrongRowExpanded(key) {
-  return expandedWrongRows.value.has(key)
-}
-
-function wrongPaperRowKey(row) {
-  return row.identityKey || row.questionId || row.content
-}
-
-async function handleExportWrongPaperAll() {
-  if (!selectedGrade.value || wrongPaperItems.value.length === 0) return
-  exportingWrongPaper.value = true
-  try {
-    const blob = await exportWrongPaper({
-      grade: selectedGrade.value,
-      mode: 'all',
-      subject: diagSubject.value || '数学',
-      periodMode: periodMode.value,
-      periodOffset: periodOffset.value,
-    })
-    const ymd = dayjs().format('YYYYMMDD')
-    const safeGrade = String(selectedGrade.value).replace(/[\\/:*?"<>|\s]/g, '_')
-    saveAs(blob, `${ymd}_${safeGrade}_全班错题卷.docx`)
-    ElMessage.success('全班错题卷已生成')
-  } catch (e) {
-    ElMessage.error('导出失败：' + (e.message || '未知错误'))
-  } finally {
-    exportingWrongPaper.value = false
-  }
-}
-
-async function handleExportWrongPaperStudent(row) {
-  if (!selectedGrade.value || !row?.involvedStudents?.length) return
-  exportingWrongPaper.value = true
-  try {
-    // 选第一个学生作为默认导出对象（个人卷：每次只生成一个学生的卷）
-    // 真实场景中老师通常会逐个学生点导出，所以这里一次只导一个
-    const stu = row.involvedStudents[0]
-    const blob = await exportWrongPaper({
-      grade: selectedGrade.value,
-      mode: 'student',
-      studentId: stu.id,
-      studentName: stu.name,
-      subject: diagSubject.value || '数学',
-      periodMode: periodMode.value,
-      periodOffset: periodOffset.value,
-    })
-    const ymd = dayjs().format('YYYYMMDD')
-    const safeName = String(stu.name || '学生').replace(/[\\/:*?"<>|\s]/g, '_')
-    saveAs(blob, `${ymd}_${safeName}_错题卷.docx`)
-    ElMessage.success(`${stu.name}的错题卷已生成`)
-  } catch (e) {
-    ElMessage.error('导出失败：' + (e.message || '未知错误'))
-  } finally {
-    exportingWrongPaper.value = false
-  }
-}
-
 async function openDrill(row) {
   if (!row) return
   drawerTag.value = row.tag
@@ -1135,47 +898,7 @@ function diagRowClass({ row }) {
   return row.blankCount > 0 ? 'diag-row--blank' : ''
 }
 
-async function handleExportHandout() {
-  if (classDiagnosis.value.length === 0 && !currentStudentDetail.value?.knowledgeDiagnosis?.length) return
-  // 重构：跳转到 HandoutPreview 备课工作台（不再直接下载 docx）。
-  // 老师可以在工作台切换模板、查看错题、编辑笔记、导 docx。
-  router.push({
-    name: 'HandoutPreview',
-    query: {
-      subject: diagSubject.value || '',
-      periodMode: periodMode.value,
-      periodOffset: periodOffset.value,
-    },
-  })
-}
 
-async function handleDistributeExam() {
-  // r110（负责人批准的对齐）：统一叫「重练卷」，指路文案更新到现状——
-  // 路径 B 原来只指移动端，现在 PC 学生档案的错题清单已能直接勾选组卷出 PDF（第 102 轮）。
-  try {
-    const { ElMessageBox } = await import('element-plus')
-    await ElMessageBox.confirm(
-      '<div style="line-height: 1.7;">' +
-      '<p style="font-weight: 600; margin: 4px 0;">给学生发重练卷，有三条路：</p>' +
-      '<p style="margin: 6px 0;"><b style="color: #6366F1;">① 周报自动（推荐，全量）</b><br/>' +
-      '周学习诊断报告已内含每位学生的错题重练卷，点「生成本周/本月报告」一键生成全部学生，下载打印即可发卷。</p>' +
-      '<p style="margin: 6px 0;"><b style="color: var(--wb-success);">② 错题清单勾选（按需）</b><br/>' +
-      '打开学生档案页，在下方错题清单勾选题目，点「生成重练卷」直接下载可打印 PDF（卷上带扫码答题二维码）。</p>' +
-      '<p style="margin: 6px 0;"><b style="color: var(--wb-text-secondary);">③ 移动端现场</b><br/>' +
-      '晚托现场用手机时，打开 App「错题本」勾选错题（最多 30 题）即可生成临时重练卷。</p>' +
-      '</div>',
-      '发「错题重练卷」',
-      {
-        confirmButtonText: '知道了',
-        cancelButtonText: '关闭',
-        type: 'info',
-        dangerouslyUseHTMLString: true
-      }
-    )
-  } catch (e) {
-    ElMessage.warning('发卷入口已取消')
-  }
-}
 
 function generatePeriodReport(mode) {
   if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
@@ -1550,23 +1273,6 @@ function knowledgeLevel(row) {
 .trend-switch__btn:hover{color:var(--wb-text)}
 .trend-switch__btn.is-on{background:#fff;color:var(--wb-primary);box-shadow:0 1px 2px rgba(16,24,40,.08)}
 .trend-note{margin:10px 0 0;color:var(--wb-text-tertiary);font-size:11.5px;line-height:1.6}
-.wrong-paper-section{margin-bottom:16px}
-.wrong-paper-card :deep(.el-button.is-text){font-size:11px}
-.wrong-paper-table{margin-top:8px}
-.wrong-paper-table :deep(.cell){padding:8px 6px}
-.wrong-q-cell{display:flex;flex-direction:column;gap:4px;min-width:0}
-.wrong-q-content{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.5;word-break:break-word}
-.wrong-q-tags{display:flex;flex-wrap:wrap;gap:4px}
-.error-rate{display:flex;flex-direction:column;align-items:center;line-height:1.2}
-.error-rate strong{font-size:14px;font-weight:700}
-.error-rate small{font-size:9px;color:var(--wb-text-tertiary);margin-top:2px}
-.error-rate.is-critical strong{color:var(--wb-danger)}
-.error-rate.is-critical{background:#fef2f2;border-radius:6px;padding:4px 0}
-.error-rate.is-warning strong{color:var(--wb-warning)}
-.error-rate.is-info strong{color:var(--wb-primary)}
-.error-rate.is-normal strong{color:var(--wb-text-secondary)}
-.rank-num{display:inline-block;min-width:24px;padding:2px 8px;border-radius:10px;background:var(--wb-bg-elevated);color:var(--wb-text-secondary);font-size:11px;font-weight:600}
-.rank-num.is-top{background:var(--wb-primary-soft);color:var(--wb-primary)}
 
 /* ── 成长对比 / 重练进步（2026-09-20 P0） ── */
 .growth-compare,.retry-progress{margin-bottom:16px}
@@ -1592,15 +1298,9 @@ function knowledgeLevel(row) {
 .recent-change .change-bad{color:var(--wb-danger)}
 .recent-change .change-new{color:var(--wb-warning)}
 .table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px;margin-top:2px}
-.error-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
 .row-actions{display:flex;gap:4px;justify-content:center}
 .muted{color:var(--wb-text-tertiary);font-size:11px}
-.wrong-paper-expand{padding:8px 12px;background:var(--wb-bg-elevated);border-radius:8px;margin:4px 0}
-.expand-row{display:flex;gap:12px;align-items:flex-start;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--wb-border-light)}
 .expand-row:last-child{border-bottom:0}
-.expand-label{flex-shrink:0;width:96px;color:var(--wb-text-tertiary);font-size:11px}
-.student-chips{display:flex;flex-wrap:wrap;gap:4px}
-.error-mini{display:flex;flex-wrap:wrap;gap:8px;font-size:11px}
 
 /* ── 学习概览 hero（2026-10-04）：数字一览，色板全取工作台既有 token ── */
 .hero-strip{display:flex;align-items:center;gap:22px;margin-bottom:16px;padding:16px 22px;border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}

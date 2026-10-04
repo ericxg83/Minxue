@@ -157,29 +157,6 @@ async function fetchSampleQuestions({ studentIds, kpName, periodStart, periodEnd
 }
 
 /**
- * 获取晚托班所有年级（去重，按 grade 排序）
- * 用于年级选择器下拉
- */
-export async function listGrades() {
-  const { rows } = await query(
-    `SELECT DISTINCT grade FROM ${TABLES.STUDENTS} WHERE grade IS NOT NULL AND grade != '' ORDER BY grade`
-  )
-  return rows.map(r => r.grade).filter(Boolean)
-}
-
-/**
- * 获取某年级下所有学生 ID
- */
-export async function listStudentIdsByGrade(grade) {
-  if (!grade) return []
-  const { rows } = await query(
-    `SELECT id FROM ${TABLES.STUDENTS} WHERE grade = $1`,
-    [grade]
-  )
-  return rows.map(r => r.id)
-}
-
-/**
  * 给一组 KP 建议批量生成 LLM 教学建议（年级 / 单生 两种 perspective）
  * 失败兜底：返回硬编码模板，不抛错，不让卡片空白
  *
