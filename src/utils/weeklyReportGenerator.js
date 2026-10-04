@@ -224,6 +224,37 @@ function renderMasteryDistribution(subjectDiagnosis) {
   </div>`
 }
 
+/**
+ * 重点薄弱知识点明细（错题≥2，按错误次数降序，最多 24 条）。
+ * 后端 knowledgeDiagnosis 返回全部知识点（实测可达 130+ 条），旧版学科页只用了
+ * subjectDiagnosis.topTags 每科 TOP5，绝大多数真实数据被丢弃。这里把「错得最多」的
+ * 一批知识点带正确率条展出（独立成页），提高报告数据密度与可信度。
+ */
+function renderKnowledgeDetail(knowledgeDiagnosis) {
+  const rows = (knowledgeDiagnosis || [])
+    .filter(k => k && (k.wrongCount || 0) >= 2)
+    .sort((a, b) => (b.wrongCount - a.wrongCount) || (a.accuracy - b.accuracy))
+    .slice(0, 24)
+  if (rows.length === 0) return ''
+  const trs = rows.map(k => {
+    const c = colorForAccuracy(k.accuracy)
+    const w = Math.max(2, Math.min(100, k.accuracy))
+    return `<tr>
+      <td class="kd-sub">${escapeHtml(k.subject)}</td>
+      <td class="kd-tag">${escapeHtml(k.tag)}</td>
+      <td class="kd-c kd-wrong">${k.wrongCount}/${k.totalCount}</td>
+      <td class="kd-barcell"><div class="kd-bar-track"><div class="kd-bar-fill" style="width:${w}%;background:${c}"></div></div></td>
+      <td class="kd-c kd-acc" style="color:${c}">${k.accuracy}%</td>
+    </tr>`
+  }).join('')
+  return `<div class="kd-card">
+    <table class="kd-table">
+      <thead><tr><th style="width:52px">学科</th><th>知识点</th><th class="kd-c" style="width:64px">错/总</th><th style="width:150px">正确率</th><th class="kd-c" style="width:52px">数值</th></tr></thead>
+      <tbody>${trs}</tbody>
+    </table>
+  </div>`
+}
+
 /** 价值点图标（简洁线性 SVG） */
 const VALUE_ICONS = {
   find: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none"><circle cx="11" cy="11" r="7" stroke="${T.primary}" stroke-width="2"/><path d="M16 16l4 4" stroke="${T.primary}" stroke-width="2" stroke-linecap="round"/></svg>`,
@@ -301,6 +332,8 @@ export function buildDiagnosisHTML(reportData) {
   const { student, period, stats, subjectDiagnosis = [], knowledgeDiagnosis = [], dailyTrend = [], prev = null, retryProgress = null } = reportData
   // 日维度趋势是否可用（mode=all / 无每日数据时 dailyTrend 为空，旧版会渲染一张空网格图）
   const hasTrend = Array.isArray(dailyTrend) && dailyTrend.some(d => d && d.accuracy != null)
+  // 是否有错题≥2 的知识点可展出（决定要不要单独开一页明细）
+  const hasKnowledgeDetail = (knowledgeDiagnosis || []).some(k => k && (k.wrongCount || 0) >= 2)
   const mode = period.mode || 'week'
   const weekNum = period.weekNum || (mode === 'week' ? dayjs(period.start).isoWeek() : null)
   const badgeLabel = mode === 'month'
@@ -486,6 +519,21 @@ export function buildDiagnosisHTML(reportData) {
   .kt-c{text-align:center}
   .mastery{display:inline-block;padding:3px 12px;border-radius:12px;font-size:11px;font-weight:600}
 
+  /* 重点薄弱知识点明细表 */
+  .kd-card{margin-top:6px}
+  .kd-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:2px}
+  .kd-table th{background:${T.bg};padding:7px 10px;text-align:left;font-weight:600;color:${T.textSec};border-bottom:1px solid ${T.border};font-size:11px}
+  .kd-table th.kd-c{text-align:center}
+  .kd-table td{padding:6px 10px;border-bottom:1px solid ${T.borderLight};color:${T.text};vertical-align:middle}
+  .kd-sub{color:${T.textSec};font-size:11px;white-space:nowrap}
+  .kd-tag{font-weight:500}
+  .kd-c{text-align:center}
+  .kd-wrong{font-weight:700;color:${T.danger};white-space:nowrap}
+  .kd-barcell{width:150px}
+  .kd-bar-track{height:8px;border-radius:4px;background:${T.borderLight};overflow:hidden}
+  .kd-bar-fill{height:100%;border-radius:4px}
+  .kd-acc{font-weight:700;white-space:nowrap}
+
   .advice{background:${T.accentSoft};border:1px solid #FCD9B6;border-radius:16px;padding:18px 22px;margin-top:6px;display:flex;gap:13px;align-items:flex-start}
   .advice-icon{flex-shrink:0;width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,${T.accent},#FBB040);display:flex;align-items:center;justify-content:center}
   .advice-t{font-size:14px;font-weight:800;color:${T.accent};margin-bottom:6px}
@@ -635,6 +683,23 @@ export function buildDiagnosisHTML(reportData) {
       </div>
     </div>
     <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '04' : '03'} -</span></div>
+  </div>
+  ` : ''}
+
+  ${(subjectDiagnosis.length > 0 && hasKnowledgeDetail) ? `
+  <!-- ═══ 知识点掌握度明细页（数据密度：错题≥2 的薄弱知识点，最多 24 项）═══ -->
+  <div class="page">
+    <div class="pad">
+      <div class="ph">
+        ${logoSm}
+        <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
+      </div>
+      <div class="sec-title"><span class="sec-num">03</span>知识点掌握度明细</div>
+      <div class="sec-sub">本周期错得最多的知识点，带正确率与错题量，供逐点巩固</div>
+
+      ${renderKnowledgeDetail(knowledgeDiagnosis)}
+    </div>
+    <div class="pf"><span>${BRAND.nameCn} · ${BRAND.slogan}</span><span>- ${hasCompare ? '05' : '04'} -</span></div>
   </div>
   ` : ''}
 

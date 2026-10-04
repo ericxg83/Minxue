@@ -108,6 +108,14 @@
 - ❕ 数据边界（提案）：payload **无「章节/错因」字段**（knowledgeDiagnosis 只有 subject/tag/wrongCount/accuracy）——要加章节/错因需改后端 `weeklyReport.js`（对方在飞）+ DB 查询，属 C 级，只提不擅做。学科诊断页只展 TOP5（后端 buildSubjectDiagnosis 截断），同样需后端才能扩。
 - 四道闸：单测 1589/1589｜lint 0 error（仅 2 条既存 warning）｜`dist_nightly_20261004r115q`｜可视化渲染自检 PNG 实测（对 PDF 产出物，真机 PNG 即最贴切冒烟）。
 
+**第 116q 轮（2026-10-04，本赛道）已交付：【PDF 产出物】新增「知识点掌握度明细」独立页（数据密度）**
+- 只读可视化质检的第二个发现（决定性）：后端 `knowledgeDiagnosis` 实测返回 **133 条**知识点（带 wrongCount/totalCount/accuracy），但旧版学科页只用了 `subjectDiagnosis.topTags` 每科 TOP5——**128 条真实数据被丢弃**。这正好是负责人要的「数据性内容多、细化、显得真实」，且零后端改动。
+- 新增 `renderKnowledgeDetail`（错题≥2、按错次降序、最多 24 项，带正确率条）+ 独立「03 知识点掌握度明细」页（`.page` 固定高 1123px overflow:hidden，24 行塑学科页会裁切，故单独成页）。
+- 重渲染自检：报告 3页→**4页**（封面/概览/学科诊断/知识点明细），明细页 24 行完整不裁，数据密度大幅提升。
+- 数据边界（再确认）：`questions` 表**无章节/错因列**（只有 question_type/ai_tags/confidence）——章节需 questions↔unit 关联（无列），错因需新采集（AI 分类）；均属 C 级后端/数据工作，只提不擅做。
+- ⚠️ 并发 hazard 实记：本轮首次编辑后，`weeklyReportGenerator.js` 被另一会话回退到 r115q 提交态（未提交的 r116q 改动被抹），已重新应用全部四处（函数/CSS/变量/新页）。教训：移动端 PDF 改动要快改快提，降低被并发 checkout 抹掉的风窗口。
+- 四道闸：单测 1585/1585｜lint 0 error（仅 2 条既存 warning）｜`dist_nightly_20261004r116q`（明细页内容已入 chunk）｜真机 PNG 渲染自检（4 页完整）。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到
