@@ -2,9 +2,14 @@ import axios from 'axios'
 import { createRateLimiter } from '../utils/aiRateLimiter.js'
 import { recordDegraded } from '../services/quotaSentinel.js'
 
-// 从 axios 实例的 baseURL 推断供应商名（供配额哨兵归因；未知域名回退为主机名）
-function supplierFromClient(client) {
-  const host = String(client?.defaults?.baseURL || '').toLowerCase()
+// 从请求 endpoint 推断供应商名（供配额哨兵归因；未知域名回退为主机名）
+// ⚠️ 2026-10-04 修复：原先读 axios client.defaults.baseURL —— 但 postWith429Retry 复用的是
+//    无 baseURL 的共享实例（axiosNoProxy/backupAxios），endpoint 每次调用才作为参数传入。
+//    拿 baseURL 恒为空 ⇒ 所有 AI 额度事件统统落到 'ai-provider' 兜底串，直接显示到工作台横幅
+//    （用户看到的「系统降级运行：ai-provider」即源于此，没有任何 SUPPLIER_LABEL 能命中）。
+//    改为按真实 endpoint 归因，魔搭/SenseNova/Gemini 等才能各自显示友好名称。
+function supplierFromEndpoint(endpoint) {
+  const host = String(endpoint || '').toLowerCase()
   if (host.includes('modelscope')) return 'modelscope'
   if (host.includes('sensenova')) return 'sensenova'
   if (host.includes('googleapis')) return 'gemini'
@@ -289,7 +294,7 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
         markModelExhausted(auth, body?.model, exhaustedTtlMs ?? msUntilEndOfDayUtc())
         // 配额哨兵（提案 1）：真·额度耗尽上报水位，只记录、不改「换 Key×模型组合」的既有语义。
         // 瞬时限流分支刻意不接——几秒即恢复的限流不值得挂 6 小时横幅。
-        recordDegraded(supplierFromClient(client), {
+        recordDegraded(supplierFromEndpoint(endpoint), {
           kind: 'quota-exhausted',
           detail: `model=${body?.model || '(unknown)'} key=…${String(auth).slice(-6)} ${String(err?.response?.data?.error?.message || err?.message || '').slice(0, 160)}`
         })
