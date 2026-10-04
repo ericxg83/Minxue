@@ -73,7 +73,11 @@ test('分享卡：原图态包含全名、品牌与全部数据块', () => {
   assert.match(html, /敏学成长中心/)
   assert.match(html, /MINXUE GROWTH CENTER/)
   assert.match(html, /让孩子的成长，看得见/)
-  assert.match(html, /WEEK 40/, '周徽章')
+  // 2026-10-04 第19轮改：周徽章由英文内部口径「WEEK 40」改为家长看得懂的人话。
+  // 原断言只是**记录当时行为**（内部 ISO 周数），不是产品判断；下方 periodLine
+  // 已另行断言日期区间，故此处改为断言"人话周期标签"，并顺带守住"不许回退成英文"。
+  assert.match(html, />本周</, '周徽章应为家长看得懂的「本周」')
+  assert.doesNotMatch(html, /WEEK \d+/, '家长可见的卡片不得再出现英文周数')
   assert.match(html, /82\.6%/, '正确率')
   assert.match(html, /09\/28 ~ 10\/04/, '周期线')
   assert.match(html, /<svg/, '周模式必须有趋势图')
@@ -119,7 +123,10 @@ test('分享卡：月模式隐藏趋势，徽章显示月份', () => {
   }
   const html = buildShareCardHTML(report, { maskName: false })
   assert.ok(!html.includes('正确率趋势'), '月模式没有每日趋势块')
-  assert.match(html, /9月/, '月份徽章')
+  // 2026-10-04 第19轮改：offset=0 的月模式徽章由「9月」改为「本月」（更口语）。
+  // 往期月份（offset>=2）仍显示具体月份，见 test/shareCardParentCopy.test.mjs。
+  assert.match(html, />本月</, '本月的月份徽章应为「本月」')
+  assert.doesNotMatch(html, />\d+月</, 'offset=0 时不该显示具体月份数字')
   assert.match(html, /较上一周期/, '月模式仍渲染对比')
 })
 
