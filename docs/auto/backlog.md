@@ -1583,3 +1583,10 @@ KPI 条 + 薄弱知识点 + 最近作业/重练双栏）、移动端首页（CTA
   请以 git 编辑器历史恢复。教训：对「在制文件」连 checkout 都不该做——定性只用
   git show 导出到临时目录比对，绝不动工作区。
 - 分享卡取数失败优雅降级（a61d3f8）与徽章说人话（6a71793）已合流验证。
+
+## 第 120 轮（2026-10-04）：例行巡检——全绿 + 生产安全态势复核
+
+- 全量 1622/1622（移动端赛道已把分享卡断言同步落库 8759c7e）；lint 9e/155w；构建 r120；
+  route_sweep 0/16 + render_smoke 8/8 + _r91_smoke 33/33。
+- 生产侧复核：health 200；**CORS 拦截持续生效**（evil.com Origin 仍被拒）——⑰⑱ 整改态势稳定。
+- 在制区：仅 QuestionDetailPanel.vue + reviewExcludeNoUndo.test.mjs（并行会话，未碰）。
