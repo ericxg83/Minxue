@@ -1613,3 +1613,8 @@ _r91_smoke 33/33。首轮 sweep 撞上后端死亡窗口（16/16 全 500），�
 
 npm test 1626/1626｜lint 9e/155w｜构建 r124｜route_sweep 0/16 + render_smoke 8/8 +
 _r91_smoke 33/33（首轮撞后端死亡窗口 + shell 变量抖动，分步重跑全绿）。
+
+## 第 125 轮（2026-10-04）：例行巡检——全绿
+
+npm test 1626/1626｜lint 9e/155w｜构建 r125｜route_sweep 0/16 + render_smoke 8/8 +
+_r91_smoke 33/33。无新提交、无异常。
