@@ -881,3 +881,43 @@ API/数据库约束，按要求只提案不动手）：
 
 建议优先级：⑨-1（数据重复，老师可见）> ⑨-5（双倍累计）> ⑨-2/⑨-3/⑨-4 > ⑨-6。
 —— 等负责人裁决后逐项执行（每项独立一轮 + 回归锁）。
+
+### 提案⑩ 服务端数据访问层实测（2026-10-04，常驻巡检赛道追加）
+
+只读实测，生产库零写入。探针（gitignore 的 `server/_*` 临时件，可按描述重写）：
+`_diag_infra_health_1004.mjs`（表/索引/膨胀/扫描）、`_diag_seqscan_1004.mjs`（索引清单+放大倍数）、
+`_diag_students_explain_1004.mjs`（EXPLAIN 实测 + 等价性验证）。数据库总量仅 32 MB / 51 张表。
+
+**⑩-1（A 级，已实测等价，可直接落地）`GET /api/students` 的 6×N 相关子查询**
+位置 `server/index.js:1801-1811`。21 个学生 → 6×21=126 次子查询，其中 5 次打在 wrong_questions 上。
+`COALESCE(w.lifecycle_status,'new')='mastered'`（1808 行）是**表达式包列**，index 永远用不上；
+EXPLAIN 显示 SubPlan 6 `Rows Removed by Filter: 53`（该生 53 行全读再滤）。
+EXPLAIN ANALYZE 实测两版：
+
+| 版本 | Execution Time | Buffers shared hit | 估算 cost |
+|---|---|---|---|
+| 现行 6×N 相关子查询 | **3.269 ms** | 2239 | 297925 |
+| wrong_questions 预聚合一次 + LEFT JOIN | **1.164 ms** | 297 | 19890 |
+
+→ 快 2.8 倍、缓冲命中少 7.5 倍。**等价性已逐行逐列验证通过**（两版结果 JSON 完全一致）。
+注意 `COALESCE(lifecycle_status,'new')='mastered'` 与 `lifecycle_status='mastered'` 语义等价
+（NULL→'new' 永远 ≠ 'mastered'），改写时可安全去掉 COALESCE。
+**测试缺口**：`mastered_count / total_error_count / last_wrong_at / recent_wrong_count / practice_count`
+五个派生字段在 `test/` 下**零覆盖**——这正是该 N+1 长期未被发现的原因。落地时必须补口径锁。
+边界：`server/index.js` 的非批改部分属「服务端基础设施」赛道（本次已认领），
+但返回体被移动端与工作台共用，改完须双端目测。
+
+**⑩-2（C 级，需拍板）4 个热点列无索引**：实测缺 `tasks.created_at`、`questions.lifecycle`、
+`judgements.task_id`、`question_assets.status`。其中 `questions.lifecycle` 最值得补——
+它是错题生命周期主字段（长期记忆铁律 2），3011 行表每次过滤全表扫。
+`judgements`（6544 行，最大的表）按 task 查审计也全表扫。
+⛔ 建索引属 DB Schema 变更，按 AGENTS.md 禁止事项第 1 条与 C 级红线，未动手。
+
+**⑩-3（提案）8 个零扫描非唯一索引**（`idx_kp_synonyms` 56kB、`idx_question_cache_phash` 56kB 等），
+只报不删；删索引同属 C 级。`idx_question_cache_phash` 零扫描需先确认是否已被
+`question_cache` 并发击穿修复（in-flight Map）改写了查询形态，别误删。
+
+**⑩-4（提案）把 DB 层纳入夜间巡检**：`scripts/nightlyAudit.mjs` 自报盲区第 3 条
+「数据库实际结构与静态 Schema 的差异未校验」至今未闭环。本轮的 3 个探针可直接收编进
+`server/scripts/`（只读），纳入每日 03:30 夜间巡检，避免盲区长期敞着。
+⛔ 未动 `scripts/nightlyAudit.mjs`——「仓库卫生与门禁基线」是他人赛道，等其空闲再收编。
