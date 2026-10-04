@@ -1590,3 +1590,9 @@ KPI 条 + 薄弱知识点 + 最近作业/重练双栏）、移动端首页（CTA
   route_sweep 0/16 + render_smoke 8/8 + _r91_smoke 33/33。
 - 生产侧复核：health 200；**CORS 拦截持续生效**（evil.com Origin 仍被拒）——⑰⑱ 整改态势稳定。
 - 在制区：仅 QuestionDetailPanel.vue + reviewExcludeNoUndo.test.mjs（并行会话，未碰）。
+
+## 第 121 轮（2026-10-04）：合流验证——分享卡趋势图边界修复
+
+- 移动端赛道 c861083：整周只批改 1 天时不再画「只剩一个点」的空趋势图（产出物质量）。
+- 合流验证：npm test **1626/1626**｜lint 9e/155w｜构建 r121｜route_sweep 0/16 +
+  render_smoke 8/8 + _r91_smoke 33/33 + 生产 health 200。
