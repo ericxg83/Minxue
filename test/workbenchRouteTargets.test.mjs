@@ -144,3 +144,74 @@ test('学生档案页「还没有作业记录」时不再给会白屏的按钮�
   assert.match(src, /<div v-if="nextAction\.cta" class="next-action__cta">/,
     'CTA 容器要按 nextAction.cta 有无来渲染：空 cta 会渲染出一个空白按钮')
 })
+
+// ─────────────────── ③ 「能解析」不等于「跳对地方」（r141） ───────────────────
+//
+//⛔ 前两条锁查不出 r141 这两个真缺陷，因为它们的路由**都存在**、都能解析：
+//   ① `NextActions.vue` 的三条动作 run() 一律 push('/students') —— 那是学生**列表**页，
+//      与「发重练卷」毫无关系；老师点完还得自己在列表里再找一遍这个学生。
+//   ② knowledge 动作 push('/weekly-report') = 跳本页自己 ⇒ 点了毫无反应，
+//      视觉上与「坏掉的按钮」无异，但它不报错、不白屏，前两条锁全部放行。
+//
+// ⇒本组判据：**动作的跳转目标不得是它自己所在的那一页**（点了等于没点）。
+//   反向自检内联在下面，每条都在坏样本上验证过会红。
+
+const NEXT_ACTIONS = 'src/workbench/components/diagnosis/NextActions.vue'
+
+/** 诊断页（/weekly-report）里出现的、指向诊断页自身的跳转目标 */
+function selfJumpTargets(src) {
+  const code = stripComments(src)
+  const out = []
+  for (const m of code.matchAll(/router\.(?:push|replace)\(\s*\{?\s*path:\s*'\/weekly-report'/g)) {
+    out.push({ at: m.index, text: m[0] })
+  }
+  return out
+}
+
+test('⛔ 动作不得跳回它自己所在的那一页（点了等于没点，但前两条锁查不出来）', () => {
+  // 反向自检：坏样本必须被判红，否则本锁在历史修复合入后就成了空锁
+  const badSample = `
+    // 注释里的 to: '/weekly-report' 不算命中
+    function run(action) {
+      if (action.id === 'knowledge') {
+        router.push({ path: '/weekly-report' })
+      }
+      router.push({ path: '/students' })
+    }`
+  assert.equal(selfJumpTargets(badSample).length, 1,
+    '反向自检失效：跳本页的样本没被抓住，本锁已退化为空锁')
+
+  const actual = selfJumpTargets(readFileSync(join(ROOT, NEXT_ACTIONS), 'utf8'))
+  assert.deepEqual(
+    actual.map((a) => a.text), [],
+    `${NEXT_ACTIONS} 里有动作跳回本页（/weekly-report）——点了没有任何反应，看着像坏按钮`
+  )
+})
+
+test('⛔ 带 cta 的动作要么有落点、要么显式禁用，不许「有 CTA 却跳去无关的地方」', () => {
+  const code = stripComments(readFileSync(join(ROOT, NEXT_ACTIONS), 'utf8'))
+  // 动作对象里必须出现 to（去某个具体地方）或 disabled: true（明说现在点不了）
+  const actionBlocks = [...code.matchAll(/list\.push\(\{([\s\S]*?)\}\)/g)].map((m) => m[1])
+  assert.ok(actionBlocks.length >= 3, `只抠出 ${actionBlocks.length} 个动作，提取器疑似失效`)
+
+  const orphans = actionBlocks.filter(
+    (b) => !/\bto:/.test(b) && !/disabled:\s*true/.test(b)
+  )
+  assert.deepEqual(
+    orphans.map((b) => (b.match(/id:\s*'([^']+)'/) || [])[1] || b.slice(0, 40)), [],
+    '这些动作既没有 to（跳去哪儿）也没有 disabled: true（明说不可点）—— 属于点了没反应的坏按钮'
+  )
+})
+
+test('⛔ 诊断动作清单必须接住学生上下文，否则跳过去落不到人身上', () => {
+  const code = stripComments(readFileSync(join(ROOT, NEXT_ACTIONS), 'utf8'))
+  // r141：三条动作全push('/students')（学生列表页）而不是这名学生的档案页。
+  // 判据：组件必须声明 studentId prop，且落点由它拼出（而不是硬编码列表路径）。
+  assert.match(code, /studentId:\s*\{\s*type:\s*String/, '组件没有接 studentId，无法定位到具体学生')
+  assert.match(code, /\/students\/\$\{/, '落点应由 studentId 拼出（/students/:id），不能硬编码学生列表页')
+
+  // 调用方必须真的把它传下来 —— prop 声明了但父组件没传，等于仍然落不到人身上
+  const caller = stripComments(readFileSync(join(ROOT, 'src/workbench/views/WeeklyReportWorkbench.vue'), 'utf8'))
+  assert.match(caller, /:student-id="selectedStudentId"/,
+    '学习诊断页没把 selectedStudentId 传给动作清单 —— prop 声明了但没传，落点仍会丢学生')
+})

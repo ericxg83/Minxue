@@ -8,7 +8,6 @@
       >
         <template #actions>
           <ActionButton
-            v-if="viewMode === 'single'"
             :disabled="!selectedStudentId"
             :loading="generating"
             @click="handleGenerateCurrent"
@@ -26,10 +25,7 @@
       </PageHeader>
 
       <FilterBar class="diagnosis-filter">
-        <template #leading><el-segmented v-model="viewMode" :options="viewModeOptions" /></template>
-        <WorkbenchSelect v-if="viewMode === 'grade'" v-model="selectedGrade" :options="gradeOptions" width="140px" aria-label="按年级筛选" placeholder="选择年级" />
-        <WorkbenchSelect v-if="viewMode === 'single'" v-model="selectedStudentId" :options="studentOptions" width="180px" aria-label="选择学生" placeholder="选择学生" />
-        <WorkbenchSelect v-if="viewMode === 'grade'" v-model="diagSubject" :options="diagSubjectOptions" width="120px" aria-label="按学科筛选" />
+        <WorkbenchSelect v-model="selectedStudentId" :options="studentOptions" width="180px" aria-label="选择学生" placeholder="选择学生" />
         <el-segmented v-model="periodMode" :options="periodModeOptions" />
         <WorkbenchSelect v-if="periodMode !== 'all'" v-model="periodOffset" :options="offsetOptions" width="120px" aria-label="时间偏移" />
         <template #actions><span class="filter-note">{{ filterNoteText }}</span></template>
@@ -40,382 +36,311 @@
            正确率/错题数且可点击进诊断）已完整覆盖选人与横向对比两个诉求，卡片排信息量反而最低。
            选人入口保留：下拉（快）+ 列表行点击（带上下文）。 -->
 
-      <template v-if="viewMode === 'single'">
-        <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
-             与家长分享卡同构，正确率圆环 + 关键 KPI 一眼读数） -->
-        <section v-if="!selectedStudentId && reportsWithData.length" class="hero-strip" aria-label="全班学习概览">
-          <div class="hero-ring-wrap">
-            <div class="hero-ring" :style="heroRingStyle(aggregateStats.accuracy)"><b :class="accuracyTone(aggregateStats.accuracy)">{{ aggregateStats.accuracy }}%</b></div>
-            <span class="hero-ring-label">全班整体正确率</span>
+      <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
+           与家长分享卡同构，正确率圆环 + 关键 KPI 一眼读数） -->
+      <section v-if="!selectedStudentId && reportsWithData.length" class="hero-strip" aria-label="全班学习概览">
+        <div class="hero-ring-wrap">
+          <div class="hero-ring" :style="heroRingStyle(aggregateStats.accuracy)"><b :class="accuracyTone(aggregateStats.accuracy)">{{ aggregateStats.accuracy }}%</b></div>
+          <span class="hero-ring-label">全班整体正确率</span>
+        </div>
+        <div class="hero-main">
+          <div class="hero-caption"><strong>全班概览</strong><span>{{ periodLabel }} · 共 {{ summaryData?.reports?.length || 0 }} 名学生</span></div>
+          <div class="hero-kpis">
+            <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
+            <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
+            <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
+            <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已记住</span></div>
+            <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>还在攻克</span></div>
           </div>
-          <div class="hero-main">
-            <div class="hero-caption"><strong>全班概览</strong><span>{{ periodLabel }} · 共 {{ summaryData?.reports?.length || 0 }} 名学生</span></div>
-            <div class="hero-kpis">
-              <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
-              <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
-              <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
-              <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已记住</span></div>
-              <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>还在攻克</span></div>
-            </div>
-            <TrophyBar
-              :mastered="aggregateStats.masteredCount"
-              :basic="aggregateStats.basicMasteredCount"
-              :todo="aggregateStats.notStartedCount"
-              :practiced="aggregateStats.practicedCount"
-            />
-          </div>
-        </section>
-
-        <section v-if="!selectedStudentId" class="diagnosis-layout">
-          <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
-            <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
-            <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
-            <EmptyState
-              v-else-if="summaryError"
-              :icon="WarningFilled"
-              title="学习诊断数据加载失败"
-              :description="`${summaryError}。请检查网络后重试 —— 这不代表本周期没有批改数据。`"
-            >
-              <template #actions>
-                <el-button size="small" type="primary" @click="loadSummary">重试</el-button>
-              </template>
-            </EmptyState>
-            <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
-            <div v-else class="student-diagnosis-list">
-              <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
-                <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
-                <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
-                <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
-                <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
-                <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
-                <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
-                <el-icon class="row-arrow"><ArrowRight /></el-icon>
-              </article>
-            </div>
-          </ContentCard>
-        </section>
-
-        <template v-else>
-          <!-- r134 布局骨架（按 03-mockup-v2 重做）：左主栏 + 右侧操作栏。
-               r133 我把内容全铺成了通栏长条 —— 视觉上像一张Excel 表，
-               信息密度上去了但**没有视线的落点**。mockup 的核心是那条竖直分界：
-               左边是「诊断」（是什么情况），右边是「行动」（接下来做什么），
-               视线自然从左扫到右，形成「看问题 → 找动作」的动线。
-               右侧栏固定 372px：动作卡都是短条目，窄栏反而更易扫读。 -->
-          <div class="dx">
-            <div class="dx__main">
-
-          <!-- 单生学习概览 hero：选中学生后的第一眼数字（与分享卡 hero 同构） -->
-          <section v-if="singleHero" class="hero-strip" aria-label="学生学习概览">
-            <div class="hero-ring-wrap">
-              <div class="hero-ring" :style="heroRingStyle(singleHero.acc)"><b :class="accuracyTone(singleHero.acc)">{{ singleHero.accText }}</b></div>
-              <span class="hero-ring-label">整体正确率</span>
-            </div>
-            <div class="hero-main">
-              <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
-              <div class="hero-kpis">
-                <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
-                <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
-                <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
-                <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已记住</span></div>
-                <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>还在攻克</span></div>
-              </div>
-              <TrophyBar
-                :mastered="singleHero.masteredCount"
-                :basic="singleHero.basicMasteredCount"
-                :todo="singleHero.notStartedCount"
-                :practiced="singleHero.practicedCount"
-              />
-            </div>
-          </section>
-
-          <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）。
-               放在 hero 正下方（第一屏）而不是趋势图之后 —— 实测两列卡片原本落在
-               1281px，第一屏完全看不到，等于白做。叙事顺序也更像诊断：
-               先「已拿下多少」→ 再「为什么错」→ 再「接下来做什么」→ 最后才是趋势与明细。 -->
-          <ContentCard
-            class="dx__errcause"
-            title="错因分布：为什么错"
-            :description="currentStudentDetail?.errorDistribution?.length
-              ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 占前三类的比例最高，优先处理`
-              : '错因会在每周一凌晨自动回填，或随批改逐步补齐'"
-          >
-            <ErrorCauseBars
-              :items="currentStudentDetail?.errorDistribution || []"
-              @select="onErrorCauseClick"
-            />
-          </ContentCard>
-          <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
-               它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
-               point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
-               字段名对不上，柱子恒为 4% 空高、标签恒为 '-'，等于一张坏掉的图；
-               且整块包在 v-if="periodMode === 'week'" 里，月/全部模式根本没图。
-               保留两张图只会让老师困惑，故直接删旧留新（小而美：能删就删）。
-
-               r132：默认「按天」。按周会把剧烈波动抹平 —— 实测陆晨曦 09-10
-               只有 2/12 题（16.7%），按周看完全被平均掉。老师要看的正是
-               「哪天崩了」，所以按天是默认，周是备选。 -->
-          <ContentCard
-            v-if="currentStudentDetail?.stats"
-            class="trend-line-card"
-            title="正确率走势"
-            :description="`${currentStudentName} · 只看有批改记录的时段 · 没批改的日子不计入`"
-          >
-            <template #actions>
-              <div class="trend-switch">
-                <button
-                  v-for="opt in trendGranularityOptions"
-                  :key="opt.key"
-                  type="button"
-                  class="trend-switch__btn"
-                  :class="{ 'is-on': trendGranularity === opt.key }"
-                  :aria-pressed="trendGranularity === opt.key"
-                  @click="trendGranularity = opt.key"
-                >{{ opt.label }}</button>
-              </div>
-            </template>
-            <TrendLineChart :points="trendChartPoints" />
-            <p v-if="trendChartPoints.length" class="trend-note">
-              {{ trendSummary.description }}
-            </p>
-          </ContentCard>
-
-
-          <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
-          <ContentCard
-            v-if="periodMode !== 'all' && currentStudentDetail?.prev"
-            class="growth-compare"
-            title="成长对比"
-            :description="`${currentStudentName} · 本${periodMode === 'week' ? '周' : '月'} vs ${lastPeriodLabel}`"
-          >
-            <div v-if="prevHasData" class="compare-grid">
-              <div v-for="item in growthCompareItems" :key="item.key" class="compare-item">
-                <div class="compare-item__label">{{ item.label }}</div>
-                <div class="compare-item__value">{{ item.currentText }}</div>
-                <div :class="['compare-item__delta', item.tone]">
-                  <span v-if="item.prevText">{{ item.deltaText }}</span>
-                  <span v-else>上周无数据</span>
-                </div>
-                <div class="compare-item__prev">上周 {{ item.prevText }}</div>
-              </div>
-            </div>
-            <EmptyState
-              v-else
-              title="上一周期暂无学习数据"
-              description="本周期有学习记录，但上一周期没有进入批改的数据，暂无法对比。"
-            />
-          </ContentCard>
-
-          <!-- 重练进步：本周期重练卷判题结果 + 错题生命周期推进 -->
-          <ContentCard
-            v-if="retryProgressVisible"
-            class="retry-progress"
-            title="重练进步"
-            :description="`重练卷批改完成后推进错题掌握状态 · ${currentStudentName}`"
-          >
-            <div class="retry-grid">
-              <div class="retry-item">
-                <div class="retry-item__value">{{ retryProgress.examCount }}</div>
-                <div class="retry-item__label">完成重练卷</div>
-              </div>
-              <div class="retry-item">
-                <div class="retry-item__value">{{ retryProgress.retriedCount }}</div>
-                <div class="retry-item__label">重练题目</div>
-              </div>
-              <div class="retry-item">
-                <div class="retry-item__value" :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 80 }">{{ retryProgress.retryAccuracy }}<small>%</small></div>
-                <div class="retry-item__label">重练正确率</div>
-              </div>
-              <div class="retry-item">
-                <div class="retry-item__value" :class="{ 'is-good': retryProgress.pushedToBasic > 0 }">{{ retryProgress.pushedToBasic }}</div>
-                <div class="retry-item__label">推进到基本掌握</div>
-              </div>
-            </div>
-            <div class="retry-note">
-              <span>重练答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题</span>
-            </div>
-          </ContentCard>
-
-          <!-- ⛔ 知识点表从「全量 133 行」改为「默认 5 行 + 可展开」（r134）。
-               实测全量渲染高度 **7622px** —— 一张卡把整个主栏拉成一条看不到头的长带，
-               这正是负责人说的「长条通栏显得太丑」的元凶：
-               ① 视觉上，主栏被一张无限长的表占满，右栏的 sticky 完全失去意义；
-               ② 133 行里绝大多数是「错 1 次、正确率 90%+」的知识点，
-                  排在后面根本不会被看到，等于占位。
-               mockup 的做法是只列最该练的 5 行 + 一个「全部」入口 —— 保留信息可达性，
-               但把首屏还给真正要处理的问题。 -->
-          <ContentCard
-            v-if="currentStudentDetail?.knowledgeDiagnosis?.length"
-            class="knowledge-diagnosis"
-            title="最该练的知识点"
-            :description="`按错误次数排序 · 共 ${weakKnowledge.length} 个知识点出过错 · ${
-              weakKnowledgeCount > TOP_KNOWLEDGE_ROWS
-                ? `先看最严重的 ${TOP_KNOWLEDGE_ROWS} 个`
-                : '已全部列出'}`"
-            flush
-          >
-            <template #actions>
-              <button v-if="weakKnowledge.length > TOP_KNOWLEDGE_ROWS" type="button" class="kp-toggle" @click="knowledgeExpanded = !knowledgeExpanded">
-                {{ knowledgeExpanded ? '只看最严重的' : `展开全部 ${weakKnowledge.length} 个` }}
-              </button>
-            </template>
-            <DataTable :data="knowledgeRows" size="small" empty-text=" ">
-              <el-table-column prop="tag" label="知识点" min-width="180"><template #default="{ row }"><div class="knowledge-name"><strong>{{ row.tag }}</strong><small>{{ row.subject || '其他' }}</small></div></template></el-table-column>
-              <el-table-column label="当前掌握" width="130"><template #default="{ row }"><StatusTag :tone="knowledgeLevel(row).key === 'critical' ? 'danger' : knowledgeLevel(row).key === 'attention' ? 'warning' : 'success'">{{ knowledgeLevel(row).label }} · {{ row.accuracy }}%</StatusTag></template></el-table-column>
-              <el-table-column label="错题表现" width="130"><template #default="{ row }"><strong :class="{ 'danger-text': row.wrongCount >= 3 }">最近错误 {{ row.wrongCount }} 次</strong><small class="table-sub">共 {{ row.totalCount }} 题</small></template></el-table-column>
-              <el-table-column label="最近变化" width="150"><template #default="{ row }"><div v-if="knowledgeChange(row).prevWrong != null" class="recent-change"><strong :class="knowledgeChange(row).tone === 'down' ? 'change-good' : knowledgeChange(row).tone === 'up' ? 'change-bad' : ''">{{ knowledgeChange(row).deltaText }}</strong><small class="table-sub">上周 {{ knowledgeChange(row).prevWrong }} 次</small></div><div v-else class="recent-change"><strong class="change-new">本周新增</strong><small class="table-sub">上周未出现</small></div></template></el-table-column>
-              <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><div class="table-action"><span>{{ getDiagnosisAction(row) }}</span><el-button text type="primary" @click.stop="openWrongBook">加入重练</el-button></div></template></el-table-column>
-            </DataTable>
-            <p v-if="!knowledgeExpanded && weakKnowledge.length > TOP_KNOWLEDGE_ROWS" class="kp-note">
-              其余 {{ weakKnowledge.length - TOP_KNOWLEDGE_ROWS }} 个知识点多为「错 1 次、正确率 90% 以上」，
-              不占首屏；点右上角可展开查看。
-            </p>
-          </ContentCard>
-
-          <ContentCard v-if="studentSuggestions.length" class="student-suggestions" title="本周备课建议（按 KP）" :description="`${currentStudentName} · ${periodLabel}`" flush>
-            <div class="student-suggestion-list">
-              <article v-for="(s, idx) in studentSuggestions" :key="s.kpName" class="student-suggestion-card">
-                <header>
-                  <div class="rank-pill small">{{ idx + 1 }}</div>
-                  <strong>{{ s.kpName }}</strong>
-                  <span class="meta-inline">错题 {{ s.wrongCount }} · 空题 {{ s.blankCount }}</span>
-                </header>
-                <div v-if="s.errorDistribution?.length" class="mini-error-dist">
-                  <div v-for="e in s.errorDistribution.slice(0, 3)" :key="e.errorType" class="mini-error-row">
-                    <span :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
-                    <span class="mini-error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
-                  </div>
-                </div>
-                <footer v-if="s.teachingAdvice">
-                  <span class="advice-label">辅导建议：</span>
-                  <strong>{{ s.teachingAdvice }}</strong>
-                </footer>
-              </article>
-            </div>
-          </ContentCard>
-          <EmptyState v-else-if="!generating && currentStudentDetail" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
-            </div>
-
-            <!-- ── 右侧操作栏：行动 + 战绩 + 产出 ── -->
-            <aside class="dx__rail">
-              <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干" flush>
-                <div class="dx__rail-body">
-                  <NextActions
-                    :error-causes="currentStudentDetail?.errorDistribution || []"
-                    :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
-                    :basic-count="singleHero?.basicMasteredCount || 0"
-                    :todo-count="singleHero?.notStartedCount || 0"
-                    :zero-accuracy-tags="zeroAccuracyTags"
-                  />
-                </div>
-              </ContentCard>
-
-              <ContentCard v-if="retryProgressVisible" title="重练战绩" :description="`${retryProgress.examCount} 份卷 · ${retryProgress.retriedCount} 题`" flush>
-                <div class="dx__rail-body">
-                  <div class="rail-stats">
-                    <div class="rail-stat">
-                      <b :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 60 }">{{ retryProgress.retryAccuracy }}<small>%</small></b>
-                      <span>重练正确率</span>
-                    </div>
-                    <div class="rail-stat">
-                      <b class="is-good">{{ retryProgress.pushedToBasic }}</b>
-                      <span>推进到已记住</span>
-                    </div>
-                  </div>
-                  <p class="rail-note">
-                    答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题
-                  </p>
-                </div>
-              </ContentCard>
-
-              <ContentCard title="发给家长" description="老师转发用，家长只看产出物" flush>
-                <div class="dx__rail-body">
-                  <ParentOutputCard
-                    :student-name="currentStudentName"
-                    :total-questions="singleHero?.totalQuestions || 0"
-                    :correct-count="currentStudentDetail?.stats?.correctCount || 0"
-                    :accuracy="singleHero?.acc"
-                    :secured="singleHero?.securedCount || 0"
-                    :mastered="singleHero?.masteredCount || 0"
-                    :new-wrong="singleHero?.newWrongCount || 0"
-                  />
-                </div>
-              </ContentCard>
-            </aside>
-          </div>
-        </template>
-      </template>
-
-      <section v-else class="grade-suggestions-section">
-        <ContentCard
-          :title="`「${selectedGrade || '年级'}」本周备课建议`"
-          :description="`${periodLabel} · ${diagSubject || '数学'} · ${gradeSuggestionsMeta?.studentCount ?? '-'} 名学生`
-            + (gradeSuggestionsError ? ` · 加载失败：${gradeSuggestionsError}` : '')"
-          flush
-        >
-          <template #actions>
-            <ActionButton :loading="loadingGradeSuggestions" @click="retryGradeSuggestions">刷新</ActionButton>
-          </template>
-          <div v-if="loadingGradeSuggestions" class="loading-stack"><el-skeleton v-for="index in 3" :key="index" :rows="3" animated /></div>
-          <EmptyState
-            v-else-if="!gradeSuggestions.length"
-            :icon="Reading"
-            title="该年级本周暂无共性薄弱知识点"
-            description="切换时间范围或学科继续查看，或等待新批改数据进入。"
+          <TrophyBar
+            :mastered="aggregateStats.masteredCount"
+            :basic="aggregateStats.basicMasteredCount"
+            :todo="aggregateStats.notStartedCount"
+            :practiced="aggregateStats.practicedCount"
           />
-          <div v-else class="grade-suggestion-list">
-            <article v-for="(s, idx) in gradeSuggestions" :key="s.kpName" class="grade-suggestion-card">
-              <header class="card-header">
-                <div class="rank-pill">{{ idx + 1 }}</div>
-                <div class="kp-name-block">
-                  <h3>{{ s.kpName }}</h3>
-                  <div class="kp-meta">
-                    <StatusTag :label="s.subject || '其他'" tone="neutral" />
-                    <span class="meta-item"><b>{{ s.wrongCount }}</b> 道错题</span>
-                    <span class="meta-item"><b>{{ s.blankCount }}</b> 道空题</span>
-                    <span class="meta-item"><b>{{ s.studentCount }}</b> 名学生</span>
-                  </div>
-                </div>
-              </header>
+        </div>
+      </section>
 
-              <section v-if="s.errorDistribution?.length" class="card-section error-dist">
-                <label>错因分布</label>
-                <div class="error-bars">
-                  <div v-for="e in s.errorDistribution" :key="e.errorType" class="error-bar-row">
-                    <span class="error-type" :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
-                    <el-progress :percentage="e.ratio" :color="errorTypeColor(e.errorType)" :stroke-width="10" style="flex: 1; margin: 0 10px;" />
-                    <span class="error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
-                  </div>
-                </div>
-              </section>
-
-              <section v-if="s.sampleQuestions?.length" class="card-section sample-list">
-                <label>典型错题（讲义例题）</label>
-                <div v-for="(q, qi) in s.sampleQuestions" :key="q.id" class="sample-item">
-                  <div class="sample-q">{{ qi + 1 }}. {{ q.content }}</div>
-                  <div class="sample-meta">
-                    <span class="sample-stu">{{ q.studentName }}</span>
-                    <span v-if="q.isBlank" class="sample-answer sample-answer--blank">空题未作答</span>
-                    <span v-else class="sample-answer">作答：{{ q.studentAnswer || '未填写' }}</span>
-                    <span class="sample-answer">正确：{{ q.correctAnswer || '—' }}</span>
-                  </div>
-                  <div class="sample-reason">
-                    <StatusTag v-if="!q.isBlank" :tone="q.errorType ? 'danger' : 'info'">
-                      {{ q.errorType || '未标注' }}{{ q.errorReason ? `：${q.errorReason}` : '' }}
-                    </StatusTag>
-                    <StatusTag v-else tone="warning">空题（建议当堂提问）</StatusTag>
-                  </div>
-                </div>
-              </section>
-
-              <footer v-if="s.teachingAdvice" class="card-footer">
-                <el-icon><Reading /></el-icon>
-                <span>教学建议：<strong>{{ s.teachingAdvice }}</strong></span>
-              </footer>
+      <section v-if="!selectedStudentId" class="diagnosis-layout">
+        <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
+          <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
+          <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
+          <EmptyState
+            v-else-if="summaryError"
+            :icon="WarningFilled"
+            title="学习诊断数据加载失败"
+            :description="`${summaryError}。请检查网络后重试 —— 这不代表本周期没有批改数据。`"
+          >
+            <template #actions>
+              <el-button size="small" type="primary" @click="loadSummary">重试</el-button>
+            </template>
+          </EmptyState>
+          <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
+          <div v-else class="student-diagnosis-list">
+            <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
+              <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
+              <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
+              <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
+              <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
+              <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
+              <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
+              <el-icon class="row-arrow"><ArrowRight /></el-icon>
             </article>
           </div>
         </ContentCard>
       </section>
+
+      <template v-else>
+        <!-- r134 布局骨架（按 03-mockup-v2 重做）：左主栏 + 右侧操作栏。
+             r133 我把内容全铺成了通栏长条 —— 视觉上像一张Excel 表，
+             信息密度上去了但**没有视线的落点**。mockup 的核心是那条竖直分界：
+             左边是「诊断」（是什么情况），右边是「行动」（接下来做什么），
+             视线自然从左扫到右，形成「看问题 → 找动作」的动线。
+             右侧栏固定 372px：动作卡都是短条目，窄栏反而更易扫读。 -->
+        <div class="dx">
+          <div class="dx__main">
+
+        <!-- 单生学习概览 hero：选中学生后的第一眼数字（与分享卡 hero 同构） -->
+        <section v-if="singleHero" class="hero-strip" aria-label="学生学习概览">
+          <div class="hero-ring-wrap">
+            <div class="hero-ring" :style="heroRingStyle(singleHero.acc)"><b :class="accuracyTone(singleHero.acc)">{{ singleHero.accText }}</b></div>
+            <span class="hero-ring-label">整体正确率</span>
+          </div>
+          <div class="hero-main">
+            <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
+            <div class="hero-kpis">
+              <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
+              <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
+              <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
+              <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已记住</span></div>
+              <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>还在攻克</span></div>
+            </div>
+            <TrophyBar
+              :mastered="singleHero.masteredCount"
+              :basic="singleHero.basicMasteredCount"
+              :todo="singleHero.notStartedCount"
+              :practiced="singleHero.practicedCount"
+            />
+          </div>
+        </section>
+
+        <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）。
+             放在 hero 正下方（第一屏）而不是趋势图之后 —— 实测两列卡片原本落在
+             1281px，第一屏完全看不到，等于白做。叙事顺序也更像诊断：
+             先「已拿下多少」→ 再「为什么错」→ 再「接下来做什么」→ 最后才是趋势与明细。 -->
+        <ContentCard
+          class="dx__errcause"
+          title="错因分布：为什么错"
+          :description="currentStudentDetail?.errorDistribution?.length
+            ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 占前三类的比例最高，优先处理`
+            : '错因会在每周一凌晨自动回填，或随批改逐步补齐'"
+        >
+          <ErrorCauseBars
+            :items="currentStudentDetail?.errorDistribution || []"
+            @select="onErrorCauseClick"
+          />
+        </ContentCard>
+        <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
+             它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
+             point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
+             字段名对不上，柱子恒为 4% 空高、标签恒为 '-'，等于一张坏掉的图；
+             且整块包在 v-if="periodMode === 'week'" 里，月/全部模式根本没图。
+             保留两张图只会让老师困惑，故直接删旧留新（小而美：能删就删）。
+
+             r132：默认「按天」。按周会把剧烈波动抹平 —— 实测陆晨曦 09-10
+             只有 2/12 题（16.7%），按周看完全被平均掉。老师要看的正是
+             「哪天崩了」，所以按天是默认，周是备选。 -->
+        <ContentCard
+          v-if="currentStudentDetail?.stats"
+          class="trend-line-card"
+          title="正确率走势"
+          :description="`${currentStudentName} · 只看有批改记录的时段 · 没批改的日子不计入`"
+        >
+          <template #actions>
+            <div class="trend-switch">
+              <button
+                v-for="opt in trendGranularityOptions"
+                :key="opt.key"
+                type="button"
+                class="trend-switch__btn"
+                :class="{ 'is-on': trendGranularity === opt.key }"
+                :aria-pressed="trendGranularity === opt.key"
+                @click="trendGranularity = opt.key"
+              >{{ opt.label }}</button>
+            </div>
+          </template>
+          <TrendLineChart :points="trendChartPoints" />
+          <p v-if="trendChartPoints.length" class="trend-note">
+            {{ trendSummary.description }}
+          </p>
+        </ContentCard>
+
+
+        <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
+        <ContentCard
+          v-if="periodMode !== 'all' && currentStudentDetail?.prev"
+          class="growth-compare"
+          title="成长对比"
+          :description="`${currentStudentName} · 本${periodMode === 'week' ? '周' : '月'} vs ${lastPeriodLabel}`"
+        >
+          <div v-if="prevHasData" class="compare-grid">
+            <div v-for="item in growthCompareItems" :key="item.key" class="compare-item">
+              <div class="compare-item__label">{{ item.label }}</div>
+              <div class="compare-item__value">{{ item.currentText }}</div>
+              <div :class="['compare-item__delta', item.tone]">
+                <span v-if="item.prevText">{{ item.deltaText }}</span>
+                <span v-else>上周无数据</span>
+              </div>
+              <div class="compare-item__prev">上周 {{ item.prevText }}</div>
+            </div>
+          </div>
+          <EmptyState
+            v-else
+            title="上一周期暂无学习数据"
+            description="本周期有学习记录，但上一周期没有进入批改的数据，暂无法对比。"
+          />
+        </ContentCard>
+
+        <!-- 重练进步：本周期重练卷判题结果 + 错题生命周期推进 -->
+        <ContentCard
+          v-if="retryProgressVisible"
+          class="retry-progress"
+          title="重练进步"
+          :description="`重练卷批改完成后推进错题掌握状态 · ${currentStudentName}`"
+        >
+          <div class="retry-grid">
+            <div class="retry-item">
+              <div class="retry-item__value">{{ retryProgress.examCount }}</div>
+              <div class="retry-item__label">完成重练卷</div>
+            </div>
+            <div class="retry-item">
+              <div class="retry-item__value">{{ retryProgress.retriedCount }}</div>
+              <div class="retry-item__label">重练题目</div>
+            </div>
+            <div class="retry-item">
+              <div class="retry-item__value" :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 80 }">{{ retryProgress.retryAccuracy }}<small>%</small></div>
+              <div class="retry-item__label">重练正确率</div>
+            </div>
+            <div class="retry-item">
+              <div class="retry-item__value" :class="{ 'is-good': retryProgress.pushedToBasic > 0 }">{{ retryProgress.pushedToBasic }}</div>
+              <div class="retry-item__label">推进到基本掌握</div>
+            </div>
+          </div>
+          <div class="retry-note">
+            <span>重练答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题</span>
+          </div>
+        </ContentCard>
+
+        <!-- ⛔ 知识点表从「全量 133 行」改为「默认 5 行 + 可展开」（r134）。
+             实测全量渲染高度 **7622px** —— 一张卡把整个主栏拉成一条看不到头的长带，
+             这正是负责人说的「长条通栏显得太丑」的元凶：
+             ① 视觉上，主栏被一张无限长的表占满，右栏的 sticky 完全失去意义；
+             ② 133 行里绝大多数是「错 1 次、正确率 90%+」的知识点，
+                排在后面根本不会被看到，等于占位。
+             mockup 的做法是只列最该练的 5 行 + 一个「全部」入口 —— 保留信息可达性，
+             但把首屏还给真正要处理的问题。 -->
+        <ContentCard
+          v-if="currentStudentDetail?.knowledgeDiagnosis?.length"
+          class="knowledge-diagnosis"
+          title="最该练的知识点"
+          :description="`按错误次数排序 · 共 ${weakKnowledge.length} 个知识点出过错 · ${
+            weakKnowledgeCount > TOP_KNOWLEDGE_ROWS
+              ? `先看最严重的 ${TOP_KNOWLEDGE_ROWS} 个`
+              : '已全部列出'}`"
+          flush
+        >
+          <template #actions>
+            <button v-if="weakKnowledge.length > TOP_KNOWLEDGE_ROWS" type="button" class="kp-toggle" @click="knowledgeExpanded = !knowledgeExpanded">
+              {{ knowledgeExpanded ? '只看最严重的' : `展开全部 ${weakKnowledge.length} 个` }}
+            </button>
+          </template>
+          <DataTable :data="knowledgeRows" size="small" empty-text=" ">
+            <el-table-column prop="tag" label="知识点" min-width="180"><template #default="{ row }"><div class="knowledge-name"><strong>{{ row.tag }}</strong><small>{{ row.subject || '其他' }}</small></div></template></el-table-column>
+            <el-table-column label="当前掌握" width="130"><template #default="{ row }"><StatusTag :tone="knowledgeLevel(row).key === 'critical' ? 'danger' : knowledgeLevel(row).key === 'attention' ? 'warning' : 'success'">{{ knowledgeLevel(row).label }} · {{ row.accuracy }}%</StatusTag></template></el-table-column>
+            <el-table-column label="错题表现" width="130"><template #default="{ row }"><strong :class="{ 'danger-text': row.wrongCount >= 3 }">最近错误 {{ row.wrongCount }} 次</strong><small class="table-sub">共 {{ row.totalCount }} 题</small></template></el-table-column>
+            <el-table-column label="最近变化" width="150"><template #default="{ row }"><div v-if="knowledgeChange(row).prevWrong != null" class="recent-change"><strong :class="knowledgeChange(row).tone === 'down' ? 'change-good' : knowledgeChange(row).tone === 'up' ? 'change-bad' : ''">{{ knowledgeChange(row).deltaText }}</strong><small class="table-sub">上周 {{ knowledgeChange(row).prevWrong }} 次</small></div><div v-else class="recent-change"><strong class="change-new">本周新增</strong><small class="table-sub">上周未出现</small></div></template></el-table-column>
+            <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><div class="table-action"><span>{{ getDiagnosisAction(row) }}</span><el-button text type="primary" @click.stop="openWrongBook">加入重练</el-button></div></template></el-table-column>
+          </DataTable>
+          <p v-if="!knowledgeExpanded && weakKnowledge.length > TOP_KNOWLEDGE_ROWS" class="kp-note">
+            其余 {{ weakKnowledge.length - TOP_KNOWLEDGE_ROWS }} 个知识点多为「错 1 次、正确率 90% 以上」，
+            不占首屏；点右上角可展开查看。
+          </p>
+        </ContentCard>
+
+        <ContentCard v-if="studentSuggestions.length" class="student-suggestions" title="本周备课建议（按 KP）" :description="`${currentStudentName} · ${periodLabel}`" flush>
+          <div class="student-suggestion-list">
+            <article v-for="(s, idx) in studentSuggestions" :key="s.kpName" class="student-suggestion-card">
+              <header>
+                <div class="rank-pill small">{{ idx + 1 }}</div>
+                <strong>{{ s.kpName }}</strong>
+                <span class="meta-inline">错题 {{ s.wrongCount }} · 空题 {{ s.blankCount }}</span>
+              </header>
+              <div v-if="s.errorDistribution?.length" class="mini-error-dist">
+                <div v-for="e in s.errorDistribution.slice(0, 3)" :key="e.errorType" class="mini-error-row">
+                  <span :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
+                  <span class="mini-error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+                </div>
+              </div>
+              <footer v-if="s.teachingAdvice">
+                <span class="advice-label">辅导建议：</span>
+                <strong>{{ s.teachingAdvice }}</strong>
+              </footer>
+            </article>
+          </div>
+        </ContentCard>
+        <EmptyState v-else-if="!generating && currentStudentDetail" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
+          </div>
+
+          <!-- ── 右侧操作栏：行动 + 战绩 + 产出 ── -->
+          <aside class="dx__rail">
+            <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干" flush>
+              <div class="dx__rail-body">
+                <NextActions
+                  :error-causes="currentStudentDetail?.errorDistribution || []"
+                  :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
+                  :basic-count="singleHero?.basicMasteredCount || 0"
+                  :todo-count="singleHero?.notStartedCount || 0"
+                  :zero-accuracy-tags="zeroAccuracyTags"
+                  :student-id="selectedStudentId"
+                />
+              </div>
+            </ContentCard>
+
+            <ContentCard v-if="retryProgressVisible" title="重练战绩" :description="`${retryProgress.examCount} 份卷 · ${retryProgress.retriedCount} 题`" flush>
+              <div class="dx__rail-body">
+                <div class="rail-stats">
+                  <div class="rail-stat">
+                    <b :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 60 }">{{ retryProgress.retryAccuracy }}<small>%</small></b>
+                    <span>重练正确率</span>
+                  </div>
+                  <div class="rail-stat">
+                    <b class="is-good">{{ retryProgress.pushedToBasic }}</b>
+                    <span>推进到已记住</span>
+                  </div>
+                </div>
+                <p class="rail-note">
+                  答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题
+                </p>
+              </div>
+            </ContentCard>
+
+            <ContentCard title="发给家长" description="老师转发用，家长只看产出物" flush>
+              <div class="dx__rail-body">
+                <ParentOutputCard
+                  :student-name="currentStudentName"
+                  :total-questions="singleHero?.totalQuestions || 0"
+                  :correct-count="currentStudentDetail?.stats?.correctCount || 0"
+                  :accuracy="singleHero?.acc"
+                  :secured="singleHero?.securedCount || 0"
+                  :mastered="singleHero?.masteredCount || 0"
+                  :new-wrong="singleHero?.newWrongCount || 0"
+                />
+              </div>
+            </ContentCard>
+          </aside>
+        </div>
+      </template>
+
 
 
       <!-- 底部输出条：只保留家长侧报告（成长卡已搬到页头，见 PageHeader actions）。
@@ -428,88 +353,6 @@
         <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('month')">生成本月报告</ActionButton>
       </section>
     </div>
-    <!-- 知识点下钻抽屉 -->
-    <el-drawer
-      v-model="drawerVisible"
-      size="520px"
-      destroy-on-close
-      :show-close="false"
-    >
-      <template #header>
-        <div class="drawer-header">
-          <div>
-            <div class="drawer-title">「{{ drawerTag }}」诊断详情</div>
-            <div class="drawer-sub">{{ periodLabel }}</div>
-          </div>
-          <el-button text @click="drawerVisible = false">
-            <el-icon><Close /></el-icon>
-          </el-button>
-        </div>
-      </template>
-      <div v-loading="loadingDetail" class="drawer-body">
-        <template v-if="drawerDetail">
-          <div class="section-title">
-            <el-icon><PieChart /></el-icon>
-            错因分布（做错题共 {{ drawerDetail.totalWrong }} 道）
-          </div>
-          <div class="error-dist">
-            <div class="error-item" v-for="e in drawerDetail.errorDist" :key="e.errorType">
-              <span class="error-type" :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
-              <el-progress
-                :percentage="e.ratio"
-                :color="errorTypeColor(e.errorType)"
-                :stroke-width="12"
-                style="flex: 1; margin: 0 12px;"
-              />
-              <span class="error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
-            </div>
-            <div v-if="drawerDetail.errorDist.length === 0" class="muted" style="padding: 8px 0;">
-              暂无做错题（该知识点仅有空题，空题不做错因分析）
-            </div>
-          </div>
-
-          <div class="section-title" style="margin-top: 20px;">
-            <el-icon><User /></el-icon>
-            涉及学生（{{ drawerDetail.students.length }} 人）
-          </div>
-          <el-table :data="drawerDetail.students" stripe size="small" style="width: 100%">
-            <el-table-column prop="name" label="姓名" min-width="100" />
-            <el-table-column prop="grade" label="年级" width="90" align="center" />
-            <el-table-column prop="blankCount" label="空题" width="80" align="center">
-              <template #default="{ row }">
-                <span v-if="row.blankCount > 0" class="blank-badge">{{ row.blankCount }}</span>
-                <span v-else class="muted">0</span>
-              </template>
-            </el-table-column>
-            <el-table-column prop="wrongCount" label="做错" width="80" align="center" />
-          </el-table>
-
-          <div class="section-title" style="margin-top: 20px;">
-            <el-icon><Collection /></el-icon>
-            典型错题（讲义例题）
-          </div>
-          <div v-if="drawerDetail.sampleQuestions?.length" class="sample-list">
-            <div class="sample-item" v-for="(q, qi) in drawerDetail.sampleQuestions" :key="q.id">
-              <div class="sample-q">{{ qi + 1 }}. {{ q.content }}</div>
-              <div class="sample-meta">
-                <span class="sample-stu">{{ q.studentName }}</span>
-                <span v-if="q.isBlank" class="sample-answer sample-answer--blank">空题未作答</span>
-                <span v-else class="sample-answer">作答：{{ q.studentAnswer || '未填写' }}</span>
-                <span class="sample-answer">正确：{{ q.correctAnswer || '—' }}</span>
-              </div>
-              <div class="sample-reason">
-                <StatusTag v-if="!q.isBlank" :tone="q.errorType ? 'danger' : 'info'">
-                  {{ q.errorType || '未标注' }}{{ q.errorReason ? `：${q.errorReason}` : '' }}
-                </StatusTag>
-                <StatusTag v-else tone="warning">空题（建议当堂提问）</StatusTag>
-              </div>
-            </div>
-          </div>
-          <div v-else class="muted" style="padding: 8px 0;">暂未取到该知识点的错题样本</div>
-        </template>
-        <el-empty v-else description="暂无详情数据" :image-size="80" />
-      </div>
-    </el-drawer>
   </div>
 </template>
 
@@ -535,31 +378,21 @@ import ParentOutputCard from '../components/diagnosis/ParentOutputCard.vue'
 import { getStudents, getAllWeeklyReports, getWeeklyReport } from '../../services/apiService'
 
 /**
- * ⛔ r137 已下线、r138 收尾清理：以下4 个 API 在「班级备课」下线时
+ * ⛔ r137 已下线、r138 收尾清理、r141 彻底清除：以下 4 个 API 在「班级备课」下线时
  *    连同后端 /teaching/diagnosis、/diagnosis/:tag、/wrong-paper 路由一起删掉了，
  *    但本页面的调用代码与 UI 按钮一直留着 —— Vite 对「import 不存在的导出」只在
- *    transform 阶段报 Failed to resolve import，页面能加载，点到按钮才炸。
- *    这段残留在 HEAD 里已存在（不是最近某轮改出来的），今天页面彻底打不开才暴露。
+ *    transform 阶段报Failed to resolve import，页面能加载，点到按钮才炸。
+ *    这段残留在 HEAD 里已存在（不是最近某轮改出来的），r139 页面彻底打不开时暴露。
  *
- *负责人裁决（2026-10-04）：**删前端残留，不补后端**。
- *    对应 UI（年级备课视图、错题卷清单、知识点下钻抽屉）一并移除入口，
- *    保留单生「学习诊断」主线。下方函数保留为显式 no-op 并提示，
- *    而不是直接删干净 —— 这样将来若要恢复功能，能一眼看出该接哪个接口。
+ * 负责人裁决（2026-10-04）：**删前端残留，不补后端**。
+ *    r141（2026-10-05）补完最后一刀：既然后端路由已不存在、UI 入口也全部摘掉，
+ *    这4 个 no-op 占位只剩「将来恢复时能看出该接哪个接口」这一点价值 —— 而那份信息
+ *    已完整写在上面这段注释里。继续留着反而是死代码（lint 也会一直报未使用）。
+ *    故本轮一并删除，并把接口名记在注释中。
+ *已删除的下线接口：/teaching/diagnosis（getTeachingDiagnosis）、
+ *    /teaching/diagnosis/:tag（getTeachingDiagnosisDetail）、
+ *    /teaching/wrong-paper（getTeachingWrongPaper / exportWrongPaper）。
  */
-const OFFLINE_API_MESSAGE = '该功能已下线，当前不可用'
-
-const getTeachingDiagnosis = async () => {
-  throw new Error(OFFLINE_API_MESSAGE)
-}
-const getTeachingDiagnosisDetail = async () => {
-  throw new Error(OFFLINE_API_MESSAGE)
-}
-const getTeachingWrongPaper = async () => {
-  throw new Error(OFFLINE_API_MESSAGE)
-}
-const exportWrongPaper = async () => {
-  throw new Error(OFFLINE_API_MESSAGE)
-}
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -570,7 +403,6 @@ dayjs.extend(isoWeek)
 const router = useRouter()
 
 // ── State ──
-const viewMode = ref('single')
 const selectedStudentId = ref('')
 const studentList = ref([])
 const summaryData = ref(null)
@@ -582,42 +414,9 @@ const generating = ref(false)
 const currentStudentDetail = ref(null)
 const checkedIds = ref([])
 
-const viewModeOptions = [
-  { label: '按年级', value: 'grade' },
-  { label: '单生', value: 'single' }
-]
-
-// ── 全班共性诊断 State（保留兼容，新口径按年级） ──
-const classDiagnosis = ref([])
-const loadingClassDiagnosis = ref(false)
-const diagSubject = ref('')
-const diagSubjectOptions = [
-  { label: '全部学科', value: '' },
-  { label: '数学', value: '数学' },
-  { label: '语文', value: '语文' },
-  { label: '英语', value: '英语' }
-]
-
-// ── 年级备课建议 State（新口径：晚托班按年级） ──
-const grades = ref([])
-const selectedGrade = ref('')
-const gradeSuggestions = ref([])
-const gradeSuggestionsMeta = ref(null)
-const loadingGradeSuggestions = ref(false)
-const gradeSuggestionsError = ref('')
-
 // ── 单生备课建议 State ──
 const studentSuggestions = ref([])
 const loadingStudentSuggestions = ref(false)
-const drawerVisible = ref(false)
-const drawerTag = ref('')
-const drawerDetail = ref(null)
-const loadingDetail = ref(false)
-
-// ── 周末讲题错题卷 State（年级视图） ──
-// ⛔ r138 收尾：错题卷清单 UI 已整块移除（该功能随「班级备课」于 r137 下线，
-//    后端 /teaching/wrong-paper 路由同步删除）。相关 state / computed / 方法一并清掉，
-//    只保留 apiService 那 4 个显式 no-op 占位（见文件上方 import 处注释）。
 
 const allChecked = computed(() =>
   summaryData.value?.reports?.length > 0 &&
@@ -703,48 +502,26 @@ const currentStudentName = computed(() => {
   return s?.name || ''
 })
 
-const gradeOptions = computed(() =>
-  grades.value.map(g => ({ label: g, value: g }))
-)
-
-const filterNoteText = computed(() => {
-  if (viewMode.value === 'grade') {
-    if (!selectedGrade.value) return '请选择年级'
-    return `${selectedGrade.value} · ${gradeSuggestions.value.length} 个薄弱知识点`
-  }
-  return selectedStudentId.value
+const filterNoteText = computed(() =>
+  selectedStudentId.value
     ? currentStudentName.value
     : `${reportsWithData.value.length} 名学生有数据`
-})
-
-// ⛔ r138 收尾：错题卷区块的描述文案、错误率档位、错因→tone 映射
-//    随该区块一并移除（三者只被错题卷模板使用）。
+)
 
 // ── Watch period changes to refresh data ──
 
 watch([periodMode, periodOffset], () => {
   loadSummary()
-  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
   if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
 })
 
-watch(viewMode, (val) => {
-  if (val === 'grade' && selectedGrade.value) loadGradeSuggestions()
-  if (val === 'single' && selectedStudentId.value) loadStudentSuggestions()
-})
-
-watch(selectedGrade, () => {
-  if (viewMode.value === 'grade' && selectedGrade.value) loadGradeSuggestions()
-})
-
 watch(selectedStudentId, (id) => {
-  if (viewMode.value === 'single' && id) loadStudentSuggestions()
+  if (id) loadStudentSuggestions()
 })
 
 // ── Lifecycle ──
 onMounted(async () => {
   await loadStudents()
-  await loadGrades()
   await loadSummary()
 })
 
@@ -783,66 +560,6 @@ async function handleStudentChange(id) {
     if (data.success) currentStudentDetail.value = data
   } catch (e) {
     ElMessage.error('获取学生周统计失败')
-  }
-}
-
-async function loadClassDiagnosis() {
-  loadingClassDiagnosis.value = true
-  try {
-    const data = await getTeachingDiagnosis({
-      mode: periodMode.value,
-      offset: periodOffset.value,
-      subject: diagSubject.value || undefined
-    })
-    classDiagnosis.value = data.success ? data.diagnosis : []
-  } catch (e) {
-    ElMessage.error('加载全班共性诊断失败')
-  } finally {
-    loadingClassDiagnosis.value = false
-  }
-}
-
-async function loadGrades() {
-  try {
-    const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    const resp = await fetch(`${API_BASE}/teaching/grades`)
-    const data = await resp.json()
-    if (data.success && Array.isArray(data.grades)) {
-      grades.value = data.grades
-      // 默认选中第一个年级
-      if (!selectedGrade.value && data.grades.length > 0) {
-        selectedGrade.value = data.grades[0]
-      }
-    }
-  } catch (e) {
-    console.warn('加载年级列表失败:', e)
-  }
-}
-
-async function loadGradeSuggestions() {
-  if (!selectedGrade.value) return
-  loadingGradeSuggestions.value = true
-  gradeSuggestionsError.value = ''
-  try {
-    const API_BASE = import.meta.env.VITE_API_URL || '/api'
-    const url = new URL(`${API_BASE}/teaching/grade-suggestions`, window.location.origin)
-    url.searchParams.set('grade', selectedGrade.value)
-    url.searchParams.set('mode', periodMode.value)
-    url.searchParams.set('offset', String(periodOffset.value))
-    url.searchParams.set('subject', diagSubject.value || '数学')
-    const resp = await fetch(url.toString().replace(window.location.origin, ''))
-    const data = await resp.json()
-    if (data.success) {
-      gradeSuggestions.value = data.suggestions || []
-      gradeSuggestionsMeta.value = data
-    } else {
-      gradeSuggestionsError.value = data.error || '获取年级备课建议失败'
-    }
-  } catch (e) {
-    gradeSuggestionsError.value = e.message || '获取年级备课建议失败'
-    console.error('loadGradeSuggestions 异常:', e)
-  } finally {
-    loadingGradeSuggestions.value = false
   }
 }
 
@@ -1195,11 +912,14 @@ const zeroAccuracyTags = computed(() => {
     .slice(0, 3)
     .map(k => k.tag)
 })
-// 3) 点错因条 → 下钻到错题中心（该类错题在错题本里可筛）
-//    ⛔ 不直接调发卷接口：会动组卷链路（C 级敏感区），先跳到有现成勾选入口的页面。
+// 3) 点错因条 → 跳这名学生的错题清单（r141）
+//⛔ r133 起这里 push('/students')（学生**列表**页），提示语还说「到错题中心」——
+//    错题中心 r91 已并入学生档案页，那句指引指向一个不存在的页面，且跳过去也定位不到人。
+//    真正能筛出这一类的是档案页里的错题清单（每行带错因标签）。
 function onErrorCauseClick(row) {
-  ElMessage.info(`已定位「${row.errorType}」${row.count} 道 —— 到错题中心可勾选后一键发卷`)
-  router.push({ path: '/students' })
+  if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
+  ElMessage.info(`「${row.errorType}」${row.count} 道都在错题清单里，可按标签逐题核对后勾选发卷`)
+  router.push({ path: `/students/${selectedStudentId.value}` })
 }
 
 // r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0

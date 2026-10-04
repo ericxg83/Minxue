@@ -7,10 +7,22 @@
  *
  * 排序规则（不是随便排的）：
  *   高优先级 = 数据支撑强 + 老师当天就能做。
- *   score 越高越靠前，页面据此排序。
+ *   score 越高越靠前，页面据此排序；名次按排完的次序给（不写死）。
  *
  * ⛔ 每个动作都必须有真实的数字来源；拿不到数就不渲染这一条
  *    （宁可少一条，也不能给一个「大概类似」的假建议）。
+ *
+ * ⛔ r141（负责人验收）：CTA 文案不许承诺本页做不到的事，动作必须跳到
+ *    「真能把这事做完」的地方。两个真实缺陷：
+ *      ① 三条动作的 run() 一律 push('/students') —— 那是学生**列表**页，
+ *         和「重练卷」毫无关系；老师点完还得自己在列表里再找一遍这个学生。
+ *         真出口是学生档案页的错题清单（r91 起「错题中心」并入档案页），
+ *         那里有勾选框与「生成重练卷」按钮（接移动端同一导出引擎）。
+ *         故动作一律带 studentId 落到 `/students/:id`。
+ *      ② knowledge 动作 push('/weekly-report') = 跳本页自己 ⇒ 点了毫无反应，
+ *         看起来就是个坏按钮。它原本要开的知识点下钻接口已随 r137 下线，
+ *         负责人 2026-10-05 裁决「备课功能暂不开发」⇒ 这条**显式禁用**，
+ *         不再靠「跳本页」假装能用（要恢复：接知识点下钻并把 disabled 去掉）。
  */
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -26,48 +38,54 @@ const props = defineProps({
   // 待复习数
   todoCount: { type: Number, default: 0 },
   // 正确率 0% 的知识点（出题 >=2 全错）
-  zeroAccuracyTags: { type: Array, default: () => [] }
+  zeroAccuracyTags: { type: Array, default: () => [] },
+  // 当前诊断的学生 —— 动作要跳到「这个学生」的错题清单，缺它就落不到人身上
+  studentId: { type: String, default: '' }
 })
 
 const router = useRouter()
+
+// 错题清单在学生档案页（r91 起错题中心并入档案页），并自带「生成重练卷」按钮 ⇒
+// 「去组专项卷」的真实落点就是这里。没有 studentId 就不给这条动作（宁可少一条）。
+const wrongListPath = computed(() => (props.studentId ? `/students/${props.studentId}` : ''))
 
 const actions = computed(() => {
   const list = []
 
   const top = (props.errorCauses || [])[0]
-  if (top && top.count >= 3) {
+  if (top && top.count >= 3 && wrongListPath.value) {
     list.push({
       id: 'error-cause',
       score: 100 + top.count,
-      rank: 1,
       title: `${top.count} 道「${top.errorType}」→ 专项练`,
-      detail: `占全部错题 ${top.ratio}%，是最大的一块。已按这类预筛好，点开直接发卷`,
-      cta: '发重练卷',
-      tone: 'danger'
+      detail: `占全部错题 ${top.ratio}%，是最大的一块。这 ${top.count} 道在错题清单里都带「${top.errorType}」标签，勾上就能组一份专项卷`,
+      cta: '去错题清单',
+      tone: 'danger',
+      to: wrongListPath.value
     })
   }
 
-  if (props.repeatWrongCount >= 3) {
+  if (props.repeatWrongCount >= 3 && wrongListPath.value) {
     list.push({
       id: 'repeat',
       score: 90 + props.repeatWrongCount,
-      rank: 1,
       title: `${props.repeatWrongCount} 道反复错 → 优先回炉`,
-      detail: '错 2 次以上说明上次没真懂，重做同类题收效最快',
-      cta: '发重练卷',
-      tone: 'warning'
+      detail: '错 2 次以上说明上次没真懂。这几道在错题清单里点「重复出错」就能筛出来，勾选后直接生成重练卷',
+      cta: '去错题清单',
+      tone: 'warning',
+      to: wrongListPath.value
     })
   }
 
-  if (props.basicCount > 0) {
+  if (props.basicCount > 0 && wrongListPath.value) {
     list.push({
       id: 'basic',
       score: 70,
-      rank: 1,
       title: `${props.basicCount} 道已记住 → 本周重练做二次验证`,
-      detail: '已经答对过 1 次，本周重练卷会自动带上它们，再对一次就能升级为彻底掌握',
-      cta: '发重练卷',
-      tone: 'info'
+      detail: '已经答对过 1 次（还不算彻底掌握）。本周重练卷会自动带上它们，再对一次就能升级为彻底掌握',
+      cta: '去错题清单',
+      tone: 'info',
+      to: wrongListPath.value
     })
   }
 
@@ -76,46 +94,53 @@ const actions = computed(() => {
     list.push({
       id: 'knowledge',
       score: 60 + zero.length,
-      rank: 1,
       title: `${zero.length} 个知识点全错 → 合并讲一节`,
       detail: `${zero.join('、')} 等都还没对过 —— 多半是同一块内容拆成了多个标签，建议一次讲透再重练`,
-      cta: '看知识点',
+      cta: '备课视图待开发',
       tone: 'info',
-      to: '/weekly-report'
+      // ⛔ 显式禁用，不跳任何路由。原抽屉接口 /teaching/diagnosis/:tag 随 r137 下线，
+      //    负责人 2026-10-05 裁决备课功能暂不开发 —— 那就诚实地不可点，
+      //    而不是跳回本页假装有反应（跳本页 = 坏按钮，视觉上与BUG 无异）。
+      disabled: true
     })
   }
 
-  return list.sort((a, b) => b.score - a.score)
+  // 名次按排序结果给：r133 三条动作都写死 rank:1，页面会出现三个「①」。
+  return list.sort((a, b) => b.score - a.score).map((action, i) => ({ ...action, rank: i + 1 }))
 })
 
 function run(action) {
-  // ⛔ 本轮不接发卷接口（会动组卷链路，C 级敏感区）。
-  //  先跳到错题中心，那里有现成的勾选与发卷入口 —— 一步到位，不绕路。
-  if (action.id === 'knowledge') {
-    router.push({ path: '/weekly-report' })
-    return
-  }
-  router.push({ path: '/students' })
+  // 禁用的动作不跳任何地方（native <button disabled> 也会挡住，这里是第二道）
+  if (action.disabled) return
+  if (!action.to) return
+  router.push(action.to)
 }
 </script>
 
 <template>
   <div v-if="actions.length" class="nextlist">
-    <button
+    <!-- ⛔ 禁用的动作渲染成 div 而不是 disabled <button>：原生 disabled 按钮不可聚焦，
+         但视觉与可点按钮几乎一样，读屏软件也会念它 —— 都会让「暂不可用」看着像能用。
+         改成 div + aria-disabled，语义与视觉同时说清「这条现在点不了」。 -->
+    <div
       v-for="action in actions"
       :key="action.id"
-      type="button"
       class="nx"
-      :class="`is-${action.tone}`"
+      :class="[`is-${action.tone}`, { 'is-off': action.disabled }]"
+      :role="action.disabled ? undefined : 'button'"
+      :tabindex="action.disabled ? undefined : 0"
+      :aria-disabled="action.disabled ? 'true' : undefined"
       @click="run(action)"
+      @keydown.enter.prevent="run(action)"
+      @keydown.space.prevent="run(action)"
     >
       <span class="nx__rank">{{ action.rank }}</span>
       <span class="nx__body">
         <strong class="nx__title">{{ action.title }}</strong>
         <span class="nx__detail">{{ action.detail }}</span>
       </span>
-      <span class="nx__cta">{{ action.cta }}<el-icon><ArrowRight /></el-icon></span>
-    </button>
+      <span class="nx__cta">{{ action.cta }}<el-icon v-if="!action.disabled"><ArrowRight /></el-icon></span>
+    </div>
   </div>
   <div v-else class="nextlist__empty">
     本周期还没有需要立刻处理的动作 —— 等新的批改数据进来再安排。
@@ -148,5 +173,10 @@ function run(action) {
   font-size:var(--wb-fs-caption);font-weight:var(--wb-fw-semibold);
   color:var(--wb-status-info-fg);white-space:nowrap;
 }
+/* 禁用态：去掉手型与 hover 反馈，CTA 文字改为中性灰 —— 一眼看得出这条现在点不了 */
+.nx.is-off{cursor:default;background:var(--wb-bg-elevated)}
+.nx.is-off:hover{background:var(--wb-bg-elevated);border-color:var(--wb-border)}
+.nx.is-off .nx__rank{background:var(--wb-text-tertiary)}
+.nx.is-off .nx__cta{color:var(--wb-text-tertiary);font-weight:var(--wb-fw-medium)}
 .nextlist__empty{padding:var(--wb-space-6) 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);text-align:center}
 </style>
