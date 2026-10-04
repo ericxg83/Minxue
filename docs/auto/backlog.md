@@ -1413,3 +1413,14 @@ keep_backend 此前以 stdio:ignore 拉起后端 ⇒ 后端报错无处可看（
 **Render 后台把环境变量 `ALLOWED_ORIGIN` 从 `*` 改为 `https://minxue.pages.dev`**
 （负责人已确认工作台域名）。改完即封死「任意网站跨域读学生数据」的口子；
 server/.env.example 已写明。不改代码，纯后台操作。
+
+### ⑱ 最终合流态确认（第 112 轮末尾追加）
+
+两个会话并行执行⑱，最终代码状态（main 已验证）：
+- urlGuard.js 两道防线在线：端点白名单 + studentId 查库（我方）→ 移动端赛道评审后
+  补掉三处内联 axios 抓图副本的绕过缺口（worker.js:950/cropAndUpload/rerunGeometry
+  全部收敛到受守卫的统一入口，其 imageFetchGuard 锁保证「直接 axios 抓图」全仓为 0）；
+- CORS 回环放行（修冒烟假红）+ 守护后端日志落盘（我方）也已落库；
+- npm test 1588/1588（合流后全绿）；五项源码级抽查全 ✅。
+- 结论：⑱ 两道防线完整落地，双会话协作无冲突。剩余唯一动作：**负责人在 Render 后台
+  把 ALLOWED_ORIGIN 从 `*` 改为 `https://minxue.pages.dev`**（纯后台操作，改完即闭环）。
