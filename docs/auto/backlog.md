@@ -850,3 +850,14 @@ git checkout 还原后改逐行带闭合引号正则重做 —— **改代码的
    config/ai.js），前端只依赖服务端任务状态；上线后 VITE_AI_API_KEY/VITE_AI_ENDPOINT/
    VITE_AI_MODEL 从 env 全家桶退役。同时修掉「上传成功却弹识别失败」的假错。
    —— 等负责人点头后执行。
+
+#### 提案⑧ 执行（第 103 轮，负责人拍板「做」）
+
+- 删除：processTask（前端直调识别重练卷）、features/PaperBank（UI 外壳从未渲染）、
+  config/ai.js、aiService/taggingService/recognitionStorage/qrContent、
+  answerJudge/docxGenerator/imageEnhancer 死尾巴 —— 共 10 文件 −3185 行。
+- 判题 null 语义四组用例迁移到权威实现 server/services/judgeService.js（两端语义实测一致）。
+- 新锁 noClientDirectAI：src/ 禁魔搭端点/VITE_AI_*/AI_CONFIG + 已删文件不得复活。
+- 四道闸全过；产物实测 modelscope 端点零命中（仅剩 QuotaBanner 供应商标签键，属服务端契约）。
+- ⚠️ 交接给负责人：.env.development 曾含真 key（ms-***）且已被 git 跟踪——历史里仍可见，
+  **建议去魔搭控制台作废该 key**（应用侧引用已全部移除，作废无副作用）。
