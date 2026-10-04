@@ -160,6 +160,29 @@ process.on('unhandledRejection', (reason) => {
   console.error('❌ [兜底] 未处理的 Promise 拒绝:', reason)
 })
 
+// ── 生命周期面包屑（2026-10-04 提案⑯）────────────────────────────────────
+// 起因：2026-10-04 巡检发现本地后端进程没了，端口 4000 无监听，但日志是「戛然而止」的——
+// 末行只是周期性 Redis 健康检查，没有崩溃信息、没有退出记录。查了半天才确认是被外部
+// 杀掉（关终端/父进程退出）而非崩溃。这类静默死亡完全没有痕迹，是排障最大的黑洞。
+//
+// 有了下面三条面包屑，日志尾部的形态就能直接判读：
+//   · 有「收到 SIGTERM/SIGINT」+「进程退出」→ 被人或部署平台正常停掉的，属预期
+//   · 有「未捕获异常，进程退出」(上面的兜底) → 代码抛异常，可查堆栈
+//   · 什么都没有、日志直接断在半行          → 被 SIGKILL / OOM / 强杀，需查系统与内存
+const __bootedAt = Date.now()
+const __uptime = () => `${Math.round((Date.now() - __bootedAt) / 1000)}s`
+
+process.on('exit', (code) => {
+  console.log(`[生命周期] 进程退出 code=${code}，本次运行 ${__uptime()}`)
+})
+
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    console.log(`[生命周期] 收到 ${sig}（部署平台或人工停止），本次运行 ${__uptime()}，即将退出`)
+    process.exit(0)
+  })
+}
+
 const allowedOrigins = process.env.ALLOWED_ORIGIN 
   ? process.env.ALLOWED_ORIGIN.split(',')
   : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3001']
@@ -4572,6 +4595,9 @@ const __filename = fileURLToPath(import.meta.url)
 if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js')) {
   app.listen(PORT, async () => {
     console.log(`敏学后端服务已启动: http://localhost:${PORT}`)
+    // 启动横幅：把 pid / 端口 / 运行时长打出来，便于把日志与具体进程对上
+    // （2026-10-04 提案⑯：此前进程静默死亡后无从判断"跑的是哪一个、起了多久"）
+    console.log(`[生命周期] 启动 pid=${process.pid} port=${PORT} node=${process.version} bootAt=${new Date(__bootedAt).toISOString()}`)
 
     // 启动队列和 Worker
     try {
