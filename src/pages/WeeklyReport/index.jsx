@@ -15,7 +15,10 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 
 const T = {
-  primary: '#6366F1', primarySoft: '#E0E7FF',
+  // 对齐全局品牌主色 token（src/index.css --primary: #3157D5 蓝）。
+  // 旧值 #6366F1 是从 index.css 过时注释拄来的（注释写“主色 Indigo #6366F1”，
+  // 但实际 token 已是 #3157D5），导致本页颜色与其他页面不一、像另一个 App。
+  primary: '#3157D5', primarySoft: '#E8EDFF',
   success: '#16A34A', successSoft: '#DCFCE7',
   danger: '#DC2626', dangerSoft: '#FEE2E2',
   warning: '#D97706', warningSoft: '#FEF3C7',

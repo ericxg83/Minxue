@@ -89,6 +89,13 @@
 - 新锁 `test/weeklyReportEmptyGuard.test.mjs`；**同时修正了两把锁的反向自检设计**：旧树每轮从 HEAD 重导，历史修复合入 HEAD 后旧树会 0 红误报 → 改为内联合成坏样本（永久触发全部判据，不依赖 git）。
 - 四道闸：单测 1579/1579｜lint 我方 0 error（仅 2 条既存 warning：buildPaperCSS/isProd 未用，非本引入）｜`dist_nightly_20261004r113q`｜preview:5248 冒烟全绿（14 条文案进包，含新增两条周报空数据文案）。
 
+**第 114q 轮（2026-10-04，本赛道）已交付：【UI】学习诊断页品牌主色对齐全局蓝 token**
+- 发现真实不一致：移动端全局 `--primary: #3157D5`（蓝，已记录的跨端统一品牌色决策），但学习诊断页 `src/pages/WeeklyReport` 硬编码 `T.primary: #6366F1`（indigo）——旧值是从 `index.css` 一行**过时注释**拄来的（注释写“主色 Indigo #6366F1”，但实际 token 早已是 #3157D5）。页面颜色与其他页不一、像另一个 App。
+- 修正（零逻辑变更、纯配色）：`T.primary #6366F1→#3157D5`、`T.primarySoft #E0E7FF→#E8EDFF`（对齐 index.css）；success/danger/warning/accent/text 实测已一致未动。注释里标了过时注释陷阱。
+- 验证：属视觉/颜色（按仓内边界用渲染而非源码硬锁验）——构建成功 + 产物 chunk grep 实测 `#3157D5` 已入、`#6366F1` 已消 + 4 页渲染冒烟全绿。
+- ❕ 遗留提案（B 级需拍板）：PDF 本体用墨绿 #0F6B6D“成长绿”体系（weeklyReportGenerator.js 注释显示是刻意设计），与 App 蓝不一致——整份报告是否改统一品牌蓝，属跨文档品牌决策，只提不擅改。
+- 四道闸：单测 1579/1579｜lint 0｜`dist_nightly_20261004r114q`｜preview:5250 冒烟全绿。
+
 **第 105 轮深审移交（PC 工作台 stores 赛道会话产出，供移动端赛道接手）**
 - ⛔ **App.jsx 错题本「切换学生竞态」**（提案⑱-2，详见 backlog）：`loadWrongBookData`
   /`loadMoreWrongQuestions` 发起时捕获 studentId、落地前不校验当前学生 → 在途响应晚到
