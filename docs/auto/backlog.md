@@ -808,3 +808,23 @@ Windows 上 TaskStop 杀不干净 preview 的 node 子进程：`netstat -ano | g
 - vite `preview` 未显式配 proxy 时**继承 `server.proxy`**（所以隔离产物冒烟能打到本机 4000）。
 - `dist_nightly_20261004r95` 为首个「全本地」产物；r94 及更早产物均含生产 base，勿再用于
   冒烟断言数据类项目。
+
+---
+
+## 第 97–102 轮（2026-10-04 深夜）：负责人裁决批量执行
+
+负责人醒来一次性裁决了累计清单 ①②⑤⑥⑦ + 新增激光笔需求（③④维持原判，⑧只要解释）。
+六项全部执行完毕并推送：
+
+| 轮 | 裁决 | 交付 | 提交 |
+|---|---|---|---|
+| 97 | 新增·激光笔 | 笔迹式激光 + 抬手 1s 渐隐（推翻 r93 无拖尾）；laserInkFade 锁 + 13/13 像素级验证 | `2b9cc85` |
+| 98 | ⑤ 笔宽 | 默认 3.5 落「中」档高亮；penDefault 锁 | `c64db51` |
+| 99 | ⑥ dist/ | 陈旧 dist/（9-28，8.3M）已删；正本 _headers/_redirects 在 public/ 无损 | — |
+| 100 | ⑦ base 统一 | 11 处裸 fetch 归一（QuotaBanner/upload 走 apiService、Word 导出新增 requestBlob、诊断页 API_BASE 前缀）；workbenchApiBase 锁 | `7a207ce` |
+| 101 | ② 第 3 档 | 试卷答案库/我的题型库降「练习册管理」下二级项，URL 不变；resourceFold 锁 + 真机实点 | `7b36cd0` |
+| 102 | ① 重练卷 | 错题中心接回按钮/勾选（真消费者），组卷后直调移动端 exportWrongBookPDF；QR 构造器上提 src/utils/retryTaskUrl.js；createRetryFor 删 | `9dc9889` |
+
+⚠️ r100 教训：批量正则跨行贪婪把单引号串改成「反引号开单引号关」未闭合串（构建即红），
+git checkout 还原后改逐行带闭合引号正则重做 —— **改代码的正则必须匹配完整字面串含闭合符**。
+⚠️ r102 真机验证刻意不点「生成重练卷」：本机后端连生产库，真点 = 写生产数据（C 级红线）。
