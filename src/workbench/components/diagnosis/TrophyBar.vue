@@ -1,19 +1,26 @@
 <script setup>
 /**
- * 战果条（r133 学习诊断重构 · 取代 r130 的 MasteryBar）。
+ * 三态进度条（r133 学习诊断重构 · 取代 r130 的 MasteryBar · r138 简化为读数条）。
  *
  * 口径决策（负责人 2026-10-04 明确）：
  *   主数字 = **已记住**（答对 1 次），不是「完全掌握」（答对 2 次）。
  *   原因：现实里没有时间让每道题都做两次；答对一次就是记住了，
  *   拿「完全掌握 2 道」当主数字会严重低估孩子，也让家长看不到信心。
- *   「彻底掌握」降级为右侧小徽章 —— 锦上添花，不抢主位。
+ *   「彻底掌握」降级为徽章 —— 锦上添花，不抢主位。
  *
  * 第二个改进：**已练口径**。
  *   「74 道里拿下 16 道 = 22%」看着差，因为 58 道是还没练过的新错题在稀释分母。
  *   换成「练过 41 道 → 拿下 16 道 = 39%」才是真实努力的结果。
  *
+ * ── r138 改动 ──
+ *   1. 移除顶部「N 道错题，已拿下 M 道」的大数字块 —— 它与读数条的
+ *      「已记住」指标显示同一数据，且「已记住」在两处指的不是一回事
+ *      （此处原指 mastered+basic，读数条 KPI 也指合计）⇒ 口径重复，已合并。
+ *      现在这里只显示「还差 N 道 / 全部拿下」+ 三态图例 + 已练口径。
+ *   2. 进度条高度 10px → 6px：它现在是辅助读数，不该跟正确率数字抢视觉重量。
+ *
  * ⛔ 全部用设计 token（8 档字号 / 4 档间距 / 5 档状态色），
- *   旧版硬编码了 5 个字号 + 4 个色值，是页面「视觉噪音」的来源之一。
+ *   不引入新色值，不加渐变/发光/阴影。
  */
 import { computed } from 'vue'
 
@@ -41,22 +48,17 @@ const segments = computed(() => [
 
 <template>
   <div v-if="total > 0" class="trophy">
+    <!-- r138：移除「N 道错题，已拿下 M 道」大数字块。
+         它与读数条 KPI 的「已记住」显示同一数据 ⇒ 口径重复，已合并到读数条一处。
+         这里只保留「还差多少」+ 三态图例 + 已练口径，作为辅助读数。 -->
     <div class="trophy__head">
-      <div class="trophy__figure">
-        <strong class="trophy__num">{{ total }}</strong>
-        <span class="trophy__unit">道错题，已拿下 <b>{{ secured }}</b> 道</span>
-      </div>
-      <div class="trophy__right">
-        <!-- r135②：条上方结论句 —— 全橙的长条只说明「没进度」，不说明「该干什么」；
-             补一句还差多少，把颜色压力翻译成行动量。 -->
-        <span v-if="todo > 0" class="trophy__todo">还差 <b>{{ todo }}</b> 道全部清零</span>
-        <span v-else class="trophy__todo is-done">全部拿下，没有待攻克的题</span>
-        <span v-if="mastered > 0" class="trophy__badge">✓ {{ mastered }} 道彻底掌握</span>
-        <span v-if="practicedSecured !== null" class="trophy__pace">
-          练过 <b>{{ practiced }}</b> 道 · 拿下 <b>{{ secured }}</b> 道（{{ Math.round((secured / practiced) * 100) }}%）
-        </span>
-        <span v-else class="trophy__pace">还没安排重练，练过的题会单独算在这里</span>
-      </div>
+      <span v-if="todo > 0" class="trophy__todo">还差 <b>{{ todo }}</b> 道全部清零</span>
+      <span v-else class="trophy__todo is-done">全部拿下，没有待攻克的题</span>
+      <span v-if="mastered > 0" class="trophy__badge">✓ {{ mastered }} 道彻底掌握</span>
+      <span v-if="practicedSecured !== null" class="trophy__pace">
+        练过 <b>{{ practiced }}</b> 道 · 拿下 <b>{{ secured }}</b> 道（{{ Math.round((secured / practiced) * 100) }}%）
+      </span>
+      <span v-else class="trophy__pace">还没安排重练，练过的题会单独算在这里</span>
     </div>
     <div class="trophy__track">
       <span
@@ -77,16 +79,13 @@ const segments = computed(() => [
 </template>
 
 <style scoped>
-.trophy{margin-top:var(--wb-space-4)}
-.trophy__head{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--wb-space-4);flex-wrap:wrap;margin-bottom:var(--wb-space-3)}
-.trophy__figure{display:flex;align-items:baseline;gap:var(--wb-space-2)}
-.trophy__num{font-size:var(--wb-fs-display);font-weight:var(--wb-fw-bold);letter-spacing:-.02em;line-height:var(--wb-lh-tight);color:var(--wb-text);font-variant-numeric:tabular-nums}
-.trophy__unit{font-size:var(--wb-fs-body);color:var(--wb-text-secondary)}
-.trophy__unit b{color:var(--wb-text);font-weight:var(--wb-fw-bold);font-size:var(--wb-fs-section)}
-.trophy__right{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+/* r138：无框读数条。不再有大数字，所以不需要上边距 */
+.trophy{display:flex;flex-direction:column;gap:var(--wb-space-2)}
+/* 结论句与图例同一行组：左「还差 N 道」，右「已练口径 + 彻底掌握徽章」 */
+.trophy__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--wb-space-4);flex-wrap:wrap}
 .trophy__todo{font-size:var(--wb-fs-meta);color:var(--wb-text-secondary);font-weight:var(--wb-fw-semibold)}
 .trophy__todo b{color:var(--wb-status-warning-fg);font-weight:var(--wb-fw-bold);font-variant-numeric:tabular-nums}
-.trophy__todo.is-done b,.trophy__todo.is-done{color:var(--wb-status-success-fg)}
+.trophy__todo.is-done{color:var(--wb-status-success-fg)}
 .trophy__badge{
   padding:2px var(--wb-space-2);border-radius:var(--wb-radius-pill);
   background:var(--wb-status-success-bg);color:var(--wb-status-success-fg);
@@ -94,14 +93,15 @@ const segments = computed(() => [
 }
 .trophy__pace{font-size:var(--wb-fs-caption);color:var(--wb-text-tertiary)}
 .trophy__pace b{color:var(--wb-status-info-fg);font-weight:var(--wb-fw-semibold)}
-.trophy__track{display:flex;gap:2px;height:10px;border-radius:var(--wb-radius-pill);overflow:hidden;background:var(--wb-bg-mist)}
+/* r138：进度条 10px → 6px。它现在只是辅助读数，不该跟正确率主数字抢视觉重量 */
+.trophy__track{display:flex;gap:2px;height:6px;border-radius:var(--wb-radius-pill);overflow:hidden;background:var(--wb-bg-mist)}
 .trophy__seg{display:block;min-width:3px;height:100%}
 /* 色类只作用在色条段上（scoped 到 .trophy__seg）——
    裸写 .is-mastered 会同时命中图例 <li>，把整块背景刷成色块（r133 首版实测踩到）。 */
 .trophy__seg.is-mastered{background:var(--wb-status-success-fg)}
 .trophy__seg.is-basic{background:var(--wb-status-info-fg)}
 .trophy__seg.is-todo{background:var(--wb-status-warning-fg)}
-.trophy__legend{display:flex;gap:var(--wb-space-5);margin:var(--wb-space-2) 0 0;padding:0;list-style:none;flex-wrap:wrap}
+.trophy__legend{display:flex;gap:var(--wb-space-5);margin:0;padding:0;list-style:none;flex-wrap:wrap}
 .trophy__legend li{display:flex;align-items:center;gap:var(--wb-space-2);font-size:var(--wb-fs-caption);color:var(--wb-text-secondary)}
 .trophy__legend i{width:8px;height:8px;border-radius:2px;flex:0 0 auto}
 /* ⛔ 只给图例里的圆点上色。r133 首版把 .is-* 用在 <li> 上，

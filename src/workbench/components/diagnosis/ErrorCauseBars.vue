@@ -49,16 +49,24 @@ const toneOf = (index) => {
       还没有错因数据。错因会在每周一凌晨自动回填，或随批改逐步补齐。
     </div>
     <template v-else>
+      <!-- r138：轻量分析列表。行间只靠 hairline 分隔（原来靠 8px gap 撑开，
+           在无容器布局里会读成散落的行而不是一张表）。
+           首行加「最需要关注」标记 —— 它就是最该抓的那一类。 -->
+      <div class="errdist__head" aria-hidden="true">
+        <span>错因</span><span>占比</span>
+      </div>
       <button
         v-for="(row, i) in rows"
         :key="row.errorType"
         type="button"
         class="errdist__row"
-        :class="`is-${toneOf(i)}`"
+        :class="[`is-${toneOf(i)}`, { 'is-top': i === 0 }]"
         :aria-label="`${row.errorType}，${row.count} 道，占 ${row.ratio}%，点击查看题目`"
         @click="emit('select', row)"
       >
-        <span class="errdist__name">{{ row.errorType }}</span>
+        <span class="errdist__name">
+          <i v-if="i === 0" class="errdist__flag">最需要关注</i>{{ row.errorType }}
+        </span>
         <span class="errdist__track">
           <span
             class="errdist__fill"
@@ -66,7 +74,7 @@ const toneOf = (index) => {
           />
         </span>
         <span class="errdist__num">
-          <b>{{ row.count }}</b>
+          <b>{{ row.count }}</b>道
           <em>{{ row.ratio }}%</em>
         </span>
       </button>
@@ -78,28 +86,52 @@ const toneOf = (index) => {
 </template>
 
 <style scoped>
-.errdist{display:flex;flex-direction:column;gap:var(--wb-space-2)}
+.errdist{display:flex;flex-direction:column}
+/* 表头：极轻的一行标签，让「占比」列有对齐基准（结构即信息，不是装饰） */
+.errdist__head{
+  display:grid;grid-template-columns:var(--errdist-name-w) 1fr var(--errdist-num-w);
+  gap:var(--wb-space-4);padding:0 var(--wb-space-2) var(--wb-space-2);
+  color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);
+}
+.errdist__head span:last-child{text-align:right}
 .errdist__empty{padding:var(--wb-space-6) 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);text-align:center}
+/* 行间用 hairline（不是 gap）—— 让它读成一张紧凑的表，而不是散落的行 */
 .errdist__row{
-  display:grid;grid-template-columns:88px 1fr 76px;align-items:center;gap:var(--wb-space-3);
-  width:100%;padding:var(--wb-space-2) var(--wb-space-2);border:0;border-radius:var(--wb-radius-sm);
-  background:transparent;cursor:pointer;text-align:left;transition:background .12s;
+  --errdist-name-w:150px;
+  --errdist-num-w:104px;
+  display:grid;grid-template-columns:var(--errdist-name-w) 1fr var(--errdist-num-w);
+  align-items:center;gap:var(--wb-space-4);
+  width:100%;padding:var(--wb-space-3) var(--wb-space-2);
+  border:0;border-bottom:1px solid var(--wb-border-light);
+  background:transparent;cursor:pointer;text-align:left;
+  transition:background var(--wb-motion-fast) var(--wb-motion-ease);
 }
 .errdist__row:hover{background:var(--wb-bg-hover)}
-.errdist__row:focus-visible{outline:2px solid var(--wb-status-info-fg);outline-offset:1px}
-.errdist__name{font-size:var(--wb-fs-body);color:var(--wb-text);font-weight:var(--wb-fw-medium)}
-.errdist__track{height:8px;background:var(--wb-bg-mist);border-radius:var(--wb-radius-pill);overflow:hidden}
+.errdist__row:focus-visible{outline:2px solid var(--wb-status-info-fg);outline-offset:-2px}
+/* 首行稍加重：占比最高的那类就是结论本身 */
+.errdist__row.is-top .errdist__name{font-weight:var(--wb-fw-semibold)}
+.errdist__name{display:flex;align-items:center;gap:var(--wb-space-2);font-size:var(--wb-fs-body);color:var(--wb-text);font-weight:var(--wb-fw-medium)}
+/* 「最需要关注」是文字标记，不是色块 —— 少一个矩形就少一个容器感 */
+.errdist__flag{font-style:normal;font-size:var(--wb-fs-caption);color:var(--wb-status-danger-fg);font-weight:var(--wb-fw-semibold)}
+/* r138：条高 8px → 5px，改成细分析列表的辅助刻度，不与主数字抢重量 */
+.errdist__track{height:5px;background:var(--wb-bg-mist);border-radius:var(--wb-radius-pill);overflow:hidden}
 .errdist__fill{display:block;height:100%;border-radius:var(--wb-radius-pill)}
-.errdist__num{display:flex;align-items:baseline;justify-content:flex-end;gap:5px;font-variant-numeric:tabular-nums}
+.errdist__num{display:flex;align-items:baseline;justify-content:flex-end;gap:4px;font-variant-numeric:tabular-nums;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
 .errdist__num b{font-size:var(--wb-fs-body);font-weight:var(--wb-fw-bold);color:var(--wb-text)}
-.errdist__num em{font-style:normal;font-size:var(--wb-fs-caption);color:var(--wb-text-tertiary);min-width:30px;text-align:right}
+.errdist__num em{font-style:normal;font-size:var(--wb-fs-caption);color:var(--wb-text-tertiary);min-width:34px;text-align:right}
 
 .is-danger .errdist__fill{background:var(--wb-status-danger-fg)}
 .is-warning .errdist__fill{background:var(--wb-status-warning-fg)}
 .is-info .errdist__fill{background:var(--wb-status-info-fg)}
 .is-neutral .errdist__fill{background:var(--wb-status-neutral-fg)}
-.is-danger .errdist__name{color:var(--wb-status-danger-fg);font-weight:var(--wb-fw-semibold)}
-.is-warning .errdist__name{color:var(--wb-status-warning-fg);font-weight:var(--wb-fw-semibold)}
+.is-danger .errdist__name{color:var(--wb-status-danger-fg)}
+.is-warning .errdist__name{color:var(--wb-status-warning-fg)}
+
+/* 窄屏：名称列收窄，条形区保住最小可读长度 */
+@media(max-width:640px){
+  .errdist__row,.errdist__head{--errdist-name-w:104px;--errdist-num-w:88px;gap:var(--wb-space-3)}
+  .errdist__flag{display:none}
+}
 
 .errdist__hint{
   margin:var(--wb-space-3) 0 0;padding:var(--wb-space-3) var(--wb-space-4);
