@@ -11,7 +11,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 dotenv.config({ path: resolve(__dirname, '.env') })
 
 import crypto from 'crypto'
-import axios from 'axios'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
@@ -34,7 +33,7 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
-import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
+import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { aiParseSelfCheck, detectAnswerCopiedFromStudent, buildTextOnlyResolveInput } from './utils/aiParseSelfCheck.js'
@@ -947,8 +946,9 @@ const downloadImage = async (imageUrl) => {
     // 后果：OSS 页图 GET 被代理拦下返回 400 → 抛「下载图片失败: Request failed with status
     // code 400」→ 整个任务 failed（09-22 三个作业任务共 50 题答案永久为空）。
     // 实测同一 URL 直连 200 / 1MB，走代理才 400。选项集中在 server/utils/noProxyHttp.js。
-    const response = await axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)
-    const buf = Buffer.from(response.data)
+    // ⛔ 提案⑱ 第二道防线：改走统一封装，抓取前硬拦私网/回环/元数据地址。
+    // 原为内联的 axios.get + Buffer.from，与封装函数体逐字等价，属纯重构、不改行为。
+    const buf = await downloadImageBufferNoProxy(imageUrl)
     console.log(`   图片下载成功: ${buf.length} bytes`)
 
     // ── 魔数校验：OSS 404 / 403 / 鉴权失败会返回 XML/HTML 错误页（约 3000-4000 bytes），

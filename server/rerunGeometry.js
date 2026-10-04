@@ -18,8 +18,7 @@
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import axios from 'axios'
-import { NO_PROXY_DOWNLOAD_OPTS } from './utils/noProxyHttp.js'
+import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { query, TABLES } from './config/neon.js'
 import { callVisionCompletion, buildGeometryReconstructionPrompt } from './config/ai.js'
 import { parseGeometryStructure, isEmptyStructure, renderGeometrySvg } from './utils/geometrySvg.js'
@@ -47,8 +46,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 async function downloadImageBuffer(url) {
   try {
     // 禁代理选项：避免环境 HTTP_PROXY 把 OSS 页图请求拦成 400（2026-09-22 事故）
-    const resp = await axios.get(url, NO_PROXY_DOWNLOAD_OPTS)
-    return Buffer.from(resp.data)
+    // 走统一封装：带禁代理选项（2026-09-22 事故）＋ SSRF 私网/回环/元数据拦截（提案⑱）
+    return await downloadImageBufferNoProxy(url)
   } catch (error) {
     console.error(`   ⚠️ [下载] 图片下载失败: ${error.message}`)
     return null

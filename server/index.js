@@ -129,6 +129,7 @@ import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
 import { getKnowledgeTree, getQuestionKnowledge, clearKnowledgeCache } from './services/knowledgeService.js'
 import { finalizeRejudgeResult, finalizeGeneratedExamResults } from './services/gradingFinalizer.js'
+import { assertImageUrlAllowed } from './utils/urlGuard.js'
 
 const app = express()
 const PORT = process.env.PORT || 4000
@@ -209,7 +210,11 @@ if (allowedOrigins.includes('*')) {
 
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    // r112：本机回环任意端口视为可信 —— 冒烟产物（127.0.0.1:523x）与本地多端口前端
+    // 的 POST 自带 Origin 头，之前会被这里拒成 500（冒烟假红）。互联网上的恶意站点
+    // 无法让浏览器伪造 localhost/127.0.0.1 的 Origin，故此放行不影响生产安全。
+    const isLoopbackOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '')
+    if (!origin || isLoopbackOrigin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
       callback(new Error('Not allowed by CORS'))
@@ -608,12 +613,29 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
       return res.status(400).json({ error: '缺少 studentId 或 imageUrl' })
     }
 
+    // ⛔ 提案⑱ 第一道防线：imageUrl 必须过「协议 + 域名白名单 + 私网拦截」，
+    //    否则任何人都能让服务器抓任意地址（SSRF）并无限触发付费 AI 批改烧额度。
+    //    第二道防线在统一抓图入口 downloadImageBufferNoProxy（存量的 image_url 也受管）。
+    let safeImageUrl
+    try {
+      safeImageUrl = await assertImageUrlAllowed(imageUrl)
+    } catch (e) {
+      return res.status(400).json({ error: e.message })
+    }
+
+    // studentId 必须真实存在：此前任意 uuid 都能塞进 tasks 表
+    const { rows: stuRows } = await query(
+      `SELECT 1 FROM ${TABLES.STUDENTS} WHERE id = $1 LIMIT 1`, [studentId])
+    if (stuRows.length === 0) {
+      return res.status(400).json({ error: '学生不存在' })
+    }
+
     const queue = await getTaskQueue()
 
     const { rows } = await query(
       `INSERT INTO ${TABLES.TASKS} (student_id, image_url, original_name, status, result)
        VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [studentId, imageUrl, originalName || `试卷_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
+      [studentId, safeImageUrl, originalName || `试卷_${Date.now()}.jpg`, TASK_STATUS.PENDING, JSON.stringify({ progress: 0 })]
     )
 
     const savedTask = rows[0]
@@ -622,7 +644,7 @@ app.post('/api/tasks/create-by-url', async (req, res) => {
       await queue.add('process-task', {
         taskId: savedTask.id,
         studentId: studentId,
-        imageUrl: imageUrl,
+        imageUrl: safeImageUrl,
         originalName: savedTask.original_name
       }, {
         attempts: parseInt(process.env.MAX_RETRIES) || 3,

@@ -16,6 +16,7 @@
  * 回归测试 test/noProxyDownload.test.mjs 会扫描下载调用点，漏带即失败。
  */
 import axios from 'axios'
+import { assertNotPrivateUrl } from './urlGuard.js'
 
 export const NO_PROXY_DOWNLOAD_OPTS = Object.freeze({
   responseType: 'arraybuffer',
@@ -27,6 +28,10 @@ export const NO_PROXY_DOWNLOAD_OPTS = Object.freeze({
 
 /** 下载图片并返回 Buffer（统一走 NO_PROXY_DOWNLOAD_OPTS） */
 export const downloadImageBufferNoProxy = async (url) => {
+  // ⛔ 提案⑱ 第二道防线：抓取前硬拦私网/回环/链路本地/元数据地址（SSRF）。
+  //    本地开发要抓内网图需显式设 IMAGE_URL_ALLOW_PRIVATE=1（Render 生产绝不配）。
+  //    ⚠️ 这道拦截只有在「所有抓图都走本封装」时才有效——已由 test/imageFetchGuard.test.mjs 锁住。
+  await assertNotPrivateUrl(url)
   const resp = await axios.get(url, NO_PROXY_DOWNLOAD_OPTS)
   return Buffer.from(resp.data)
 }

@@ -90,8 +90,14 @@ test('NO_PROXY_DOWNLOAD_OPTS 必须真正关代理（proxy/httpsAgent/httpAgent�
 test('server 生产代码中所有 axios 下载调用点都必须带 NO_PROXY_DOWNLOAD_OPTS', () => {
   const offenders = []
   let scanned = 0
+  // 2026-10-04 提案⑲：三处内联副本已收敛为调用 downloadImageBufferNoProxy 封装
+  // （封装内既带 NO_PROXY_DOWNLOAD_OPTS 又加 SSRF 拦截），直连点因此变少。
+  // 把走封装的调用点也计入「已覆盖的下载路径」，保住本条测试的原意：
+  // 下载路径必须全部关代理，不允许有裸奔的下载。
+  let viaWrapper = 0
   for (const file of collectServerSources()) {
     const src = readFileSync(file, 'utf8')
+    viaWrapper += (src.match(/downloadImageBufferNoProxy\(/g) || []).length
     for (const name of ['axios.get', 'axios.request', 'axios.create']) {
       for (const args of findCallArgs(src, name)) {
         scanned++
@@ -105,7 +111,7 @@ test('server 生产代码中所有 axios 下载调用点都必须带 NO_PROXY_DO
       }
     }
   }
-  assert.ok(scanned >= 5, `应扫描到至少 5 处 axios 调用，实际 ${scanned}（扫描逻辑可能失效）`)
+  assert.ok(scanned + viaWrapper >= 5, `应覆盖到至少 5 处下载路径，实际 直连 ${scanned} + 走封装 ${viaWrapper}（扫描逻辑可能失效）`)
   assert.deepEqual(
     offenders,
     [],
@@ -150,6 +156,11 @@ test('行为回归：HTTP_PROXY 指向死端口时，禁代理下载仍直连成
   // 端口 1 必然拒连：只要请求真的走了代理，就一定是 ECONNREFUSED
   process.env.HTTP_PROXY = 'http://127.0.0.1:1'
   process.env.HTTPS_PROXY = 'http://127.0.0.1:1'
+  // 2026-10-04 提案⑱：统一抓图入口已加 SSRF 私网/回环拦截（urlGuard.assertNotPrivateUrl），
+  // 而本用例刻意用 127.0.0.1 起本地服务来验证「不走代理」——这正是该守卫的逃生门用途。
+  // 本用例只关心禁代理行为，故显式声明走逃生门；守卫本身由 test/urlGuard.test.mjs 单独锁。
+  const savedAllowPrivate = process.env.IMAGE_URL_ALLOW_PRIVATE
+  process.env.IMAGE_URL_ALLOW_PRIVATE = '1'
   try {
     const buf = await downloadImageBufferNoProxy(url)
     assert.ok(buf.length === payload.length, `应取回 ${payload.length} 字节，实际 ${buf.length}`)
@@ -171,13 +182,21 @@ test('行为回归：HTTP_PROXY 指向死端口时，禁代理下载仍直连成
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
+    // 回收逃生门开关，避免污染同进程后续用例
+    if (savedAllowPrivate === undefined) delete process.env.IMAGE_URL_ALLOW_PRIVATE
+    else process.env.IMAGE_URL_ALLOW_PRIVATE = savedAllowPrivate
     await new Promise((r) => server.close(r))
   }
 })
 
 test('事故复盘：worker.js 下载图片必须走禁代理选项（含魔数校验，错误页不得喂给视觉模型）', () => {
   const src = read('server/worker.js')
-  assert.ok(src.includes('NO_PROXY_DOWNLOAD_OPTS'), 'worker.js downloadImage 必须使用禁代理选项')
+  // 2026-10-04 提案⑲：worker.js 的下载已改为调用统一封装 downloadImageBufferNoProxy
+  // （封装内带 NO_PROXY_DOWNLOAD_OPTS），两种形态都算达标。
+  assert.ok(
+    src.includes('NO_PROXY_DOWNLOAD_OPTS') || src.includes('downloadImageBufferNoProxy'),
+    'worker.js 下载图片必须走禁代理路径：直接用 NO_PROXY_DOWNLOAD_OPTS，或经统一封装 downloadImageBufferNoProxy'
+  )
   assert.ok(src.includes('isValidImageBuffer'), '下载后应做魔数校验，OSS 错误页不得喂给视觉模型')
   // 旧写法：axios.get(imageUrl, { responseType: 'arraybuffer', ... }) 已必须消失
   assert.ok(

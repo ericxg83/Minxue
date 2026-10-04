@@ -16,10 +16,9 @@
  * ⇒ 结论：**不要整文件删除**（会拆掉上面的契约锁）；要清理就只清 `cropAndUploadQuestionRegion` 本身。
  */
 import sharp from 'sharp'
-import axios from 'axios'
 import { uploadImage } from '../services/ossService.js'
 import { isOutOfRangeBox } from './blockBoxTrust.js'
-import { NO_PROXY_DOWNLOAD_OPTS } from './noProxyHttp.js'
+import { downloadImageBufferNoProxy } from './noProxyHttp.js'
 
 /**
  * 下载图片
@@ -27,8 +26,8 @@ import { NO_PROXY_DOWNLOAD_OPTS } from './noProxyHttp.js'
 async function downloadImage(imageUrl) {
   // 走共享的禁代理选项：环境里若设了 HTTP_PROXY/HTTPS_PROXY，axios 默认会走代理，
   // OSS 页图会被代理拦成 400（2026-09-22 事故）。见 server/utils/noProxyHttp.js。
-  const response = await axios.get(imageUrl, NO_PROXY_DOWNLOAD_OPTS)
-  return Buffer.from(response.data)
+  // 走统一封装：既带禁代理选项（2026-09-22 事故），又带 SSRF 私网/回环/元数据拦截（提案⑱）
+  return downloadImageBufferNoProxy(imageUrl)
 }
 
 /**
