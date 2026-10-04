@@ -1,4 +1,4 @@
-import { requestJson, onNetworkRecover, getNetworkHealth } from './httpCore'
+import { requestJson, requestBlob, onNetworkRecover, getNetworkHealth } from './httpCore'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -122,6 +122,12 @@ export const apiRequest = async (path, options = {}, retries = 3) => {
 // 网络恢复（online 事件 / 请求成功）时清空 GET 去重表，
 // 避免失败瞬间的并发去重项把后续重试请求挡回旧 Promise。
 onNetworkRecover(() => inFlightRequests.clear())
+
+/**
+ * 二进制下载（r100）：POST 换 blob，走与 apiRequest 同一个 API_BASE。
+ * 用于讲义 Word 导出这类「响应是文件」的请求；无超时、不重试，错误体挂 err.payload。
+ */
+export const apiRequestBlob = (path, options = {}) => requestBlob(path, options)
 
 export { getNetworkHealth }
 

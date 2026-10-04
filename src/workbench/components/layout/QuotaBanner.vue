@@ -9,11 +9,13 @@
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
+import { apiRequest } from '../../../services/apiService'
 
-// 配额哨兵顶栏横幅（提案 1，2026-10-01）：轮询 GET /api/quota/status，
+// 配额哨兵顶栏横幅（提案 1，2026-10-01）：轮询 GET /quota/status，
 // 有供应商降级时显示、恢复自动消失。
 // 设计约束：拉取失败（如本地后端未启动、登录过期）一律静默隐藏——
 // 横幅只在后端明确报告降级时出现，绝不误报。
+// r100：裸 fetch 改 apiRequest（统一 API_BASE；retries=1 保持轮询不重试的旧行为）。
 const POLL_MS = 60 * 1000
 const degraded = ref([])
 const text = ref('')
@@ -32,9 +34,7 @@ const SUPPLIER_LABEL = {
 
 const refresh = async () => {
   try {
-    const resp = await fetch('/api/quota/status', { headers: { Accept: 'application/json' } })
-    if (!resp.ok) { degraded.value = []; return }
-    const payload = await resp.json()
+    const payload = await apiRequest('/quota/status', {}, 1)
     const list = payload?.data?.degraded || []
     degraded.value = list
     text.value = list

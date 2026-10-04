@@ -744,7 +744,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Download, Printer, Document, CopyDocument, MagicStick, Collection } from '@element-plus/icons-vue'
-import { apiRequest, getKnowledgeTree } from '../../services/apiService'
+import { apiRequest, apiRequestBlob, getKnowledgeTree } from '../../services/apiService'
 import { normalizeOptions } from '../../utils/optionText'
 import katex from 'katex'
 import 'katex/dist/katex.min.css'
@@ -956,7 +956,9 @@ async function handleExportWord() {
   if (!handout.value) return
   exporting.value = true
   try {
-    const res = await fetch('/api/handout/export-word', {
+    // r100：裸 fetch 改 apiRequestBlob（统一 API_BASE；blob 响应，无超时、不重试，
+    // 服务端错误体挂 err.payload，与原「读 j.error」语义一致）
+    const blob = await apiRequestBlob('/handout/export-word', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -964,15 +966,6 @@ async function handleExportWord() {
         filename: (handout.value.title || '备课讲义') + '.docx',
       }),
     })
-    if (!res.ok) {
-      let msg = `HTTP ${res.status}`
-      try {
-        const j = await res.json()
-        if (j && j.error) msg = j.error
-      } catch {}
-      throw new Error(msg)
-    }
-    const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url

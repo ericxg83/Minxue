@@ -1569,13 +1569,10 @@ const handleImageUpload = async (file) => {
   reader.onload = (e) => { localImageUrl.value = e.target?.result || '' }
   reader.readAsDataURL(file)
   try {
-    const formData = new FormData()
-    formData.append('files', file)
-    const response = await fetch('/api/upload', { method: 'POST', body: formData })
-    if (!response.ok) throw new Error('上传失败')
-    const result = await response.json()
-    localImageUrl.value = result.url
-    question.geometry_image_url = result.url
+    // r100：此处的裸 fetch 上传改走既有服务 uploadImage（同能力，统一 API_BASE）
+    const url = await uploadImage(file)
+    localImageUrl.value = url
+    question.geometry_image_url = url
     question.geometry_manual_override = true
     showOriginal.value = true
     ElMessage.success('配图上传成功')

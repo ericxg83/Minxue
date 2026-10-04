@@ -238,6 +238,7 @@
 </template>
 
 <script setup>
+import { API_BASE } from '../../services/httpCore'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, UploadFilled, Loading, PictureFilled, Search, Document, ArrowRight } from '@element-plus/icons-vue'
@@ -798,16 +799,16 @@ const appendLog = (line) => {
 }
 
 const fixApi = {
-  listSuspects: () => fetch('/api/worksheets/fix-exam-units/suspects?limit=200').then(r => r.json()),
-  listDebug: () => fetch('/api/worksheets/fix-exam-units/debug?limit=50').then(r => r.json()),
-  startBatch: (limit = 20) => fetch('/api/worksheets/fix-exam-units', {
+  listSuspects: () => fetch(`${API_BASE}/worksheets/fix-exam-units/suspects?limit=200`).then(r => r.json()),
+  listDebug: () => fetch(`${API_BASE}/worksheets/fix-exam-units/debug?limit=50`).then(r => r.json()),
+  startBatch: (limit = 20) => fetch(`${API_BASE}/worksheets/fix-exam-units`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit })
   }).then(r => r.json()),
-  startOne: (worksheetId) => fetch('/api/worksheets/fix-one-async', {
+  startOne: (worksheetId) => fetch(`${API_BASE}/worksheets/fix-one-async`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ worksheetId })
   }).then(r => r.json()),
-  pollJob: (jobId) => fetch(`/api/worksheets/fix-exam-units/job/${jobId}`).then(r => r.json()),
-  cancelJob: (jobId) => fetch('/api/worksheets/fix-exam-units/cancel', {
+  pollJob: (jobId) => fetch(`${API_BASE}/worksheets/fix-exam-units/job/${jobId}`).then(r => r.json()),
+  cancelJob: (jobId) => fetch(`${API_BASE}/worksheets/fix-exam-units/cancel`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId })
   }).then(r => r.json()),
 }
@@ -962,10 +963,10 @@ const handlePageUnitFix = async () => {
 }
 
 const ordinalFixApi = {
-  preview: (worksheetId) => fetch(`/api/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
+  preview: (worksheetId) => fetch(`${API_BASE}/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dryRun: true })
   }).then(r => r.json()),
-  apply: (worksheetId) => fetch(`/api/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
+  apply: (worksheetId) => fetch(`${API_BASE}/worksheets/${worksheetId}/fix-tanglian-ordinals`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dryRun: false })
   }).then(r => r.json()),
 }
@@ -1042,11 +1043,11 @@ const typeFixLoading = ref(false) // 扫描中
 const typeFixApplying = ref(false) // 修复中
 
 const typeFixApi = {
-  scan: (worksheetId) => fetch('/api/worksheets/fix-question-types/scan', {
+  scan: (worksheetId) => fetch(`${API_BASE}/worksheets/fix-question-types/scan`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(worksheetId ? { worksheetId } : {}),
   }).then(r => r.json()),
-  fix: (worksheetId) => fetch('/api/worksheets/fix-question-types', {
+  fix: (worksheetId) => fetch(`${API_BASE}/worksheets/fix-question-types`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(worksheetId ? { worksheetId, limit: 5000 } : { limit: 5000 }),
   }).then(r => r.json()),

@@ -253,6 +253,34 @@ export async function requestJson(path, options = {}) {
 }
 
 /**
+ * 二进制下载（r100）：POST 换 blob（讲义 Word 导出等）。与 requestJson 的差别：
+ *  - 不设超时（导出可能跑几分钟，超时只会掐死正常任务）；
+ *  - 不重试（重放长任务有副作用）；
+ *  - 返回 Blob 而不是解析后的 JSON。
+ * 错误语义与 requestJson 对齐：非 2xx 抛 createApiError，服务端错误体挂在 .payload 上。
+ */
+export async function requestBlob(path, options = {}) {
+  const url = `${API_BASE}${path}`
+  const response = await fetch(url, {
+    method: options.method || 'GET',
+    headers: options.headers,
+    body: options.body,
+    signal: options.signal
+  })
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => null)
+    const serverMessage = errorBody?.error || errorBody?.message || response.statusText
+    const error = createApiError(serverMessage || `请求失败: ${response.status}`, {
+      code: `HTTP_${response.status}`,
+      status: response.status
+    })
+    if (errorBody) error.payload = errorBody
+    throw error
+  }
+  return response.blob()
+}
+
+/**
  * 预热探测。重试之前先打一次极轻量的健康检查：
  * 既能把冷启动的实例唤醒，也能验证当前 WebView 连接是否真的可用——
  * 避免"盲重试"在死连接上连撞三次，用户只看到转圈。
