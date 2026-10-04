@@ -26,14 +26,6 @@ const SERVER = read('server/routes/weeklyReport.js')
 const VIEW = read('src/workbench/views/WeeklyReportWorkbench.vue')
 const TROPHY = read('src/workbench/components/diagnosis/TrophyBar.vue')
 const LINE = read('src/workbench/components/diagnosis/TrendLineChart.vue')
-// r138：页面把 hero-strip 白卡换成了 DiagnosisReadout（无框读数条），
-// 它内部组合TrophyBar。口径断言随之改为「两个文件合起来看」——
-// 守护对象没变（主数字=已记住=完全+基本），只是组件边界变了。
-const READOUT = read('src/workbench/components/diagnosis/DiagnosisReadout.vue')
-const PAGE = VIEW + READOUT
-// r138：「已拿下 N 道」这个措辞从 PC 页面移走了（那儿与读数条 KPI 重复），
-// 但它是家长 PDF 封面的主视觉，必须留在生成器里 —— 断言改守 PDF 侧，强度不降。
-const PDF_GEN = read('src/utils/weeklyReportGenerator.js')
 
 // ── ① 三态拆分纯函数：行为锁定（真跑，不靠正则）──
 const { splitMasteryStates } = await import('../server/routes/weeklyReport.js')
@@ -184,27 +176,22 @@ test('⛔ 折线图不许伪造数据：无题量的点不画、单点不画假�
   assert.match(LINE, /1 - Math\.max\(0, Math\.min\(100, acc\)\) \/ 100/, '纵轴必须锁 0-100%')
 })
 
-// ── ③ 页面信心口径（r133 更新：按负责人决策改口径 + 组件更名；r138 组件边界变更）──
+// ── ③ 页面信心口径（r133 更新：按负责人决策改口径 + 组件更名）──
 // r133 口径决策：主数字 = **已记住**（答对 1 次），「完全掌握」（答对 2 次）降级为徽章。
 //   现实里没时间让每道题都做两次；答对一次就是记住了，
 //   拿「完全掌握 2 道」当主数字会严重低估孩子、也让家长看不到信心。
 //   组件同步更名：MasteryBar → TrophyBar（不只是改名，是重写了「已练口径」）。
-// r138 结构调整（口径未变，只换了承载位置）：
-//   hero-strip 白卡 → DiagnosisReadout（无框读数条），TrophyBar 收进它内部。
-//   「已记住 / 还在攻克」这两个措辞现在只出现在 TrophyBar（三态条）里——
-//   读数条不再重复列「已记住」（原先同一个词在两处指的不是一回事，属口径冲突）。
-//   ⇒断言对象从 VIEW 扩到 VIEW+READOUT+TROPHY，守护的语义与强度均未放宽。
 test('⛔ 页面主数字必须是「已记住」= 完全 + 基本（不能退回只显示完全掌握）', () => {
-  assert.match(VIEW, /securedCount: mastered \+ basic/, '单生必须算出 securedCount = 完全 + 基本')
+  assert.match(VIEW, /securedCount: mastered \+ basic/, '单生 hero 必须有 securedCount')
   assert.match(VIEW, /securedCount: totals\.mastered \+ totals\.basic/, '全班概览必须有 securedCount')
-  assert.ok(PAGE.includes('已记住'), '页面链路必须出现「已记住」这个口径')
-  assert.ok(TROPHY.includes('还在攻克'), '「还在攻克」必须是三态条的正式措辞（不能退回「待复习」）')
-  // r138：三态条必须仍被挂上（现在挂在 DiagnosisReadout 内部，不是 hero-strip）
-  assert.match(READOUT, /<TrophyBar/, '读数条内部必须挂三态条')
+  assert.ok(VIEW.includes('已记住'), '页面必须出现「已记住」这个口径')
+  assert.ok(VIEW.includes('还在攻克'), '第三个 KPI 必须是「还在攻克」而不是「待复习」（语义更准）')
+  // 战果条组件必须在（r133 已从 MasteryBar 改名 TrophyBar）
+  assert.match(VIEW, /<TrophyBar/, 'hero 必须挂战果条')
+  assert.match(TROPHY, /已拿下/, '战果条要说清「已拿下 N 道」')
   assert.match(TROPHY, /道彻底掌握/, '彻底掌握作为小徽章存在，不是主数字')
-  assert.match(PDF_GEN, /已拿下/, '家长 PDF 封面必须仍说清「已拿下 N 道」（r138 只从 PC 页面移除）')
   // 已练口径：不能只给「74 道里拿下 16 道 = 22%」那种被稀释的口径
-  assert.match(TROPHY, /练过/, '三态条必须给出已练口径（练过 N 道 · 拿下 M 道）')
+  assert.match(TROPHY, /练过/, '战果条必须给出已练口径（练过 N 道 · 拿下 M 道）')
 })
 
 test('⛔ 战果条三段都要有（缺一段就退回成两格老样子）', () => {

@@ -4,141 +4,131 @@
       <PageHeader
         eyebrow="教学工作 / 学习诊断"
         title="学习诊断"
-        description="看清一段时间的作业表现、错因和薄弱知识点，再生成家长反馈。"
+        description="发现学生学习问题，判断优先级，并直接安排下一步教学。"
       >
         <template #actions>
           <ActionButton
-            :disabled="!selectedStudentId || loadingStudentDetail || !currentStudentDetail"
+            v-if="viewMode === 'single'"
+            :disabled="!selectedStudentId"
             :loading="generating"
             @click="handleGenerateCurrent"
-          >导出家长报告</ActionButton>
-          <span class="header-share-card">
-            <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudentName || ''" :mode="periodMode" :offset="periodOffset" />
-          </span>
+          >生成报告</ActionButton>
         </template>
       </PageHeader>
 
-      <!-- r138：筛选条改variant='bare' —— 原来是一个 58px 高的白框，
-           而它承载的只是「上下文」（我是谁、看哪段），不该比下面的结论框得更重。
-           说明文字（filterNoteText）移到读数条副行，语义上更贴数字。 -->
-      <FilterBar class="diagnosis-filter" variant="bare">
-        <WorkbenchSelect v-model="selectedStudentId" :options="studentOptions" width="180px" aria-label="选择学生" placeholder="选择学生" />
+      <FilterBar class="diagnosis-filter">
+        <template #leading><el-segmented v-model="viewMode" :options="viewModeOptions" /></template>
+        <WorkbenchSelect v-if="viewMode === 'grade'" v-model="selectedGrade" :options="gradeOptions" width="140px" aria-label="按年级筛选" placeholder="选择年级" />
+        <WorkbenchSelect v-if="viewMode === 'single'" v-model="selectedStudentId" :options="studentOptions" width="180px" aria-label="选择学生" placeholder="选择学生" />
+        <WorkbenchSelect v-if="viewMode === 'grade'" v-model="diagSubject" :options="diagSubjectOptions" width="120px" aria-label="按学科筛选" />
         <el-segmented v-model="periodMode" :options="periodModeOptions" />
         <WorkbenchSelect v-if="periodMode !== 'all'" v-model="periodOffset" :options="offsetOptions" width="120px" aria-label="时间偏移" />
+        <template #actions><span class="filter-note">{{ filterNoteText }}</span></template>
       </FilterBar>
 
       <!-- r135：删除 r133 的学生横排选择器（StudentPicker）。负责人验收反馈「姓名框好多余又丑」，
-           核实确实三重冗余：顶栏「选择学生」下拉 + 下方「需要关注的学生」列表（行内含头像/姓名/年级/
+           核实确实三重冗余：顶栏「选择学生」下拉 + 下方「发现问题」列表（行内含头像/姓名/年级/
            正确率/错题数且可点击进诊断）已完整覆盖选人与横向对比两个诉求，卡片排信息量反而最低。
            选人入口保留：下拉（快）+ 列表行点击（带上下文）。 -->
 
-      <!-- r137（负责人裁决）：「班级备课」grade 视图与「我的讲义」一并下线，
-           页面只剩单生诊断（家长反馈）一条主线，viewMode 分段器随之删除。 -->
-
-      <!-- ═══ r138 视觉重构 ═══
-           核心假设验证：页面不好看的主因不是设计系统不够，而是过度使用大型 Card。
-           本轮改动（不改业务逻辑、不改 API / 路由 / 数据）：
-           ① hero-strip 白卡 → DiagnosisReadout（无框读数条，全页最大数字 = 正确率）；
-           ② 5 个 KPI → 3 个主指标（批改题量 / 新增错题 / 待攻克），
-              「已记住」不再单列（与三态条重复且口径冲突，已合并到三态条）；
-           ③ 「下一步做什么」从右栏第二屏提到**全宽第一屏** —— 它是全页结论；
-           ④ 成长对比 4 项 → 压缩成 1 行脚注（3 项与顶部读数条重复）；
-           ⑤ 重练战绩（右栏）与重练进步（主栏）数据重复、口径不同 → 只留一处；
-           ⑥ 错因分布 / 正确率走势 / 知识点表 改variant='bare'（去白框）；
-           ⑦ 「需要关注的学生」列表也改bare —— 行间已有 hairline，不需要再套白卡。 -->
-
-      <!-- 未选学生：全班概览读数条 -->
-      <DiagnosisReadout
-        v-if="!selectedStudentId && reportsWithData.length"
-        aria-label="全班学习概览"
-        :accuracy="aggregateStats.totalQuestions ? aggregateStats.accuracy : null"
-        :accuracy-text="aggregateStats.totalQuestions ? `${aggregateStats.accuracy}` : '—'"
-        caption-title="全班概览"
-        :caption-meta="`${periodLabel} · 共 ${summaryData?.reports?.length || 0} 名学生`"
-        :note="`${reportsWithData.length} 名学生本周期有批改数据 · 完成作业 ${aggregateStats.completedTasks || 0} 份`"
-        :metrics="aggregateMetrics"
-        :mastered="aggregateStats.masteredCount"
-        :basic="aggregateStats.basicMasteredCount"
-        :todo="aggregateStats.notStartedCount"
-        :practiced="aggregateStats.practicedCount"
-      />
-
-      <!-- 未选学生：需要关注的学生（bare 列表，行间 hairline） -->
-      <section v-if="!selectedStudentId" class="attention">
-        <header class="sec-head">
-          <h2>需要关注的学生</h2>
-          <p>按真实正确率、错题与待重练数量排列 · 点任意一行进入该生诊断</p>
-        </header>
-        <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
-        <EmptyState
-          v-else-if="summaryError"
-          :icon="WarningFilled"
-          title="学习诊断数据加载失败"
-          :description="`${summaryError}。请检查网络后重试 —— 这不代表本周期没有批改数据。`"
-        >
-          <template #actions>
-            <el-button size="small" type="primary" @click="loadSummary">重试</el-button>
-          </template>
-        </EmptyState>
-        <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
-        <div v-else class="student-diagnosis-list">
-          <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
-            <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
-            <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
-            <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
-            <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
-            <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
-            <el-icon class="row-arrow"><ArrowRight /></el-icon>
-          </article>
-        </div>
-      </section>
-
-      <template v-else>
-        <div v-if="loadingStudentDetail" class="diagnosis-loading" role="status">正在整理所选学生的学习记录…</div>
-        <EmptyState v-else-if="!currentStudentDetail" title="暂时无法显示诊断内容" description="请重新选择学生，或稍后重试。" />
-        <div v-else class="student-diagnosis">
-
-          <!-- ── 二级：学生当前状态（无框读数条）── -->
-          <DiagnosisReadout
-            v-if="singleHero"
-            aria-label="学生学习概览"
-            :accuracy="singleHero.acc"
-            :accuracy-text="singleHero.accText"
-            :caption-title="currentStudentName"
-            :caption-meta="`${periodLabel} · ${singleHero.correctLine}`"
-            :note="singleHero.totalTasks ? `完成作业 ${singleHero.completedTasks}/${singleHero.totalTasks} 份 · 反复错 ${singleHero.repeatWrongCount} 道` : `反复错 ${singleHero.repeatWrongCount} 道`"
-            :metrics="singleMetrics"
-            :mastered="singleHero.masteredCount"
-            :basic="singleHero.basicMasteredCount"
-            :todo="singleHero.notStartedCount"
-            :practiced="singleHero.practicedCount"
-          />
-
-          <!-- ── 一级结论：「下一步做什么」提到全宽第一屏 ──
-               r138 之前它在 356px 右栏第二屏、且每条自带卡片（卡片套卡片）。
-               它是这一页真正要回答的问题（老师要的是「我今天该干什么」），
-               所以位置必须最靠前，宽度必须够放完整句。 -->
-          <section class="dx__next">
-            <header class="sec-head">
-              <h2>下一步做什么</h2>
-              <p>按见效快慢排序 · 每条都有真实数据支撑 · 点开就能干</p>
-            </header>
-            <NextActions
-              :error-causes="currentStudentDetail?.errorDistribution || []"
-              :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
-              :basic-count="singleHero?.basicMasteredCount || 0"
-              :todo-count="singleHero?.notStartedCount || 0"
-              :zero-accuracy-tags="zeroAccuracyTags"
+      <template v-if="viewMode === 'single'">
+        <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
+             与家长分享卡同构，正确率圆环 + 关键 KPI 一眼读数） -->
+        <section v-if="!selectedStudentId && reportsWithData.length" class="hero-strip" aria-label="全班学习概览">
+          <div class="hero-ring-wrap">
+            <div class="hero-ring" :style="heroRingStyle(aggregateStats.accuracy)"><b :class="accuracyTone(aggregateStats.accuracy)">{{ aggregateStats.accuracy }}%</b></div>
+            <span class="hero-ring-label">全班整体正确率</span>
+          </div>
+          <div class="hero-main">
+            <div class="hero-caption"><strong>全班概览</strong><span>{{ periodLabel }} · 共 {{ summaryData?.reports?.length || 0 }} 名学生</span></div>
+            <div class="hero-kpis">
+              <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
+              <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
+              <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已记住</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>还在攻克</span></div>
+            </div>
+            <TrophyBar
+              :mastered="aggregateStats.masteredCount"
+              :basic="aggregateStats.basicMasteredCount"
+              :todo="aggregateStats.notStartedCount"
+              :practiced="aggregateStats.practicedCount"
             />
+          </div>
+        </section>
+
+        <section v-if="!selectedStudentId" class="diagnosis-layout">
+          <ContentCard class="student-attention" title="发现问题" description="按真实正确率、错题与待重练数量排列需要关注的学生" flush>
+            <template #actions><el-checkbox :model-value="allChecked" :indeterminate="isIndeterminate" @change="toggleCheckAll">全选</el-checkbox></template>
+            <div v-if="loadingSummary" class="loading-stack"><el-skeleton v-for="index in 5" :key="index" :rows="2" animated /></div>
+            <EmptyState
+              v-else-if="summaryError"
+              :icon="WarningFilled"
+              title="学习诊断数据加载失败"
+              :description="`${summaryError}。请检查网络后重试 —— 这不代表本周期没有批改数据。`"
+            >
+              <template #actions>
+                <el-button size="small" type="primary" @click="loadSummary">重试</el-button>
+              </template>
+            </EmptyState>
+            <EmptyState v-else-if="!attentionReports.length" title="暂无可诊断的学生数据" description="当前周期还没有已完成的批改数据，可以切换时间范围后重试。" />
+            <div v-else class="student-diagnosis-list">
+              <article v-for="report in attentionReports" :key="report.student.id" class="student-diagnosis-row" tabindex="0" role="button" :aria-label="`查看${report.student.name}的学习诊断，正确率${hasStats(report) ? `${report.stats.accuracy}%` : '暂无数据'}，${hasStats(report) ? report.stats.newWrongCount : '—'} 道新增错题`" @click="focusStudent(report)" @keydown.enter.prevent="focusStudent(report)" @keydown.space.prevent="focusStudent(report)">
+                <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
+                <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
+                <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
+                <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
+                <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
+                <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
+                <el-icon class="row-arrow"><ArrowRight /></el-icon>
+              </article>
+            </div>
+          </ContentCard>
+        </section>
+
+        <template v-else>
+          <!-- r134 布局骨架（按 03-mockup-v2 重做）：左主栏 + 右侧操作栏。
+               r133 我把内容全铺成了通栏长条 —— 视觉上像一张Excel 表，
+               信息密度上去了但**没有视线的落点**。mockup 的核心是那条竖直分界：
+               左边是「诊断」（是什么情况），右边是「行动」（接下来做什么），
+               视线自然从左扫到右，形成「看问题 → 找动作」的动线。
+               右侧栏固定 372px：动作卡都是短条目，窄栏反而更易扫读。 -->
+          <div class="dx">
+            <div class="dx__main">
+
+          <!-- 单生学习概览 hero：选中学生后的第一眼数字（与分享卡 hero 同构） -->
+          <section v-if="singleHero" class="hero-strip" aria-label="学生学习概览">
+            <div class="hero-ring-wrap">
+              <div class="hero-ring" :style="heroRingStyle(singleHero.acc)"><b :class="accuracyTone(singleHero.acc)">{{ singleHero.accText }}</b></div>
+              <span class="hero-ring-label">整体正确率</span>
+            </div>
+            <div class="hero-main">
+              <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
+              <div class="hero-kpis">
+                <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
+                <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
+                <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已记住</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>还在攻克</span></div>
+              </div>
+              <TrophyBar
+                :mastered="singleHero.masteredCount"
+                :basic="singleHero.basicMasteredCount"
+                :todo="singleHero.notStartedCount"
+                :practiced="singleHero.practicedCount"
+              />
+            </div>
           </section>
 
-          <!-- ── 三级：为什么错（错因分布，bare + 轻量分析列表）── -->
+          <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）。
+               放在 hero 正下方（第一屏）而不是趋势图之后 —— 实测两列卡片原本落在
+               1281px，第一屏完全看不到，等于白做。叙事顺序也更像诊断：
+               先「已拿下多少」→ 再「为什么错」→ 再「接下来做什么」→ 最后才是趋势与明细。 -->
           <ContentCard
             class="dx__errcause"
-            variant="bare"
-            title="为什么错"
+            title="错因分布：为什么错"
             :description="currentStudentDetail?.errorDistribution?.length
-              ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 占比最高的一类最该先抓`
+              ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 占前三类的比例最高，优先处理`
               : '错因会在每周一凌晨自动回填，或随批改逐步补齐'"
           >
             <ErrorCauseBars
@@ -146,23 +136,19 @@
               @select="onErrorCauseClick"
             />
           </ContentCard>
-
           <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
                它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
-               point.total，而后端buildDailyTrend 返回 {date, accuracy, count}，
+               point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
                字段名对不上，柱子恒为 4% 空高、标签恒为 '-'，等于一张坏掉的图；
                且整块包在 v-if="periodMode === 'week'" 里，月/全部模式根本没图。
                保留两张图只会让老师困惑，故直接删旧留新（小而美：能删就删）。
 
                r132：默认「按天」。按周会把剧烈波动抹平 —— 实测陆晨曦 09-10
                只有 2/12 题（16.7%），按周看完全被平均掉。老师要看的正是
-               「哪天崩了」，所以按天是默认，周是备选。
-
-               r138：改 variant='bare'（去白框）；成长对比压缩成脚注一行。 -->
+               「哪天崩了」，所以按天是默认，周是备选。 -->
           <ContentCard
             v-if="currentStudentDetail?.stats"
             class="trend-line-card"
-            variant="bare"
             title="正确率走势"
             :description="`${currentStudentName} · 只看有批改记录的时段 · 没批改的日子不计入`"
           >
@@ -183,25 +169,75 @@
             <p v-if="trendChartPoints.length" class="trend-note">
               {{ trendSummary.description }}
             </p>
-            <!-- r138：成长对比从独立大卡压缩成一行脚注。
-                 原来 4 项里「正确率 / 新增错题 / 完成题量」与顶部读数条重复，
-                 只剩「较上周涨跌」是这里独有的信息 ⇒ 只保留它。 -->
-            <p v-if="growthFootnote" class="growth-footnote">{{ growthFootnote }}</p>
+          </ContentCard>
+
+
+          <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
+          <ContentCard
+            v-if="periodMode !== 'all' && currentStudentDetail?.prev"
+            class="growth-compare"
+            title="成长对比"
+            :description="`${currentStudentName} · 本${periodMode === 'week' ? '周' : '月'} vs ${lastPeriodLabel}`"
+          >
+            <div v-if="prevHasData" class="compare-grid">
+              <div v-for="item in growthCompareItems" :key="item.key" class="compare-item">
+                <div class="compare-item__label">{{ item.label }}</div>
+                <div class="compare-item__value">{{ item.currentText }}</div>
+                <div :class="['compare-item__delta', item.tone]">
+                  <span v-if="item.prevText">{{ item.deltaText }}</span>
+                  <span v-else>上周无数据</span>
+                </div>
+                <div class="compare-item__prev">上周 {{ item.prevText }}</div>
+              </div>
+            </div>
+            <EmptyState
+              v-else
+              title="上一周期暂无学习数据"
+              description="本周期有学习记录，但上一周期没有进入批改的数据，暂无法对比。"
+            />
+          </ContentCard>
+
+          <!-- 重练进步：本周期重练卷判题结果 + 错题生命周期推进 -->
+          <ContentCard
+            v-if="retryProgressVisible"
+            class="retry-progress"
+            title="重练进步"
+            :description="`重练卷批改完成后推进错题掌握状态 · ${currentStudentName}`"
+          >
+            <div class="retry-grid">
+              <div class="retry-item">
+                <div class="retry-item__value">{{ retryProgress.examCount }}</div>
+                <div class="retry-item__label">完成重练卷</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value">{{ retryProgress.retriedCount }}</div>
+                <div class="retry-item__label">重练题目</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value" :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 80 }">{{ retryProgress.retryAccuracy }}<small>%</small></div>
+                <div class="retry-item__label">重练正确率</div>
+              </div>
+              <div class="retry-item">
+                <div class="retry-item__value" :class="{ 'is-good': retryProgress.pushedToBasic > 0 }">{{ retryProgress.pushedToBasic }}</div>
+                <div class="retry-item__label">推进到基本掌握</div>
+              </div>
+            </div>
+            <div class="retry-note">
+              <span>重练答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题</span>
+            </div>
           </ContentCard>
 
           <!-- ⛔ 知识点表从「全量 133 行」改为「默认 5 行 + 可展开」（r134）。
-               实测全量渲染高度**7622px** —— 一张卡把整个主栏拉成一条看不到头的长带，
+               实测全量渲染高度 **7622px** —— 一张卡把整个主栏拉成一条看不到头的长带，
                这正是负责人说的「长条通栏显得太丑」的元凶：
                ① 视觉上，主栏被一张无限长的表占满，右栏的 sticky 完全失去意义；
                ② 133 行里绝大多数是「错 1 次、正确率 90%+」的知识点，
                   排在后面根本不会被看到，等于占位。
                mockup 的做法是只列最该练的 5 行 + 一个「全部」入口 —— 保留信息可达性，
-               但把首屏还给真正要处理的问题。
-               r138：外层改 variant='bare'（表格本身需要列对齐，保留；壳去掉）。 -->
+               但把首屏还给真正要处理的问题。 -->
           <ContentCard
             v-if="currentStudentDetail?.knowledgeDiagnosis?.length"
             class="knowledge-diagnosis"
-            variant="bare"
             title="最该练的知识点"
             :description="`按错误次数排序 · 共 ${weakKnowledge.length} 个知识点出过错 · ${
               weakKnowledgeCount > TOP_KNOWLEDGE_ROWS
@@ -227,83 +263,400 @@
             </p>
           </ContentCard>
 
-          <!-- ── 四级：明细（折叠区，默认收起）──
-               r138：重练进步 + 本周备课建议原本各占一张大卡，
-               但它们是「查得到就行」的信息，不该和上面的结论抢首屏。
-               折叠后首屏只剩：状态 → 结论 → 原因 → 走势 → 知识点。 -->
-          <details v-if="retryProgressVisible" class="fold">
-            <summary class="fold__head">
-              <span class="fold__title">重练进步</span>
-              <span class="fold__meta">{{ retryProgress.examCount }} 份卷 · {{ retryProgress.retriedCount }} 题 · 正确率 {{ retryProgress.retryAccuracy }}%</span>
-            </summary>
-            <div class="fold__body">
-              <div class="retry-grid">
-                <div class="retry-item">
-                  <div class="retry-item__value">{{ retryProgress.examCount }}</div>
-                  <div class="retry-item__label">完成重练卷</div>
+          <ContentCard v-if="studentSuggestions.length" class="student-suggestions" title="本周备课建议（按 KP）" :description="`${currentStudentName} · ${periodLabel}`" flush>
+            <div class="student-suggestion-list">
+              <article v-for="(s, idx) in studentSuggestions" :key="s.kpName" class="student-suggestion-card">
+                <header>
+                  <div class="rank-pill small">{{ idx + 1 }}</div>
+                  <strong>{{ s.kpName }}</strong>
+                  <span class="meta-inline">错题 {{ s.wrongCount }} · 空题 {{ s.blankCount }}</span>
+                </header>
+                <div v-if="s.errorDistribution?.length" class="mini-error-dist">
+                  <div v-for="e in s.errorDistribution.slice(0, 3)" :key="e.errorType" class="mini-error-row">
+                    <span :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
+                    <span class="mini-error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+                  </div>
                 </div>
-                <div class="retry-item">
-                  <div class="retry-item__value">{{ retryProgress.retriedCount }}</div>
-                  <div class="retry-item__label">重练题目</div>
-                </div>
-                <div class="retry-item">
-                  <div class="retry-item__value" :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 80 }">{{ retryProgress.retryAccuracy }}<small>%</small></div>
-                  <div class="retry-item__label">重练正确率</div>
-                </div>
-                <!-- r138：原右栏「重练战绩」卡与此重复（同一个retryProgress），
-                     且标签一个叫「推进到基本掌握」一个叫「推进到已记住」⇒ 口径冲突。
-                     现在只留一处，统一用「推进到已记住」（与读数条/三态条措辞一致）。 -->
-                <div class="retry-item">
-                  <div class="retry-item__value" :class="{ 'is-good': retryProgress.pushedToBasic > 0 }">{{ retryProgress.pushedToBasic }}</div>
-                  <div class="retry-item__label">推进到已记住</div>
-                </div>
-              </div>
-              <p class="retry-note">
-                答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题
-              </p>
+                <footer v-if="s.teachingAdvice">
+                  <span class="advice-label">辅导建议：</span>
+                  <strong>{{ s.teachingAdvice }}</strong>
+                </footer>
+              </article>
             </div>
-          </details>
+          </ContentCard>
+          <EmptyState v-else-if="!generating && currentStudentDetail" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
+            </div>
 
-          <details v-if="studentSuggestions.length" class="fold">
-            <summary class="fold__head">
-              <span class="fold__title">本周备课建议</span>
-              <span class="fold__meta">{{ studentSuggestions.length }} 个知识点 · {{ currentStudentName }} · {{ periodLabel }}</span>
-            </summary>
-            <div class="fold__body">
-              <div class="student-suggestion-list">
-                <article v-for="(s, idx) in studentSuggestions" :key="s.kpName" class="student-suggestion-card">
-                  <header>
-                    <div class="rank-pill small">{{ idx + 1 }}</div>
-                    <strong>{{ s.kpName }}</strong>
-                    <span class="meta-inline">错题 {{ s.wrongCount }} · 空题 {{ s.blankCount }}</span>
-                  </header>
-                  <div v-if="s.errorDistribution?.length" class="mini-error-dist">
-                    <div v-for="e in s.errorDistribution.slice(0, 3)" :key="e.errorType" class="mini-error-row">
-                      <span :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
-                      <span class="mini-error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+            <!-- ── 右侧操作栏：行动 + 战绩 + 产出 ── -->
+            <aside class="dx__rail">
+              <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干" flush>
+                <div class="dx__rail-body">
+                  <NextActions
+                    :error-causes="currentStudentDetail?.errorDistribution || []"
+                    :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
+                    :basic-count="singleHero?.basicMasteredCount || 0"
+                    :todo-count="singleHero?.notStartedCount || 0"
+                    :zero-accuracy-tags="zeroAccuracyTags"
+                  />
+                </div>
+              </ContentCard>
+
+              <ContentCard v-if="retryProgressVisible" title="重练战绩" :description="`${retryProgress.examCount} 份卷 · ${retryProgress.retriedCount} 题`" flush>
+                <div class="dx__rail-body">
+                  <div class="rail-stats">
+                    <div class="rail-stat">
+                      <b :class="{ 'is-good': (retryProgress.retryAccuracy || 0) >= 60 }">{{ retryProgress.retryAccuracy }}<small>%</small></b>
+                      <span>重练正确率</span>
+                    </div>
+                    <div class="rail-stat">
+                      <b class="is-good">{{ retryProgress.pushedToBasic }}</b>
+                      <span>推进到已记住</span>
                     </div>
                   </div>
-                  <footer v-if="s.teachingAdvice">
-                    <span class="advice-label">辅导建议：</span>
-                    <strong>{{ s.teachingAdvice }}</strong>
-                  </footer>
-                </article>
-              </div>
-            </div>
-          </details>
+                  <p class="rail-note">
+                    答对 {{ retryProgress.correctCount }} 题 · 未通过回到待练 {{ retryProgress.stillNew }} 题
+                  </p>
+                </div>
+              </ContentCard>
 
-          <EmptyState v-else-if="!generating && currentStudentDetail && !studentSuggestions.length && !retryProgressVisible" title="该学生当前周期暂无知识点诊断" description="可以切换周期，或等待新的批改数据进入诊断。" />
+              <ContentCard title="发给家长" description="老师转发用，家长只看产出物" flush>
+                <div class="dx__rail-body">
+                  <ParentOutputCard
+                    :student-name="currentStudentName"
+                    :total-questions="singleHero?.totalQuestions || 0"
+                    :correct-count="currentStudentDetail?.stats?.correctCount || 0"
+                    :accuracy="singleHero?.acc"
+                    :secured="singleHero?.securedCount || 0"
+                    :mastered="singleHero?.masteredCount || 0"
+                    :new-wrong="singleHero?.newWrongCount || 0"
+                  />
+                </div>
+              </ContentCard>
+            </aside>
+          </div>
+        </template>
+      </template>
+
+      <section v-else class="grade-suggestions-section">
+        <ContentCard
+          :title="`「${selectedGrade || '年级'}」本周备课建议`"
+          :description="`${periodLabel} · ${diagSubject || '数学'} · ${gradeSuggestionsMeta?.studentCount ?? '-'} 名学生`
+            + (gradeSuggestionsError ? ` · 加载失败：${gradeSuggestionsError}` : '')"
+          flush
+        >
+          <template #actions>
+            <ActionButton :loading="loadingGradeSuggestions" @click="retryGradeSuggestions">刷新</ActionButton>
+          </template>
+          <div v-if="loadingGradeSuggestions" class="loading-stack"><el-skeleton v-for="index in 3" :key="index" :rows="3" animated /></div>
+          <EmptyState
+            v-else-if="!gradeSuggestions.length"
+            :icon="Reading"
+            title="该年级本周暂无共性薄弱知识点"
+            description="切换时间范围或学科继续查看，或等待新批改数据进入。"
+          />
+          <div v-else class="grade-suggestion-list">
+            <article v-for="(s, idx) in gradeSuggestions" :key="s.kpName" class="grade-suggestion-card">
+              <header class="card-header">
+                <div class="rank-pill">{{ idx + 1 }}</div>
+                <div class="kp-name-block">
+                  <h3>{{ s.kpName }}</h3>
+                  <div class="kp-meta">
+                    <StatusTag :label="s.subject || '其他'" tone="neutral" />
+                    <span class="meta-item"><b>{{ s.wrongCount }}</b> 道错题</span>
+                    <span class="meta-item"><b>{{ s.blankCount }}</b> 道空题</span>
+                    <span class="meta-item"><b>{{ s.studentCount }}</b> 名学生</span>
+                  </div>
+                </div>
+              </header>
+
+              <section v-if="s.errorDistribution?.length" class="card-section error-dist">
+                <label>错因分布</label>
+                <div class="error-bars">
+                  <div v-for="e in s.errorDistribution" :key="e.errorType" class="error-bar-row">
+                    <span class="error-type" :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
+                    <el-progress :percentage="e.ratio" :color="errorTypeColor(e.errorType)" :stroke-width="10" style="flex: 1; margin: 0 10px;" />
+                    <span class="error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+                  </div>
+                </div>
+              </section>
+
+              <section v-if="s.sampleQuestions?.length" class="card-section sample-list">
+                <label>典型错题（讲义例题）</label>
+                <div v-for="(q, qi) in s.sampleQuestions" :key="q.id" class="sample-item">
+                  <div class="sample-q">{{ qi + 1 }}. {{ q.content }}</div>
+                  <div class="sample-meta">
+                    <span class="sample-stu">{{ q.studentName }}</span>
+                    <span v-if="q.isBlank" class="sample-answer sample-answer--blank">空题未作答</span>
+                    <span v-else class="sample-answer">作答：{{ q.studentAnswer || '未填写' }}</span>
+                    <span class="sample-answer">正确：{{ q.correctAnswer || '—' }}</span>
+                  </div>
+                  <div class="sample-reason">
+                    <StatusTag v-if="!q.isBlank" :tone="q.errorType ? 'danger' : 'info'">
+                      {{ q.errorType || '未标注' }}{{ q.errorReason ? `：${q.errorReason}` : '' }}
+                    </StatusTag>
+                    <StatusTag v-else tone="warning">空题（建议当堂提问）</StatusTag>
+                  </div>
+                </div>
+              </section>
+
+              <footer v-if="s.teachingAdvice" class="card-footer">
+                <el-icon><Reading /></el-icon>
+                <span>教学建议：<strong>{{ s.teachingAdvice }}</strong></span>
+              </footer>
+            </article>
+          </div>
+        </ContentCard>
+      </section>
+
+      <!-- 周末讲题错题卷：按"具体题"维度聚合，错误率排序 -->
+      <section v-if="viewMode === 'grade'" class="wrong-paper-section">
+        <ContentCard
+          class="wrong-paper-card"
+          :title="`「${selectedGrade || '年级'}」本周错题卷清单`"
+          :description="wrongPaperDescription"
+          flush
+        >
+          <template #actions>
+            <ActionButton :loading="exportingWrongPaper" :disabled="wrongPaperItems.length === 0" @click="handleExportWrongPaperAll">
+              <el-icon><Download /></el-icon>导出全班讲义卷
+            </ActionButton>
+            <ActionButton :loading="loadingWrongPaper" @click="loadWrongPaper">
+              <el-icon><Refresh /></el-icon>刷新
+            </ActionButton>
+          </template>
+
+          <div v-if="loadingWrongPaper" class="loading-stack">
+            <el-skeleton v-for="i in 4" :key="i" :rows="2" animated />
+          </div>
+          <EmptyState
+            v-else-if="!wrongPaperItems.length"
+            :icon="Reading"
+            title="该年级本周暂无错题"
+            description="切换时间范围或学科继续查看，或等待新批改数据进入。"
+          />
+          <DataTable
+            v-else
+            :data="wrongPaperItems"
+            row-key="identityKey"
+            :expand-row-keys="Array.from(expandedWrongRows)"
+            :default-expand-all="false"
+            size="small"
+            empty-text=" "
+            class="wrong-paper-table"
+          >
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="wrong-paper-expand">
+                  <div class="expand-row">
+                    <span class="expand-label">正确答案</span>
+                    <strong>{{ row.correctAnswer || '—' }}</strong>
+                  </div>
+                  <div v-if="row.involvedStudents?.length" class="expand-row">
+                    <span class="expand-label">错的学生（{{ row.involvedStudents.length }} 人）</span>
+                    <div class="student-chips">
+                      <el-tag
+                        v-for="s in row.involvedStudents"
+                        :key="s.id"
+                        :type="s.wrongTimes > 1 ? 'danger' : 'info'"
+                        effect="plain"
+                        size="small"
+                      >
+                        {{ s.name }}{{ s.wrongTimes > 1 ? ` ×${s.wrongTimes}` : '' }}
+                      </el-tag>
+                    </div>
+                  </div>
+                  <div v-if="row.errorDistribution?.length" class="expand-row">
+                    <span class="expand-label">错因分布</span>
+                    <div class="error-mini">
+                      <span v-for="e in row.errorDistribution" :key="e.errorType" :style="{ color: errorTypeColor(e.errorType) }">
+                        {{ e.errorType }} {{ e.count }}次 · {{ e.ratio }}%
+                      </span>
+                    </div>
+                  </div>
+                  <div v-if="row.knowledgeTags?.length" class="expand-row">
+                    <span class="expand-label">知识点</span>
+                    <span>
+                      <el-tag v-for="t in row.knowledgeTags.slice(0, 4)" :key="t" type="info" effect="plain" size="small" style="margin-right: 4px;">
+                        {{ t }}
+                      </el-tag>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="row" width="48" align="center">
+              <template #default="{ row, $index }">
+                <span :class="['rank-num', { 'is-top': $index < 3 }]">{{ $index + 1 }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="题目" min-width="280">
+              <template #default="{ row }">
+                <div class="wrong-q-cell">
+                  <span class="wrong-q-content">{{ row.content }}</span>
+                  <span v-if="row.knowledgeTags?.length" class="wrong-q-tags">
+                    <el-tag
+                      v-for="t in row.knowledgeTags.slice(0, 2)"
+                      :key="t"
+                      type="info"
+                      effect="plain"
+                      size="small"
+                    >{{ t }}</el-tag>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="错误率" width="110" align="center" sortable :sort-method="(a, b) => a.errorRate - b.errorRate">
+              <template #default="{ row }">
+                <div :class="['error-rate', errorRateTone(row.errorRate)]">
+                  <strong>{{ row.errorRate }}%</strong>
+                  <small>{{ row.studentCount }}/{{ wrongPaperMeta?.totalStudentCount || '-' }}</small>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="错题次数" width="86" align="center">
+              <template #default="{ row }"><span>{{ row.wrongCount }}</span></template>
+            </el-table-column>
+            <el-table-column label="错因" min-width="160">
+              <template #default="{ row }">
+                <div v-if="row.errorDistribution?.length" class="error-tags">
+                  <StatusTag
+                    v-for="e in row.errorDistribution.slice(0, 2)"
+                    :key="e.errorType"
+                    :tone="errorTypeToTone(e.errorType)"
+                    size="small"
+                  >{{ e.errorType }} {{ e.ratio }}%</StatusTag>
+                  <span v-if="row.errorDistribution.length > 2" class="muted">+{{ row.errorDistribution.length - 2 }}</span>
+                </div>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="140" align="center" fixed="right">
+              <template #default="{ row }">
+                <div class="row-actions">
+                  <el-button text size="small" @click="toggleWrongRow(wrongPaperRowKey(row))">
+                    {{ isWrongRowExpanded(wrongPaperRowKey(row)) ? '收起' : '详情' }}
+                  </el-button>
+                  <el-button
+                    text
+                    type="primary"
+                    size="small"
+                    :disabled="!row.involvedStudents?.length"
+                    @click="handleExportWrongPaperStudent(row)"
+                  >个人卷</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </DataTable>
+        </ContentCard>
+      </section>
+
+      <!-- 底部输出条：把诊断结论直接转化为下一步教学动作（替代原 report-output 大面板） -->
+      <section class="output-bar" aria-label="诊断输出">
+        <span class="output-bar__label">输出</span>
+        <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('week')">生成本周报告</ActionButton>
+        <ActionButton :disabled="!selectedStudentId" :loading="generating" @click="generatePeriodReport('month')">生成本月报告</ActionButton>
+        <ActionButton @click="handleExportHandout">生成讲义</ActionButton>
+        <ActionButton variant="primary" @click="handleDistributeExam">发重练卷</ActionButton>
+        <!-- 家长成长卡（第 91 轮从「成长中心」搬来）：这是老师转发给家长的产出物，
+             成长中心下线后不能跟着消失。未选学生时点它会提示「请先选择学生」。
+             ⛔ 类名必须挂在外层 span 上，不能直接挂到 <GrowthCardButton>：
+             该组件是「按钮 + 弹窗 + Teleport」多根节点，Vue 无法透传 class
+             （运行时会告警 "Extraneous non-props attributes"），margin-left:auto 会静默失效。 -->
+        <span class="output-bar__growth">
+          <GrowthCardButton :student-id="selectedStudentId || ''" :student-name="currentStudentName || ''" :mode="periodMode" :offset="periodOffset" />
+        </span>
+      </section>
+    </div>
+    <!-- 知识点下钻抽屉 -->
+    <el-drawer
+      v-model="drawerVisible"
+      size="520px"
+      destroy-on-close
+      :show-close="false"
+    >
+      <template #header>
+        <div class="drawer-header">
+          <div>
+            <div class="drawer-title">「{{ drawerTag }}」诊断详情</div>
+            <div class="drawer-sub">{{ periodLabel }}</div>
+          </div>
+          <el-button text @click="drawerVisible = false">
+            <el-icon><Close /></el-icon>
+          </el-button>
         </div>
       </template>
-    </div>
+      <div v-loading="loadingDetail" class="drawer-body">
+        <template v-if="drawerDetail">
+          <div class="section-title">
+            <el-icon><PieChart /></el-icon>
+            错因分布（做错题共 {{ drawerDetail.totalWrong }} 道）
+          </div>
+          <div class="error-dist">
+            <div class="error-item" v-for="e in drawerDetail.errorDist" :key="e.errorType">
+              <span class="error-type" :style="{ color: errorTypeColor(e.errorType) }">{{ e.errorType }}</span>
+              <el-progress
+                :percentage="e.ratio"
+                :color="errorTypeColor(e.errorType)"
+                :stroke-width="12"
+                style="flex: 1; margin: 0 12px;"
+              />
+              <span class="error-count">{{ e.count }}次 · {{ e.ratio }}%</span>
+            </div>
+            <div v-if="drawerDetail.errorDist.length === 0" class="muted" style="padding: 8px 0;">
+              暂无做错题（该知识点仅有空题，空题不做错因分析）
+            </div>
+          </div>
+
+          <div class="section-title" style="margin-top: 20px;">
+            <el-icon><User /></el-icon>
+            涉及学生（{{ drawerDetail.students.length }} 人）
+          </div>
+          <el-table :data="drawerDetail.students" stripe size="small" style="width: 100%">
+            <el-table-column prop="name" label="姓名" min-width="100" />
+            <el-table-column prop="grade" label="年级" width="90" align="center" />
+            <el-table-column prop="blankCount" label="空题" width="80" align="center">
+              <template #default="{ row }">
+                <span v-if="row.blankCount > 0" class="blank-badge">{{ row.blankCount }}</span>
+                <span v-else class="muted">0</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="wrongCount" label="做错" width="80" align="center" />
+          </el-table>
+
+          <div class="section-title" style="margin-top: 20px;">
+            <el-icon><Collection /></el-icon>
+            典型错题（讲义例题）
+          </div>
+          <div v-if="drawerDetail.sampleQuestions?.length" class="sample-list">
+            <div class="sample-item" v-for="(q, qi) in drawerDetail.sampleQuestions" :key="q.id">
+              <div class="sample-q">{{ qi + 1 }}. {{ q.content }}</div>
+              <div class="sample-meta">
+                <span class="sample-stu">{{ q.studentName }}</span>
+                <span v-if="q.isBlank" class="sample-answer sample-answer--blank">空题未作答</span>
+                <span v-else class="sample-answer">作答：{{ q.studentAnswer || '未填写' }}</span>
+                <span class="sample-answer">正确：{{ q.correctAnswer || '—' }}</span>
+              </div>
+              <div class="sample-reason">
+                <StatusTag v-if="!q.isBlank" :tone="q.errorType ? 'danger' : 'info'">
+                  {{ q.errorType || '未标注' }}{{ q.errorReason ? `：${q.errorReason}` : '' }}
+                </StatusTag>
+                <StatusTag v-else tone="warning">空题（建议当堂提问）</StatusTag>
+              </div>
+            </div>
+          </div>
+          <div v-else class="muted" style="padding: 8px 0;">暂未取到该知识点的错题样本</div>
+        </template>
+        <el-empty v-else description="暂无详情数据" :image-size="80" />
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowRight, Close, PieChart, User, Collection, Reading, Download, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import DataTable from '../components/ui/DataTable.vue'
@@ -313,13 +666,12 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-// r138：新增 DiagnosisReadout（读数条）。它内部复用 TrophyBar（三态条），
-// 取代了原hero-strip（白卡 + 正确率圆环 + 5 个 KPI）。
-import DiagnosisReadout from '../components/diagnosis/DiagnosisReadout.vue'
+import TrophyBar from '../components/diagnosis/TrophyBar.vue'
 import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
 import ErrorCauseBars from '../components/diagnosis/ErrorCauseBars.vue'
 import NextActions from '../components/diagnosis/NextActions.vue'
-import { getStudents, getWeeklyReport, getAllWeeklyReports } from '../../services/apiService'
+import ParentOutputCard from '../components/diagnosis/ParentOutputCard.vue'
+import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -330,9 +682,7 @@ dayjs.extend(isoWeek)
 const router = useRouter()
 
 // ── State ──
-// r137（负责人裁决）：「班级备课」（年级备课建议 + 错题卷清单）与「我的讲义」属伪需求，
-// 已基本不用，整个视图连同 viewMode 分段器一并下线；本页只剩单生学习诊断（家长反馈）一条主线。
-// 讲义/错题卷 Word 导出、模板引擎、提词器等后端能力同步移除。
+const viewMode = ref('single')
 const selectedStudentId = ref('')
 const studentList = ref([])
 const summaryData = ref(null)
@@ -342,13 +692,70 @@ const loadingSummary = ref(false)
 const summaryError = ref('')
 const generating = ref(false)
 const currentStudentDetail = ref(null)
+const checkedIds = ref([])
 
-const loadingStudentDetail = ref(false)
-let studentDetailRequestId = 0
+const viewModeOptions = [
+  { label: '按年级', value: 'grade' },
+  { label: '单生', value: 'single' }
+]
 
-// ── 单生学习建议 State ──
+// ── 全班共性诊断 State（保留兼容，新口径按年级） ──
+const classDiagnosis = ref([])
+const loadingClassDiagnosis = ref(false)
+const diagSubject = ref('')
+const diagSubjectOptions = [
+  { label: '全部学科', value: '' },
+  { label: '数学', value: '数学' },
+  { label: '语文', value: '语文' },
+  { label: '英语', value: '英语' }
+]
+
+// ── 年级备课建议 State（新口径：晚托班按年级） ──
+const grades = ref([])
+const selectedGrade = ref('')
+const gradeSuggestions = ref([])
+const gradeSuggestionsMeta = ref(null)
+const loadingGradeSuggestions = ref(false)
+const gradeSuggestionsError = ref('')
+
+// ── 单生备课建议 State ──
 const studentSuggestions = ref([])
 const loadingStudentSuggestions = ref(false)
+const drawerVisible = ref(false)
+const drawerTag = ref('')
+const drawerDetail = ref(null)
+const loadingDetail = ref(false)
+
+// ── 周末讲题错题卷 State（年级视图） ──
+const wrongPaperItems = ref([])
+const wrongPaperMeta = ref(null) // {totalStudentCount, wrongStudentCount, period}
+const loadingWrongPaper = ref(false)
+const wrongPaperError = ref('')
+const exportingWrongPaper = ref(false)
+const expandedWrongRows = ref(new Set()) // Set<identityKey>
+
+const allChecked = computed(() =>
+  summaryData.value?.reports?.length > 0 &&
+  checkedIds.value.length === summaryData.value.reports.length
+)
+const isIndeterminate = computed(() =>
+  checkedIds.value.length > 0 &&
+  checkedIds.value.length < (summaryData.value?.reports?.length || 0)
+)
+
+function toggleCheck(id, checked) {
+  if (checked) {
+    if (!checkedIds.value.includes(id)) checkedIds.value.push(id)
+  } else {
+    checkedIds.value = checkedIds.value.filter(x => x !== id)
+  }
+}
+
+function toggleCheckAll(checked) {
+  checkedIds.value = checked
+    ? (summaryData.value?.reports || []).map(r => r.student.id)
+    : []
+}
 
 // ── Period State ──
 const periodMode = ref('week')
@@ -411,29 +818,83 @@ const currentStudentName = computed(() => {
   return s?.name || ''
 })
 
-// r138：filterNoteText 随模板里的 FilterBar actions 一起移除 —— 说明文字
-// 现在直接写进读数条的 captionMeta / note（语义上更贴数字，不必绕一层插槽）。
-// 保留导出以防后续复用；未使用的变量不会报错，但为避免 lint 噪音改名为注释说明。
+const gradeOptions = computed(() =>
+  grades.value.map(g => ({ label: g, value: g }))
+)
+
+const filterNoteText = computed(() => {
+  if (viewMode.value === 'grade') {
+    if (!selectedGrade.value) return '请选择年级'
+    return `${selectedGrade.value} · ${gradeSuggestions.value.length} 个薄弱知识点`
+  }
+  return selectedStudentId.value
+    ? currentStudentName.value
+    : `${reportsWithData.value.length} 名学生有数据`
+})
+
+// 错题卷区块描述：年级 · 时段 · 学科 · 总人数 · 本周错题学生数 · 加载失败原因
+const wrongPaperDescription = computed(() => {
+  if (!selectedGrade.value) return '请选择年级'
+  const meta = wrongPaperMeta.value
+  const total = meta?.totalStudentCount ?? '-'
+  const wrongStu = meta?.wrongStudentCount ?? '-'
+  return `${selectedGrade.value} · ${periodLabel.value} · ${diagSubject.value || '数学'} · 共 ${total} 名学生 · ${wrongStu} 人本周错题${wrongPaperError.value ? ` · 加载失败：${wrongPaperError.value}` : ''}`
+})
+
+// 错误率档位（视觉强化）
+function errorRateTone(rate) {
+  if (rate >= 40) return 'is-critical'
+  if (rate >= 20) return 'is-warning'
+  if (rate >= 10) return 'is-info'
+  return 'is-normal'
+}
+
+// 错因 → StatusTag tone（与已有 errorTypeColor 视觉一致）
+function errorTypeToTone(type) {
+  if (!type || type === '未标注') return 'default'
+  if (/计算|运算/.test(type)) return 'danger'
+  if (/审题/.test(type)) return 'warning'
+  if (/公式|概念/.test(type)) return 'primary'
+  if (/步骤|单位/.test(type)) return 'info'
+  if (/方法|分析/.test(type)) return 'success'
+  if (/抄写|粗心/.test(type)) return 'default'
+  return 'default'
+}
 
 // ── Watch period changes to refresh data ──
 
 watch([periodMode, periodOffset], () => {
   loadSummary()
+  if (viewMode.value === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
+  }
   if (selectedStudentId.value) handleStudentChange(selectedStudentId.value)
 })
 
-watch(selectedStudentId, (id) => {
-  if (id) {
-    handleStudentChange(id)
-    loadStudentSuggestions()
-  } else {
-    currentStudentDetail.value = null
+watch(viewMode, (val) => {
+  if (val === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
   }
+  if (val === 'single' && selectedStudentId.value) loadStudentSuggestions()
+})
+
+watch(selectedGrade, () => {
+  if (viewMode.value === 'grade' && selectedGrade.value) {
+    loadGradeSuggestions()
+    loadWrongPaper()
+  }
+})
+
+watch(selectedStudentId, (id) => {
+  if (viewMode.value === 'single' && id) loadStudentSuggestions()
 })
 
 // ── Lifecycle ──
 onMounted(async () => {
   await loadStudents()
+  await loadGrades()
   await loadSummary()
 })
 
@@ -463,25 +924,75 @@ async function loadSummary() {
 }
 
 async function handleStudentChange(id) {
-  const requestId = ++studentDetailRequestId
   currentStudentDetail.value = null
-  if (!id) {
-    loadingStudentDetail.value = false
-    return
-  }
-
-  loadingStudentDetail.value = true
+  if (!id) return
   try {
-    const data = await getWeeklyReport(id, { mode: periodMode.value, offset: periodOffset.value })
-    if (requestId !== studentDetailRequestId) return
-    if (!data?.success) throw new Error(data?.error || '获取学生周统计失败')
-    currentStudentDetail.value = data
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const resp = await fetch(`${API_BASE}/weekly-report/${id}?mode=${periodMode.value}&offset=${periodOffset.value}`)
+    const data = await resp.json()
+    if (data.success) currentStudentDetail.value = data
   } catch (e) {
-    if (requestId === studentDetailRequestId) {
-      ElMessage.error(e?.message || '获取学生周统计失败')
-    }
+    ElMessage.error('获取学生周统计失败')
+  }
+}
+
+async function loadClassDiagnosis() {
+  loadingClassDiagnosis.value = true
+  try {
+    const data = await getTeachingDiagnosis({
+      mode: periodMode.value,
+      offset: periodOffset.value,
+      subject: diagSubject.value || undefined
+    })
+    classDiagnosis.value = data.success ? data.diagnosis : []
+  } catch (e) {
+    ElMessage.error('加载全班共性诊断失败')
   } finally {
-    if (requestId === studentDetailRequestId) loadingStudentDetail.value = false
+    loadingClassDiagnosis.value = false
+  }
+}
+
+async function loadGrades() {
+  try {
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const resp = await fetch(`${API_BASE}/teaching/grades`)
+    const data = await resp.json()
+    if (data.success && Array.isArray(data.grades)) {
+      grades.value = data.grades
+      // 默认选中第一个年级
+      if (!selectedGrade.value && data.grades.length > 0) {
+        selectedGrade.value = data.grades[0]
+      }
+    }
+  } catch (e) {
+    console.warn('加载年级列表失败:', e)
+  }
+}
+
+async function loadGradeSuggestions() {
+  if (!selectedGrade.value) return
+  loadingGradeSuggestions.value = true
+  gradeSuggestionsError.value = ''
+  try {
+    const API_BASE = import.meta.env.VITE_API_URL || '/api'
+    const url = new URL(`${API_BASE}/teaching/grade-suggestions`, window.location.origin)
+    url.searchParams.set('grade', selectedGrade.value)
+    url.searchParams.set('mode', periodMode.value)
+    url.searchParams.set('offset', String(periodOffset.value))
+    url.searchParams.set('subject', diagSubject.value || '数学')
+    const resp = await fetch(url.toString().replace(window.location.origin, ''))
+    const data = await resp.json()
+    if (data.success) {
+      gradeSuggestions.value = data.suggestions || []
+      gradeSuggestionsMeta.value = data
+    } else {
+      gradeSuggestionsError.value = data.error || '获取年级备课建议失败'
+    }
+  } catch (e) {
+    gradeSuggestionsError.value = e.message || '获取年级备课建议失败'
+    console.error('loadGradeSuggestions 异常:', e)
+  } finally {
+    loadingGradeSuggestions.value = false
   }
 }
 
@@ -500,10 +1011,184 @@ async function loadStudentSuggestions() {
       studentSuggestions.value = data.suggestions || []
     }
   } catch (e) {
-    console.warn('加载单生学习建议失败:', e)
+    console.warn('加载单生备课建议失败:', e)
   } finally {
     loadingStudentSuggestions.value = false
   }
+}
+
+async function retryGradeSuggestions() {
+  await loadGradeSuggestions()
+}
+
+// ── 错题卷（年级视图） ──
+async function loadWrongPaper() {
+  if (!selectedGrade.value) return
+  loadingWrongPaper.value = true
+  wrongPaperError.value = ''
+  try {
+    const data = await getTeachingWrongPaper({
+      grade: selectedGrade.value,
+      mode: periodMode.value,
+      offset: periodOffset.value,
+      subject: diagSubject.value || undefined,
+    })
+    if (data.success) {
+      wrongPaperItems.value = data.items || []
+      wrongPaperMeta.value = data
+    } else {
+      wrongPaperError.value = data.error || '获取错题卷失败'
+      wrongPaperItems.value = []
+      wrongPaperMeta.value = null
+    }
+  } catch (e) {
+    wrongPaperError.value = e.message || '获取错题卷失败'
+    console.error('loadWrongPaper 异常:', e)
+  } finally {
+    loadingWrongPaper.value = false
+  }
+}
+
+function toggleWrongRow(key) {
+  const set = expandedWrongRows.value
+  if (set.has(key)) set.delete(key)
+  else set.add(key)
+}
+
+function isWrongRowExpanded(key) {
+  return expandedWrongRows.value.has(key)
+}
+
+function wrongPaperRowKey(row) {
+  return row.identityKey || row.questionId || row.content
+}
+
+async function handleExportWrongPaperAll() {
+  if (!selectedGrade.value || wrongPaperItems.value.length === 0) return
+  exportingWrongPaper.value = true
+  try {
+    const blob = await exportWrongPaper({
+      grade: selectedGrade.value,
+      mode: 'all',
+      subject: diagSubject.value || '数学',
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    })
+    const ymd = dayjs().format('YYYYMMDD')
+    const safeGrade = String(selectedGrade.value).replace(/[\\/:*?"<>|\s]/g, '_')
+    saveAs(blob, `${ymd}_${safeGrade}_全班错题卷.docx`)
+    ElMessage.success('全班错题卷已生成')
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e.message || '未知错误'))
+  } finally {
+    exportingWrongPaper.value = false
+  }
+}
+
+async function handleExportWrongPaperStudent(row) {
+  if (!selectedGrade.value || !row?.involvedStudents?.length) return
+  exportingWrongPaper.value = true
+  try {
+    // 选第一个学生作为默认导出对象（个人卷：每次只生成一个学生的卷）
+    // 真实场景中老师通常会逐个学生点导出，所以这里一次只导一个
+    const stu = row.involvedStudents[0]
+    const blob = await exportWrongPaper({
+      grade: selectedGrade.value,
+      mode: 'student',
+      studentId: stu.id,
+      studentName: stu.name,
+      subject: diagSubject.value || '数学',
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    })
+    const ymd = dayjs().format('YYYYMMDD')
+    const safeName = String(stu.name || '学生').replace(/[\\/:*?"<>|\s]/g, '_')
+    saveAs(blob, `${ymd}_${safeName}_错题卷.docx`)
+    ElMessage.success(`${stu.name}的错题卷已生成`)
+  } catch (e) {
+    ElMessage.error('导出失败：' + (e.message || '未知错误'))
+  } finally {
+    exportingWrongPaper.value = false
+  }
+}
+
+async function openDrill(row) {
+  if (!row) return
+  drawerTag.value = row.tag
+  drawerVisible.value = true
+  drawerDetail.value = null
+  loadingDetail.value = true
+  try {
+    const data = await getTeachingDiagnosisDetail(row.tag, {
+      mode: periodMode.value,
+      offset: periodOffset.value
+    })
+    drawerDetail.value = data.success ? data : null
+  } catch (e) {
+    ElMessage.error('加载知识点详情失败')
+  } finally {
+    loadingDetail.value = false
+  }
+}
+
+function diagRowClass({ row }) {
+  return row.blankCount > 0 ? 'diag-row--blank' : ''
+}
+
+async function handleExportHandout() {
+  if (classDiagnosis.value.length === 0 && !currentStudentDetail.value?.knowledgeDiagnosis?.length) return
+  // 重构：跳转到 HandoutPreview 备课工作台（不再直接下载 docx）。
+  // 老师可以在工作台切换模板、查看错题、编辑笔记、导 docx。
+  router.push({
+    name: 'HandoutPreview',
+    query: {
+      subject: diagSubject.value || '',
+      periodMode: periodMode.value,
+      periodOffset: periodOffset.value,
+    },
+  })
+}
+
+async function handleDistributeExam() {
+  // r110（负责人批准的对齐）：统一叫「重练卷」，指路文案更新到现状——
+  // 路径 B 原来只指移动端，现在 PC 学生档案的错题清单已能直接勾选组卷出 PDF（第 102 轮）。
+  try {
+    const { ElMessageBox } = await import('element-plus')
+    await ElMessageBox.confirm(
+      '<div style="line-height: 1.7;">' +
+      '<p style="font-weight: 600; margin: 4px 0;">给学生发重练卷，有三条路：</p>' +
+      '<p style="margin: 6px 0;"><b style="color: #6366F1;">① 周报自动（推荐，全量）</b><br/>' +
+      '周学习诊断报告已内含每位学生的错题重练卷，点「生成本周/本月报告」一键生成全部学生，下载打印即可发卷。</p>' +
+      '<p style="margin: 6px 0;"><b style="color: var(--wb-success);">② 错题清单勾选（按需）</b><br/>' +
+      '打开学生档案页，在下方错题清单勾选题目，点「生成重练卷」直接下载可打印 PDF（卷上带扫码答题二维码）。</p>' +
+      '<p style="margin: 6px 0;"><b style="color: var(--wb-text-secondary);">③ 移动端现场</b><br/>' +
+      '晚托现场用手机时，打开 App「错题本」勾选错题（最多 30 题）即可生成临时重练卷。</p>' +
+      '</div>',
+      '发「错题重练卷」',
+      {
+        confirmButtonText: '知道了',
+        cancelButtonText: '关闭',
+        type: 'info',
+        dangerouslyUseHTMLString: true
+      }
+    )
+  } catch (e) {
+    ElMessage.warning('发卷入口已取消')
+  }
+}
+
+function generatePeriodReport(mode) {
+  if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
+  periodMode.value = mode
+  periodOffset.value = 0
+  nextTick(() => handleGenerateCurrent())
+}
+
+function subjectTagType(subject) {
+  if (subject === '数学') return 'danger'
+  if (subject === '语文') return 'primary'
+  if (subject === '英语') return 'warning'
+  return 'info'
 }
 
 function errorTypeColor(type) {
@@ -597,21 +1282,6 @@ const growthCompareItems = computed(() => {
   })
 })
 
-// ═══ r138：成长对比从独立大卡压缩成一行脚注 ═══
-// 原「成长对比」卡有 4 项（正确率 / 新增错题 / 待重练 / 完成题量），
-// 其中 3 项与顶部读数条显示的是同一批数据 ⇒ 重复。
-// 只保留这里独有的「较上周涨跌」，拼成一行放在趋势图脚注里。
-// ⛔ 口径完全复用 growthCompareItems，不新增任何计算逻辑。
-const growthFootnote = computed(() => {
-  if (periodMode.value === 'all') return ''
-  if (!prevHasData.value) return ''
-  const parts = growthCompareItems.value
-    .filter(item => item.prevText && item.deltaText !== '与上周持平')
-    .map(item => `${item.label} ${item.deltaText}`)
-  if (!parts.length) return `与${lastPeriodLabel}基本持平`
-  return `较${periodMode.value === 'week' ? '上周' : '上月'}：${parts.join(' · ')}`
-})
-
 // 知识点「最近变化」：上周同名知识点错误次数对比
 const prevTagWrongMap = computed(() => {
   const map = new Map()
@@ -681,32 +1351,20 @@ const aggregateStats = computed(() => {
   }
 })
 
-// ── r138：全班概览读数条的 3 个主指标 ──
-// ⛔ 从原来的 5 个 KPI 减到 3 个：批改题量 / 新增错题 / 待攻克。
-//   删掉「有数据学生」（移到 note 副行）与「已记住」
-//   （后者与下方三态条显示同一批数据，且两处「已记住」口径不同 ⇒ 口径冲突，已合并）。
-//   「完成作业」需要跨 report 汇总，单独累加，不进 aggregateStats 主体字段。
-const aggregateCompletedTasks = computed(() =>
-  reportsWithData.value.reduce((sum, report) => sum + (report.stats?.completedTasks || 0), 0)
-)
-const aggregateMetrics = computed(() => [
-  { label: '批改题量', value: aggregateStats.value.totalQuestions },
-  { label: '新增错题', value: aggregateStats.value.newWrongCount, tone: 'is-warn' },
-  { label: '待攻克', value: aggregateStats.value.notStartedCount }
-])
-
-// 单生读数条的 3 个主指标（同 aggregateMetrics 口径，逐项对应而非重复统计）
-const singleMetrics = computed(() => {
-  const h = singleHero.value
-  if (!h) return []
-  return [
-    { label: '批改题量', value: h.totalQuestions },
-    { label: '新增错题', value: h.newWrongCount, tone: 'is-warn' },
-    { label: '待攻克', value: h.notStartedCount }
-  ]
-})
-
-// 单生 hero 数据视图：批改题量为 0 时正确率无意义，显示 —
+// ── 学习概览 hero（2026-10-04）：正确率圆环 + KPI 一排，与家长分享卡同构。
+//    色板只用工作台既有 token（success/warning/danger/border-light），不引入新色值。 ──
+function accuracyTone(acc) {
+  if (acc == null) return ''
+  return acc >= 80 ? 'good' : acc >= 60 ? 'warn' : 'bad'
+}
+function heroRingStyle(acc) {
+  const v = Math.max(0, Math.min(100, Number(acc) || 0))
+  const color = acc == null
+    ? 'var(--wb-text-tertiary)'
+    : acc >= 80 ? 'var(--wb-success)' : acc >= 60 ? 'var(--wb-warning)' : 'var(--wb-danger)'
+  return { background: `conic-gradient(${color} ${v * 3.6}deg, var(--wb-border-light) 0)` }
+}
+// 单生 hero 数据视图：批改题量为 0 时正确率无意义，显示 — 并用中性灰圆环
 const singleHero = computed(() => {
   const s = currentStudentDetail.value?.stats
   if (!s) return null
@@ -847,6 +1505,7 @@ function studentRiskScore(report) {
 function focusStudent(report) {
   if (!report?.student?.id) return
   selectedStudentId.value = report.student.id
+  handleStudentChange(report.student.id)
 }
 // 第 91 轮：错题中心页面已下线，错题清单并入学生档案页 ⇒ 这里改指学生档案。
 function openWrongBook() {
@@ -861,175 +1520,149 @@ function knowledgeLevel(row) {
 </script>
 
 <style scoped>
-/* ══════════════════════════════════════════════════════════════════
-   学习诊断页 · r138 视觉重构
-   核心假设：页面不好看的主因不是设计系统不够，而是过度使用大型 Card。
-   本轮验证的做法 —— 不新增设计语言，只用既有 token（spacing / typography /
-   hairline border）重新组织层级：
-     · 容器：8 张ContentCard → 3 个 variant='bare' 无卡区块 + 2 个折叠区
-     · 横向：只有一条粗分隔线（页头下），其余全用 --wb-border-light
-     · 纵向：靠 --wb-space-* 与字号层级建立，不靠盒子
-   ⛔ 全程无渐变 / 发光 / 玻璃拟态 / 阴影 / 新色值 —— 只用 --wb-* token。
-   ══════════════════════════════════════════════════════════════════ */
+.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,84px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:10px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:17px;font-weight:750;line-height:1.2;font-variant-numeric:tabular-nums}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
 
-/* ── 页面骨架：收窄容器 + 上移筛选条 ──
-   r138：原--wb-container-standard 是 1520px（全局 token，未改）。
-   内容型页面（读数 + 列表 + 折线）在 1520px 下会被拉成稀疏长条，
-   这里在页面内收窄到 1120px —— 留白变成「行的呼吸」而不是「盒子之间的空隙」。 */
-.diagnosis-page{color:var(--wb-text)}
-.diagnosis-page .wb-page__inner{max-width:1120px}
-
-/* ── 小节标题（无容器区块的统一标题形态）──
-   替代原来每张 ContentCard 的 header：h2 + 一句说明 + 下方 hairline。 */
-.sec-head{margin-bottom:var(--wb-space-2)}
-.sec-head h2{
-  margin:0;color:var(--wb-text);
-  font-size:var(--wb-fs-section);font-weight:var(--wb-fw-semibold);
-  line-height:var(--wb-lh-tight);
-}
-.sec-head p{margin:var(--wb-space-1) 0 0;color:var(--wb-text-secondary);font-size:var(--wb-fs-meta);line-height:var(--wb-lh-normal)}
-
-/* ── 筛选条（bare变体）：只保留下方 hairline ── */
-.diagnosis-filter{margin-bottom:var(--wb-space-6)}
-
-/* ══ 一级结论：「下一步做什么」（全宽 · 裸排版 · 编号清单）══
-   r138 之前它在 356px 右栏第二屏、且每条自带卡片（卡片套卡片）。
-   它是这一页真正要回答的问题，必须最靠前、宽度必须够放完整句。 */
-.dx__next{margin-bottom:var(--wb-space-8)}
-.dx__next .nextlist{margin-top:var(--wb-space-3)}
-
-/* ══ 二/三级区块间距：用 --wb-space-8 做「呼吸」，不再靠卡片 gap ══ */
-.dx__errcause,.trend-line-card,.knowledge-diagnosis{margin-bottom:var(--wb-space-8)}
-
-/* ── 趋势区块内的粒度切换 ── */
-.trend-switch{display:flex;gap:2px;padding:2px;background:var(--wb-bg-elevated);border-radius:8px}
-.trend-switch__btn{padding:5px 13px;border:0;border-radius:6px;background:transparent;color:var(--wb-text-tertiary);font-size:12px;font-weight:600;cursor:pointer;transition:color var(--wb-motion-fast) var(--wb-motion-ease)}
-.trend-switch__btn:hover{color:var(--wb-text)}
-.trend-switch__btn.is-on{background:var(--wb-bg-card);color:var(--wb-primary);box-shadow:var(--wb-elev-card)}
-.trend-note{margin:var(--wb-space-3) 0 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
-/* r138：成长对比脚注。与趋势说明同字号档，只用间距分开—— 两者都是脚注。 */
-.growth-footnote{
-  margin:var(--wb-space-2) 0 0;padding-top:var(--wb-space-2);
-  border-top:1px solid var(--wb-border-light);
-  color:var(--wb-text-secondary);font-size:var(--wb-fs-caption);
-  font-variant-numeric:tabular-nums;line-height:var(--wb-lh-relaxed);
-}
-
-/* ── 知识点表：bare 外壳下的补充说明 ── */
+/* ── r135：.picker-row 样式随学生横排选择器删除 ── */
+/* ── r134 诊断页两列骨架（按 03-mockup-v2）──
+   mockup 的核心是那条竖直分界：左「诊断」右「行动」。r133 全部通栏 ⇒ 视觉退化成
+   一张长表，没有视线落点。右栏 372px：动作条目都短，窄栏更易扫读。
+   1360px 容器 - 372px 右栏 - 20px 间距 ≈ 主栏 968px，够放 5 个 KPI + 三态条。 */
+.dx{display:grid;grid-template-columns:minmax(0,1fr) 356px;gap:var(--wb-space-5);align-items:start}
+.dx__main{display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
+.dx__rail{position:sticky;top:calc(var(--wb-header-height) + var(--wb-space-4));display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
+/* 右栏卡内的内容统一内缩（ContentCard 用 flush 时 body 无 padding） */
+.dx__rail-body{padding:var(--wb-space-4)}
 .kp-toggle{padding:5px 12px;border:1px solid var(--wb-border);border-radius:var(--wb-radius-sm);background:var(--wb-bg-card);color:var(--wb-status-info-fg);font-size:var(--wb-fs-caption);font-weight:var(--wb-fw-semibold);cursor:pointer;white-space:nowrap}
 .kp-toggle:hover{background:var(--wb-bg-hover);border-color:var(--wb-border-strong)}
-.kp-note{margin:0;padding:var(--wb-space-3) 0 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
-.knowledge-name{display:flex;flex-direction:column;gap:3px}
-.knowledge-name strong{font-size:12px}
-.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}
-.danger-text{color:var(--wb-status-danger-fg)}
-.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.kp-note{margin:0;padding:var(--wb-space-3) var(--wb-space-5);border-top:1px solid var(--wb-border-light);color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
+.rail-stats{display:grid;grid-template-columns:1fr 1fr;gap:var(--wb-space-3)}
+.rail-stat b{display:block;color:var(--wb-text);font-size:var(--wb-fs-stat);font-weight:var(--wb-fw-bold);line-height:var(--wb-lh-tight);font-variant-numeric:tabular-nums}
+.rail-stat b.is-good{color:var(--wb-status-success-fg)}
+.rail-stat b small{font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}
+.rail-stat span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
+.rail-note{margin:var(--wb-space-3) 0 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
+/* 窄屏：右栏落到主栏下方，不做挤压 */
+@media(max-width:1280px){.dx{grid-template-columns:1fr}.dx__rail{position:static}}
+
+.trend-line-card{margin-bottom:16px}
+.trend-switch{display:flex;gap:2px;padding:2px;background:var(--wb-bg-elevated);border-radius:8px}
+.trend-switch__btn{padding:5px 13px;border:0;border-radius:6px;background:transparent;color:var(--wb-text-tertiary);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
+.trend-switch__btn:hover{color:var(--wb-text)}
+.trend-switch__btn.is-on{background:#fff;color:var(--wb-primary);box-shadow:0 1px 2px rgba(16,24,40,.08)}
+.trend-note{margin:10px 0 0;color:var(--wb-text-tertiary);font-size:11.5px;line-height:1.6}
+.wrong-paper-section{margin-bottom:16px}
+.wrong-paper-card :deep(.el-button.is-text){font-size:11px}
+.wrong-paper-table{margin-top:8px}
+.wrong-paper-table :deep(.cell){padding:8px 6px}
+.wrong-q-cell{display:flex;flex-direction:column;gap:4px;min-width:0}
+.wrong-q-content{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.5;word-break:break-word}
+.wrong-q-tags{display:flex;flex-wrap:wrap;gap:4px}
+.error-rate{display:flex;flex-direction:column;align-items:center;line-height:1.2}
+.error-rate strong{font-size:14px;font-weight:700}
+.error-rate small{font-size:9px;color:var(--wb-text-tertiary);margin-top:2px}
+.error-rate.is-critical strong{color:var(--wb-danger)}
+.error-rate.is-critical{background:#fef2f2;border-radius:6px;padding:4px 0}
+.error-rate.is-warning strong{color:var(--wb-warning)}
+.error-rate.is-info strong{color:var(--wb-primary)}
+.error-rate.is-normal strong{color:var(--wb-text-secondary)}
+.rank-num{display:inline-block;min-width:24px;padding:2px 8px;border-radius:10px;background:var(--wb-bg-elevated);color:var(--wb-text-secondary);font-size:11px;font-weight:600}
+.rank-num.is-top{background:var(--wb-primary-soft);color:var(--wb-primary)}
+
+/* ── 成长对比 / 重练进步（2026-09-20 P0） ── */
+.growth-compare,.retry-progress{margin-bottom:16px}
+.compare-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.compare-item{display:flex;flex-direction:column;gap:6px;padding:14px 16px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-card)}
+.compare-item__label{color:var(--wb-text-tertiary);font-size:10px;font-weight:600}
+.compare-item__value{font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.1}
+.compare-item__delta{font-size:11px;font-weight:650}
+.compare-item__delta.is-good{color:var(--wb-success)}
+.compare-item__delta.is-bad{color:var(--wb-danger)}
+.compare-item__delta.is-neutral{color:var(--wb-text-tertiary)}
+.compare-item__prev{color:var(--wb-text-tertiary);font-size:10px}
+.retry-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.retry-item{display:flex;flex-direction:column;gap:4px;padding:14px 16px;background:var(--wb-bg-elevated);border-radius:8px}
+.retry-item__value{font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.1}
+.retry-item__value small{font-size:12px;color:var(--wb-text-tertiary);margin-left:2px}
+.retry-item__value.is-good{color:var(--wb-success)}
+.retry-item__label{color:var(--wb-text-tertiary);font-size:10px}
+.retry-note{margin-top:12px;padding:10px 14px;border-radius:6px;background:var(--wb-primary-soft);color:var(--wb-text-secondary);font-size:11px}
 .recent-change{display:flex;flex-direction:column;gap:3px}
 .recent-change strong{font-size:12px;font-weight:650}
-.recent-change .change-good{color:var(--wb-status-success-fg)}
-.recent-change .change-bad{color:var(--wb-status-danger-fg)}
-.recent-change .change-new{color:var(--wb-status-warning-fg)}
+.recent-change .change-good{color:var(--wb-success)}
+.recent-change .change-bad{color:var(--wb-danger)}
+.recent-change .change-new{color:var(--wb-warning)}
+.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px;margin-top:2px}
+.error-tags{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.row-actions{display:flex;gap:4px;justify-content:center}
+.muted{color:var(--wb-text-tertiary);font-size:11px}
+.wrong-paper-expand{padding:8px 12px;background:var(--wb-bg-elevated);border-radius:8px;margin:4px 0}
+.expand-row{display:flex;gap:12px;align-items:flex-start;padding:6px 0;font-size:12px;border-bottom:1px dashed var(--wb-border-light)}
+.expand-row:last-child{border-bottom:0}
+.expand-label{flex-shrink:0;width:96px;color:var(--wb-text-tertiary);font-size:11px}
+.student-chips{display:flex;flex-wrap:wrap;gap:4px}
+.error-mini{display:flex;flex-wrap:wrap;gap:8px;font-size:11px}
 
-/* ══ 四级明细：折叠区（默认收起）══
-   重练进步 + 本周备课建议是「查得到就行」的信息，不该和上面的结论抢首屏。
-   用原生 <details>，无新组件、无动画、键盘可达。 */
-.fold{border-top:1px solid var(--wb-border-light)}
-.fold:last-of-type{border-bottom:1px solid var(--wb-border-light)}
-.fold__head{
-  display:flex;align-items:baseline;gap:var(--wb-space-4);
-  padding:var(--wb-space-4) var(--wb-space-2);
-  cursor:pointer;list-style:none;
-}
-.fold__head::-webkit-details-marker{display:none}
-.fold__head:hover .fold__title{color:var(--wb-primary)}
-.fold__head:focus-visible{outline:2px solid var(--wb-status-info-fg);outline-offset:-2px}
-.fold__title{color:var(--wb-text);font-size:var(--wb-fs-body);font-weight:var(--wb-fw-semibold);transition:color var(--wb-motion-fast) var(--wb-motion-ease)}
-.fold__meta{color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
-/* 展开标记：一个纯文本三角，用CSS 画，不引图标库 */
-.fold__head::before{content:'▸';color:var(--wb-text-tertiary);font-size:11px}
-.fold[open] .fold__head::before{content:'▾'}
-.fold__body{padding:0 var(--wb-space-2) var(--wb-space-5)}
+/* ── 学习概览 hero（2026-10-04）：数字一览，色板全取工作台既有 token ── */
+.hero-strip{display:flex;align-items:center;gap:22px;margin-bottom:16px;padding:16px 22px;border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}
+.hero-ring-wrap{display:flex;flex-direction:column;align-items:center;gap:7px;flex-shrink:0}
+.hero-ring{width:100px;height:100px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative}
+.hero-ring::before{content:'';position:absolute;width:72px;height:72px;border-radius:50%;background:var(--wb-bg-card)}
+.hero-ring b{position:relative;z-index:1;font-size:20px;font-weight:750;color:var(--wb-text)}
+.hero-ring b.good{color:var(--wb-success)}
+.hero-ring b.warn{color:var(--wb-warning)}
+.hero-ring b.bad{color:var(--wb-danger)}
+.hero-ring-label{color:var(--wb-text-tertiary);font-size:10px}
+.hero-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.hero-caption{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.hero-caption strong{font-size:14px;color:var(--wb-text)}
+.hero-caption span{color:var(--wb-text-tertiary);font-size:11px}
+/* r135①：去方格 —— 5 个带框小格子像作业本，改为无框竖线分隔排式，只靠数字大小建立层级 */
+.hero-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
+.hero-kpi{padding:2px 8px 2px 18px;border-left:1px solid var(--wb-border-light);text-align:left}
+.hero-kpi:first-child{border-left:0;padding-left:0}
+.hero-kpi b{display:block;font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.15;font-variant-numeric:tabular-nums}
+.hero-kpi b small{font-size:12px;font-weight:500;color:var(--wb-text-tertiary)}
+.hero-kpi b.good{color:var(--wb-success)}
+.hero-kpi b.warn{color:var(--wb-warning)}
+.hero-kpi span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:10px}
+@media(max-width:900px){.hero-strip{flex-direction:column;align-items:stretch}.hero-kpis{grid-template-columns:repeat(3,1fr)}.hero-kpi:nth-child(3n+1){border-left:0;padding-left:0}}
 
-/* 重练网格：bare 语境下用竖线分隔，不用小灰盒 */
-.retry-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;max-width:640px}
-.retry-item{padding:0 var(--wb-space-5);border-left:1px solid var(--wb-border-light)}
-.retry-item:first-child{padding-left:0;border-left:0}
-.retry-item__value{color:var(--wb-text);font-size:var(--wb-fs-section);font-weight:var(--wb-fw-bold);line-height:var(--wb-lh-tight);font-variant-numeric:tabular-nums}
-.retry-item__value small{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-medium);margin-left:2px}
-.retry-item__value.is-good{color:var(--wb-status-success-fg)}
-.retry-item__label{margin-top:var(--wb-space-1);color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
-.retry-note{margin:var(--wb-space-4) 0 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
+/* ── 年级备课建议（grade view） ── */
+.grade-suggestions-section{margin-bottom:16px}
+.grade-suggestion-list{display:grid;gap:14px}
+.grade-suggestion-card{padding:18px 20px;border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}
+.card-header{display:flex;gap:14px;align-items:flex-start;margin-bottom:14px}
+.rank-pill{display:grid;flex-shrink:0;width:30px;height:30px;place-items:center;color:#fff;background:var(--wb-primary);border-radius:50%;font-size:13px;font-weight:650}
+.rank-pill.small{width:22px;height:22px;font-size:11px}
+.kp-name-block{flex:1;min-width:0}
+.kp-name-block h3{margin:0 0 6px;font-size:14px;font-weight:650}
+.kp-meta{display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--wb-text-secondary);font-size:10px}
+.kp-meta .meta-item b{color:var(--wb-text);font-weight:600;font-size:11px}
+.card-section{padding:12px 0;border-top:1px solid var(--wb-border-light)}
+.card-section:first-of-type{border-top:0;padding-top:0}
+.card-section label{display:block;margin-bottom:8px;color:var(--wb-text-tertiary);font-size:10px;font-weight:600}
+.error-bars{display:grid;gap:10px}
+.error-bar-row{display:flex;align-items:center}
+.error-bar-row .error-type{width:90px;font-size:11px}
+.error-bar-row .error-count{color:var(--wb-text-tertiary);font-size:10px;min-width:74px;text-align:right}
+.sample-item{padding:10px 12px;background:var(--wb-bg-elevated);border-radius:6px;margin-bottom:8px}
+.sample-item:last-child{margin-bottom:0}
+.sample-q{font-size:12px;line-height:1.6}
+.sample-meta,.sample-reason{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;color:var(--wb-text-secondary);font-size:10px}
+.card-footer{display:flex;align-items:center;gap:8px;margin-top:14px;padding:10px 14px;background:var(--wb-primary-soft);border-radius:6px;color:var(--wb-text);font-size:11px}
+.card-footer strong{color:var(--wb-primary);font-weight:600}
 
-/* ── 备课建议（折叠区内）── */
-.student-suggestion-list{display:grid;gap:var(--wb-space-4)}
-.student-suggestion-card{padding-bottom:var(--wb-space-4);border-bottom:1px solid var(--wb-border-light)}
-.student-suggestion-card:last-child{padding-bottom:0;border-bottom:0}
-.student-suggestion-card header{display:flex;align-items:center;gap:var(--wb-space-3);margin-bottom:var(--wb-space-2)}
-.student-suggestion-card header strong{font-size:var(--wb-fs-body)}
-.meta-inline{color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);margin-left:auto}
-.mini-error-dist{display:grid;gap:var(--wb-space-1);margin:var(--wb-space-2) 0}
-.mini-error-row{display:flex;align-items:center;justify-content:space-between;font-size:var(--wb-fs-meta)}
-.mini-error-count{color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
-.student-suggestion-card footer{margin-top:var(--wb-space-3);padding-top:var(--wb-space-3);border-top:1px solid var(--wb-border-light);font-size:var(--wb-fs-meta);color:var(--wb-text-secondary)}
+/* ── 单生备课建议（single view 内的紧凑卡片） ── */
+.student-suggestions{margin-bottom:16px}
+.student-suggestion-list{display:grid;gap:12px}
+.student-suggestion-card{padding:14px 16px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-card)}
+.student-suggestion-card header{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.student-suggestion-card header strong{font-size:13px}
+.meta-inline{color:var(--wb-text-tertiary);font-size:10px;margin-left:auto}
+.mini-error-dist{display:grid;gap:4px;margin:8px 0}
+.mini-error-row{display:flex;align-items:center;justify-content:space-between;font-size:11px}
+.mini-error-count{color:var(--wb-text-tertiary);font-size:10px}
+.student-suggestion-card footer{margin-top:10px;padding-top:10px;border-top:1px dashed var(--wb-border-light);font-size:11px;color:var(--wb-text-secondary)}
 .advice-label{color:var(--wb-text-tertiary);margin-right:4px}
 .student-suggestion-card footer strong{color:var(--wb-primary);font-weight:600}
-.rank-pill{display:grid;flex-shrink:0;width:22px;height:22px;place-items:center;color:#fff;background:var(--wb-primary);border-radius:50%;font-size:11px;font-weight:650}
-
-/* ══ 未选学生：「需要关注的学生」（bare 列表）══
-   原来是一张 flush 大卡；行与行之间本来就有 hairline，卡壳是多余的。 */
-.attention{margin-bottom:var(--wb-space-8)}
-.loading-stack{display:grid;gap:var(--wb-space-4);padding:var(--wb-space-5) 0}
-.student-diagnosis-list{min-height:320px}
-.student-diagnosis-row{
-  display:flex;align-items:center;gap:var(--wb-space-3);
-  min-height:72px;padding:var(--wb-space-3) var(--wb-space-2);
-  box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer;
-  transition:background var(--wb-motion-fast) var(--wb-motion-ease);
-}
-.student-diagnosis-row:hover{background:var(--wb-bg-hover)}
-.student-diagnosis-row:focus-visible{outline:2px solid var(--wb-status-info-fg);outline-offset:-2px}
-.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}
-.student-identity strong{font-size:var(--wb-fs-body)}
-.student-identity small{color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
-.student-metrics{display:grid;grid-template-columns:repeat(3,84px);gap:var(--wb-space-2)}
-.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);flex-direction:column;gap:3px}
-.student-metrics b{color:var(--wb-text);font-size:var(--wb-fs-section);font-weight:var(--wb-fw-bold);line-height:var(--wb-lh-tight);font-variant-numeric:tabular-nums}
-.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}
-.student-next span{color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption)}
-.student-next strong{font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-medium)}
-.row-arrow{color:var(--wb-text-tertiary)}
-
-/* ── 页头右侧的分享卡按钮 ── */
-.header-share-card{display:inline-flex;align-items:center}
-.diagnosis-loading{padding:var(--wb-space-8) var(--wb-space-4);text-align:center;color:var(--wb-text-secondary);font-size:var(--wb-fs-meta)}
-
-/* ── Element Plus 控件在诊断页的对齐（沿用 r133，未变）── */
-.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}
-.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}
-.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}
-/* bare 表格外壳：去掉 Element Plus 自带的表头底色，只留 hairline —— 表格需要列对齐，
-   但不需要一整块底色（那是「容器感」的来源之一）。 */
-.diagnosis-page :deep(.knowledge-diagnosis .el-table th.el-table__cell){background:transparent}
-
-/* ══ 响应式 ══
-   三个断点：1280（窄桌面，收指标列）/ 860（平板，指标转行）/ 640（手机，表格与网格转单列） */
-@media(max-width:1280px){
-  .student-next{display:none}
-  .diagnosis-page .wb-page__inner{max-width:100%}
-}
-@media(max-width:860px){
-  .retry-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--wb-space-4) 0}
-  .retry-item:nth-child(3){padding-left:0;border-left:0}
-  .student-metrics{grid-template-columns:repeat(3,minmax(0,1fr))}
-  .fold__head{flex-wrap:wrap;gap:var(--wb-space-2)}
-}
-@media(max-width:640px){
-  .student-diagnosis-row{align-items:flex-start;flex-wrap:wrap;padding:var(--wb-space-4) var(--wb-space-2)}
-  .student-metrics{width:100%;padding-left:0}
-  .student-identity{width:auto;flex:1}
-  .retry-grid{grid-template-columns:1fr}
-  .retry-item{padding:var(--wb-space-2) 0 0;border-left:0;border-top:1px solid var(--wb-border-light)}
-  .retry-item:first-child{padding-top:0;border-top:0}
-}
-@media(max-width:600px){:global(.app-shell:has(.diagnosis-page) > .app-sidebar){display:none}}
 </style>
