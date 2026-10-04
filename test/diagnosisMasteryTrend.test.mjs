@@ -24,7 +24,7 @@ const read = (p) => readFileSync(resolve(ROOT, p), 'utf8')
 
 const SERVER = read('server/routes/weeklyReport.js')
 const VIEW = read('src/workbench/views/WeeklyReportWorkbench.vue')
-const BAR = read('src/workbench/components/diagnosis/MasteryBar.vue')
+const TROPHY = read('src/workbench/components/diagnosis/TrophyBar.vue')
 const LINE = read('src/workbench/components/diagnosis/TrendLineChart.vue')
 
 // ── ① 三态拆分纯函数：行为锁定（真跑，不靠正则）──
@@ -169,19 +169,27 @@ test('⛔ 折线图不许伪造数据：无题量的点不画、单点不画假�
   assert.match(LINE, /1 - Math\.max\(0, Math\.min\(100, acc\)\) \/ 100/, '纵轴必须锁 0-100%')
 })
 
-// ── ③ 页面信心口径：「已掌握」必须含基本掌握 ──
-test('⛔ 页面主数字必须是「已掌握」= 完全 + 基本（不能退回只显示完全掌握）', () => {
+// ── ③ 页面信心口径（r133 更新：按负责人决策改口径 + 组件更名）──
+// r133 口径决策：主数字 = **已记住**（答对 1 次），「完全掌握」（答对 2 次）降级为徽章。
+//   现实里没时间让每道题都做两次；答对一次就是记住了，
+//   拿「完全掌握 2 道」当主数字会严重低估孩子、也让家长看不到信心。
+//   组件同步更名：MasteryBar → TrophyBar（不只是改名，是重写了「已练口径」）。
+test('⛔ 页面主数字必须是「已记住」= 完全 + 基本（不能退回只显示完全掌握）', () => {
   assert.match(VIEW, /securedCount: mastered \+ basic/, '单生 hero 必须有 securedCount')
   assert.match(VIEW, /securedCount: totals\.mastered \+ totals\.basic/, '全班概览必须有 securedCount')
-  assert.ok(VIEW.includes('已掌握'), '页面必须出现「已掌握」这个口径')
-  // 三态条组件必须在
-  assert.match(VIEW, /<MasteryBar/, 'hero 必须挂三态条')
-  assert.match(BAR, /已掌握 \{\{ \(mastered \|\| 0\) \+ \(basic \|\| 0\) \}\}/, '三态条也要说清「已掌握 = 完全 + 基本」')
+  assert.ok(VIEW.includes('已记住'), '页面必须出现「已记住」这个口径')
+  assert.ok(VIEW.includes('还在攻克'), '第三个 KPI 必须是「还在攻克」而不是「待复习」（语义更准）')
+  // 战果条组件必须在（r133 已从 MasteryBar 改名 TrophyBar）
+  assert.match(VIEW, /<TrophyBar/, 'hero 必须挂战果条')
+  assert.match(TROPHY, /已拿下/, '战果条要说清「已拿下 N 道」')
+  assert.match(TROPHY, /道彻底掌握/, '彻底掌握作为小徽章存在，不是主数字')
+  // 已练口径：不能只给「74 道里拿下 16 道 = 22%」那种被稀释的口径
+  assert.match(TROPHY, /练过/, '战果条必须给出已练口径（练过 N 道 · 拿下 M 道）')
 })
 
-test('⛔ 三态条三段都要有（缺一段就退回成两格老样子）', () => {
-  for (const seg of ['完全掌握', '基本掌握', '待复习']) {
-    assert.ok(BAR.includes(seg), `三态条缺「${seg}」段`)
+test('⛔ 战果条三段都要有（缺一段就退回成两格老样子）', () => {
+  for (const seg of ['彻底掌握', '已记住', '还在攻克']) {
+    assert.ok(TROPHY.includes(seg), `战果条缺「${seg}」段`)
   }
 })
 

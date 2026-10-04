@@ -140,8 +140,13 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
     )
 
     // 4. 本周新增错题 & 掌握状态
+    // r133：顺带取「练过 / 反复错」两个计数，供页面的战果条与动作清单用。
+    //     反复错 = error_count >= 2（错两次以上说明上次没真懂，回炉优先级最高）；
+    //     练过   = practice_count >= 1（已纳入过重练）。
     const { rows: wrongStatusRows } = await query(
-      `SELECT lifecycle_status, COUNT(*)::int AS count
+      `SELECT lifecycle_status, COUNT(*)::int AS count,
+              COUNT(*) FILTER (WHERE COALESCE(practice_count, 0) >= 1)::int AS practiced,
+              COUNT(*) FILTER (WHERE COALESCE(error_count, 0) >= 2)::int AS repeated
       FROM ${TABLES.WRONG_QUESTIONS}
       WHERE student_id = $1
         AND added_at >= $2
@@ -343,6 +348,9 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
     // 组合掌握状态统计（mastered / 基本掌握 / 待复习 三态）
     const { masteredCount, basicMasteredCount, notStartedCount, pendingCount } =
       splitMasteryStates(wrongStatusRows)
+    // r133：练过 / 反复错合计（跨状态求和，与三态拆分互不干扰）
+    const practicedCount = wrongStatusRows.reduce((s, r) => s + (r.practiced || 0), 0)
+    const repeatWrongCount = wrongStatusRows.reduce((s, r) => s + (r.repeated || 0), 0)
 
     const stats = {
       totalTasks: taskRows[0]?.total_tasks || 0,
@@ -357,6 +365,8 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       masteredCount,
       basicMasteredCount,
       notStartedCount,
+      practicedCount,
+      repeatWrongCount,
       pendingCount,
       wrongQuestionIds: wrongIdRows.map(r => r.question_id)
     }

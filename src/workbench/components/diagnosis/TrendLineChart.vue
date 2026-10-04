@@ -52,6 +52,12 @@ const areaPath = computed(() => {
 })
 const gridLines = [0, 25, 50, 75, 100]
 const yAt = (v) => PAD.top + (H - PAD.top - PAD.bottom) * (1 - v / 100)
+// r133：低样本天（题量少）的正确率波动大 —— 2 道题全错会画成 0%，
+// 与 200 道题的 56% 同等视觉权重会误导（实测 130 个「学生×天」样本里
+// 13 个题量 <10，其中 2 个 0 答对）。
+// ⛔ 不删这些点（那是真实数据），改为**标记**出来：空心点 + 悬停说明题量。
+const LOW_SAMPLE = 10
+const isLowSample = (p) => (p.count || 0) < LOW_SAMPLE
 // X 轴标签最多 7 个，均匀抽样，避免密集时糊成一片
 const xLabels = computed(() => {
   const cs = coords.value
@@ -108,8 +114,11 @@ const tone = computed(() => {
         <path v-if="areaPath" :d="areaPath" fill="url(#trendFill)" />
         <polyline :points="polyline" class="trend-line__stroke" :class="`is-${tone}`" />
         <g v-for="point in coords" :key="point.date">
-          <circle :cx="point.x" :cy="point.y" :r="coords.length > 20 ? 2.5 : 3.5" class="trend-line__dot" :class="`is-${tone}`">
-            <title>{{ shortDate(point.date) }} · {{ point.correct }}/{{ point.count }} 题 · {{ point.accuracy }}%</title>
+          <circle
+            :cx="point.x" :cy="point.y" :r="coords.length > 20 ? 2.5 : 3.5"
+            class="trend-line__dot" :class="[`is-${tone}`, { 'is-low': isLowSample(point) }]"
+          >
+            <title>{{ shortDate(point.date) }} · {{ point.correct }}/{{ point.count }} 题 · {{ point.accuracy }}%{{ isLowSample(point) ? '（题量少，波动大，仅供参考）' : '' }}</title>
           </circle>
         </g>
         <g v-for="label in valueLabels" :key="`v-${label.date}`">
@@ -142,6 +151,8 @@ const tone = computed(() => {
 .trend-line__dot.is-up{fill:var(--wb-success)}
 .trend-line__dot.is-down{fill:var(--wb-danger)}
 .trend-line__dot.is-flat{fill:var(--wb-primary)}
+/* r133：低样本天（题量<10）用空心点，视觉上与可信数据区分开 */
+.trend-line__dot.is-low{fill:#fff;stroke-width:2.5}
 .trend-line__value{fill:var(--wb-text-secondary);font-size:10px;font-weight:600}
 .trend-line__x text{fill:var(--wb-text-tertiary);font-size:9px}
 </style>

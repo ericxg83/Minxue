@@ -19,14 +19,19 @@
       <FilterBar class="diagnosis-filter">
         <template #leading><el-segmented v-model="viewMode" :options="viewModeOptions" /></template>
         <WorkbenchSelect v-if="viewMode === 'grade'" v-model="selectedGrade" :options="gradeOptions" width="140px" aria-label="按年级筛选" placeholder="选择年级" />
-        <el-select v-if="viewMode === 'single'" v-model="selectedStudentId" class="student-select" placeholder="选择学生" filterable clearable @change="handleStudentChange">
-          <el-option v-for="student in studentList" :key="student.id" :label="student.name" :value="student.id"><span class="student-option"><el-avatar :size="22" :src="student.avatar" />{{ student.name }}<small>{{ student.grade }}</small></span></el-option>
-        </el-select>
+        <WorkbenchSelect v-if="viewMode === 'single'" v-model="selectedStudentId" :options="studentOptions" width="180px" aria-label="选择学生" placeholder="选择学生" />
         <WorkbenchSelect v-if="viewMode === 'grade'" v-model="diagSubject" :options="diagSubjectOptions" width="120px" aria-label="按学科筛选" />
         <el-segmented v-model="periodMode" :options="periodModeOptions" />
         <WorkbenchSelect v-if="periodMode !== 'all'" v-model="periodOffset" :options="offsetOptions" width="120px" aria-label="时间偏移" />
         <template #actions><span class="filter-note">{{ filterNoteText }}</span></template>
       </FilterBar>
+
+      <!-- r133 重构：学生横排选择器。取代「只看一个学生的下拉框」——
+           选谁看 = 一眼横向对比全班战果，不用一个个点开再切回来。
+           仅单生视图显示；已选中学生时把选择器收在 hero 下方，不占首屏高度。 -->
+      <section v-if="viewMode === 'single' && !selectedStudentId && pickerStudents.length" class="picker-row" aria-label="选择学生">
+        <StudentPicker v-model="selectedStudentId" :students="pickerStudents" @select="focusStudentById" />
+      </section>
 
       <template v-if="viewMode === 'single'">
         <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
@@ -42,10 +47,15 @@
               <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
               <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
               <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
-              <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已掌握</span></div>
-              <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>待复习</span></div>
+              <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已记住</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>还在攻克</span></div>
             </div>
-            <MasteryBar :mastered="aggregateStats.masteredCount" :basic="aggregateStats.basicMasteredCount" :todo="aggregateStats.notStartedCount" />
+            <TrophyBar
+              :mastered="aggregateStats.masteredCount"
+              :basic="aggregateStats.basicMasteredCount"
+              :todo="aggregateStats.notStartedCount"
+              :practiced="aggregateStats.practicedCount"
+            />
           </div>
         </section>
 
@@ -86,16 +96,21 @@
               <span class="hero-ring-label">整体正确率</span>
             </div>
             <div class="hero-main">
-            <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
-            <div class="hero-kpis">
-              <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
-              <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
-              <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
-              <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已掌握</span></div>
-              <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>待复习</span></div>
+              <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
+              <div class="hero-kpis">
+                <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
+                <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
+                <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已记住</span></div>
+                <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>还在攻克</span></div>
+              </div>
+              <TrophyBar
+                :mastered="singleHero.masteredCount"
+                :basic="singleHero.basicMasteredCount"
+                :todo="singleHero.notStartedCount"
+                :practiced="singleHero.practicedCount"
+              />
             </div>
-            <MasteryBar :mastered="singleHero.masteredCount" :basic="singleHero.basicMasteredCount" :todo="singleHero.notStartedCount" />
-          </div>
           </section>
 
           <section v-if="currentStudentDetail?.stats" class="diagnosis-layout student-detail-layout">
@@ -142,6 +157,33 @@
               {{ trendSummary.description }}
             </p>
           </ContentCard>
+
+          <!-- r133 重构新增：错因分布（横条）+ 下一步动作（可点）
+               位置放在趋势图之后、知识点表之前 —— 先「发现问题」（错了什么），
+               再「决定动作」（接下来做什么），最后才是「知识点明细」（备课时看）。 -->
+          <div class="diag-two-col">
+            <ContentCard
+              title="错因分布：为什么错"
+              :description="currentStudentDetail?.errorDistribution?.length
+                ? `${currentStudentDetail.errorDistribution.reduce((s, e) => s + e.count, 0)} 道错题已归因 · 点任一项可筛出对应题目`
+                : '错因会在每周一凌晨自动回填'"
+            >
+              <ErrorCauseBars
+                :items="currentStudentDetail?.errorDistribution || []"
+                @select="onErrorCauseClick"
+              />
+            </ContentCard>
+
+            <ContentCard title="下一步做什么" description="按见效快慢排序 · 点开就能干">
+              <NextActions
+                :error-causes="currentStudentDetail?.errorDistribution || []"
+                :repeat-wrong-count="singleHero?.repeatWrongCount || 0"
+                :basic-count="singleHero?.basicMasteredCount || 0"
+                :todo-count="singleHero?.notStartedCount || 0"
+                :zero-accuracy-tags="zeroAccuracyTags"
+              />
+            </ContentCard>
+          </div>
 
           <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
           <ContentCard
@@ -562,8 +604,11 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import MasteryBar from '../components/diagnosis/MasteryBar.vue'
+import TrophyBar from '../components/diagnosis/TrophyBar.vue'
 import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
+import ErrorCauseBars from '../components/diagnosis/ErrorCauseBars.vue'
+import NextActions from '../components/diagnosis/NextActions.vue'
+import StudentPicker from '../components/diagnosis/StudentPicker.vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
@@ -1245,8 +1290,9 @@ const aggregateStats = computed(() => {
     acc.mastered += stats.masteredCount || 0
     acc.basic += stats.basicMasteredCount || 0
     acc.todo += stats.notStartedCount || 0
+    acc.practiced += stats.practicedCount || 0
     return acc
-  }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0, basic: 0, todo: 0 })
+  }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0, basic: 0, todo: 0, practiced: 0 })
   return {
     accuracy: totals.questions ? Math.round((totals.correct / totals.questions) * 1000) / 10 : 0,
     totalQuestions: totals.questions,
@@ -1255,7 +1301,8 @@ const aggregateStats = computed(() => {
     masteredCount: totals.mastered,
     basicMasteredCount: totals.basic,
     notStartedCount: totals.todo,
-    // 「已掌握」= 完全掌握 + 基本掌握：家长要看的信心数字，答对过就该被承认
+    practicedCount: totals.practiced,
+    // 「已记住」= 完全掌握 + 基本掌握：家长要看的信心数字，答对过就该被承认
     securedCount: totals.mastered + totals.basic,
     studentCount: reports.length
   }
@@ -1292,6 +1339,8 @@ const singleHero = computed(() => {
     masteredCount: mastered,
     basicMasteredCount: basic,
     notStartedCount: s.notStartedCount || 0,
+    practicedCount: s.practicedCount || 0,
+    repeatWrongCount: s.repeatWrongCount || 0,
     // r130：「已掌握」把基本掌握算进来（答对过 1 次就是记住了），
     // 旧版只显示完全掌握 2 道，实际 16 道 —— 数字好看但失真。
     securedCount: mastered + basic
@@ -1327,14 +1376,28 @@ const trendSummary = computed(() => {
   }
   // 按天的首末对比会被单日噪声主导（如某天只做 2 题），故按天只报「区间」不报涨跌，
   // 按周（样本量足够大）才给涨跌 —— 避免拿一个 16.7% 的单日去讲「下降 15%」。
+  // ⛔ 极值只在「样本量够」的天里取：实测蔡怡希 09-24 只批改 2 题且全错，
+  //   若把它算成「最低 0%」，会与 200 道题的 56% 同等呈现，明显误导。
+  //   低样本天（题量 <10）只作为图上的空心点存在，不参与极值与文案。
   const first = points[0]
   const last = points[points.length - 1]
   if (isDay) {
-    const lowest = points.reduce((a, b) => (b.accuracy < a.accuracy ? b : a))
-    const highest = points.reduce((a, b) => (b.accuracy > a.accuracy ? b : a))
+    const solid = points.filter(p => p.count >= 10)
+    const lowCount = points.length - solid.length
+    if (solid.length >= 2) {
+      const lowest = solid.reduce((a, b) => (b.accuracy < a.accuracy ? b : a))
+      const highest = solid.reduce((a, b) => (b.accuracy > a.accuracy ? b : a))
+      return {
+        label: `${points.length} 天有批改`,
+        description: `最高 ${highest.accuracy}%（${highest.date.slice(5)}）· 最低 ${lowest.accuracy}%（${lowest.date.slice(5)}）`
+          + (lowCount > 0 ? ` · 另有 ${lowCount} 天题量不足 10 道，图上用空心点表示，波动大仅供参考` : '')
+          + ' · 当天没批改的日子不计入',
+        tone: 'default'
+      }
+    }
     return {
       label: `${points.length} 天有批改`,
-      description: `最高 ${highest.accuracy}%（${highest.date.slice(5)}）· 最低 ${lowest.accuracy}%（${lowest.date.slice(5)}）· 当天没批改的日子不计入`,
+      description: '每天批改的题量都不足 10 道，正确率波动大，先看整体题量再判断',
       tone: 'default'
     }
   }
@@ -1348,6 +1411,42 @@ const trendSummary = computed(() => {
 function securedOf(stats) {
   if (!stats) return 0
   return (stats.masteredCount || 0) + (stats.basicMasteredCount || 0)
+}
+
+// ── r133 重构新增 ──
+// 1) 学生选择器数据源：把全班战果摊平，横向对比「谁在进步」。
+//    数据来自 summary（已批量拿回所有学生），不再为选择器额外打接口。
+const pickerStudents = computed(() =>
+  (summaryData.value?.reports || []).map(r => ({
+    id: r.student?.id,
+    name: r.student?.name,
+    grade: r.student?.grade,
+    securedCount: securedOf(r.stats),
+    wrongCount: r.stats?.newWrongCount || 0
+  })).filter(s => s.id)
+)
+// 顶栏下拉的选项（换成 WorkbenchSelect，与工作台其他页统一）
+const studentOptions = computed(() =>
+  studentList.value.map(s => ({ value: s.id, label: s.name }))
+)
+// 2) 全错知识点：出题 >= 2 且正确率 0 —— 建议合并讲一节而不是逐个重练
+const zeroAccuracyTags = computed(() => {
+  const list = currentStudentDetail.value?.knowledgeDiagnosis || []
+  return list
+    .filter(k => (k.totalCount || 0) >= 2 && (k.wrongCount || 0) >= (k.totalCount || 0))
+    .slice(0, 3)
+    .map(k => k.tag)
+})
+// 3) 点错因条 → 下钻到错题中心（该类错题在错题本里可筛）
+//    ⛔ 不直接调发卷接口：会动组卷链路（C 级敏感区），先跳到有现成勾选入口的页面。
+function onErrorCauseClick(row) {
+  ElMessage.info(`已定位「${row.errorType}」${row.count} 道 —— 到错题中心可勾选后一键发卷`)
+  router.push({ path: '/students' })
+}
+// 4) 选择器点学生 → 复用既有加载逻辑（保持与下拉一致的行为）
+function focusStudentById(student) {
+  if (!student?.id) return
+  handleStudentChange(student.id)
 }
 
 // r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0
@@ -1390,6 +1489,9 @@ function knowledgeLevel(row) {
 .diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.student-select{width:220px}.offset-select,.subject-select{width:120px}.student-option{display:flex;align-items:center;gap:8px}.student-option small{margin-left:auto;color:var(--wb-text-tertiary)}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.teaching-judgement{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--wb-border-light);border-radius:8px}.teaching-judgement>div{min-height:88px;padding:14px;border-right:1px solid var(--wb-border-light)}.teaching-judgement>div:last-child{border-right:0}.teaching-judgement .focus{background:#fffaf2}.teaching-judgement span{display:block;margin-bottom:7px;color:var(--wb-text-tertiary);font-size:10px}.teaching-judgement strong{font-size:11px;line-height:1.65}.trend-result{font-size:11px;font-weight:600}.trend-result.success{color:var(--wb-success)}.trend-result.danger{color:var(--wb-danger)}.trend-result.primary{color:var(--wb-primary)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.teaching-judgement{grid-template-columns:1fr}.teaching-judgement>div{border-right:0;border-bottom:1px solid var(--wb-border-light)}.output-bar{flex-wrap:wrap}}
 
 /* ── 周末讲题错题卷（grade view） ── */
+.picker-row{margin-bottom:var(--wb-space-4)}
+.diag-two-col{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--wb-space-4);margin-bottom:var(--wb-space-4);align-items:start}
+@media(max-width:1100px){.diag-two-col{grid-template-columns:1fr}}
 .trend-line-card{margin-bottom:16px}
 .trend-switch{display:flex;gap:2px;padding:2px;background:var(--wb-bg-elevated);border-radius:8px}
 .trend-switch__btn{padding:5px 13px;border:0;border-radius:6px;background:transparent;color:var(--wb-text-tertiary);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
