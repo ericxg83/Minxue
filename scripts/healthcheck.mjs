@@ -1,0 +1,136 @@
+#!/usr/bin/env node
+/**
+ * 敏学系统一键体检（只读，不改任何东西）
+ *
+ * 用途：负责人不想读日志、不想翻数据库时，跑一条命令就知道"系统现在还好吗"。
+ * 所有输出用大白话，红色标注的才是需要处理的。
+ *
+ * 用法：
+ *   node scripts/healthcheck.mjs                     # 查本机后端 4000
+ *   node scripts/healthcheck.mjs --api https://xxx   # 改查生产
+ *   node scripts/healthcheck.mjs --json              # 机器可读（给别的程序用）
+ *
+ * 设计约束（勿破坏）：
+ *   1) **全程只读**：只发 GET、只跑 SELECT，不写库、不入队、不改配置。
+ *   2) 不打印任何密钥、密码、连接串。
+ *   3) 某一项失败不能中断整体体检——每项各自 try/catch，坏的显示"查不了"而不是崩。
+ */
+
+import { existsSync, readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+const argv = process.argv.slice(2)
+const JSON_ONLY = argv.includes('--json')
+const argOf = (name, dflt) => {
+  const i = argv.indexOf(name)
+  return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt
+}
+const API = argOf('--api', 'http://127.0.0.1:4000').replace(/\/+$/, '')
+const isProd = !API.includes('127.0.0.1') && !API.includes('localhost')
+
+const C = { ok: '✅', warn: '⚠️ ', bad: '❌', info: 'ℹ️ ' }
+const out = []
+const say = (s) => { if (!JSON_ONLY) console.log(s) }
+const results = []
+function record(name, status, detail) {
+  results.push({ name, status, detail })
+  if (!JSON_ONLY) console.log(`${status === 'ok' ? C.ok : status === 'warn' ? C.warn : C.bad} ${name}：${detail}`)
+}
+
+// ── 1. 后端在不在 ────────────────────────────────────────────────────────
+let health = null
+try {
+  const t0 = Date.now()
+  const r = await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(15000) })
+  const j = await r.json()
+  health = { ...j, rt: Date.now() - t0 }
+  const up = typeof health.uptimeSec === 'number' ? Math.round(health.uptimeSec / 60) : null
+  record('后端在线', 'ok', `已运行 ${up === null ? '?' : up} 分钟，响应 ${health.rt}ms`)
+} catch (e) {
+  record('后端在线', 'bad', `连不上（${e.message}）。本地跑 ${API} 启动；线上请看 Render 后台日志`)
+}
+
+// ── 2. 响应速度（本地/内网正常 <0.3s；国内访问美国服务器约 0.7~1.3s，属正常）──
+if (health) {
+  try {
+    const t0 = Date.now()
+    await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(20000) })
+    const ms = Date.now() - t0
+    const limit = isProd ? 2000 : 500
+    record('接口速度', ms <= limit ? 'ok' : 'warn',
+      `${ms}ms${ms > limit ? `（超过 ${limit}ms，${isProd ? '多为网络往返，可稍后再试或让服务器换到离国内更近的机房' : '本地偏慢，查连接池'}）` : '（正常）'}`)
+  } catch (e) {
+    record('接口速度', 'warn', `测不了：${e.message}`)
+  }
+}
+
+// ── 3. 数据能不能读到（读得到 = 数据库正常）──────────────────────────────
+let students = null
+if (health) {
+  try {
+    const t0 = Date.now()
+    const r = await fetch(`${API}/api/students`, { signal: AbortSignal.timeout(20000) })
+    const j = await r.json()
+    students = j.students || []
+    record('数据库可读', students.length ? 'ok' : 'warn',
+      `读到 ${students.length} 名学生，用时 ${Date.now() - t0}ms`)
+  } catch (e) {
+    record('数据库可读', 'bad', `读不到：${e.message}`)
+  }
+}
+
+// ── 4. 有没有卡住/失败的任务（这才是老师真正关心的）─────────────────────
+if (health) {
+  try {
+    const r = await fetch(`${API}/api/tasks/summary`, { signal: AbortSignal.timeout(20000) })
+    const s = (await r.json()).summary || {}
+    const stuck = (s.pendingTasks || []).length
+    const failed = s.failedTasks || 0
+    if (failed > 0) {
+      record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
+    } else if (stuck > 0) {
+      record('批改失败任务', 'warn', `${stuck} 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`)
+    } else {
+      record('批改失败任务', 'ok', '没有失败也没有卡住的任务')
+    }
+  } catch (e) {
+    record('批改失败任务', 'warn', `查不了：${e.message}`)
+  }
+}
+
+// ── 5. 队列积压（偶尔堆积正常，持续堆积要管）─────────────────────────────
+if (health) {
+  try {
+    const r = await fetch(`${API}/api/queue/stats`, { signal: AbortSignal.timeout(20000) })
+    const q = await r.json()
+    const w = q.waiting || 0
+    const a = q.active || 0
+    const f = q.failed || 0
+    if (w > 20) record('任务队列', 'warn', `排队 ${w} 个（积压偏多，可能是 AI 额度紧张导致重试堆积）`)
+    else record('任务队列', 'ok', `排队 ${w} 个、进行中 ${a} 个、历史上失败 ${f} 个（失败数会定期清理，看趋势不看绝对值）`)
+  } catch (e) {
+    record('任务队列', 'warn', `查不了：${e.message}`)
+  }
+}
+
+// ── 6. 服务器磁盘会不会满（图片存服务器上，这是最容易忽略的坑）───────────
+// 说明：Render 免费实例磁盘只有约 1GB，图片一多就可能写不进去。
+// 这里只能间接判断（读不到 Render 后台配额），故给 warn 而不是 ok。
+if (health) {
+  record('服务器磁盘', 'warn', '体检读不到磁盘用量。图片存本地磁盘时请定期在 Render 后台看用量（免费额度约 1GB，接近上限会导致上传失败）')
+}
+
+if (JSON_ONLY) {
+  console.log(JSON.stringify({ checkedAt: new Date().toISOString(), api: API, results }, null, 2))
+} else {
+  const bad = results.filter((r) => r.status === 'bad').length
+  const warn = results.filter((r) => r.status === 'warn').length
+  console.log('\n' + '─'.repeat(56))
+  if (bad === 0 && warn === 0) console.log('结论：一切正常，不用管。')
+  else if (bad === 0) console.log(`结论：没有致命问题，但有 ${warn} 项想提醒你（黄色）。`)
+  else console.log(`结论：${bad} 项需要处理（红色），建议先看红色那几条。`)
+  console.log('─'.repeat(56))
+}
+process.exit(results.some((r) => r.status === 'bad') ? 1 : 0)
