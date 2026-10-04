@@ -1,5 +1,11 @@
 # 敏学App V3 — 系统架构总览
 
+> ⚠️ **历史快照（截至 2026-06-14），不是当前实现说明。** 本文记录的是**当时**的设计/扫描结果，
+> 其中的文件路径、函数名、端口可能已被删除或改名（例如本文提到的 `aiService.js`、`paperBankAIService.js` 现已不存在）。
+> **以代码为准**；当前系统口径见 `AGENTS.md`、`docs/architecture.md`、`docs/grading-flow.md`。
+> （2026-10-04 核实加注：只加本横幅，未改动正文——历史记录不重写。）
+
+
 > 生成日期: 2026-06-14
 > 范围: 全项目代码扫描（前端+后端+工作台）
 > ⚠️ 本文档仅作认知记录，不修改任何代码
@@ -120,7 +126,7 @@ minxue-app-v3/
 │   └── api/[[path]].js           # API代理
 │
 ├── android/                      # Capacitor Android 壳
-├── vite.config.js                # Vite配置 (代理: /api → localhost:3001)
+├── vite.config.js                # Vite配置 (dev 端口 3000；代理: /api → 127.0.0.1:4000)
 └── package.json
 ```
 
@@ -370,7 +376,7 @@ Vue Workbench Stores:
 | 双层缓存 | question_fingerprint + Levenshtein | 精确SHA256指纹 + 编辑距离相似匹配 |
 | 指数退避重试 | uploadRetryManager.js | OSS上传重试，上限30s抖动 |
 | 生产者-消费者 | BullMQ (queue.js + worker.js) | 上传请求入队，Worker异步处理 |
-| 适配器 | vite.config.js proxy | `/api` → localhost:3001 |
+| 适配器 | vite.config.js proxy | `/api` → `127.0.0.1:4000`（后端默认端口 4000） |
 | 懒加载 | App.jsx lazyWithRetry | 4个重页面动态导入，失败可重试 |
 
 ---
