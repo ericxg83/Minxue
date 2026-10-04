@@ -39,3 +39,10 @@
 - `createStudent/updateStudent/deleteStudent` 补 `retries=1`（仓内写操作不重试既有约定；POST /students 纯 INSERT 无去重，默认 3 次会重放出重复学生）。⚠️ apiService 与工作台共用：retries=1 对 StudentsWorkbench.vue 的调用方同样是语义改善，无签名变更。
 - 同类残留（本轮只提名未动，属本赛道待办）：App.jsx 初始化链（237/250）、NotificationsPanel.jsx:62、ScanQR:66、WeeklyReport:96 的 catch 只进 console；WorksheetPicker 存在 button 嵌 button（HTML 非法，点击事件已 stopPropagation，风险低）。
 - 回归锁 `test/mobileErrorVisibility.test.mjs`（旧树 12 红/新树 0，反向自检已实测）；产物 `dist_nightly_20261004r105q`；四道闸全绿（1560/1560，排除他人 in-flight 的 reviewStoreFailureRollback 其当时自身红）。
+
+**第 107q 轮（2026-10-04，本赛道）已交付：初始化/通知失败不再伪装正常空态 + 非法嵌套修正**
+- App.jsx 冷启动拉不到学生名单/初始化失败只进 console，首页停在「暂无学生」误导为名单丢了 → 两处补 useToast 可见提示（App 用自家 ToastProvider，非 antd-mobile）。
+- NotificationsPanel 加载失败被渲染成「暂无新通知」（铃铛里的「识别失败」提醒正是老师需要看的）→ 新增错误态 + 重试按钮；load 提为组件级 useCallback（active 改用 ref，卸载后不再 setState）。⚠️ 首轮把它直接写在 useEffect 作域内被 lint 抓到 no-undef，已收线。
+- WorksheetPicker 列表行 button 嵌 button（HTML 非法，部分 WebView 会把内层星标点击归并给外层导致误选）→ 外层改 div[role=button]，行为不变。
+- 锁扩判据：新增「禁 button 嵌 button（线性深度扫描）/ App 初始化失败必须 Toast / 通知面板必须错误态+重试」；旧树（=r105q 已推树）实测 5 红、新树 0。
+- 四道闸：单测 1567/1567（排除他人 in-flight）｜lint 我方 0｜`dist_nightly_20261004r107q`｜preview:5235 冒烟全绿（含 6 条新文案进包实测）。运维事件：会话间 4000 后端被他模型操作弄死，本轮按分离进程规范拉起（日志 `_r107q_backend.log`，仍在跑）；5227–5234 被旧 preview 占满，后续冒烟用 5235+ 并先探测。

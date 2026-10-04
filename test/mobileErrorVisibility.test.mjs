@@ -44,6 +44,23 @@ function catchesWithoutToast(src) {
   return fails
 }
 
+/** JSX 源码里扫描 button 嵌 button（线性深度扫描，自闭合标签不计入深度）。 */
+function hasButtonInButton(src) {
+  const re = /<\/?button(?=[\s/>])/g
+  let depth = 0
+  let m
+  while ((m = re.exec(src))) {
+    const tag = m[0]
+    if (tag.startsWith('</')) { depth = Math.max(0, depth - 1); continue }
+    if (depth >= 1) return true
+    const tail = src.slice(m.index + tag.length, m.index + tag.length + 2000)
+    const close = tail.indexOf('>')
+    const selfClose = close >= 0 && tail[close - 1] === '/'
+    if (!selfClose) depth += 1
+  }
+  return false
+}
+
 /** 对一组「修复前」文件复用同一套判据，返回违规清单（供反向自检）。 */
 export function collectFailures(dir) {
   const file = (rel) => {
@@ -78,6 +95,24 @@ export function collectFailures(dir) {
     const s0 = ws.indexOf('const handleSetDefault')
     const sd = s0 < 0 ? '' : ws.slice(s0, s0 + 500)
     if (!sd.includes('Toast.show')) fails.push('WorksheetPicker: 设为默认失败必须 Toast')
+    // r107q：列表行曾把「设为默认」星标 button 包在整行 button 里（HTML 非法）
+    if (hasButtonInButton(ws)) fails.push('WorksheetPicker: 禁止 button 嵌 button（外层改用 div[role=button]）')
+  }
+
+  // r107q：App 初始化链与通知面板的失败不得伪装成正常空态
+  const app = file('App.jsx')
+  if (app !== null) {
+    const iGet = app.indexOf('console.error(\'获取学生数据失败:\', err)')
+    if (iGet < 0) fails.push('App.jsx: 学生名单失败锚点不在（改动前请先同步本锁）')
+    else if (!app.slice(iGet, iGet + 400).includes('Toast.show')) fails.push('App.jsx: 冷启动拉不到学生名单必须 Toast（空首页不得误导为「没学生」）')
+    const iInit = app.indexOf("console.error('初始化失败:', error)")
+    if (iInit >= 0 && !app.slice(iInit, iInit + 300).includes('Toast.show')) fails.push('App.jsx: 初始化失败必须 Toast')
+  }
+
+  const np = file(join('components', 'NotificationsPanel.jsx'))
+  if (np !== null) {
+    if (!np.includes('setLoadError')) fails.push('NotificationsPanel: 加载失败必须有错误态（不得渲染成「暂无新通知」误导）')
+    if (!np.includes('通知加载失败') || !np.includes('重试')) fails.push('NotificationsPanel: 错误态必须带可见文案与重试入口')
   }
 
   const api = file(join('services', 'apiService.js'))
@@ -107,7 +142,8 @@ test('锁健全性：判据套修复前旧树必须判红（反向自检）', ()
   const oldDir = join(ROOT, '_r105q_old', 'src')
   if (!existsSync(oldDir)) return // 旧树未导出时跳过（CI 环境），主锁仍生效
   const probe = collectFailures(oldDir)
-  // 实测旧树 12 处（3×catch 无 Toast + 未引 Toast + 删除顺序 + 2×ImageCropper
-  // + 2×WorksheetPicker + 3×apiService 重试）；阈值留 1 处余量防格式微调
-  assert.ok(probe.length >= 11, `判据套旧树应报 ≥11 处，实际 ${probe.length} —— 锁可能被掏空`)
+  // 旧树（= r105q 已推树，前四条已修因此只剩 5）：WorksheetPicker 按钮嵌套
+  // + 2×App.jsx（名单/初始化无 Toast）+ 2×NotificationsPanel（无错误态/无重试文案）；
+  // 再往前（r105q 前）另有 12 条，同一判据共 17 条。阈值留余量
+  assert.ok(probe.length >= 4, `判据套旧树应报 ≥4 处，实际 ${probe.length} —— 锁可能被掏空`)
 })

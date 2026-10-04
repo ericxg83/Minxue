@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { Bell, X, CheckCircle2, AlertCircle, Clock, Sparkles, Loader2, ChevronRight } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import EmptyState from './EmptyState'
@@ -26,8 +26,28 @@ export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPag
   const [summary, setSummary] = useState(null)
   const [inProgress, setInProgress] = useState([])
   const [loading, setLoading] = useState(true)
+  // 加载失败态：此前 catch 只进 console，面板把「加载失败」渲染成「暂无新通知」，
+  // 老师会误信真的没有通知（铃铛里的「识别失败」提醒正是老师需要看的）
+  const [loadError, setLoadError] = useState(null)
   // 正在打开的任务：拉完整任务详情有网络往返，按钮上给出反馈并防重复点击
   const [openingId, setOpeningId] = useState(null)
+  const activeRef = useRef(true)
+
+  const load = useCallback(async () => {
+    try {
+      const [sum, prog] = await Promise.all([
+        getTasksSummary(false),
+        getInProgressTasks(10).catch(() => ({ success: false, tasks: [] }))
+      ])
+      if (activeRef.current && sum?.success) { setSummary(sum.summary); setLoadError(null) }
+      if (activeRef.current && prog?.success) setInProgress(prog.tasks || [])
+    } catch (e) {
+      console.error('加载通知失败:', e)
+      if (activeRef.current) setLoadError(e?.message || '加载通知失败')
+    } finally {
+      if (activeRef.current) setLoading(false)
+    }
+  }, [])
 
   // 点击任务 = 直达该任务的结果页；未完成/重练卷无结果可看时落到作业列表。
   // 上层（App）负责补学生上下文与决定落地页，面板只负责把任务交出去。
@@ -49,26 +69,14 @@ export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPag
   }
 
   useEffect(() => {
-    let active = true
-    const load = async () => {
-      try {
-        const [sum, prog] = await Promise.all([
-          getTasksSummary(false),
-          getInProgressTasks(10).catch(() => ({ success: false, tasks: [] }))
-        ])
-        if (active && sum?.success) setSummary(sum.summary)
-        if (active && prog?.success) setInProgress(prog.tasks || [])
-      } catch (e) {
-        console.error('加载通知失败:', e)
-      } finally {
-        if (active) setLoading(false)
-      }
-    }
+    // 面板打开期间 15s 轮询，与 PC Dashboard 看板同节奏；
+    // load 提到组件级 useCallback 供错误态「重试」按钮复用，
+    // active 标记用 ref 承接，卸载后不得再 setLoadError/setLoading。
+    activeRef.current = true
     load()
-    // 15s 轮询，与 PC Dashboard 看板同节奏
     const id = setInterval(load, 15000)
-    return () => { active = false; clearInterval(id) }
-  }, [])
+    return () => { activeRef.current = false; clearInterval(id) }
+  }, [load])
 
   const statCards = [
     { key: 'pendingReview', label: '待确认', value: summary?.pendingReview ?? 0, icon: Clock, color: 'var(--warning)', onClick: () => onOpenTasksPage?.() },
@@ -113,6 +121,19 @@ export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPag
           {loading ? (
             <div className="py-16 text-center" style={{ color: 'var(--text-secondary)', fontSize: 'var(--fs-13)' }}>
               加载中...
+            </div>
+          ) : loadError && !hasContent ? (
+            <div className="py-12 px-6 text-center">
+              <AlertCircle size={32} style={{ color: 'var(--danger)', margin: '0 auto 12px' }} />
+              <div style={{ fontSize: 'var(--fs-14)', fontWeight: 500, color: 'var(--text)' }}>通知加载失败</div>
+              <div style={{ fontSize: 'var(--fs-12)', marginTop: 4, color: 'var(--text-secondary)' }}>{loadError}</div>
+              <button
+                onClick={() => { setLoading(true); setLoadError(null); load() }}
+                className="mt-4 px-4 py-2 rounded-xl"
+                style={{ background: 'var(--primary)', color: '#fff', fontSize: 'var(--fs-13)', fontWeight: 500 }}
+              >
+                重试
+              </button>
             </div>
           ) : !hasContent ? (
             <EmptyState

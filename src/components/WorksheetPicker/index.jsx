@@ -139,8 +139,13 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
                     descriptionStyle={{ fontSize: 'var(--fs-12)', marginTop: '4px', color: 'var(--text-secondary)' }}
                   />
                 ) : sorted.map(ws => (
-                  <button
+                  // 外层用 div[role=button]：HTML 不允许 button 嵌 button（旧写法把
+                  // 「设为默认」星标包在整行 button 里，属非法结构，部分 WebView 会把
+                  // 内层点击归并给外层导致误选）。行为与原 onClick+stopPropagation 一致。
+                  <div
                     key={ws.id}
+                    role="button"
+                    tabIndex={-1}
                     onClick={() => handleSelect(ws)}
                     className="w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all active:scale-[0.98] text-left mb-1"
                     style={{ background: ws.id === defaultId ? 'var(--primary-soft)' : 'transparent' }}
@@ -173,7 +178,7 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
                     >
                       <Star size={18} fill={ws.id === defaultId ? 'currentColor' : 'none'} />
                     </button>
-                  </button>
+                  </div>
                 ))}
               </div>
 

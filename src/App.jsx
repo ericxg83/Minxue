@@ -235,6 +235,9 @@ export default function App() {
         //    拿到真实名单后一次落位；网络失败也要结束初始化，避免永久 loading。
         const result = await getStudents(false).catch(err => {
           console.error('获取学生数据失败:', err)
+          // 冷启动拉不到名单：此前只进 console，首页光秃秃停在「暂无学生」，
+          // 老师会误以为名单丢了；现在给出可见提示（下拉可重试，网络自愈后刷新即恢复）
+          Toast.show({ message: '获取学生名单失败，请检查网络', type: 'error', duration: 3000 })
           return null
         })
         const studentList = (result?.data || []).filter(Boolean)
@@ -248,6 +251,7 @@ export default function App() {
         setIsInitializing(false)
       } catch (error) {
         console.error('初始化失败:', error)
+        Toast.show({ message: '初始化失败，请检查网络后刷新重试', type: 'error', duration: 3000 })
         setIsInitializing(false)
       }
     }
