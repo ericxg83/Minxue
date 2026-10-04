@@ -188,18 +188,20 @@ test('⛔ 动作不得跳回它自己所在的那一页（点了等于没点，�
   )
 })
 
-test('⛔ 带 cta 的动作要么有落点、要么显式禁用，不许「有 CTA 却跳去无关的地方」', () => {
+test('⛔ 带 cta 的动作要么能干活、要么显式禁用，不许「有 CTA 却哪也去不了」', () => {
   const code = stripComments(readFileSync(join(ROOT, NEXT_ACTIONS), 'utf8'))
-  // 动作对象里必须出现 to（去某个具体地方）或 disabled: true（明说现在点不了）
+  // 动作对象里必须出现 to（去某个具体地方）、scope（就地开预览弹窗）或 disabled: true（明说现在点不了）
+  // r142：三条组卷动作的落点从 `to`（跳档案页）改成 `scope`（就地弹窗）——
+  //      跳档案页不算做完，老师得自己在长列表里重筛一遍 49 道题。
   const actionBlocks = [...code.matchAll(/list\.push\(\{([\s\S]*?)\}\)/g)].map((m) => m[1])
   assert.ok(actionBlocks.length >= 3, `只抠出 ${actionBlocks.length} 个动作，提取器疑似失效`)
 
   const orphans = actionBlocks.filter(
-    (b) => !/\bto:/.test(b) && !/disabled:\s*true/.test(b)
+    (b) => !/\bto:/.test(b) && !/\bscope:/.test(b) && !/disabled:\s*true/.test(b)
   )
   assert.deepEqual(
     orphans.map((b) => (b.match(/id:\s*'([^']+)'/) || [])[1] || b.slice(0, 40)), [],
-    '这些动作既没有 to（跳去哪儿）也没有 disabled: true（明说不可点）—— 属于点了没反应的坏按钮'
+    '这些动作既没有 to（跳去哪儿）、没有 scope（就地预览）、也没有 disabled: true（明说不可点）—— 属于点了没反应的坏按钮'
   )
 })
 

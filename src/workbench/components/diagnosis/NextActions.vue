@@ -12,21 +12,24 @@
  * ⛔ 每个动作都必须有真实的数字来源；拿不到数就不渲染这一条
  *    （宁可少一条，也不能给一个「大概类似」的假建议）。
  *
- * ⛔ r141（负责人验收）：CTA 文案不许承诺本页做不到的事，动作必须跳到
- *    「真能把这事做完」的地方。两个真实缺陷：
- *      ① 三条动作的 run() 一律 push('/students') —— 那是学生**列表**页，
- *         和「重练卷」毫无关系；老师点完还得自己在列表里再找一遍这个学生。
- *         真出口是学生档案页的错题清单（r91 起「错题中心」并入档案页），
- *         那里有勾选框与「生成重练卷」按钮（接移动端同一导出引擎）。
- *         故动作一律带 studentId 落到 `/students/:id`。
- *      ② knowledge 动作 push('/weekly-report') = 跳本页自己 ⇒ 点了毫无反应，
- *         看起来就是个坏按钮。它原本要开的知识点下钻接口已随 r137 下线，
- *         负责人 2026-10-05 裁决「备课功能暂不开发」⇒ 这条**显式禁用**，
- *         不再靠「跳本页」假装能用（要恢复：接知识点下钻并把 disabled 去掉）。
+ * ⛔ r141（负责人验收）：CTA 文案不许承诺本页做不到的事，动作必须落到
+ *    「真能把这事做完」的地方。当时三条动作一律 push('/students')（学生**列表**页），
+ *    与「重练卷」毫无关系；knowledge 动作 push('/weekly-report') = 跳本页自己
+ *    ⇒ 点了毫无反应，看着像个坏按钮。knowledge 那条已显式禁用
+ *    （负责人 2026-10-05 裁决「备课功能暂不开发」）。
+ *
+ * ⛔ r142（负责人验收）：jump 到档案页**仍然**不算做完 —— 原话「点击去错题清单之后
+ *    也没有很顺手的页面，体验很差」。档案页那 49 道题要自己在长列表里逐条勾，
+ *    且勾选状态与本页的「49 道同类错因」没有任何关系（等于把筛选重做一遍）。
+ *    ⇒ 三条动作改为**就地打开重练卷预览弹窗**：按错因预筛、默认全选、
+ *    可逐题减选、确认后组卷出纸（走移动端同一条管线）。
+ *    所以本组件不再自己跳路由，而是 emit('preview', scope) 交父组件开弹窗；
+ *    wrongListPath 只作为弹窗里的「查看完整错题清单」次级出口保留。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowRight } from '@element-plus/icons-vue'
+import RetryPaperPreviewDialog from './RetryPaperPreviewDialog.vue'
 
 const props = defineProps({
   // { errorType, count, ratio }[] —— 用于「按某类错因专项练」
@@ -39,53 +42,66 @@ const props = defineProps({
   todoCount: { type: Number, default: 0 },
   // 正确率 0% 的知识点（出题 >=2 全错）
   zeroAccuracyTags: { type: Array, default: () => [] },
-  // 当前诊断的学生 —— 动作要跳到「这个学生」的错题清单，缺它就落不到人身上
-  studentId: { type: String, default: '' }
+  // 当前诊断的学生 —— 重练卷要发给这个人，缺它就不给任何动作（宁可少一条）
+  studentId: { type: String, default: '' },
+  // 卷面标题与 PDF 文件名要用（弹窗内也会兜底再查一次）
+  studentName: { type: String, default: '' }
 })
+
+const emit = defineEmits(['exam-created'])
 
 const router = useRouter()
 
-// 错题清单在学生档案页（r91 起错题中心并入档案页），并自带「生成重练卷」按钮 ⇒
-// 「去组专项卷」的真实落点就是这里。没有 studentId 就不给这条动作（宁可少一条）。
+// 完整错题清单在学生档案页（r91 起错题中心并入档案页）。
+// r142 起它只是弹窗里的**次级**出口（要看全部错因/全部题才去），主出口是就地预览组卷。
 const wrongListPath = computed(() => (props.studentId ? `/students/${props.studentId}` : ''))
+
+// ── 预览弹窗状态（r142）──
+const previewVisible = ref(false)
+const previewScope = ref(null)
+
+function openPreview(scope) {
+  previewScope.value = scope
+  previewVisible.value = true
+}
 
 const actions = computed(() => {
   const list = []
 
   const top = (props.errorCauses || [])[0]
-  if (top && top.count >= 3 && wrongListPath.value) {
+  if (top && top.count >= 3 && props.studentId) {
     list.push({
       id: 'error-cause',
       score: 100 + top.count,
       title: `${top.count} 道「${top.errorType}」→ 专项练`,
-      detail: `占全部错题 ${top.ratio}%，是最大的一块。这 ${top.count} 道在错题清单里都带「${top.errorType}」标签，勾上就能组一份专项卷`,
-      cta: '去错题清单',
+      detail: `占全部错题 ${top.ratio}%，是最大的一块。这 ${top.count} 道都带「${top.errorType}」标签，打开预览默认全选，嫌多可以逐题取消`,
+      cta: '预览并组卷',
       tone: 'danger',
-      to: wrongListPath.value
+      scope: { kind: 'error-cause', errorType: top.errorType }
     })
   }
 
-  if (props.repeatWrongCount >= 3 && wrongListPath.value) {
+  if (props.repeatWrongCount >= 3 && props.studentId) {
     list.push({
       id: 'repeat',
       score: 90 + props.repeatWrongCount,
       title: `${props.repeatWrongCount} 道反复错 → 优先回炉`,
-      detail: '错 2 次以上说明上次没真懂。这几道在错题清单里点「重复出错」就能筛出来，勾选后直接生成重练卷',
-      cta: '去错题清单',
+      detail: '错 2 次以上说明上次没真懂。打开预览会把这几道全部勾上，勾完直接出卷',
+      cta: '预览并组卷',
       tone: 'warning',
-      to: wrongListPath.value
+      scope: { kind: 'repeat' }
     })
   }
 
-  if (props.basicCount > 0 && wrongListPath.value) {
+  if (props.basicCount > 0 && props.studentId) {
     list.push({
       id: 'basic',
       score: 70,
       title: `${props.basicCount} 道已记住 → 本周重练做二次验证`,
       detail: '已经答对过 1 次（还不算彻底掌握）。本周重练卷会自动带上它们，再对一次就能升级为彻底掌握',
-      cta: '去错题清单',
+      cta: '预览并组卷',
       tone: 'info',
-      to: wrongListPath.value
+      scope: { kind: 'basic' }
     })
   }
 
@@ -110,8 +126,10 @@ const actions = computed(() => {
 })
 
 function run(action) {
-  // 禁用的动作不跳任何地方（native <button disabled> 也会挡住，这里是第二道）
+  // 禁用的动作不触发任何事（native <button disabled> 也会挡住，这里是第二道）
   if (action.disabled) return
+  // r142：能组卷的三条一律就地开预览弹窗（而不是跳档案页让老师自己重筛一遍）
+  if (action.scope) { openPreview(action.scope); return }
   if (!action.to) return
   router.push(action.to)
 }
@@ -141,10 +159,26 @@ function run(action) {
       </span>
       <span class="nx__cta">{{ action.cta }}<el-icon v-if="!action.disabled"><ArrowRight /></el-icon></span>
     </div>
+
+    <!-- 次级出口：想看全部错因 / 全部题（含已掌握的）时才去完整清单。
+         r142 起它不再是主路径 —— 主路径是上面点哪条就预览哪条。 -->
+    <button v-if="wrongListPath" type="button" class="nextlist__more" @click="router.push(wrongListPath)">
+      查看这名学生的完整错题清单
+    </button>
   </div>
   <div v-else class="nextlist__empty">
     本周期还没有需要立刻处理的动作 —— 等新的批改数据进来再安排。
   </div>
+
+  <!-- r142：专项重练卷预览弹窗。就地预筛 + 勾选 + 确认出卷，
+       组卷与出纸复用 PC 错题清单同一条管线（createGeneratedExam + exportWrongBookPDF）。 -->
+  <RetryPaperPreviewDialog
+    v-model="previewVisible"
+    :student-id="studentId"
+    :student-name="studentName"
+    :scope="previewScope"
+    @created="(exam) => emit('exam-created', exam)"
+  />
 </template>
 
 <style scoped>
@@ -179,4 +213,11 @@ function run(action) {
 .nx.is-off .nx__rank{background:var(--wb-text-tertiary)}
 .nx.is-off .nx__cta{color:var(--wb-text-tertiary);font-weight:var(--wb-fw-medium)}
 .nextlist__empty{padding:var(--wb-space-6) 0;color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);text-align:center}
+/* 次级出口：完整错题清单。视觉必须明显弱于上面三条动作（那是主路径）。 */
+.nextlist__more{
+  align-self:flex-start;margin-top:var(--wb-space-1);padding:4px 0;border:0;background:none;
+  color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);cursor:pointer;
+}
+.nextlist__more:hover{color:var(--wb-status-info-fg);text-decoration:underline}
+.nextlist__more:focus-visible{outline:2px solid var(--wb-status-info-fg);outline-offset:2px}
 </style>

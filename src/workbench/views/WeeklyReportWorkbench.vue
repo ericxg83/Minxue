@@ -302,6 +302,8 @@
                   :todo-count="singleHero?.notStartedCount || 0"
                   :zero-accuracy-tags="zeroAccuracyTags"
                   :student-id="selectedStudentId"
+                  :student-name="currentStudentName || ''"
+                  @exam-created="onRetryExamCreated"
                 />
               </div>
             </ContentCard>
@@ -897,6 +899,12 @@ function onErrorCauseClick(row) {
   if (!selectedStudentId.value) return ElMessage.info('请先选择学生')
   ElMessage.info(`「${row.errorType}」${row.count} 道都在错题清单里，可按标签逐题核对后勾选发卷`)
   router.push({ path: `/students/${selectedStudentId.value}` })
+}
+
+// 3b) r142：动作清单里就地组卷成功后 —— 重拉一次本页诊断数据。
+//     （新卷要等学生作答并批改后才进统计，所以这里只是刷新，不假装战绩已更新。）
+function onRetryExamCreated() {
+  handleStudentChange(selectedStudentId.value)
 }
 
 // r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0
