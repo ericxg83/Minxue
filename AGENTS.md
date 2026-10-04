@@ -54,8 +54,11 @@
       ③ 渲染层遇 NUL 崩溃。结果 626 条答案全部错位入库且 status 照常 published。
     - 解析层三道通用防线（`server/routes/worksheets.js`、`server/config/ai.js`、
       `server/services/pdfService.js`，回归测试 `test/answerOcrGuard.test.mjs` 锁定）：
-      答案页 OCR 必须 `noBackup:true` 锁主力视觉模型（弱模型 outputs 不得入库）；
-      分批 OCR 限 3 并发 + 单页空结果重试；文字层先过质量门禁
+      答案页 OCR 必须锁在**显式供应商链**上（`server/config/ai.js` 的 `ANSWER_PAGE_VENDOR_CHAIN`：
+      Bailian `qwen3.8-flash` 主 → SenseNova `kimi-k3` 兜），**弱模型 outputs 不得入库**；
+      ⚠️ 旧口径写的「必须 `noBackup:true` 锁主力视觉模型」**已空转**（魔搭双 Key 欠费禁用后该开关
+      不再起作用，2026-10-04 核实）——现行「锁模型」靠上面这条显式链，排查时别再拿 `noBackup` 当判据；
+      分批 OCR 限 3 并发（`OCR_PAGE_CONCURRENCY`，默认 3）+ 单页空结果重试；文字层先过质量门禁
      （`question_seq_anomaly ≥ 3` 或含 NUL/C0 损坏字符即丢弃改走逐页 OCR）；渲染层过滤控制字符防崩。
     - 发布闸门：`PUT /worksheets/:id/status → published` 发布前必经
       `getWorksheetPublishRisk`（`server/services/worksheetPublishRiskService.js`）评估；
