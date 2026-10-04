@@ -1376,3 +1376,40 @@ grep -rnE "requireAuth|apiKey|Bearer|passport" server/index.js   # → 无任何
 「凡 `axios.get(<url>, NO_PROXY_DOWNLOAD_OPTS)` 的调用点必须先经 `assertNotPrivateUrl`」——
 即用源码扫描断言「直接 axios 抓图的点」数量为 0，否则以后再新增又会漏。
 ⛔ 未动手：`server/worker.js` 属批改主流程（C 级），等负责人/该会话确认。
+
+## 第 112 轮（2026-10-04）：提案⑱ 执行（负责人批准）+ CORS 回环放行 + 守护日志落盘
+
+### ⑱-1 已执行（负责人批复「接受建议，批准」）
+
+- 新增 `server/utils/urlGuard.js`：
+  - `assertImageUrlAllowed`（端点层）：http/https 协议限制 + 域名白名单
+    （*.aliyuncs.com / minxue.pages.dev / env IMAGE_URL_EXTRA_HOSTS）+ 私网解析拦截；
+  - `assertNotPrivateUrl`（下载器层）：不做白名单，硬拦私网/回环/链路本地/云元数据
+    （字面 IP + DNS 解析双重判断）；
+  - 逃生门 IMAGE_URL_ALLOW_PRIVATE=1 仅限本地开发（生产绝不配）。
+- `POST /api/tasks/create-by-url`：imageUrl 先过守卫（拒绝→400 可读错误），studentId 必须
+  在 students 表真实存在；入库存守卫规范化后的 URL。
+- `downloadImageBufferNoProxy`（worker 统一抓图入口）：axios.get 前硬拦私网——SSRF 死角封死，
+  只加校验不改批改主流程。
+- 回归锁 `test/urlGuard.test.mjs`（7 例）：组件级行为 + 源码级接线 + 反向自检
+  （r111 旧树判红 2 条：旧端点无守卫、旧下载器无拦截）。
+
+### 意外收获：冒烟假红真因——CORS 拦回环 Origin
+
+r111 后冒烟 28/33、route_sweep 4/16（学生管理/学生档案 500 /api/questions/batch）。
+后端日志落盘后定位：**不是数据问题，是 CORS**——浏览器对同源 POST 也带
+`Origin: http://127.0.0.1:523x`，不在默认 localhost 白名单（无端口通配）→ cors 抛错 → 500。
+修复：origin 回调放行 `http(s)://(localhost|127.0.0.1):任意端口`。互联网恶意站点无法伪造
+回环 Origin，生产安全不变。修复后 route_sweep 0/16、_r91_smoke 33/33 恢复。
+
+### 运维：守护日志落盘
+
+keep_backend 此前以 stdio:ignore 拉起后端 ⇒ 后端报错无处可看（本次诊断因此多绕一圈）。
+改为追加写 `server/scripts/logs/backend-4000.log`；同时修复守护自身 mkdirSync 未导入的
+启动即崩 bug（上一版 sed 引入）。
+
+### ⚠️ 负责人待办（唯一剩余动作，代码侧已完成）
+
+**Render 后台把环境变量 `ALLOWED_ORIGIN` 从 `*` 改为 `https://minxue.pages.dev`**
+（负责人已确认工作台域名）。改完即封死「任意网站跨域读学生数据」的口子；
+server/.env.example 已写明。不改代码，纯后台操作。
