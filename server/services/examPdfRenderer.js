@@ -13,6 +13,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import chromium from '@sparticuz/chromium'
+import { withCjkFontFontFace } from './renderFontFace.js'
 
 let _browser = null
 
@@ -66,6 +67,8 @@ async function getBrowser() {
  */
 export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = {}, viewport = { width: 794, height: 1123 } }) {
   if (!html) throw new Error('renderExamPDF: html 不能为空')
+  // 中文字体兜底（服务端 Chromium 没有中文字形，见 renderFontFace.js）
+  const pageHtml = withCjkFontFontFace(html)
 
   const browser = await getBrowser()
   const page = await browser.newPage()
@@ -73,7 +76,7 @@ export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = 
     // puppeteer 用 setViewport，playwright 用 setViewportSize —— 按执行器兼容调用
     if (typeof page.setViewport === 'function') await page.setViewport(viewport)
     else if (typeof page.setViewportSize === 'function') await page.setViewportSize(viewport)
-    await page.setContent(html, { waitUntil: 'load' })
+    await page.setContent(pageHtml, { waitUntil: 'load' })
 
     // 等 KaTeX 完成所有度量：fonts.ready + 一帧 + 200ms 兜底
     await page.evaluate(async () => {
@@ -112,6 +115,8 @@ export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = 
  */
 export async function renderHtmlPNG({ html, width = 750, height = 1334, scale = 2 }) {
   if (!html) throw new Error('renderHtmlPNG: html 不能为空')
+  // 中文字体兜底（家长分享卡整张卡中文渲染成方框，见 renderFontFace.js）
+  const pageHtml = withCjkFontFontFace(html)
 
   const browser = await getBrowser()
   let page = null
@@ -128,7 +133,7 @@ export async function renderHtmlPNG({ html, width = 750, height = 1334, scale = 
       context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale })
       page = await context.newPage()
     }
-    await page.setContent(html, { waitUntil: 'load' })
+    await page.setContent(pageHtml, { waitUntil: 'load' })
 
     await page.evaluate(async () => {
       if (document.fonts && document.fonts.ready) {

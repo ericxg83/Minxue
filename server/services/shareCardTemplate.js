@@ -368,7 +368,11 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC',sans-serif;color:${T.text};background:#fff}
+  /* ⛔ MinxueCJK 必须排在字体栈**最后**（renderFontFace.js 注入的同名 @font-face 是服务端
+     唯一的中文兜底字形）。排前面会让数字/拉丁也换成 Noto Sans SC，整张卡版式都要重画；
+     排最后 ⇒ 原来的字体链照旧命中拉丁数字，只给中文兜底。
+     r134 之前只写了 YaHei/PingFang/Noto 三个名字，服务端容器里一个都没有 ⇒ 中文全是方框。 */
+  body{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','MinxueCJK',sans-serif;color:${T.text};background:#fff}
   .card{width:750px;height:1334px;background:${T.bg};overflow:hidden;display:flex;flex-direction:column;position:relative}
   .brandbar{height:8px;background:linear-gradient(90deg,${T.primary},${T.teal});flex-shrink:0}
   /* space-between 把剩余高度均匀分到块间，保证任何数据形态都填满 1334 高度不留底部空洞 */

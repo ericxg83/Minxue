@@ -145,7 +145,9 @@ const makeQrSvg = (text, cellSize = 4, margin = 2) => {
 /** 简化版试卷样式（与前端 buildPaperCSS 核心字段对齐；不依赖 React/前端组件） */
 const buildPaperCSS = () => `
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif; color:#1a1a1a; padding:24px 36px; }
+/* ⛔ MinxueCJK 排在最后：renderFontFace.js 注入的同名 @font-face 是服务端唯一的中文字形，
+   容器里没有任何 CJK 字体，不补就是整张卷子全是方框（r134 实测分享卡即如此）。 */
+body { font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun','MinxueCJK',sans-serif; color:#1a1a1a; padding:24px 36px; }
 .page { width:794px; }
 .head-area { min-height:80px; padding-right:170px; }
 .title { font-size:20px; font-weight:bold; margin-bottom:4px; letter-spacing:1px; }
