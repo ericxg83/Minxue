@@ -9,6 +9,7 @@
  *   node scripts/healthcheck.mjs                     # 查本机后端 4000
  *   node scripts/healthcheck.mjs --api https://xxx   # 改查生产
  *   node scripts/healthcheck.mjs --json              # 机器可读（给别的程序用）
+ *   node scripts/healthcheck.mjs --log tmp/health.jsonl   # 追加一行采样，用于事后分析
  *
  * 设计约束（勿破坏）：
  *   1) **全程只读**：只发 GET、只跑 SELECT，不写库、不入队、不改配置。
@@ -28,6 +29,10 @@ const argOf = (name, dflt) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : dflt
 }
 const API = argOf('--api', 'http://127.0.0.1:4000').replace(/\/+$/, '')
+// --log <文件>：把本次结果追加成一行 JSON，用于**持续采样**。
+// 2026-10-04 教训：单次观测不足以支撑因果结论（曾把一次部署重启误判成实例休眠），
+// 判断"到底什么时候慢"必须靠一段时间的连续数据。
+const LOG = argOf('--log', '')
 const isProd = !API.includes('127.0.0.1') && !API.includes('localhost')
 
 const C = { ok: '✅', warn: '⚠️ ', bad: '❌', info: 'ℹ️ ' }
@@ -120,6 +125,26 @@ if (health) {
 // 这里只能间接判断（读不到 Render 后台配额），故给 warn 而不是 ok。
 if (health) {
   record('服务器磁盘', 'warn', '体检读不到磁盘用量。图片存本地磁盘时请定期在 Render 后台看用量（免费额度约 1GB，接近上限会导致上传失败）')
+}
+
+// ── 追加采样日志（一行一条，便于事后按时间窗口分析）────────────────────
+if (LOG) {
+  const line = JSON.stringify({
+    t: new Date().toISOString(),
+    api: API,
+    upMin: health && typeof health.uptimeSec === 'number' ? Math.round(health.uptimeSec / 60) : null,
+    rtMs: health ? health.rt : null,
+    bad: results.filter((r) => r.status === 'bad').map((r) => r.name),
+    warn: results.filter((r) => r.status === 'warn').map((r) => r.name),
+  })
+  try {
+    const { appendFileSync, mkdirSync } = await import('node:fs')
+    mkdirSync(path.dirname(LOG), { recursive: true })
+    appendFileSync(LOG, line + '\n', 'utf8')
+    if (!JSON_ONLY) console.log(`\n${C.info} 已记到 ${LOG}`)
+  } catch (e) {
+    console.error(`${C.warn} 写日志失败（不影响体检结果）：${e.message}`)
+  }
 }
 
 if (JSON_ONLY) {

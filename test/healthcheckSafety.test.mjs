@@ -58,6 +58,21 @@ test('体检脚本支持指定地址与 JSON 输出', () => {
   assert.match(SRC, /--json/, '应支持 --json 机器可读输出')
 })
 
+test('体检脚本支持 --log 持续采样（用于替代"抓一次就下结论"）', () => {
+  // 2026-10-04 教训：曾把一次部署重启误判成实例休眠并据此下了结论。
+  // 采样日志是纠正这种「单次观测下结论」错误的手段，故必须锁住它不被删掉。
+  assert.match(SRC, /--log/, '缺少 --log 参数 ⇒ 无法持续采样，只能靠单次观测，容易再次误判')
+  assert.match(SRC, /appendFileSync/, '--log 没有真的追加写入，只是个摆设')
+  assert.match(SRC, /upMin|uptimeSec/, '采样必须记录服务器已运行分钟数（判断是否重启的关键）')
+  assert.match(SRC, /rtMs|time\.total|rt:/, '采样必须记录响应耗时')
+})
+
+test('采样日志必须写在 gitignore 覆盖的目录（别把运行痕迹提交进仓库）', () => {
+  assert.match(SRC, /mkdirSync\(path\.dirname\(LOG\)/, 'LOG 所在目录未自动创建，首次采样会因目录不存在而失败')
+  const gi = readFileSync(path.join(ROOT, '.gitignore'), 'utf8')
+  assert.match(gi, /^tmp\/?$/m, '.gitignore 必须忽略 tmp/，否则采样日志会被提交进仓库')
+})
+
 test('体检脚本的结论用大白话（不出现术语堆砌）', () => {
   // 结论行必须是人话，且给出"要不要管"的明确指引
   assert.match(SRC, /一切正常|没有致命问题|项需要处理/,
