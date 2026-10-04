@@ -49,6 +49,44 @@ export function buildRetryProgress(taskRows) {
 }
 
 /**
+ * 错题掌握状态三态拆分（2026-10-04，r130）。
+ *
+ * 背景（负责人截图质疑「完全掌握只有 2」）：旧口径只把 lifecycle_status='mastered'
+ * 算「完全掌握」，其余（review_1 基本掌握 / new 待复习 / NULL 历史）全部并进一个
+ * pendingCount，前端给它起名「待提升」。后果是**「基本掌握」这一层在页面上完全
+ * 没有出口**——陆晨曦实测 74 道错题 = 完全掌握 2 + 基本掌握 14 + 待复习 58，
+ * 页面只显示「完全掌握 2 / 待提升 72」，家长看到的是 2，实际记住了 16 道。
+ *
+ * 本函数**不改动** masteredCount / pendingCount 的既有语义（老消费方全部照旧），
+ * 只额外拆出基本掌握与待复习两层，供展示层画三态图。
+ * 口径：review_2 是历史残留枚举，按 review_1 语义计入「基本掌握」
+ * （与 weaknessService.getRetryEffectiveness 及 test/lifecycleQueue 锁一致）。
+ *
+ * @param {Array<{lifecycle_status: string|null, count: number}>} statusRows
+ * @returns {{masteredCount:number, basicMasteredCount:number, notStartedCount:number, pendingCount:number}}
+ */
+export function splitMasteryStates(statusRows) {
+  let masteredCount = 0
+  let basicMasteredCount = 0
+  let notStartedCount = 0
+  let pendingCount = 0
+  for (const row of statusRows || []) {
+    const n = row.count || 0
+    if (row.lifecycle_status === 'mastered') {
+      masteredCount += n
+    } else if (row.lifecycle_status === 'review_1' || row.lifecycle_status === 'review_2') {
+      basicMasteredCount += n
+      pendingCount += n
+    } else {
+      // new + NULL（历史无状态）都算「还没对过一次」
+      notStartedCount += n
+      pendingCount += n
+    }
+  }
+  return { masteredCount, basicMasteredCount, notStartedCount, pendingCount }
+}
+
+/**
  * 获取单个学生的周期学习报告数据（与 GET /:studentId 完全同口径）。
  * 原逻辑抽取自路由 handler（2026-10-04），供分享卡等服务端产出物复用，
  * 口径变更只改这一处。options 参数与 GET 相同（mode/offset/weeks）。
@@ -174,6 +212,43 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       [studentId, periodStart, periodEnd]
     )
 
+    // 7b. 周期趋势（r130 新增，供页面的折线图用）。
+    //     分桶粒度按**实际数据跨度**自适应，而不是死按 mode：
+    //     跨度 <= 45 天 → 按日（一个月内的学习走势，这才是家长要看的信心曲线）；
+    //     跨度更长 → 按月（全部模式跨半年时按日会挤成一条锯齿竖线）。
+    //     依据：陆晨曦 298 道题全在 2026-09，若按月分桶只有 1 个点，折线图等于没有。
+    //     isWeekMode 直接复用上面已查好的 trendRows，不重复打库。
+    let periodTrend
+    if (isWeekMode) {
+      periodTrend = buildDailyTrend(trendRows, periodStart)
+    } else {
+      const { rows: spanRows } = await query(
+        `SELECT MIN(created_at) AS first_at, MAX(created_at) AS last_at
+         FROM ${TABLES.QUESTIONS}
+         WHERE student_id = $1 AND created_at >= $2 AND created_at < $3 AND is_complete = TRUE`,
+        [studentId, periodStart, periodEnd]
+      )
+      const first = spanRows[0]?.first_at
+      const last = spanRows[0]?.last_at
+      const spanDays = first && last ? Math.ceil((last - first) / 86400000) : 0
+      const bucketFmt = spanDays > 45 ? 'YYYY-MM' : 'MM-DD'
+      const { rows: bucketRows } = await query(
+        `SELECT
+          to_char(created_at, '${bucketFmt}') AS bucket,
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct
+        FROM ${TABLES.QUESTIONS}
+        WHERE student_id = $1
+          AND created_at >= $2
+          AND created_at < $3
+          AND is_complete = TRUE
+        GROUP BY bucket
+        ORDER BY bucket`,
+        [studentId, periodStart, periodEnd]
+      )
+      periodTrend = buildPeriodTrend(bucketRows, mode, periodStart)
+    }
+
     // 8. 各学科整体正确率（本周批改题目按学科聚合）
     const { rows: subjectAccRows } = await query(
       `SELECT
@@ -212,16 +287,9 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       ratio: errorTotal > 0 ? Math.round((r.count / errorTotal) * 100) : 0
     }))
 
-    // 组合掌握状态统计
-    let masteredCount = 0
-    let pendingCount = 0
-    for (const row of wrongStatusRows) {
-      if (row.lifecycle_status === 'mastered') {
-        masteredCount += row.count
-      } else {
-        pendingCount += row.count
-      }
-    }
+    // 组合掌握状态统计（mastered / 基本掌握 / 待复习 三态）
+    const { masteredCount, basicMasteredCount, notStartedCount, pendingCount } =
+      splitMasteryStates(wrongStatusRows)
 
     const stats = {
       totalTasks: taskRows[0]?.total_tasks || 0,
@@ -234,6 +302,8 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
         : 0,
       newWrongCount: wrongCountRows[0]?.count || 0,
       masteredCount,
+      basicMasteredCount,
+      notStartedCount,
       pendingCount,
       wrongQuestionIds: wrongIdRows.map(r => r.question_id)
     }
@@ -251,7 +321,6 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
 
     // 每日趋势（周模式补全 7 天，月/全部模式不生成趋势）
     const dailyTrend = isWeekMode ? buildDailyTrend(trendRows, periodStart) : []
-
     const weekNum = isWeekMode ? getIsoWeek(periodStart) : null
 
     // 8. 上一周期对比（week/month；all 模式 prev=null） + 本周期重练进步
@@ -276,6 +345,8 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       subjectDiagnosis,
       errorDistribution,
       dailyTrend,
+      // 2026-10-04（r130）：周/月/全部都能出图的周期趋势（纯新增，向后兼容）
+      periodTrend,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,
       retryProgress
@@ -369,12 +440,8 @@ router.get('/', async (req, res) => {
           [student.id, periodStart, periodEnd]
         )
 
-        let masteredCount = 0
-        let pendingCount = 0
-        for (const row of statusRows) {
-          if (row.lifecycle_status === 'mastered') masteredCount += row.count
-          else pendingCount += row.count
-        }
+        const { masteredCount, basicMasteredCount, notStartedCount, pendingCount } =
+          splitMasteryStates(statusRows)
 
         return {
           student: { id: student.id, name: student.name, grade: student.grade },
@@ -388,6 +455,8 @@ router.get('/', async (req, res) => {
               : 0,
             newWrongCount: wrongRows[0]?.count || 0,
             masteredCount,
+            basicMasteredCount,
+            notStartedCount,
             pendingCount
           }
         }
@@ -458,7 +527,41 @@ async function fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd) {
   }))
 }
 
-/** 上一周期的对比快照：作业/题量/正确率/错题/掌握状态 + 知识点诊断 */
+/**
+ * 周期趋势（2026-10-04，r130 新增）：周/月/全部三档都能出图。
+ *
+ * 背景：旧版只在 isWeekMode 时用 buildDailyTrend 填 dailyTrend，月/全部一律返回 []，
+ * 前端于是整块不渲染 —— 负责人截图（全部模式）页面上「一张图都没有」。
+ * 这里**新增** periodTrend 字段（结构与 dailyTrend 同构：{date,accuracy,count}），
+ * 按周期粒度自动选桶：周=补齐 7 天、月=按日、全部=按月。不改 dailyTrend 语义，
+ * 移动端 PDF / 分享卡的既有消费方完全不受影响。
+ *
+ * @param {Array<{bucket:string, total:number, correct:number}>} rows 已按桶聚合
+ * @returns {Array<{date:string, accuracy:number|null, count:number}>}
+ */
+function buildPeriodTrend(rows, mode, periodStart) {
+  const map = {}
+  for (const r of rows) {
+    map[r.bucket] = {
+      accuracy: r.total > 0 ? Math.round((r.correct / r.total) * 1000) / 10 : null,
+      count: r.total
+    }
+  }
+  // 周模式复用 7 天补齐逻辑（含无数据的天 → accuracy null，折线自然断开）
+  if (mode === 'week') return buildDailyTrend(rows.map(r => ({
+    day: r.bucket, total: r.total, correct: r.correct
+  })), periodStart)
+
+  const keys = Object.keys(map).sort()
+  return keys.map(k => ({
+    date: k,
+    accuracy: map[k].accuracy,
+    count: map[k].count
+  }))
+}
+
+/**
+ * 上一周期的对比快照：作业/题量/正确率/错题/掌握状态 + 知识点诊断 */
 export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mode, offset }) {
   const [taskRows, questionRows, wrongCountRows, statusRows] = await Promise.all([
     query(
@@ -493,12 +596,8 @@ export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mo
     )
   ])
 
-  let masteredCount = 0
-  let pendingCount = 0
-  for (const r of statusRows.rows) {
-    if (r.lifecycle_status === 'mastered') masteredCount += r.count
-    else pendingCount += r.count
-  }
+  const { masteredCount, basicMasteredCount, notStartedCount, pendingCount } =
+    splitMasteryStates(statusRows.rows)
   const q = questionRows.rows[0]
   const knowledgeDiagnosis = await fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd)
 
@@ -518,6 +617,8 @@ export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mo
       accuracy: q?.total > 0 ? Math.round((q.correct / q.total) * 1000) / 10 : 0,
       newWrongCount: wrongCountRows.rows[0]?.count || 0,
       masteredCount,
+      basicMasteredCount,
+      notStartedCount,
       pendingCount
     },
     knowledgeDiagnosis

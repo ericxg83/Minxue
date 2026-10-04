@@ -42,9 +42,10 @@
               <div class="hero-kpi"><b>{{ aggregateStats.studentCount }}</b><span>有数据学生</span></div>
               <div class="hero-kpi"><b>{{ aggregateStats.totalQuestions }}</b><span>批改题量</span></div>
               <div class="hero-kpi"><b class="warn">{{ aggregateStats.newWrongCount }}</b><span>新增错题</span></div>
-              <div class="hero-kpi"><b class="good">{{ aggregateStats.masteredCount }}</b><span>完全掌握</span></div>
-              <div class="hero-kpi"><b>{{ aggregateStats.pendingCount }}</b><span>待重练</span></div>
+              <div class="hero-kpi"><b class="good">{{ aggregateStats.securedCount }}</b><span>已掌握</span></div>
+              <div class="hero-kpi"><b>{{ aggregateStats.notStartedCount }}</b><span>待复习</span></div>
             </div>
+            <MasteryBar :mastered="aggregateStats.masteredCount" :basic="aggregateStats.basicMasteredCount" :todo="aggregateStats.notStartedCount" />
           </div>
         </section>
 
@@ -69,7 +70,7 @@
                 <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
                 <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
                 <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
-                <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? report.stats.pendingCount : '—' }}</b>待重练</span></div>
+                <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
                 <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
                 <el-icon class="row-arrow"><ArrowRight /></el-icon>
               </article>
@@ -85,15 +86,16 @@
               <span class="hero-ring-label">整体正确率</span>
             </div>
             <div class="hero-main">
-              <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
-              <div class="hero-kpis">
-                <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
-                <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
-                <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
-                <div class="hero-kpi"><b class="good">{{ singleHero.masteredCount }}</b><span>完全掌握</span></div>
-                <div class="hero-kpi"><b>{{ singleHero.pendingCount }}</b><span>待提升</span></div>
-              </div>
+            <div class="hero-caption"><strong>{{ currentStudentName }}</strong><span>{{ periodLabel }} · {{ singleHero.correctLine }}</span></div>
+            <div class="hero-kpis">
+              <div class="hero-kpi"><b>{{ singleHero.completedTasks }}<small v-if="singleHero.totalTasks">/{{ singleHero.totalTasks }}</small></b><span>完成作业</span></div>
+              <div class="hero-kpi"><b>{{ singleHero.totalQuestions }}</b><span>批改题量</span></div>
+              <div class="hero-kpi"><b class="warn">{{ singleHero.newWrongCount }}</b><span>新增错题</span></div>
+              <div class="hero-kpi"><b class="good">{{ singleHero.securedCount }}</b><span>已掌握</span></div>
+              <div class="hero-kpi"><b>{{ singleHero.notStartedCount }}</b><span>待复习</span></div>
             </div>
+            <MasteryBar :mastered="singleHero.masteredCount" :basic="singleHero.basicMasteredCount" :todo="singleHero.notStartedCount" />
+          </div>
           </section>
 
           <section v-if="currentStudentDetail?.stats" class="diagnosis-layout student-detail-layout">
@@ -110,6 +112,20 @@
               </div>
             </ContentCard>
           </section>
+
+          <!-- 学习趋势折线图（r130 新增）：周/月/全部三档都出图。
+               旧版只在周模式渲染，且读的是 point.day / point.total，
+               而后端 buildDailyTrend 返回 {date, accuracy, count} —— 字段名对不上，
+               柱子恒为 4% 空高、标签恒为 '-'，等于一张坏掉的图。 -->
+          <ContentCard
+            v-if="currentStudentDetail?.stats"
+            class="trend-line-card"
+            title="正确率走势"
+            :description="`${currentStudentName} · ${trendGranularityLabel} · 只看有批改记录的时段`"
+          >
+            <template #actions><span :class="['trend-result', trendSummary.tone]">{{ trendSummary.label }}</span></template>
+            <TrendLineChart :points="trendChartPoints" />
+          </ContentCard>
 
           <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
           <ContentCard
@@ -530,6 +546,8 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import GrowthCardButton from '../components/GrowthCardButton.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
+import MasteryBar from '../components/diagnosis/MasteryBar.vue'
+import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
 import { saveAs } from 'file-saver'
@@ -1198,6 +1216,8 @@ function getDiagnosisAction(row) {
 }
 
 const reportsWithData = computed(() => (summaryData.value?.reports || []).filter(r => r.stats?.totalQuestions > 0))
+// r130：三态（mastered / basicMastered / notStarted）从后端新字段取；
+// 老字段 pendingCount 语义未变（= basic + todo），保留给排序与风险分级用。
 const aggregateStats = computed(() => {
   const reports = reportsWithData.value
   const totals = reports.reduce((acc, report) => {
@@ -1207,14 +1227,20 @@ const aggregateStats = computed(() => {
     acc.newWrong += stats.newWrongCount || 0
     acc.pending += stats.pendingCount || 0
     acc.mastered += stats.masteredCount || 0
+    acc.basic += stats.basicMasteredCount || 0
+    acc.todo += stats.notStartedCount || 0
     return acc
-  }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0 })
+  }, { questions: 0, correct: 0, newWrong: 0, pending: 0, mastered: 0, basic: 0, todo: 0 })
   return {
     accuracy: totals.questions ? Math.round((totals.correct / totals.questions) * 1000) / 10 : 0,
     totalQuestions: totals.questions,
     newWrongCount: totals.newWrong,
     pendingCount: totals.pending,
     masteredCount: totals.mastered,
+    basicMasteredCount: totals.basic,
+    notStartedCount: totals.todo,
+    // 「已掌握」= 完全掌握 + 基本掌握：家长要看的信心数字，答对过就该被承认
+    securedCount: totals.mastered + totals.basic,
     studentCount: reports.length
   }
 })
@@ -1237,6 +1263,8 @@ const singleHero = computed(() => {
   const s = currentStudentDetail.value?.stats
   if (!s) return null
   const hasQuestions = (s.totalQuestions || 0) > 0
+  const mastered = s.masteredCount || 0
+  const basic = s.basicMasteredCount || 0
   return {
     acc: hasQuestions ? s.accuracy : null,
     accText: hasQuestions ? `${s.accuracy}%` : '—',
@@ -1245,24 +1273,46 @@ const singleHero = computed(() => {
     totalTasks: s.totalTasks || 0,
     totalQuestions: s.totalQuestions || 0,
     newWrongCount: s.newWrongCount || 0,
-    masteredCount: s.masteredCount || 0,
-    pendingCount: s.pendingCount || 0
+    masteredCount: mastered,
+    basicMasteredCount: basic,
+    notStartedCount: s.notStartedCount || 0,
+    // r130：「已掌握」把基本掌握算进来（答对过 1 次就是记住了），
+    // 旧版只显示完全掌握 2 道，实际 16 道 —— 数字好看但失真。
+    securedCount: mastered + basic
   }
 })
 const overviewStats = computed(() => selectedStudentId.value && currentStudentDetail.value?.stats ? currentStudentDetail.value.stats : aggregateStats.value)
 const attentionReports = computed(() => [...(summaryData.value?.reports || [])].sort((a, b) => studentRiskScore(b) - studentRiskScore(a)))
 const weakKnowledge = computed(() => [...(currentStudentDetail.value?.knowledgeDiagnosis || [])].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy))
 const weakKnowledgeCount = computed(() => weakKnowledge.value.filter(row => row.accuracy < 80 || row.wrongCount >= 2).length)
-const dailyTrendPoints = computed(() => (currentStudentDetail.value?.dailyTrend || []).filter(point => point.total > 0))
+// r130：折线图数据源改为后端 periodTrend（周=日桶；月/全部按实际跨度自适应分桶）。
+// 旧代码读 dailyTrend 的 point.total，而后端返回的是 count —— 恒为 undefined，
+// 于是 trendSummary 永远停在「数据不足」，图也永远是空的。
+const dailyTrendPoints = computed(() => (currentStudentDetail.value?.periodTrend || currentStudentDetail.value?.dailyTrend || []).filter(point => point.count > 0))
+// 后端分桶粒度：'YYYY-MM' 说明跨度 > 45 天按月，否则按日
+const trendGranularityLabel = computed(() => {
+  const first = (currentStudentDetail.value?.periodTrend || [])[0]
+  return first && /^\d{4}-\d{2}$/.test(first.date) ? '按月' : '按日'
+})
 const trendSummary = computed(() => {
   const points = dailyTrendPoints.value
-  if (periodMode.value !== 'week') return { label: '暂无周期趋势', description: '月度与全部时间暂不提供分日趋势', tone: 'default' }
-  if (points.length < 2) return { label: '数据不足', description: '至少需要 2 天有效数据', tone: 'default' }
+  if (points.length < 2) {
+    return points.length === 1
+      ? { label: '仅 1 段记录', description: '出现第二段批改数据后可看走势', tone: 'default' }
+      : { label: '暂无趋势', description: '本周期没有批改记录', tone: 'default' }
+  }
   const change = Math.round((points[points.length - 1].accuracy - points[0].accuracy) * 10) / 10
-  if (change > 0) return { label: `上升 ${change}%`, description: '周期内首末有效学习日对比', tone: 'success' }
-  if (change < 0) return { label: `下降 ${Math.abs(change)}%`, description: '周期内首末有效学习日对比', tone: 'danger' }
-  return { label: '保持平稳', description: '周期内首末有效学习日持平', tone: 'primary' }
+  if (change >= 3) return { label: `上升 ${change}%`, description: '首末有效时段对比', tone: 'success' }
+  if (change <= -3) return { label: `下降 ${Math.abs(change)}%`, description: '首末有效时段对比', tone: 'danger' }
+  return { label: '基本持平', description: '首末有效时段持平', tone: 'primary' }
 })
+// r130：单生「已掌握」= 完全掌握 + 基本掌握。答对过 1 次就是记住了，
+// 不该只认 2 次答对那一档（那是「完全掌握」的定义，不是「记住了没有」）。
+function securedOf(stats) {
+  if (!stats) return 0
+  return (stats.masteredCount || 0) + (stats.basicMasteredCount || 0)
+}
+
 // r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0
 // （该生本周期没有任何作答）不等于正确率 0%，指标一律显示「—」，避免家长/老师误读。
 function hasStats(report) {
