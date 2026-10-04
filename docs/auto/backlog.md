@@ -996,3 +996,29 @@ answer / student_answer / ai_answer / analysis / metadata / created_at`——
 3. `questions.review_status` —— 人工复核筛选。
 4. `tasks.created_at` —— 收益最小（表 192 行），可不做。
 ⛔ 四项均属 C 级（DB Schema/索引），未动手，等负责人逐条点头。
+
+### 提案⑭ 实测推翻「继续优化数据库」这条路线（2026-10-04，常驻巡检赛道）
+
+**⑭-1 已执行（负责人批准）：`idx_wrong_questions_lifecycle_status` 已建，16 kB，结果零变化。**
+建前建后 `COUNT(DISTINCT student_id) WHERE lifecycle_status IN ('new','review_1')` = **21 → 21**、
+`WHERE lifecycle_status='new'` = **1044 → 1044**，逐项一致。索引确实被用上的只有**高选择性**查询：
+`lifecycle_status='mastered'`（2/1120 行）从 96 buffers 降到 **3**（32 倍）。
+⛔ 但我原本举荐的理由（`weaknessService.js:199` 那条聚合查询）**是错的**：
+它匹配 1118/1120 行 = 99%，planner 选 Seq Scan 才是对的，加索引前后计划完全一样。
+**教训：举荐索引必须先确认选择性，不能只看「查询跑得勤」。**
+
+**⑭-2 实测数据（推翻⑬-3 的排序）：**
+
+| 场景 | 实测 | 结论 |
+|---|---|---|
+| 错题中心分页 `ORDER BY added_at DESC LIMIT 20 OFFSET 0/20/50/100` | 0.477 / 0.499 / 0.500 / 0.555 ms，恒 96 buffers | OFFSET 惩罚被"表小且全缓存"掩盖，**不劣化** |
+| 周末班课件范围筛选（weekendHandout.js:186-189 形态） | 0.718 ms，96 buffers | 无痛点 |
+| 同上但把 `COALESCE(lifecycle_status,'new')<>'mastered'` 换成 `IS DISTINCT FROM 'mastered'` | 0.713 ms | **零差别**，不值得改代码 |
+| 端到端 `/api/students` | **3 ms** | 网络往返不是瓶颈（"新加坡 RTT 500ms"是历史状况） |
+
+**⑭-3 结论与止损决定：数据库这条线到此为止，不再加索引、不再改查询形态。**
+理由：① 整个库只有 32 MB / 51 张表，最大的 hot 表也才 6544 行、索引大多已齐全；
+② 所有相关查询的服务端耗时都在**亚毫秒级**，端到端 3–300 ms，时间不在数据库上；
+③ 继续加索引/改写只会增加改动面与未来维护成本，违反 AGENTS.md「小而美、修改范围最小」。
+**⑬-3 那份「按优先级排序、建议批三个索引」的建议整体撤回**（⑬-2 的列存在性勘误仍有效）。
+后续巡检**不要**再在索引/N+1 上找活，除非出现新的实测劣化证据。
