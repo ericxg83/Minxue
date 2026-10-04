@@ -203,7 +203,18 @@ function parseVariantResponse(text) {
  * @param {string} [kpName] - 关联的知识点名称（可选）
  * @returns {Promise<Array<{id, strategy, content, options, answer, analysis, difficulty, question_type}>>} 生成的变式题列表
  */
-export async function generateVariantsForQuestion(question, kpName = null) {
+/**
+ * 为某题生成变式题并入库。
+ *
+ * @param {object} question  原题（需含 id / content）
+ * @param {string|null} kpName  知识点名（可空）
+ * @param {string[]|null} onlyStrategies
+ *   **只保存这些策略**（其余 AI 若也返回了就丢弃）。默认 null = 全保存。
+ *   用途：`POST /api/variants/:id/generate-all` 在「部分策略已存在」时只补缺失的，
+ *   否则会把已有策略**重复插一行** —— `variant_questions` 上没有
+ *   `(source_question_id, strategy)` 唯一约束，普通 INSERT 拦不住（2026-10-04 修复）。
+ */
+export async function generateVariantsForQuestion(question, kpName = null, onlyStrategies = null) {
   if (!question || !question.id || !question.content) return []
 
   const subject = question.subject || '数学'
@@ -246,7 +257,10 @@ export async function generateVariantsForQuestion(question, kpName = null) {
 
   // 存入数据库
   const saved = []
+  const allow = Array.isArray(onlyStrategies) && onlyStrategies.length ? new Set(onlyStrategies) : null
+  let skippedExisting = 0
   for (const v of variants) {
+    if (allow && !allow.has(v.strategy)) { skippedExisting++; continue }
     try {
       const questionType = subject === '英语'
         ? (typeof v.question_type === 'string' && v.question_type.trim()
@@ -276,6 +290,9 @@ export async function generateVariantsForQuestion(question, kpName = null) {
     }
   }
 
+  if (skippedExisting > 0) {
+    console.log(`  ℹ️ [Variant] 只补缺失策略：跳过 AI 返回但已存在的 ${skippedExisting} 条`)
+  }
   return saved
 }
 

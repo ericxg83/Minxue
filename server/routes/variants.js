@@ -100,7 +100,10 @@ router.post('/:questionId/generate-all', async (req, res) => {
 
     const question = rows[0]
     const kpName = Array.isArray(question.ai_tags) ? question.ai_tags[0] : null
-    const saved = await generateVariantsForQuestion(question, kpName)
+    // ⛔ 只补缺失策略：AI 一次会返回全部 4 种，若把已有的也存进去，
+    //    因 variant_questions 没有 (source_question_id, strategy) 唯一约束，
+    //    普通 INSERT 会**重复插行**（2026-10-04 修复）。
+    const saved = await generateVariantsForQuestion(question, kpName, missing)
 
     res.json({
       success: true,
