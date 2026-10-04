@@ -21,6 +21,7 @@
 |---|---|---|---|
 | **移动端 App 体验 + 打印/PDF 产出物** | `src/App.jsx`、`src/pages/**`、`src/components/**`、`src/hooks/**`、`src/utils/**`（含 `pdfGenerator.js`、`imageEnhancer.js`、`nativeDownload.js`）、`src/services/apiService.js`、`src/domain/**`、`vite.config.js` 分包、`server/routes/**` 中仅导出/PDF 相关端点 | Quest 会话（2026-10-04 认领，定时任务「移动端与PDF产出物巡检优化」每 30 分钟） | 🟢 已认领 |
 | **服务端基础设施（非批改）** | `server/config/**`、`server/utils/**`（除 `geom/**`、`areaModel*`、`numberAxis*`、`functionGraph*`）、`server/queue.js` 的队列/连接配置、`server/index.js` 的非批改部分、数据库查询与索引健康、进程内存/句柄、定时任务、日志与可观测性 | 常驻巡检会话（2026-10-04 认领，定时任务「敏学常驻巡检循环」每日 21:30） | 🟢 已认领 |
+| **流程沉淀与 skill 维护** | `~/.workbuddy/skills/minxue-*/SKILL.md`（调用名一律中文）、`docs/auto/backlog.md` 的勘误与止损记录、`.workbuddy/memory/**` | 常驻巡检会话（2026-10-04 认领） | 🟢 已认领 |
 
 **为什么选这条**：近 25 个提交的改动文件统计显示，`src/workbench/**` 被反复触碰，而移动端 `src/`（除 workbench）几乎没动过（`App.jsx` 仅 2 次、`apiService.js` 2 次）。
 移动端是老师**现场操作**的主战场（上传→看批改→错题本→组卷），PDF/重练卷是**唯一转发给家长的出口**——高价值、低碰撞。
