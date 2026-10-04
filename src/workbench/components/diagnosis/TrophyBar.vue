@@ -47,6 +47,10 @@ const segments = computed(() => [
         <span class="trophy__unit">道错题，已拿下 <b>{{ secured }}</b> 道</span>
       </div>
       <div class="trophy__right">
+        <!-- r135②：条上方结论句 —— 全橙的长条只说明「没进度」，不说明「该干什么」；
+             补一句还差多少，把颜色压力翻译成行动量。 -->
+        <span v-if="todo > 0" class="trophy__todo">还差 <b>{{ todo }}</b> 道全部清零</span>
+        <span v-else class="trophy__todo is-done">全部拿下，没有待攻克的题</span>
         <span v-if="mastered > 0" class="trophy__badge">✓ {{ mastered }} 道彻底掌握</span>
         <span v-if="practicedSecured !== null" class="trophy__pace">
           练过 <b>{{ practiced }}</b> 道 · 拿下 <b>{{ secured }}</b> 道（{{ Math.round((secured / practiced) * 100) }}%）
@@ -80,6 +84,9 @@ const segments = computed(() => [
 .trophy__unit{font-size:var(--wb-fs-body);color:var(--wb-text-secondary)}
 .trophy__unit b{color:var(--wb-text);font-weight:var(--wb-fw-bold);font-size:var(--wb-fs-section)}
 .trophy__right{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.trophy__todo{font-size:var(--wb-fs-meta);color:var(--wb-text-secondary);font-weight:var(--wb-fw-semibold)}
+.trophy__todo b{color:var(--wb-status-warning-fg);font-weight:var(--wb-fw-bold);font-variant-numeric:tabular-nums}
+.trophy__todo.is-done b,.trophy__todo.is-done{color:var(--wb-status-success-fg)}
 .trophy__badge{
   padding:2px var(--wb-space-2);border-radius:var(--wb-radius-pill);
   background:var(--wb-status-success-bg);color:var(--wb-status-success-fg);

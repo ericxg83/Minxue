@@ -26,12 +26,10 @@
         <template #actions><span class="filter-note">{{ filterNoteText }}</span></template>
       </FilterBar>
 
-      <!-- r133 重构：学生横排选择器。取代「只看一个学生的下拉框」——
-           选谁看 = 一眼横向对比全班战果，不用一个个点开再切回来。
-           仅单生视图显示；已选中学生时把选择器收在 hero 下方，不占首屏高度。 -->
-      <section v-if="viewMode === 'single' && !selectedStudentId && pickerStudents.length" class="picker-row" aria-label="选择学生">
-        <StudentPicker v-model="selectedStudentId" :students="pickerStudents" @select="focusStudentById" />
-      </section>
+      <!-- r135：删除 r133 的学生横排选择器（StudentPicker）。负责人验收反馈「姓名框好多余又丑」，
+           核实确实三重冗余：顶栏「选择学生」下拉 + 下方「发现问题」列表（行内含头像/姓名/年级/
+           正确率/错题数且可点击进诊断）已完整覆盖选人与横向对比两个诉求，卡片排信息量反而最低。
+           选人入口保留：下拉（快）+ 列表行点击（带上下文）。 -->
 
       <template v-if="viewMode === 'single'">
         <!-- 学习概览 hero（2026-10-04 补回：数据页合并时旧概览面板删除后，数字一览一直缺席；
@@ -672,7 +670,6 @@ import TrophyBar from '../components/diagnosis/TrophyBar.vue'
 import TrendLineChart from '../components/diagnosis/TrendLineChart.vue'
 import ErrorCauseBars from '../components/diagnosis/ErrorCauseBars.vue'
 import NextActions from '../components/diagnosis/NextActions.vue'
-import StudentPicker from '../components/diagnosis/StudentPicker.vue'
 import ParentOutputCard from '../components/diagnosis/ParentOutputCard.vue'
 import { getStudents, getAllWeeklyReports, getTeachingDiagnosis, getTeachingDiagnosisDetail, getTeachingWrongPaper, exportWrongPaper } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
@@ -1466,18 +1463,8 @@ function securedOf(stats) {
 }
 
 // ── r133 重构新增 ──
-// 1) 学生选择器数据源：把全班战果摊平，横向对比「谁在进步」。
-//    数据来自 summary（已批量拿回所有学生），不再为选择器额外打接口。
-const pickerStudents = computed(() =>
-  (summaryData.value?.reports || []).map(r => ({
-    id: r.student?.id,
-    name: r.student?.name,
-    grade: r.student?.grade,
-    securedCount: securedOf(r.stats),
-    wrongCount: r.stats?.newWrongCount || 0
-  })).filter(s => s.id)
-)
-// 顶栏下拉的选项（换成 WorkbenchSelect，与工作台其他页统一）
+// （r135：原 1) pickerStudents / 4) focusStudentById 随学生横排选择器一并删除，见模板注释）
+// 顶栏下拉的选项
 const studentOptions = computed(() =>
   studentList.value.map(s => ({ value: s.id, label: s.name }))
 )
@@ -1494,11 +1481,6 @@ const zeroAccuracyTags = computed(() => {
 function onErrorCauseClick(row) {
   ElMessage.info(`已定位「${row.errorType}」${row.count} 道 —— 到错题中心可勾选后一键发卷`)
   router.push({ path: '/students' })
-}
-// 4) 选择器点学生 → 复用既有加载逻辑（保持与下拉一致的行为）
-function focusStudentById(student) {
-  if (!student?.id) return
-  handleStudentChange(student.id)
 }
 
 // r116：与 studentRiskLevel 的「暂无数据」判定同口径 —— stats 存在但 totalQuestions=0
@@ -1538,10 +1520,9 @@ function knowledgeLevel(row) {
 </script>
 
 <style scoped>
-.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
+.diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,84px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:10px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:17px;font-weight:750;line-height:1.2;font-variant-numeric:tabular-nums}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.output-bar{flex-wrap:wrap}}
 
-/* ── 周末讲题错题卷（grade view） ── */
-.picker-row{margin-bottom:var(--wb-space-4)}
+/* ── r135：.picker-row 样式随学生横排选择器删除 ── */
 /* ── r134 诊断页两列骨架（按 03-mockup-v2）──
    mockup 的核心是那条竖直分界：左「诊断」右「行动」。r133 全部通栏 ⇒ 视觉退化成
    一张长表，没有视线落点。右栏 372px：动作条目都短，窄栏更易扫读。
@@ -1635,14 +1616,16 @@ function knowledgeLevel(row) {
 .hero-caption{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .hero-caption strong{font-size:14px;color:var(--wb-text)}
 .hero-caption span{color:var(--wb-text-tertiary);font-size:11px}
-.hero-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
-.hero-kpi{background:var(--wb-bg-elevated);border:1px solid var(--wb-border-light);border-radius:8px;padding:10px 8px;text-align:center}
-.hero-kpi b{display:block;font-size:20px;font-weight:750;color:var(--wb-text);line-height:1.15}
+/* r135①：去方格 —— 5 个带框小格子像作业本，改为无框竖线分隔排式，只靠数字大小建立层级 */
+.hero-kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0}
+.hero-kpi{padding:2px 8px 2px 18px;border-left:1px solid var(--wb-border-light);text-align:left}
+.hero-kpi:first-child{border-left:0;padding-left:0}
+.hero-kpi b{display:block;font-size:22px;font-weight:750;color:var(--wb-text);line-height:1.15;font-variant-numeric:tabular-nums}
 .hero-kpi b small{font-size:12px;font-weight:500;color:var(--wb-text-tertiary)}
 .hero-kpi b.good{color:var(--wb-success)}
 .hero-kpi b.warn{color:var(--wb-warning)}
 .hero-kpi span{display:block;margin-top:3px;color:var(--wb-text-tertiary);font-size:10px}
-@media(max-width:900px){.hero-strip{flex-direction:column;align-items:stretch}.hero-kpis{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){.hero-strip{flex-direction:column;align-items:stretch}.hero-kpis{grid-template-columns:repeat(3,1fr)}.hero-kpi:nth-child(3n+1){border-left:0;padding-left:0}}
 
 /* ── 年级备课建议（grade view） ── */
 .grade-suggestions-section{margin-bottom:16px}
