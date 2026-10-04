@@ -229,14 +229,40 @@
             </div>
           </ContentCard>
 
-          <ContentCard v-if="currentStudentDetail?.knowledgeDiagnosis?.length" class="knowledge-diagnosis" title="知识点诊断" description="从掌握情况、错题表现到建议动作，帮助老师完成教学判断" flush>
-            <DataTable :data="weakKnowledge" size="small" empty-text=" ">
+          <!-- ⛔ 知识点表从「全量 133 行」改为「默认 5 行 + 可展开」（r134）。
+               实测全量渲染高度 **7622px** —— 一张卡把整个主栏拉成一条看不到头的长带，
+               这正是负责人说的「长条通栏显得太丑」的元凶：
+               ① 视觉上，主栏被一张无限长的表占满，右栏的 sticky 完全失去意义；
+               ② 133 行里绝大多数是「错 1 次、正确率 90%+」的知识点，
+                  排在后面根本不会被看到，等于占位。
+               mockup 的做法是只列最该练的 5 行 + 一个「全部」入口 —— 保留信息可达性，
+               但把首屏还给真正要处理的问题。 -->
+          <ContentCard
+            v-if="currentStudentDetail?.knowledgeDiagnosis?.length"
+            class="knowledge-diagnosis"
+            title="最该练的知识点"
+            :description="`按错误次数排序 · 共 ${weakKnowledge.length} 个知识点出过错 · ${
+              weakKnowledgeCount > TOP_KNOWLEDGE_ROWS
+                ? `先看最严重的 ${TOP_KNOWLEDGE_ROWS} 个`
+                : '已全部列出'}`"
+            flush
+          >
+            <template #actions>
+              <button v-if="weakKnowledge.length > TOP_KNOWLEDGE_ROWS" type="button" class="kp-toggle" @click="knowledgeExpanded = !knowledgeExpanded">
+                {{ knowledgeExpanded ? '只看最严重的' : `展开全部 ${weakKnowledge.length} 个` }}
+              </button>
+            </template>
+            <DataTable :data="knowledgeRows" size="small" empty-text=" ">
               <el-table-column prop="tag" label="知识点" min-width="180"><template #default="{ row }"><div class="knowledge-name"><strong>{{ row.tag }}</strong><small>{{ row.subject || '其他' }}</small></div></template></el-table-column>
               <el-table-column label="当前掌握" width="130"><template #default="{ row }"><StatusTag :tone="knowledgeLevel(row).key === 'critical' ? 'danger' : knowledgeLevel(row).key === 'attention' ? 'warning' : 'success'">{{ knowledgeLevel(row).label }} · {{ row.accuracy }}%</StatusTag></template></el-table-column>
               <el-table-column label="错题表现" width="130"><template #default="{ row }"><strong :class="{ 'danger-text': row.wrongCount >= 3 }">最近错误 {{ row.wrongCount }} 次</strong><small class="table-sub">共 {{ row.totalCount }} 题</small></template></el-table-column>
               <el-table-column label="最近变化" width="150"><template #default="{ row }"><div v-if="knowledgeChange(row).prevWrong != null" class="recent-change"><strong :class="knowledgeChange(row).tone === 'down' ? 'change-good' : knowledgeChange(row).tone === 'up' ? 'change-bad' : ''">{{ knowledgeChange(row).deltaText }}</strong><small class="table-sub">上周 {{ knowledgeChange(row).prevWrong }} 次</small></div><div v-else class="recent-change"><strong class="change-new">本周新增</strong><small class="table-sub">上周未出现</small></div></template></el-table-column>
               <el-table-column label="建议动作" min-width="220"><template #default="{ row }"><div class="table-action"><span>{{ getDiagnosisAction(row) }}</span><el-button text type="primary" @click.stop="openWrongBook">加入重练</el-button></div></template></el-table-column>
             </DataTable>
+            <p v-if="!knowledgeExpanded && weakKnowledge.length > TOP_KNOWLEDGE_ROWS" class="kp-note">
+              其余 {{ weakKnowledge.length - TOP_KNOWLEDGE_ROWS }} 个知识点多为「错 1 次、正确率 90% 以上」，
+              不占首屏；点右上角可展开查看。
+            </p>
           </ContentCard>
 
           <ContentCard v-if="studentSuggestions.length" class="student-suggestions" title="本周备课建议（按 KP）" :description="`${currentStudentName} · ${periodLabel}`" flush>
@@ -1370,6 +1396,12 @@ const overviewStats = computed(() => selectedStudentId.value && currentStudentDe
 const attentionReports = computed(() => [...(summaryData.value?.reports || [])].sort((a, b) => studentRiskScore(b) - studentRiskScore(a)))
 const weakKnowledge = computed(() => [...(currentStudentDetail.value?.knowledgeDiagnosis || [])].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy))
 const weakKnowledgeCount = computed(() => weakKnowledge.value.filter(row => row.accuracy < 80 || row.wrongCount >= 2).length)
+// r134：知识点表默认只出最严重的 5 行（见模板注释里的 7622px 教训）
+const TOP_KNOWLEDGE_ROWS = 5
+const knowledgeExpanded = ref(false)
+const knowledgeRows = computed(() =>
+  knowledgeExpanded.value ? weakKnowledge.value : weakKnowledge.value.slice(0, TOP_KNOWLEDGE_ROWS)
+)
 // ── 正确率走势图（r132：按天 / 按周 粒度切换）──
 // 数据源优先用后端 r132 的 dailyAccuracy / weeklyAccuracy（口径同源、含 correct）。
 // 旧字段 periodTrend / dailyTrend 保留兜底 —— r130 修的字段名错配不能回退。
@@ -1514,11 +1546,14 @@ function knowledgeLevel(row) {
    mockup 的核心是那条竖直分界：左「诊断」右「行动」。r133 全部通栏 ⇒ 视觉退化成
    一张长表，没有视线落点。右栏 372px：动作条目都短，窄栏更易扫读。
    1360px 容器 - 372px 右栏 - 20px 间距 ≈ 主栏 968px，够放 5 个 KPI + 三态条。 */
-.dx{display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:var(--wb-space-5);align-items:start}
+.dx{display:grid;grid-template-columns:minmax(0,1fr) 356px;gap:var(--wb-space-5);align-items:start}
 .dx__main{display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
 .dx__rail{position:sticky;top:calc(var(--wb-header-height) + var(--wb-space-4));display:flex;min-width:0;flex-direction:column;gap:var(--wb-space-4)}
 /* 右栏卡内的内容统一内缩（ContentCard 用 flush 时 body 无 padding） */
 .dx__rail-body{padding:var(--wb-space-4)}
+.kp-toggle{padding:5px 12px;border:1px solid var(--wb-border);border-radius:var(--wb-radius-sm);background:var(--wb-bg-card);color:var(--wb-status-info-fg);font-size:var(--wb-fs-caption);font-weight:var(--wb-fw-semibold);cursor:pointer;white-space:nowrap}
+.kp-toggle:hover{background:var(--wb-bg-hover);border-color:var(--wb-border-strong)}
+.kp-note{margin:0;padding:var(--wb-space-3) var(--wb-space-5);border-top:1px solid var(--wb-border-light);color:var(--wb-text-tertiary);font-size:var(--wb-fs-caption);line-height:var(--wb-lh-relaxed)}
 .rail-stats{display:grid;grid-template-columns:1fr 1fr;gap:var(--wb-space-3)}
 .rail-stat b{display:block;color:var(--wb-text);font-size:var(--wb-fs-stat);font-weight:var(--wb-fw-bold);line-height:var(--wb-lh-tight);font-variant-numeric:tabular-nums}
 .rail-stat b.is-good{color:var(--wb-status-success-fg)}
