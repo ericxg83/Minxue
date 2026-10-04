@@ -184,29 +184,48 @@ for (const sig of ['SIGTERM', 'SIGINT']) {
   })
 }
 
-const allowedOrigins = process.env.ALLOWED_ORIGIN
-  ? process.env.ALLOWED_ORIGIN.split(',')
-  : ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173', 'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3001']
+// ── CORS 白名单（2026-10-04 提案⑰-7：让 `*` 在代码层失效）───────────────
+// 背景：本 API **没有鉴权中间件**，CORS 白名单是唯一的浏览器侧防线。
+// 2026-10-04 实测生产 `ALLOWED_ORIGIN=*`，任意来源都被 echo 放行（复测两次仍如此），
+// 任何人无凭证即可读全部学生姓名/年级/错题数/任务文件名。
+//
+// 为什么不能只靠「改环境变量」：Render 面板里的值不属于仓库，改 .env.example 或
+// render.yaml 都不会让线上立刻变；而 `*` 恰好会让任何兜底分支都不被走到。
+// 因此改成三态：
+//   ① 配了且不是 `*` → 显式配置优先（将来加前端域名只改环境变量即可）
+//   ② 配了但是 `*`    → **视为无效配置**，落到安全兜底（危险值在这里被中和）
+//   ③ 完全没配        → 安全兜底
+// 安全兜底 = 本地 vite 各端口 + 已部署的 Cloudflare Pages 根来源。
+// 原生 App 走 Capacitor 原生 fetch，不受 CORS 约束，不需要列在这里。
+const SAFE_DEFAULT_ORIGINS = [
+  'http://localhost:3000', 'http://localhost:5173', 'http://localhost:4173',
+  'http://localhost:3001', 'http://localhost:3002', 'http://192.168.71.9:3001',
+  // Cloudflare Pages。工作台在 /workbench 子路径，但 CORS 只看 scheme+host+port、不看 path。
+  'https://minxue.pages.dev',
+]
 
-// ── CORS 暴露面自检（2026-10-04 提案⑰，只报警不改变行为）──────────────────
-// 为什么需要：ALLOWED_ORIGIN 配成 `*` 时**不会报任何错**，跨站来源照常 echo，
-// 日志里全是 200，肉眼完全看不出来。2026-10-04 实测生产就是 `*`，
-// 而 API 全站无鉴权 ⇒ 任何人可读全部学生姓名/年级/错题数。
-// 这里把「静默全开」变成「启动即报警」；是否收窄由负责人决定（改环境变量即可，零代码）。
-if (allowedOrigins.includes('*')) {
+const _rawAllowedOrigins = (process.env.ALLOWED_ORIGIN || '').split(',').map((s) => s.trim()).filter(Boolean)
+const _wildcardConfigured = _rawAllowedOrigins.includes('*')
+const allowedOrigins = (_rawAllowedOrigins.length > 0 && !_wildcardConfigured)
+  ? _rawAllowedOrigins
+  : SAFE_DEFAULT_ORIGINS
+
+if (_wildcardConfigured) {
   console.warn(
-    '[CORS] ⚠️ ALLOWED_ORIGIN 含 `*` ⇒ 对全互联网开放。\n' +
-    '        本 API 没有鉴权中间件，任何人可无凭证读全部学生数据（实测确认）。\n' +
-    '        收窄方式：把 Render 的 ALLOWED_ORIGIN 改成实际前端来源白名单，' +
-    '多个用英文逗号分隔，零代码改动。详见 server/.env.example 的「CORS 允许来源」段。'
+    '[CORS] ⚠️ 检测到 ALLOWED_ORIGIN 含 `*`，**已视为无效配置并改用安全兜底白名单**。\n' +
+    '        原因：本 API 无鉴权中间件，`*` 等于把全部学生数据对全互联网开放。\n' +
+    '        历史实测：2026-10-04 生产就是 `*`，且复测两次陌生来源仍被 echo 放行。\n' +
+    '        建议顺手把 Render 面板里的值也改掉（纯环境变量、零代码）。'
   )
-} else if (!process.env.ALLOWED_ORIGIN) {
+} else if (_rawAllowedOrigins.length === 0) {
   console.warn(
-    '[CORS] ⚠️ 未设置 ALLOWED_ORIGIN，已回退到 localhost 白名单。\n' +
-    '        若本服务对外提供服务，已部署的网页会被浏览器拦掉，' +
-    '表现为「前端报网络错误而后端日志全是 200」，极难排查。'
+    '[CORS] ℹ️ 未设置 ALLOWED_ORIGIN，已用安全兜底白名单：\n' +
+    '        本地 vite 各端口 + https://minxue.pages.dev'
   )
+} else {
+  console.log(`[CORS] 使用显式白名单（${_rawAllowedOrigins.length} 项）：${allowedOrigins.join(', ')}`)
 }
+
 
 app.use(cors({
   origin: (origin, callback) => {
@@ -214,7 +233,9 @@ app.use(cors({
     // 的 POST 自带 Origin 头，之前会被这里拒成 500（冒烟假红）。互联网上的恶意站点
     // 无法让浏览器伪造 localhost/127.0.0.1 的 Origin，故此放行不影响生产安全。
     const isLoopbackOrigin = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin || '')
-    if (!origin || isLoopbackOrigin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    // `allowedOrigins` 已不可能包含 `*`（`*` 被判为无效配置并落到安全兜底），
+    // 故不再判断通配符——避免留下「配 * 就能全开」的错觉。
+    if (!origin || isLoopbackOrigin || allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
       callback(new Error('Not allowed by CORS'))
