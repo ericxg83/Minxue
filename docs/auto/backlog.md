@@ -1874,3 +1874,48 @@ r130 修了学习诊断页，并把 `basicMasteredCount` / `notStartedCount` 接
 只要有一处没读，就会出现「页面/卡片显示的数字和真实情况差 8 倍」这种 silent 缺口。
 本轮已核过 `basicMasteredCount` 的消费方：weeklyReport.js 三处调用 ✅、分享卡（本轮修）✅、
 移动端 PDF（提案①，未跟）。
+
+---
+
+## r132 追加（2026-10-05 00:20–00:35）：负责人 4 条裁决落地
+
+> 上一节列为「需拍板」的 ①②③④，负责人逐条答复，此处记录实际落地情况（④不动）。
+
+### ① 移动端 PDF 与分享卡同口径 —— 已改（commit `623b45e`）
+`src/utils/weeklyReportGenerator.js:1059` 是整份 PDF 里**唯一**漏网的老口径格：
+其余几格（封面 1017、三格 1058、重练 1128）早就用了 `masteredCount + basicMasteredCount`，
+只有第三格还是「待提升错题 = pendingCount(72)」—— 而左邻「已记住的错题」已经是 16（2+14），
+两格相加超过新增错题 74，**把已记住的题又数了一遍**。
+改为「还在攻克 = notStartedCount(58)」，两处家长转发物口径彻底一致。
+
+### ③ 分享卡数字合并去重 —— 已改（保留顶部）
+按「保留顶部的那个」：删掉整块 `tri-row`，三态并进顶部 `kpi-row3`
+（新增错题 / 已记住 / 还在攻克 一行三格），上一行仍是 完成作业 / 批改题量。
+实测渲染：顶部 5 个数字格 完成作业12 / 批改题量298 / 新增错题74 / 已记住16 / 还在攻克58，
+**每个标签只出现一次**，16+58=74 恒等成立。
+顺手删掉随之变成死代码的 `.tri-row/.tri/.tri-v/.tri-l` 四条样式（不留死代码）。
+
+### ② 关掉 safe-delete 清残留 —— 已办
+`CODEBUDDY_SAFE_DELETE_ENABLED=0` 前缀即可让 shim 失效（实测 `shutil.rmtree` 成功），
+已清掉 `_r131q_badlock/` 与 `tmp/_r131q_badlock_stale_r132`，根目录无残留。
+⛔ 这条 env 前缀建议**写进 HANDOFF 与 gate README**：本仓库的测试/脚本凡是要删目录的都靠它。
+
+### ④ 后端重启归因 —— 不动（继续观察）
+
+### ⛔ 本轮四道闸：闸 3/闸 4 被环境卡死，**未推送**
+- 闸 1 单测 **1680/1680 fail 0** ✅｜闸 2 lint 我方 3 文件 **0 error**（3 条既存 warning）✅
+- 闸 3 隔离构建 ❌ / 闸 4 preview 冒烟 ❌ —— 都是**同一个环境故障**：
+  `esbuild.exe` 再次 `fatal error: winmm.dll not found`（约 00:09 还能正常构建 36.67s，00:32 起又坏）。
+  已试且**全部无效**：重试构建 ×3、`npm rebuild esbuild`（本身要跑 esbuild 也崩）、
+  杀掉僵死 esbuild.exe(PID 17660)、把 `C:\WINDOWS\System32\winmm.dll` 复制到
+  esbuild.exe 同目录（随后已移除）。
+  `winmm.dll` 文件本身存在，是 Go runtime 加载它时失败 ⇒ **机器级状态，非仓库问题**。
+- 替代验证（不依赖 esbuild，已跑）：三个改动文件 `node --check` 纯语法全过；
+  1680 单测通过，其中 2 条专门读 PDF 源码断言三态标记；反向自检实测旧口径样本会判红。
+- ⇒ 按「闸不过不推送」的规矩，`623b45e` **只提交未推送**，等 esbuild 恢复后补跑闸 3/闸 4 再推。
+  改动已进对象库，不会被并发 checkout 抹掉。
+
+### 扩锁
+`test/shareCardMasteryTiers.test.mjs` 6 → **9 条**：
+新增「每个数字只能出现一次」（守住这次去重）、新增 2 条守护移动端 PDF 三态口径（只读 src，不写）；
+反向自检补 legacy 卡片（含上下重复格）+ 旧口径 PDF 片段。
