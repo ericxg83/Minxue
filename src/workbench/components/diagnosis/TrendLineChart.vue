@@ -59,6 +59,18 @@ const xLabels = computed(() => {
   const step = Math.ceil(cs.length / 7)
   return cs.filter((_, i) => i % step === 0 || i === cs.length - 1)
 })
+// r132：点数变多（按天最多几十个）后，每个点都标数值会糊成一片。
+// 稀疏时全标；密集时只标「首 / 末 / 最高 / 最低」四个关键点。
+const valueLabels = computed(() => {
+  const cs = coords.value
+  if (cs.length <= 8) return cs
+  const highest = cs.reduce((a, b) => (b.accuracy > a.accuracy ? b : a))
+  const lowest = cs.reduce((a, b) => (b.accuracy < a.accuracy ? b : a))
+  const picked = new Set([cs[0].date, cs[cs.length - 1].date, highest.date, lowest.date])
+  return cs.filter(c => picked.has(c.date))
+})
+// 一天的标签太宽（'2026-09-10'），只留 MM-DD
+const shortDate = (d) => String(d || '').slice(5) || d
 const tone = computed(() => {
   const cs = coords.value
   if (cs.length < 2) return 'default'
@@ -96,11 +108,15 @@ const tone = computed(() => {
         <path v-if="areaPath" :d="areaPath" fill="url(#trendFill)" />
         <polyline :points="polyline" class="trend-line__stroke" :class="`is-${tone}`" />
         <g v-for="point in coords" :key="point.date">
-          <circle :cx="point.x" :cy="point.y" r="3.5" class="trend-line__dot" :class="`is-${tone}`" />
-          <text :x="point.x" :y="point.y - 9" text-anchor="middle" class="trend-line__value">{{ point.accuracy }}%</text>
+          <circle :cx="point.x" :cy="point.y" :r="coords.length > 20 ? 2.5 : 3.5" class="trend-line__dot" :class="`is-${tone}`">
+            <title>{{ shortDate(point.date) }} · {{ point.correct }}/{{ point.count }} 题 · {{ point.accuracy }}%</title>
+          </circle>
+        </g>
+        <g v-for="label in valueLabels" :key="`v-${label.date}`">
+          <text :x="label.x" :y="label.y - 9" text-anchor="middle" class="trend-line__value">{{ label.accuracy }}%</text>
         </g>
         <g class="trend-line__x">
-          <text v-for="label in xLabels" :key="label.date" :x="label.x" :y="H - 8" text-anchor="middle">{{ label.date }}</text>
+          <text v-for="label in xLabels" :key="label.date" :x="label.x" :y="H - 8" text-anchor="middle">{{ shortDate(label.date) }}</text>
         </g>
       </svg>
     </div>

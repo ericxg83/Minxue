@@ -108,20 +108,39 @@
             </ContentCard>
           </section>
 
-          <!-- 学习趋势折线图（r130 新增）：周/月/全部三档都出图。
+          <!-- 学习趋势折线图（r130 新增，r132 加粒度切换）：周/月/全部三档都出图。
                它取代了旧版那张「周期内学习趋势」柱状图 —— 后者读的是 point.day /
                point.total，而后端 buildDailyTrend 返回 {date, accuracy, count}，
                字段名对不上，柱子恒为 4% 空高、标签恒为 '-'，等于一张坏掉的图；
                且整块包在 v-if="periodMode === 'week'" 里，月/全部模式根本没图。
-               保留两张图只会让老师困惑，故直接删旧留新（小而美：能删就删）。 -->
+               保留两张图只会让老师困惑，故直接删旧留新（小而美：能删就删）。
+
+               r132：默认「按天」。按周会把剧烈波动抹平 —— 实测陆晨曦 09-10
+               只有 2/12 题（16.7%），按周看完全被平均掉。老师要看的正是
+               「哪天崩了」，所以按天是默认，周是备选。 -->
           <ContentCard
             v-if="currentStudentDetail?.stats"
             class="trend-line-card"
             title="正确率走势"
-            :description="`${currentStudentName} · ${trendGranularityLabel} · 只看有批改记录的时段`"
+            :description="`${currentStudentName} · 只看有批改记录的时段 · 没批改的日子不计入`"
           >
-            <template #actions><span :class="['trend-result', trendSummary.tone]">{{ trendSummary.label }}</span></template>
+            <template #actions>
+              <div class="trend-switch">
+                <button
+                  v-for="opt in trendGranularityOptions"
+                  :key="opt.key"
+                  type="button"
+                  class="trend-switch__btn"
+                  :class="{ 'is-on': trendGranularity === opt.key }"
+                  :aria-pressed="trendGranularity === opt.key"
+                  @click="trendGranularity = opt.key"
+                >{{ opt.label }}</button>
+              </div>
+            </template>
             <TrendLineChart :points="trendChartPoints" />
+            <p v-if="trendChartPoints.length" class="trend-note">
+              {{ trendSummary.description }}
+            </p>
           </ContentCard>
 
           <!-- 成长对比：本周 vs 上周 / 本月 vs 上月（all 模式无对比对象，不展示） -->
@@ -1282,26 +1301,47 @@ const overviewStats = computed(() => selectedStudentId.value && currentStudentDe
 const attentionReports = computed(() => [...(summaryData.value?.reports || [])].sort((a, b) => studentRiskScore(b) - studentRiskScore(a)))
 const weakKnowledge = computed(() => [...(currentStudentDetail.value?.knowledgeDiagnosis || [])].sort((a, b) => b.wrongCount - a.wrongCount || a.accuracy - b.accuracy))
 const weakKnowledgeCount = computed(() => weakKnowledge.value.filter(row => row.accuracy < 80 || row.wrongCount >= 2).length)
-// r130：折线图数据源改为后端 periodTrend（周=日桶；月/全部按实际跨度自适应分桶）。
-// 旧代码读 dailyTrend 的 point.total，而后端返回的是 count —— 恒为 undefined，
-// 于是 trendSummary 永远停在「数据不足」，图也永远是空的。
-const dailyTrendPoints = computed(() => (currentStudentDetail.value?.periodTrend || currentStudentDetail.value?.dailyTrend || []).filter(point => point.count > 0))
-// 后端分桶粒度：'YYYY-MM' 说明跨度 > 45 天按月，否则按日
-const trendGranularityLabel = computed(() => {
-  const first = (currentStudentDetail.value?.periodTrend || [])[0]
-  return first && /^\d{4}-\d{2}$/.test(first.date) ? '按月' : '按日'
+// ── 正确率走势图（r132：按天 / 按周 粒度切换）──
+// 数据源优先用后端 r132 的 dailyAccuracy / weeklyAccuracy（口径同源、含 correct）。
+// 旧字段 periodTrend / dailyTrend 保留兜底 —— r130 修的字段名错配不能回退。
+// ⛔ 两种粒度都不补空日：当天没批改不是「全错」，空点一律过滤（折线自然断开）。
+const trendGranularity = ref('day')
+const trendGranularityOptions = [
+  { key: 'day', label: '按天' },
+  { key: 'week', label: '按周' }
+]
+const trendSource = computed(() => {
+  const detail = currentStudentDetail.value || {}
+  return trendGranularity.value === 'day'
+    ? (detail.dailyAccuracy || [])
+    : (detail.weeklyAccuracy || detail.periodTrend || detail.dailyTrend || [])
 })
+const trendChartPoints = computed(() => trendSource.value.filter(point => point && point.count > 0 && point.accuracy != null))
 const trendSummary = computed(() => {
-  const points = dailyTrendPoints.value
+  const points = trendChartPoints.value
+  const isDay = trendGranularity.value === 'day'
   if (points.length < 2) {
     return points.length === 1
       ? { label: '仅 1 段记录', description: '出现第二段批改数据后可看走势', tone: 'default' }
       : { label: '暂无趋势', description: '本周期没有批改记录', tone: 'default' }
   }
-  const change = Math.round((points[points.length - 1].accuracy - points[0].accuracy) * 10) / 10
-  if (change >= 3) return { label: `上升 ${change}%`, description: '首末有效时段对比', tone: 'success' }
-  if (change <= -3) return { label: `下降 ${Math.abs(change)}%`, description: '首末有效时段对比', tone: 'danger' }
-  return { label: '基本持平', description: '首末有效时段持平', tone: 'primary' }
+  // 按天的首末对比会被单日噪声主导（如某天只做 2 题），故按天只报「区间」不报涨跌，
+  // 按周（样本量足够大）才给涨跌 —— 避免拿一个 16.7% 的单日去讲「下降 15%」。
+  const first = points[0]
+  const last = points[points.length - 1]
+  if (isDay) {
+    const lowest = points.reduce((a, b) => (b.accuracy < a.accuracy ? b : a))
+    const highest = points.reduce((a, b) => (b.accuracy > a.accuracy ? b : a))
+    return {
+      label: `${points.length} 天有批改`,
+      description: `最高 ${highest.accuracy}%（${highest.date.slice(5)}）· 最低 ${lowest.accuracy}%（${lowest.date.slice(5)}）· 当天没批改的日子不计入`,
+      tone: 'default'
+    }
+  }
+  const change = Math.round((last.accuracy - first.accuracy) * 10) / 10
+  if (change >= 3) return { label: `上升 ${change}%`, description: `${first.date.slice(5)} ${first.accuracy}% → ${last.date.slice(5)} ${last.accuracy}%`, tone: 'success' }
+  if (change <= -3) return { label: `下降 ${Math.abs(change)}%`, description: `${first.date.slice(5)} ${first.accuracy}% → ${last.date.slice(5)} ${last.accuracy}%`, tone: 'danger' }
+  return { label: '基本持平', description: `${first.date.slice(5)} ${first.accuracy}% → ${last.date.slice(5)} ${last.accuracy}%`, tone: 'primary' }
 })
 // r130：单生「已掌握」= 完全掌握 + 基本掌握。答对过 1 次就是记住了，
 // 不该只认 2 次答对那一档（那是「完全掌握」的定义，不是「记住了没有」）。
@@ -1350,6 +1390,12 @@ function knowledgeLevel(row) {
 .diagnosis-page{color:var(--wb-text)}.diagnosis-filter{margin-bottom:16px}.student-select{width:220px}.offset-select,.subject-select{width:120px}.student-option{display:flex;align-items:center;gap:8px}.student-option small{margin-left:auto;color:var(--wb-text-tertiary)}.filter-note{color:var(--wb-text-tertiary);font-size:11px;white-space:nowrap}.diagnosis-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(320px,.75fr);align-items:start;gap:16px;margin-bottom:16px}.loading-stack{display:grid;gap:18px;padding:20px}.student-diagnosis-list{min-height:360px}.student-diagnosis-row{display:flex;align-items:center;gap:12px;min-height:82px;padding:12px 16px;box-sizing:border-box;border-bottom:1px solid var(--wb-border-light);cursor:pointer}.student-diagnosis-row:last-child{border-bottom:0}.student-diagnosis-row:hover{background:var(--wb-bg-elevated)}.student-identity{display:flex;width:110px;min-width:0;flex-direction:column;gap:3px}.student-identity strong{font-size:13px}.student-identity small{color:var(--wb-text-tertiary);font-size:10px}.student-metrics{display:grid;grid-template-columns:repeat(3,72px);gap:6px}.student-metrics span{display:flex;color:var(--wb-text-tertiary);font-size:9px;flex-direction:column;gap:3px}.student-metrics b{color:var(--wb-text);font-size:12px}.student-next{display:flex;min-width:170px;flex:1;flex-direction:column;gap:4px}.student-next span{color:var(--wb-text-tertiary);font-size:9px}.student-next strong{font-size:11px;font-weight:550}.row-arrow{color:var(--wb-text-tertiary)}.student-detail-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,.65fr)}.teaching-judgement{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--wb-border-light);border-radius:8px}.teaching-judgement>div{min-height:88px;padding:14px;border-right:1px solid var(--wb-border-light)}.teaching-judgement>div:last-child{border-right:0}.teaching-judgement .focus{background:#fffaf2}.teaching-judgement span{display:block;margin-bottom:7px;color:var(--wb-text-tertiary);font-size:10px}.teaching-judgement strong{font-size:11px;line-height:1.65}.trend-result{font-size:11px;font-weight:600}.trend-result.success{color:var(--wb-success)}.trend-result.danger{color:var(--wb-danger)}.trend-result.primary{color:var(--wb-primary)}.knowledge-diagnosis,.class-diagnosis-section{margin-bottom:16px}.knowledge-name{display:flex;flex-direction:column;gap:3px}.knowledge-name strong{font-size:12px}.knowledge-name small,.table-sub{display:block;color:var(--wb-text-tertiary);font-size:9px}.danger-text{color:var(--wb-danger)}.no-comparison{font-size:11px;color:var(--wb-text-secondary)}.table-action{display:flex;align-items:center;justify-content:space-between;gap:10px}.drawer-header{display:flex;align-items:flex-start;justify-content:space-between}.drawer-title{font-size:16px;font-weight:650}.drawer-sub{margin-top:4px;color:var(--wb-text-tertiary);font-size:11px}.drawer-body{min-height:300px}.error-dist{display:grid;gap:12px}.error-item{display:flex;align-items:center}.error-type{width:90px;font-size:11px}.error-count{color:var(--wb-text-tertiary);font-size:10px}.sample-list{display:grid;gap:10px}.sample-item{padding:12px;background:var(--wb-bg-elevated);border-radius:8px}.sample-q{font-size:12px;line-height:1.6}.sample-meta,.sample-reason{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}.sample-meta{color:var(--wb-text-secondary);font-size:10px}.blank-badge{color:var(--wb-danger);font-weight:600}.muted{color:var(--wb-text-tertiary)}.diagnosis-page :deep(.el-input__wrapper),.diagnosis-page :deep(.el-select__wrapper){min-height:34px;border-radius:8px;box-shadow:0 0 0 1px var(--wb-border) inset}.diagnosis-page :deep(.el-segmented){--el-segmented-item-selected-bg-color:#fff;--el-segmented-item-selected-color:var(--wb-primary)}.diagnosis-page :deep(.diag-row--blank td){background:#fffaf2!important}.diagnosis-page :deep(button:focus-visible){outline:2px solid var(--wb-primary);outline-offset:2px}.output-bar{display:flex;align-items:center;gap:var(--wb-space-3);margin-top:var(--wb-space-4);padding:var(--wb-space-3) var(--wb-space-4);border:1px solid var(--wb-border-light);border-radius:var(--wb-radius-md);background:var(--wb-bg-card)}.output-bar__label{color:var(--wb-text-tertiary);font-size:var(--wb-fs-meta);font-weight:var(--wb-fw-semibold)}.output-bar__growth{margin-left:auto}@media(max-width:1180px){.diagnosis-layout,.student-detail-layout{grid-template-columns:1fr}.student-next{display:none}}@media(max-width:760px){.student-select,.offset-select{width:100%}.student-diagnosis-row{align-items:flex-start;flex-wrap:wrap}.student-metrics{width:100%;padding-left:58px}.teaching-judgement{grid-template-columns:1fr}.teaching-judgement>div{border-right:0;border-bottom:1px solid var(--wb-border-light)}.output-bar{flex-wrap:wrap}}
 
 /* ── 周末讲题错题卷（grade view） ── */
+.trend-line-card{margin-bottom:16px}
+.trend-switch{display:flex;gap:2px;padding:2px;background:var(--wb-bg-elevated);border-radius:8px}
+.trend-switch__btn{padding:5px 13px;border:0;border-radius:6px;background:transparent;color:var(--wb-text-tertiary);font-size:12px;font-weight:600;cursor:pointer;transition:.12s}
+.trend-switch__btn:hover{color:var(--wb-text)}
+.trend-switch__btn.is-on{background:#fff;color:var(--wb-primary);box-shadow:0 1px 2px rgba(16,24,40,.08)}
+.trend-note{margin:10px 0 0;color:var(--wb-text-tertiary);font-size:11.5px;line-height:1.6}
 .wrong-paper-section{margin-bottom:16px}
 .wrong-paper-card :deep(.el-button.is-text){font-size:11px}
 .wrong-paper-table{margin-top:8px}

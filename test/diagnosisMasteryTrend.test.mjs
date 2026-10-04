@@ -102,10 +102,12 @@ test('⛔ stats 必须同时给出三态字段（前端与分享卡都靠它）'
 })
 
 // ── ② 趋势图：字段名对不对齐（这正是旧版的真缺陷）──
+// r132 更新：数据源从 periodTrend 扩到 dailyAccuracy/weeklyAccuracy（按天/按周切换），
+// 但**过滤口径的判据不变** —— 必须按 count 过滤、不得回退到 point.total / point.day。
 test('⛔ 折线图必须消费后端真实字段 date/count（不是 day/total）', () => {
   assert.ok(SERVER.includes('date: k') || SERVER.includes('date:'), '后端趋势点必须有 date')
-  // 前端按 count 过滤有效点
-  assert.match(VIEW, /periodTrend[\s\S]{0,80}filter\(point => point\.count > 0\)/,
+  // 前端按 count 过滤有效点（变量名随粒度切换改过，判据锚在 filter 本身）
+  assert.match(VIEW, /filter\(point => point[\s\S]{0,40}point\.count > 0/,
     '前端仍按 point.count 过滤 —— 若这里写回 point.total 就是旧缺陷复发')
   // 旧字段名不得再出现在**模板/脚本**里（注释里允许提及，那是缺陷说明）
   const codeOnly = VIEW
@@ -114,6 +116,38 @@ test('⛔ 折线图必须消费后端真实字段 date/count（不是 day/total�
     .replace(/\/\*[\s\S]*?\*\//g, '')  // 去块注释
   assert.doesNotMatch(codeOnly, /point\.total/, 'point.total 是旧缺陷字段名，代码里必须清除')
   assert.doesNotMatch(codeOnly, /point\.day\b/, 'point.day 也是旧缺陷字段名，代码里必须清除')
+})
+
+// ── ②b r132：按天 / 按周粒度切换 ──
+test('⛔ 必须同时提供按天与按周两套序列（页面切换不能靠重新请求）', () => {
+  assert.match(SERVER, /dailyAccuracy/, '后端必须返回 dailyAccuracy')
+  assert.match(SERVER, /weeklyAccuracy/, '后端必须返回 weeklyAccuracy')
+  // 两套都要含 correct（折线图 tooltip 要显示「答对/总题」）
+  assert.match(SERVER, /correct: r\.correct/, '趋势点必须带 correct 字段供 tooltip 显示分数')
+})
+
+test('⛔ 不许补空日：当天没批改不是「全错」，补 0 会让家长误读', () => {
+  // 正确做法：SQL 只 GROUP BY 实际有数据的日期，空日自然不出现
+  assert.match(SERVER, /AT TIME ZONE 'Asia\/Shanghai'\)::date/, '按天必须按本地时区切自然日')
+  assert.doesNotMatch(SERVER, /generate_series[\s\S]{0,200}LEFT JOIN/, '不得用日历表补空日')
+  // 前端过滤时也必须剔掉 count=0 / accuracy=null
+  assert.match(VIEW, /point && point\.count > 0 && point\.accuracy != null/, '前端必须同时过滤 count=0 与 accuracy=null')
+})
+
+test('⛔ 粒度切换默认「按天」（按周会把单日崩盘抹平）', () => {
+  assert.match(VIEW, /trendGranularity = ref\('day'\)/, '默认必须是按天')
+  assert.match(VIEW, /trend-switch__btn/, '必须有粒度切换按钮')
+  // 按天不得报「涨跌」—— 单日样本量小（曾见某天只做 2 题对 1 道 = 50%），
+  // 拿它讲「下降 X%」是误导。只报区间。
+  assert.match(VIEW, /const isDay = trendGranularity\.value === 'day'/, '按天与按周的 summary 口径必须区分')
+  assert.match(VIEW, /最高 \$\{highest\.accuracy\}%/, '按天应报最高/最低而非涨跌')
+})
+
+test('⛔ 旧字段 periodTrend / dailyTrend 不得删除（PDF 侧仍在消费）', () => {
+  assert.match(SERVER, /periodTrend,/, 'periodTrend 必须保留（向后兼容）')
+  assert.match(SERVER, /dailyTrend,/, 'dailyTrend 必须保留（PDF 折线图数据源）')
+  // 但前端不再以 dailyTrend 为首选（它的字段名曾与前端错配）
+  assert.match(VIEW, /detail\.dailyAccuracy \|\| \[\]/, '前端应优先用 r132 的 dailyAccuracy')
 })
 
 test('⛔ 折线图在周/月/全部三档都要出图，不得只渲染周模式', () => {

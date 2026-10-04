@@ -249,6 +249,59 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       periodTrend = buildPeriodTrend(bucketRows, mode, periodStart)
     }
 
+    // 7c. 按天 + 按周两套正确率序列（r132 新增，供页面粒度切换与 PDF 用）。
+    //     为什么必须一次给全两种粒度：
+    //       - 页面加「按天 / 按周」开关要即时重画，不能让用户每切一次就打一次库；
+    //       - PDF 折线图的数据源是 dailyTrend，而旧版 dailyTrend **只在周模式生成**
+    //         （月/全部一律返回 []）⇒ 周报 PDF 的折线图一直画不出来（r132 实测
+    //         week 有效 0 点 / month 0 点 / all 0 点）。这里补上按天数据，
+    //         PDF 侧只要改读这个字段就有图，两边口径同源。
+    //     ⛔ 不补空日：当天没批改 = 「没考试」，不是「全错」，补 0 会让家长误读。
+    //       没有批改的天直接不出现，折线自然断开（铁律：趋势图不许伪造数据）。
+    //     按天用 Asia/Shanghai 切自然日，与 getDailyTrend / summary 的 today 口径一致。
+    const { rows: dailyAccRows } = await query(
+      `SELECT
+        to_char((created_at AT TIME ZONE 'Asia/Shanghai')::date, 'YYYY-MM-DD') AS day,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct
+      FROM ${TABLES.QUESTIONS}
+      WHERE student_id = $1
+        AND created_at >= $2
+        AND created_at < $3
+        AND is_complete = TRUE
+      GROUP BY day
+      ORDER BY day`,
+      [studentId, periodStart, periodEnd]
+    )
+    const dailyAccuracy = dailyAccRows.map(r => ({
+      date: r.day,
+      accuracy: r.total > 0 ? Math.round((r.correct / r.total) * 1000) / 10 : null,
+      count: r.total,
+      correct: r.correct
+    }))
+
+    // 按周：与 dailyAccuracy 同期同口径，只用日桶累加，避免多打一次库
+    const weeklyMap = new Map()
+    for (const r of dailyAccRows) {
+      // 'YYYY-MM-DD' → 该周的周一（date_trunc 在 SQL 里做跨年更稳，这里按自然日推算）
+      const d = new Date(`${r.day}T00:00:00+08:00`)
+      const dow = d.getDay() === 0 ? 6 : d.getDay() - 1
+      d.setDate(d.getDate() - dow)
+      const wk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const cur = weeklyMap.get(wk) || { total: 0, correct: 0 }
+      cur.total += r.total
+      cur.correct += r.correct
+      weeklyMap.set(wk, cur)
+    }
+    const weeklyAccuracy = [...weeklyMap.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([week, v]) => ({
+        date: week,
+        accuracy: v.total > 0 ? Math.round((v.correct / v.total) * 1000) / 10 : null,
+        count: v.total,
+        correct: v.correct
+      }))
+
     // 8. 各学科整体正确率（本周批改题目按学科聚合）
     const { rows: subjectAccRows } = await query(
       `SELECT
@@ -347,6 +400,10 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
       dailyTrend,
       // 2026-10-04（r130）：周/月/全部都能出图的周期趋势（纯新增，向后兼容）
       periodTrend,
+      // 2026-10-04（r132）：按天 + 按周两套正确率序列（纯新增）。
+      // 页面粒度切换与 PDF 折线图共用，不补空日（没批改的天不出现）。
+      dailyAccuracy,
+      weeklyAccuracy,
       // 2026-09-20 成长历史 P0：两期对比 + 重练进步（纯新增字段，向后兼容）
       prev,
       retryProgress
