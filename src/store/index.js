@@ -1,8 +1,7 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
 import { startTaskPolling } from '../services/taskService'
 
-export const useStudentStore = create((set, get) => ({
+export const useStudentStore = create((set) => ({
   currentStudent: null,
   students: [],
   
@@ -129,7 +128,7 @@ export const useTaskStore = create((set, get) => ({
 }))
 
 // 错题本状态管理 - 纯内存，无本地存储
-export const useWrongQuestionStore = create((set, get) => ({
+export const useWrongQuestionStore = create((set) => ({
   wrongQuestions: [],
   selectedQuestions: [],
   
@@ -220,25 +219,3 @@ export const useExamStore = create((set, get) => ({
     return get().initializedStudents.has(studentId)
   }
 }))
-
-// 全局 UI 状态管理
-// loading/toast 为瞬态，不持久化。
-// 注：底部 tab（首页/错题本/组卷历史）已由 App 路由化接管（URL hash），不再存入本 store。
-export const useUIStore = create(
-  persist(
-    (set) => ({
-      loading: false,
-      toast: null,
-
-      setLoading: (loading) => set({ loading }),
-
-      showToast: (message, type = 'info') => set({ toast: { message, type } }),
-
-      hideToast: () => set({ toast: null })
-    }),
-    {
-      name: 'minxue-ui',
-      storage: createJSONStorage(() => sessionStorage)
-    }
-  )
-)
