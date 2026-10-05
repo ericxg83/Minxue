@@ -16,7 +16,7 @@
  *   ④ WrongBookCenterRedesign.vue 的 markMastered 按返回值分支：false 时提示保存失败。
  *
  * 另锁 setSummary 的筛选泄漏：切出「重复出错」档必须重置 errorCount，
- * 否则「待处理/已掌握」列表被残留的 errorCount=2-3 静默过滤，KPI 数量与列表行数对不上。
+ * 否则「待处理/已掌握」列表被残留的 errorCount 筛选静默过滤，KPI 数量与列表行数对不上。
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -73,7 +73,15 @@ test('markMastered 必须按持久化结果分支提示（失败不得弹成功�
 test('错题中心切档：切出「重复出错」必须重置 errorCount，残留筛选不得泄漏到其他档', () => {
   const sIdx = viewSrc.indexOf('function setSummary')
   assert.ok(sIdx >= 0, '未找到 setSummary')
-  const seg = viewSrc.slice(sIdx, sIdx + 300)
-  assert.ok(/if \(key === 'repeat'\) wrongBookStore\.setFilter\('errorCount', '2-3'\); else wrongBookStore\.setFilter\('errorCount', 'all'\)/.test(seg),
-    '非 repeat 档未重置 errorCount=all —— 「待处理/已掌握」会被残留的 2-3 档静默过滤')
+  // 切片到下一个函数边界，避免 setSummary 变长后固定 +300 截断尾部断言（曾因此漏判）
+  const segEnd = viewSrc.indexOf('function applySubject', sIdx)
+  const seg = viewSrc.slice(sIdx, segEnd > 0 ? segEnd : sIdx + 600)
+  // repeat 档 → errorCount 取「≥2」档 '2+'（与 stats.repeatCount 口径一致，store matchErrorCount 支持 '2+' = count>=2）；
+  // 其余档必须重置为 all。⚠️ 2026-10-05 431d4df 起口径由旧字面量 '2-3' 改为 '2+'：
+  //    旧锁锁死 '2-3' ⇒ 代码正确改动后仍判红（假红）。本判据锁「口径 + 重置」而非旧字面量。
+  assert.ok(/wrongBookStore\.setFilter\('errorCount', key === 'repeat' \? '2\+' : 'all'\)/.test(seg),
+    '非 repeat 档未重置 errorCount=all —— 「待处理/已掌握」会被残留的筛选静默过滤')
+  // 同类筛选泄漏：unpracticed 档 → practiceState='none'，其余档必须重置为 all
+  assert.ok(/wrongBookStore\.setFilter\('practiceState', key === 'unpracticed' \? 'none' : 'all'\)/.test(seg),
+    'practiceState 未随 summary 档重置 —— 「尚未重练」筛选会泄漏到其他档')
 })
