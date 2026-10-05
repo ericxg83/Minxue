@@ -2331,3 +2331,12 @@ route_sweep 0/16 + text_audit 0/14 + overflow_audit 0/14。
 | ⑨ | 三个 `no-control-regex`（`worksheets.js` / `neonService.js` / `pdfService.js`） | A（下轮可做） | 实测三处**都已是 `\uXXXX` 转义文本**（不是裸控制字节，git 按文本存），属防御性代码的规则误报 ⇒ 加带说明的 scoped disable 即可，**不得改判据**。 |
 | ⑩ | 闸门脚本默认端口各自不同且已陈旧（route_sweep 5234 / text_audit 5235 / overflow_audit 5235 / render_smoke 5227） | A | 建议统一为 `BASE` 环境变量优先、默认值只留一处，避免「跑错端口以为全绿」。 |
 
+
+## 第 153 轮（2026-10-05）：合流验证——teaching 时区修复 + 门禁假绿修复
+
+- 我在 r150 中止移交的修复项已由并行会话正确落地：`ffa130d`（学生备课建议 period
+  按本地日历日印，r148 时区类最后一处残留清零）+ `95a8c54`（三个门禁脚本失败时
+  返回非零退出码，修掉「红灯也当绿」的假绿——门禁工具链质量提升）。
+- 合流全套闸：npm test **1802/1802**｜lint **8e/126w**（warnings 大降，基线继续改善）｜
+  构建 r153｜route_sweep 0/16 + render_smoke 8/8 + _r91_smoke 33/33。
+- 多会话协作状态：接力锁正常轮转（149→152），无碰撞。
