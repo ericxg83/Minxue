@@ -436,3 +436,22 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 - 提案进 backlog：③ 删 `GET /api/teaching/error-types` 死入口（B）｜④ 开工先探 esbuild（环境）
   ｜⑤ 接力锁要不要认 `halted` 这种第三种状态（B，需负责人定）｜⑥ 家长分享卡 ~36s 是否异步化（B）。
 - 健康采样：uptime 45min(17:39)→53min(18:47) 单调上升，期间无崩溃循环。
+
+
+## 第 155 轮（2026-10-05 20:06–20:40）：重练卷抬头日期改成本地日历日（已交付已推送）
+
+- 交付 `d36ca33`（A 级，行为保持型）：`server/services/wrongRetryPdfService.js` 原来用
+  `toISOString()` 印 UTC 日 ⇒ 生产 UTC+8 下本地 00:00~08:00 导出重练卷，抬头 / 文件名 / 库里
+  `generated_exams.name` 全都印成昨天（老师列表、孩子手里的卷子、磁盘文件名，一处三用）。
+  改走 `toLocalYmd`，纯函数 `buildRetryExamName(studentName, at)` 便于真跑断言。
+- 新锁 `test/wrongRetryExamName.test.mjs` 5 条；反向自检套 HEAD 旧版逐条判红、套新版逐条判绿（已实测）。
+- 四道闸：单测 1807/1807 fail 0｜lint 改动文件零输出｜`dist_nightly_20261005r155` 35.59s｜
+  preview:5291 + Chrome 读 DOM 冒烟 5/5。健康采样 uptime 53min→61min（单调上升）。
+- ⭐ 套路补充：
+  1. **闸 4 的入口路径不能抄上一轮的模板** —— `#/dashboard` 早就不存在了（首页 path 是 `/`）。
+     判据过期会造出「假红」，也会掩盖「真红」；每次改判据都要回去核一次真实路由表。
+  2. **本机 https 直连报 `CRYPT_E_REVOCATION_OFFLINE` 不等于站点挂了** —— 用 `-k` 复测即可区分，
+     别据此下「服务不可用」的结论（单次观测不得用于因果结论）。
+  3. **扫同类 UTC 日期残留时必须先判列类型/输入形态**：`week_start` 是 `::date` 字符串那条看着像 bug 其实对。
+- 下次触发接 **r156**：四道闸正常跑；首选清 backlog 提案⑪（`server/index.js:4462`，两行，可选），
+  或提案⑬（周报全班版单人失败的静默成功，B 级需先和负责人确认口径）。

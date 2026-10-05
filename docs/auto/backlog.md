@@ -2345,3 +2345,42 @@ route_sweep 0/16 + text_audit 0/14 + overflow_audit 0/14。
 
 npm test 1802/1802｜lint 8e/126w｜构建 r154｜route_sweep 0/16 + render_smoke 8/8。
 无新提交、无异常。
+
+
+## 第 155 轮（2026-10-05 20:06–20:40）· 重练卷抬头日期按本地日历日（已交付已推送）
+
+- **发现（A 级真实缺陷，家长/学生/老师三边可见的一处三用）**：`server/services/wrongRetryPdfService.js`
+  原本用 `new Date().toISOString().slice(0, 10)` 给重练卷抬头命名。toISOString 是 UTC，
+  生产容器 UTC+8 ⇒ **本地 00:00~08:00 导出时，抬头 / 下载文件名 / `generated_exams.name` 整体印成昨天**。
+  一处三用：① 老师工作台错题中心列表 ② 打给孩子、交给家长的那一页卷子抬头 ③ 磁盘文件名。
+  实测（人工手算判别时刻）：上海 10-05 01:00 时旧值印 `2026-10-04`、新值 `2026-10-05`；
+  上海 10-06 00:00 时旧值 `2026-10-05`、新值 `2026-10-06`。这是 **r148 时区类的最后一处漏网**。
+- 交付 `d36ca33`：抽出纯函数 `buildRetryExamName(studentName, at)`（注入时刻，便于真跑断言，
+  不靠 grep 源码假装测了），改走 `toLocalYmd`（与 weeklyReport / teaching 同口径）。
+  新锁 `test/wrongRetryExamName.test.mjs` 5 条。
+- **反向自检（实测，非假设）**：套 HEAD 旧版**逐条判红**、套新版**逐条判绿**
+  （A/B 两个判别时刻输出全错 + 旧版无该纯函数 + 旧版源码确有 toISOString 那行）。临时探针 `_r155_*`
+  已按 `.gitignore` 的 `_*` 规则排除，跑完即删。
+- ⚠️ **本轮自踩的判据坑（写进套路）**：闸 4 冒烟照抄 r151 模板的 `#/dashboard`，
+  **工作台路由表里根本没有 `/dashboard`**（首页 path 是 `/`、name 才叫 Dashboard）⇒ 主区渲染成 90 字空壳，
+  判红。查 `src/workbench/router/index.js` 才知道正确入口是 `/workbench#/`（418 字）与
+  `#/weekly-report`（920 字）。**判据过期 = 假红，也会掩盖真红。**
+- 复核（防下轮重复翻）：
+  - 家长分享卡**打码版真图**出了一张（209KB / 36.08s）：姓名与头像糊透、老学生寄语口径正确；
+  - 二维码默认域名 `https://minxue.pages.dev` 实测可达（SPA 200，`retry-task` 路由有内容），
+    ⛔ 本机 https 直连报 `CRYPT_E_REVOCATION_OFFLINE` 是**本机证书吊销检查离线**的假象，别当成站点挂了；
+  - 周报真实数据端到端核对：period `2026-10-05 ~ 2026-10-12`、本周 0 题、上周 34 题正确率 52.9%，全对；
+  - `missingFigureMonitorService.js:88` 看着像同类 bug，**实测其实是对的**：`week_start` 是 `::date`
+    字符串，`new Date('2026-10-05')` 按 UTC 解析再 toISOString 正好同日。未改，避免误伤。
+- 四道闸：单测 **1807/1807 fail 0**｜lint 改动文件**零输出**｜`dist_nightly_20261005r155` **35.59s**｜
+  preview:5291 + Chrome 读 DOM 冒烟 **5/5**、0 pageerror。健康采样 uptime 53min(18:47)→**61min**(20:06)
+  单调上升，无崩溃循环。
+
+### 本轮提案（只提不动）
+
+| # | 内容 | 等级 | 说明 |
+|---|---|---|---|
+| ⑪ | `server/index.js:4462` admin 误判统计默认 `since` 仍用 UTC 日 | A（本轮**没做**） | 同上类残留，但只影响管理员统计的默认 30 天窗口起点（差 ≤1 天），且接口支持显式 `?since=`；给 4600 行单体加 import 收益不抵风险。下轮想清可顺手做。 |
+| ⑫ | 闸 4 冒烟脚本里的 PC 入口路径是硬编码的过期路径（`#/dashboard`） | 环境/判据 | 工作台路由表已无 `/dashboard`。建议把入口路径收敛到一个常量，别再逐轮抄模板。 |
+| ⑬ | 周报全班版对单人取数失败仍返回 `success: true` + 该生 `stats:null`（无提示） | B | shareCard 已改成 503 拒绝渲染（宁可让老师重试，也不让家长看到假数据），周报没跟。属 PC 工作台赛道，要前端一起改才能给提示。 |
+| ⑭ | 分享卡 36s / 二维码域名可达性 | 观察 | 已实测可达，不构成缺陷；36s 异步化见 r151 提案⑥。 |
