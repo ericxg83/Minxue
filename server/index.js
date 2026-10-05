@@ -569,7 +569,10 @@ app.post('/api/tasks/upload', upload.array('files', 20), async (req, res) => {
             if (dup.length > 0) {
               console.log(`[Upload Dedup] 23505 兜底命中: 新上传被合并到 taskId=${dup[0].id}`)
               for (const img of images) {
-                try { const urlObj = new URL(img.image_url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { /* ignore */ }
+                // ⛔ 失败必须打日志：这里清的是本次上传撞主键后留下的孤儿文件，
+                // 静默吞掉会让文件一直挂在存储上白占额度（免费实例约 1GB，满了会上传失败），
+                // 而且排障时完全看不出「为什么磁盘一直涨」。r157 之前这里是 `catch(e){/* ignore */}`。
+                try { const urlObj = new URL(img.image_url); const ossPath = urlObj.pathname.replace(/^\//, ''); await deleteFile(ossPath) } catch (e) { console.error('  [Upload Dedup] 孤儿文件清理失败:', e.message) }
               }
               tasks.push({
                 ...dup[0],
