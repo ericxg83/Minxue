@@ -279,6 +279,30 @@ export function buildCooccurGraph(centerId, self, rows) {
 }
 
 /**
+ * GET /api/teaching-question-types/hot-kp
+ * 「关系图」独立入口的默认考点：挑关联题数最多（最"网感"）的考点自动展开，
+ * 老师一进考法库就能看到蜘蛛网，不用先手动选考点。
+ *
+ * r145：之前蜘蛛网藏在「按考点选题 → 还得先选一个考点」三级之后，老师根本找不到。
+ *   独立「关系图」入口默认就选一个最热闹的考点直接出图，首屏即见。
+ */
+router.get('/hot-kp', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT kp.id, kp.name, COUNT(DISTINCT qk.question_id)::int AS question_count
+         FROM knowledge_points kp
+         JOIN question_knowledge qk ON qk.kp_id = kp.id
+        WHERE kp.subject = $1
+        GROUP BY kp.id, kp.name
+        ORDER BY question_count DESC
+        LIMIT 1`, [subject])
+    res.json({ success: true, kp: rows[0] || null })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+/**
  * GET /api/teaching-question-types/kp-cooccur?kpId=xxx&limit=8
  * 「聚焦网状图」的数据源：选中考点 → 它自己 + 共现最强的 N 个邻居。
  *
