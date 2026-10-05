@@ -416,4 +416,23 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
   而是给样本显式补 `hasEverGraded:false`（把"免费诊断首份报告 = 从没被批改过"这个本意写清楚）。
   ⛔ 绝不允许为了让测试变绿而删/放宽别人的断言。
 - 四道闸：单测 1711/1711 fail 0｜lint 5 文件 0 error｜`dist_nightly_20261005r133` 34.86s（前端零改动）
-  ｜preview:5261 读 DOM 冒烟 8/8。健康采样 uptime 36min / 响应 868ms，与 16:12→本轮单调上升，期间无重启。
+｜preview:5261 读 DOM 冒烟 8/8。健康采样 uptime 36min / 响应 868ms，与 16:12→本轮单调上升，期间无重启。
+
+## 第 151 轮（2026-10-05 18:47–19:04）：清 r148 时区类最后一处残留
+
+- 交付 `ffa130d`（A 级，已推送）：`server/routes/teaching.js` 的 `period.start/end` 原来是
+  `periodStart.toISOString().split('T')[0]`（按 UTC 印日期），而周期边界是本地时区算的。
+  全仓同款扫描确认**这是 r148 那类缺陷的最后一处漏网**（`weeklyReport.js` 三处都在
+  `mode==='all'` 哨兵分支、刻意用 UTC 构造哨兵值，正确）。改成 `toLocalYmd`，end 减 1ms 说「最后一天」。
+- ⛔ **A 级的前提是「行为保持」，本轮实测坐实**：`TZ=UTC`（生产容器）下新旧输出逐字相同；
+  `TZ=Asia/Shanghai` 下旧写法周起点印成 10-04（周日）、月起点 09-30，新写法才对。
+  ⇒ **改任何「只在 UTC 容器里才正确」的时区代码，必须先跑一遍 TZ=UTC 的同值比对**，
+  否则你无法证明自己在生产上没改行为。
+- 新锁 `test/teachingPeriodLocalDate.test.mjs` 5 条；反向自检改成**精确比对四条判据逐条命中**
+  （不只数条数 —— 只数条数时判据写错位置也会「碰巧」凑数 = 假通过）。
+- 闸 4 套路升级：本机 `agent-browser` 本轮 `open` 反复挂死（`close --all` 却正常）。
+  ⇒ **改用项目自带 `puppeteer-core` + 本机 `C:\Program Files\Google\Chrome\Application\chrome.exe`**，
+  10s 出读 DOM 结果，真浏览器。别在这台机器上死等 agent-browser。
+- 提案进 backlog：③ 删 `GET /api/teaching/error-types` 死入口（B）｜④ 开工先探 esbuild（环境）
+  ｜⑤ 接力锁要不要认 `halted` 这种第三种状态（B，需负责人定）｜⑥ 家长分享卡 ~36s 是否异步化（B）。
+- 健康采样：uptime 45min(17:39)→53min(18:47) 单调上升，期间无崩溃循环。

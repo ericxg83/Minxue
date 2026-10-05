@@ -2212,3 +2212,48 @@ route_sweep 0/16 + text_audit 0/14 + overflow_audit 0/14。
 - **本轮零改动、零推送**（修复未执行——在不可信的读取上改代码等于盲改）。
 - ⚠️ 修复项保持待办：teaching.js:67-68 时区残留死字段（Render TZ=UTC 下暂时正确，UTC+8 即退回 r148 差一天类缺陷）。
 - **必须负责人介入**：本会话上下文已不可信，请在会话外核实后开新会话执行该修复。
+
+## 第 151 轮（2026-10-05 18:47–19:04，常驻巡检线）：清掉 r148 时区类最后一处残留（已交付已推送）
+
+- **接力锁处置（需拍板，见文末提案⑤）**：开工读到 `halted / 150`（r150 自报「输出注入」后中止），
+  这是接力锁的**第三种状态**，原规则只认 `running` / `finished`。本轮按「未识别状态 ⇒ 新开一轮」处理为 151，
+  但先做了环境自检再动手：
+  - `.git/refs/heads/main` 与 `git rev-parse HEAD` 一致（4d340fa），`4d340fa` 的提交时间戳/改动真实存在；
+  - 上一轮自称「读到伪造内容」的 `src/workbench/views/WeeklyReportWorkbench.vue:488-500 / 568-581`
+    **重新读一遍，与 backlog 记录逐行吻合**（periodLabel 在 :488、只取 data.success + data.suggestions），
+    无注入迹象 ⇒ 本会话输出可信，恢复执行被中止的 A 级修复。
+- **交付（A 级 · 行为保持型缺陷）**：`server/routes/teaching.js:67-68` 原用
+  `periodStart.toISOString().split('T')[0]` 按 **UTC** 印周期日期，而周期边界是
+  `parsePeriod()` 按**本地时区**算的 —— r148 那类缺陷的最后一处残留。
+  - 实测行为保持：`TZ=UTC`（生产容器）下新旧输出**逐字相同**（week `2026-10-05~2026-10-12`、
+    上周 `2026-09-28~2026-10-05`、month `2026-10-01~2026-11-01`）。
+  - 实测修好的坑：`TZ=Asia/Shanghai` 下旧写法把周起点印成 `2026-10-04`（周日）、月起点 `2026-09-30`，
+    新写法分别 `2026-10-05`（周一）、`2026-10-01`。
+  - 改引 `server/utils/period.js` 的 `toLocalYmd`，end 为排他边界故减 1ms 说「最后一天」，
+    与 `weeklyReport.js` 同口径（r148 已修，同款扫描确认这是唯一漏网处）。
+  - 新锁 `test/teachingPeriodLocalDate.test.mjs` **5 条**（4 行为 + 1 源码锁），
+    反向自检：套「修复前」坏样本**精确命中全部 4 条判据**（不调 git，避免 Windows EBUSY）。
+- **四道闸**：单测 **1793/1793 fail 0**（基线 1788 + 本轮 5 条，无他人红）｜lint 我方两文件**零输出**
+  （全仓 8 个 error 是既存 `no-var`/`no-control-regex`，非本轮引入）｜
+  `dist_nightly_20261005r151` **36.83s**｜preview:5281 + 真浏览器读 DOM 首屏/PC 工作台均正常、0 pageerror。
+  commit `ffa130d`，已推送。
+- **闸 4 的套路升级（可复用）**：本机 `agent-browser` 本轮**反复挂死**（`close --all` 能成功、`open` 必挂），
+  改用**项目自带的 `puppeteer-core` + 本机 `C:\Program Files\Google\Chrome\Application\chrome.exe`**
+  跑读 DOM 探针，10s 内出结果 —— 同样是真浏览器。⛔ 别再在这台机器上死等 agent-browser。
+- **复核（防止下轮重复翻）**：`grep` 全仓确认 `toISOString().split('T')[0]` 在非诊断脚本里
+  只剩 `weeklyReport.js` 三处（都在 `mode === 'all'` 哨兵分支，刻意用 UTC 构造哨兵值，正确）与
+  一条说明性注释 ⇒ 时区类缺陷**已全部清干净**。
+
+### 本轮提案
+
+| # | 内容 | 等级 | 说明 |
+|---|---|---|---|
+| ③ | 删除 `GET /api/teaching/error-types` 死入口 | **B（需负责人点头）** | 全仓 grep 确认**零消费方**（只在 teaching.js 自我定义 + `_r112_old/` 历史副本）。数据源本身还在被 `server/services/diagnosisService.js` 直接查库使用，删的只是这个多此一举的 HTTP 出口。属删输出端点，非纯内部重构，故不擅动。 |
+| ④ | `phase.start` 时 `npx esbuild --version` 探一次再决定走不走 vite | 环境 | 本机 esbuild 时好时坏，开工探一次最省时间（本轮 0.21.5 正常）。 |
+| ⑤ | 接力锁要不要认 `halted` 这种第三种状态？ | **B（需拍板）** | 现在遇到未识别状态只能靠「当成新开一轮」兜底。建议要么明写「未识别状态 ⇒ 按 finished 处理、允许自动接续」，要么让中止方把状态写成 `finished` 并在 backlog 留待办。**锁的状态语义归负责人定。** |
+| ⑥ | 家长分享卡单次渲染 ~36s 是否要缓存/异步化 | B | 已有 loading 遮罩 + 失败抛错，非缺陷；前端超时给到 240s/600s，不会超时。只是老师每次生成都要等。 |
+
+### 观察项（不立案）
+
+- 第 0 步健康采样：`uptime 45min(17:39) → 53min(18:47)` 单调上升，期间无崩溃循环；响应 1090ms、接口 778ms、21 名学生可读、无失败/卡住任务；唯一黄色是「Render 后台看磁盘用量」（Read 环境无解）。
+- 构建产物比对：`r151` 与 `r149` 的 63 个 js 有 20 个不同 —— 来自他人 `262ecd5`（考法库独立关系图入口）等提交，**本轮前端零改动**。
