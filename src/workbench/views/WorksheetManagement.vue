@@ -239,7 +239,7 @@
 
 <script setup>
 import { API_BASE } from '../../services/httpCore'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, UploadFilled, Loading, PictureFilled, Search, Document, ArrowRight } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
@@ -393,6 +393,19 @@ const loadData = async () => {
 }
 
 onMounted(loadData)
+
+// 组件卸载时（无 keep-alive，路由切换即卸载）必须清掉所有轮询/定时器：
+// parsePollTimer/parsePollStartTimer（解析进度轮询）、parseMessageTimer（提示消息）、
+// pollTimer（修复任务轮询）。否则切走页面后这些 setInterval/setTimeout 仍继续触发，
+// 既泄漏内存，还会持续请求后端（幽灵轮询）。
+onUnmounted(() => {
+  stopParsePolling()
+  if (parseMessageTimer) {
+    clearTimeout(parseMessageTimer)
+    parseMessageTimer = null
+  }
+  stopPolling()
+})
 
 const statusType = (status) => {
   if (status === 'published') return 'success'
