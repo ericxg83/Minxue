@@ -294,6 +294,20 @@
   反向对照（死端口）overflow_audit **exit 1**（自证「既会红也会绿」）。
 - ⚠️ 跨赛道发现只提不改：`scripts/dailyBackup.mjs` 无退出码 + 「备份到空库也算成功」+ 目录名 UTC 口径
   ⇒ 已入 backlog 提案⑱，属「服务端基础设施·定时任务」赛道。
+  ⚠️ **r158 的判断后来被证伪**：r158 走的兜底脉冲赛道是「仓库卫生与门禁基线」，
+  而 ⑱ 点名的脚本属上表「服务端基础设施·定时任务」= 本赛道 ⇒ **第 159 轮已落地**（`e3638cb` + `9bd97f7`）。
+  教训：写「跨赛道只提不改」之前，先拿 lanes 表里那条**点名赛道**的认领方是不是自己，别只看当前轮次认领了什么。
+
+**第 159 轮（2026-10-05 23:28–23:45，本赛道）已交付：每日备份脚本「失败伪装成成功」四处缺陷（`e3638cb` + `9bd97f7`）**
+- 交付物：`scripts/backupKit.mjs`（新，纯函数：本地日命名 / 过期轮换 / fail-closed 成败判定，
+  复用 `server/utils/period.js` 的 `toLocalYmd`，单一实现）；`scripts/dailyBackup.mjs` 改走它 +
+  显式 `process.exit(0/1)` + 失败写 `manifest.error` + manifest 在 `finally` 必写。
+- 回归锁 `test/dailyBackupResult.test.mjs` 14 条；反向自检套 HEAD 修复前真实脚本 = 8 条判红 / 新版 0 条。
+- 端到端实跑 exit 0，落盘 `D:/Minxue_Backup/2026-10-05/` 9.2MB，manifest `ok:true`。
+- ⭐ 顺带抓到更大问题（backlog 提案 ⑲，B 级待拍板）：这份「每晚 21:30 自动」的脚本**没有任何调用方**，
+  10-03~10-05 三天零备份且无人知晓（正是没有退出码/告警）。本轮没擅自建定时任务。
+- ⚠️ 单测基线现 1839 条 / 1 红 = `test/wrongBookLifecycleRollback.test.mjs:73` 锁过期（他人 `431d4df`
+  把 `errorCount` 改 `2+` 档），属 PC 工作台赛道，提案 ⑳，本轮未动。
 
 
 

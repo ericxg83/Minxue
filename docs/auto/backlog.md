@@ -2443,11 +2443,46 @@ npm test 1779/1779｜lint 8e/141w｜构建 r156｜route_sweep 0/16 + render_smok
   正向对照（健康应用）`route_sweep 0/16`、`text_audit 0/14`、`overflow_audit 0/14` **全部 exit 0**；
   反向对照（死端口 5999）`overflow_audit` **exit 1**。全部走 `BASE` 环境变量，同时验证了新解析路径。
 
+### 第 159 轮（2026-10-05 23:28–，本赛道「服务端基础设施·定时任务」）已交付：备份脚本失败不再伪装成成功（`e3638cb` + `9bd97f7`，已推送）
+
+- 为什么落在本赛道：提案 ⑱ 是 r158 跨赛道提的，但 **r158 属于兜底脉冲、认领的是「仓库卫生与门禁基线」**，
+  而 ⑱ 点名的 `scripts/dailyBackup.mjs` 属「服务端基础设施·定时任务」——正是本轮（21:30 常驻）赛道，
+  ⇒ r158「只提不改」是认领范围判断失误，**本轮落地**。
+- 四处缺陷全部实测坐实（原 `scripts/dailyBackup.mjs`）：① 全文 0 处 `process.exit`，调用方拿不到显式失败信号；
+  ② 核心表 0 行照样写空 JSON + 打印「完成」（连错库/库被清空 = **谎报平安**）；
+  ③ 快照目录名 `toISOString()`（UTC）而轮换判断用 `+08:00`，**一个文件两种时区口径**；
+  ④ `manifest.json` 只在全表成功后写 ⇒ 半途失败留下「看不出残缺」的快照，30 天后才被轮换掉。
+- 修：新增 `scripts/backupKit.mjs`（纯函数：本地日命名 / 过期轮换 / 备份结果 fail-closed 判定，
+  与 `server/utils/period.js` 的 `toLocalYmd` **同一实现**，不另起一套）；
+  `dailyBackup.mjs` 改走它 + 显式 `process.exit(0/1)` + 失败写 `manifest.error` + manifest 在 `finally` 必写。
+  ⭐ 判空以 **TABLES 清单**为准而非 manifest 实际键：只导了 2 张表的半途失败同样判失败（这点是锁写红之后才发现实现不够 fail-closed，已改实现）。
+- 回归锁 `test/dailyBackupResult.test.mjs` **14 条**（真跑纯函数 10 + 源码契约 3 + 覆盖面 1）。
+  **反向自检实测**：同一把判据套 HEAD 修复前的真实脚本 ⇒ **8 条判红**且逐条点名（R1/R2/R3/R4/R5/R6×2/R8），
+  新版 0 条；另加「逐条把修复点改回旧写法」的真回退对照 4 组，全部判红。
+- **端到端实跑**（不是读代码想象）：`node scripts/dailyBackup.mjs` ⇒ exit **0**，
+  落盘 `D:/Minxue_Backup/2026-10-05/` 共 9.2MB（students 21 / tasks 192 / wrong_questions 1120 /
+  questions 3011 / knowledge_mastery 152），`manifest.json` 为 `"ok": true`。
+- ⭐ **顺手抓到的更大问题（见新提案 ⑲）：这份「每晚 21:30 自动跑」的备份脚本，实际上没有任何东西在调它。**
+- 四道闸：单测 **1838 通过 / 1 红**（红 = 他人赛道，归属见下）｜lint 我方 3 文件**零输出**｜
+  `dist_nightly_20261005r159` **36.53s**｜preview:5295 + Chrome 读 DOM 冒烟
+  `cert_probe` 零外部 origin exit 0 + `render_smoke` **8/8** exit 0（0 控制台错误 / 0 个 4xx5xx）。
+
+#### ⚠️ 单测那 1 条红的归属（不是本轮引入）
+
+`test/wrongBookLifecycleRollback.test.mjs:73`「切出「重复出错」必须重置 errorCount」判红，
+锁的是旧字面量 `setFilter('errorCount', '2-3')`；而 23:30:57 的他人提交 `431d4df`
+（`fix(workbench): 错题中心统计口径对齐 + 路由死代码清理`）已把 `setSummary` 改成 `errorCount 用 2+ 档`
+且把 if/else 折叠成三元表达式。⇒ **锁过期**（r155 的 `/dashboard` 同款），且属 PC 工作台赛道，
+本轮**未删未放宽未改**，只记为提案 ⑳。本轮改动只碰 `scripts/**` 与 `test/dailyBackupResult.test.mjs`，
+与 src/ 零交集，该红在 HEAD（本轮之前）就存在。
+
 ### 本轮提案（只提不动）
 
 | # | 内容 | 等级 | 说明 |
 |---|---|---|---|
-| ⑱ | `scripts/dailyBackup.mjs` 备份脚本**没有任何退出码，且「备份到空库」会当成成功** | **A（跨赛道，未动）** | 属「服务端基础设施（非批改）· 定时任务」赛道（21:30 常驻会话认领），故只提不改。三处：① 全文 0 处 `process.exit`，失败只靠顶层 await 抛错（隐式 exit 1），没有显式「失败」信号；② `SELECT` 全表 0 行时照样写空 JSON + 打「完成」，**一次没备份到任何东西的"成功"**；③ 目录名用 `toISOString()`（UTC）而轮换判断用 `+08:00`（同文件两种时区口径），且 `manifest.json` 只在全表成功后写 ⇒ 半途失败会留下**没有 manifest 的残缺快照**，30 天后才被轮换掉。备份是「出事时唯一能救命的东西」，建议按 r148/r151/r155/r157 同款口径修（本地日 + 显式失败退出 + 空备份告警）。 |
+| ⑲ | **数据保险库（提案 4，2026-10-02 已批准）其实压根没在跑** | **B（需拍板）** | 实测：`D:/Minxue_Backup/` 现在只有 `2026-10-02` 一份快照；全仓 grep、系统计划任务、全部定时任务（含本循环的 5 条自动化）**没有任何一个在调 `scripts/dailyBackup.mjs`** ⇒ 10-03/04/05 三天一份都没备份，而脚本注释和 HANDOFF 都写着「每晚 21:30 自动」。正是因为没有退出码、没有告警，这三天「没人知道」。本轮已修好成败口径，但**没人调用就还是没备份**。建议二选一：① 加一条每天 02:00 跑一次 `node scripts/dailyBackup.mjs` 的定时任务（唯一读取生产库，纯 SELECT，9.2MB，离晚托班结束很远）；② 明确「备份就手动跑」，并把脚本注释/HANDOFF 里「每晚 21:30 自动」的说法改掉，免得以后还以为在跑。⚠️ 本轮没擅自建定时任务（改生产库读取频次 = 产品/运维决策）。 |
+| ⑳ | `test/wrongBookLifecycleRollback.test.mjs:73` 判据过期（锁旧 `2-3`，代码已改 `2+`） | A（跨赛道，未动） | 属 PC 工作台赛道：**应该把旧断言更新为守住新口径**（`errorCount` 切 repeat 档必须显式置成「2+ 及以上」，切到其它档必须重置 `all`），而不是删锁。本轮未碰。 |
+| ⑱ | `scripts/dailyBackup.mjs` 备份脚本**没有任何退出码，且「备份到空库」会当成成功** | **✅ 本轮已闭环** | 见上「第 159 轮」——四处缺陷全修 + 14 条回归锁 + 端到端实跑 exit 0。 | 属「服务端基础设施（非批改）· 定时任务」赛道（21:30 常驻会话认领），故只提不改。三处：① 全文 0 处 `process.exit`，失败只靠顶层 await 抛错（隐式 exit 1），没有显式「失败」信号；② `SELECT` 全表 0 行时照样写空 JSON + 打「完成」，**一次没备份到任何东西的"成功"**；③ 目录名用 `toISOString()`（UTC）而轮换判断用 `+08:00`（同文件两种时区口径），且 `manifest.json` 只在全表成功后写 ⇒ 半途失败会留下**没有 manifest 的残缺快照**，30 天后才被轮换掉。备份是「出事时唯一能救命的东西」，建议按 r148/r151/r155/r157 同款口径修（本地日 + 显式失败退出 + 空备份告警）。 |
 | ⑧（沿用） | `server/scripts/construct-labeled-figures-0927.mjs` 的 5 条 `no-var` | A（下轮可做） | 属几何方向脚本，不在本赛道，未动。 |
 | ⑨（沿用） | 三处 `no-control-regex`（`worksheets.js` / `neonService.js` / `pdfService.js`） | A（下轮可做） | 实测均为 `\uXXXX` 转义文本，属规则误报；文件都不在本赛道，未动。 |
 | ⑩ | 闸门脚本默认端口各自不同且已陈旧 | **✅ 本轮已闭环** | 见上「修法」——默认值收敛到 `base.mjs` 一处，且每个脚本回显审计目标。 |

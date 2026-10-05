@@ -487,3 +487,26 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
   只提案）；真实学生（汤一诺）周报 period `2026-10-05 ~ 2026-10-12` 本地口径正确、本周 0 题符合
   周一开局；`toISOString` 全仓扫描后，**生产代码里非批改路径已清零**（仅剩 worker.js 与一次性脚本）。
 
+## 第 159 轮（2026-10-05 23:28–23:45）：备份脚本失败不再伪装成成功（已交付已推送 `e3638cb` + `9bd97f7`）
+
+- **赛道**：服务端基础设施（非批改）· 定时任务 —— 提案 ⑱ 的落地（r158 把它当成跨赛道只提不改，
+  实际属本赛道；r158 认领的是「仓库卫生与门禁基线」，判断失误，本轮补上）。
+- **缺陷（四处，全部实测坐实）**：`scripts/dailyBackup.mjs` 全文 0 处 `process.exit`（调用方拿不到显式失败信号）；
+  核心表 0 行照样写空 JSON 并打印「完成」（连错库 = 谎报平安）；快照目录名用 `toISOString()`（UTC）
+  而同一文件轮换判断用 `+08:00`（两种时区口径）；`manifest.json` 只在全表成功后写（半途失败的残快照看不出残缺）。
+- **修法**：新增 `scripts/backupKit.mjs` 纯函数模块（本地日命名 / 过期轮换 / fail-closed 成败判定，
+  复用 `server/utils/period.js` 的 `toLocalYmd` 不另起一套）；`dailyBackup.mjs` 显式 `process.exit(0/1)`、
+  失败写 `manifest.error`、manifest 在 `finally` 必写。判空以 TABLES 清单为准 ⇒ 只导了 2 张表也算失败。
+- **回归锁** `test/dailyBackupResult.test.mjs` 14 条；**反向自检**：同一判据套 HEAD 修复前真实脚本 = **8 条判红**，
+  新版 0 条 + 4 组「逐点改回旧写法」真回退全红。
+- **端到端实跑**：`node scripts/dailyBackup.mjs` ⇒ exit 0，`D:/Minxue_Backup/2026-10-05/` 9.2MB
+  （students 21 / tasks 192 / wrong_questions 1120 / questions 3011 / knowledge_mastery 152），`manifest.ok=true`。
+- ⚠️ **新发现（提案 ⑲，B 级待拍板）**：这份脚本**压根没人调它**——`D:/Minxue_Backup/` 只有 `2026-10-02` 一份，
+  全仓 grep / 系统计划任务 / 全部定时任务都找不到调用方，10-03~10-05 三天零备份，而脚本注释与本文档
+  都写着「每晚 21:30 自动」。正是没有退出码、没人告警，这三天无声无息。已修口径，但**得先有人排上或明说手动**。
+- ⚠️ **单测基线**：现 1839 条，**1 红且不是本轮引入** —— `test/wrongBookLifecycleRollback.test.mjs:73`
+  锁旧字面量 `errorCount '2-3'`，而他人 23:30 的 `431d4df` 已改成 `2+ 档` ⇒ 锁过期（PC 工作台赛道），
+  本轮未删未放宽，记为提案 ⑳。下轮接手若看到这 1 红，直接归属 431d4df，别查本轮。
+- 四道闸：单测 1838 通过 / 1 红（归属如上）｜lint 我方 3 文件零输出｜`dist_nightly_20261005r159` 36.53s｜
+  preview:5295 + `cert_probe` 零外联 exit 0 + `render_smoke` **8/8**（0 控制台错误 / 0 个 4xx5xx）。
+
