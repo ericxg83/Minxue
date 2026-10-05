@@ -27,7 +27,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     time: 'all',
     errorCount: 'all',
     tag: 'all',
-    category: 'all'
+    category: 'all',
+    practiceState: 'all'   // 重练状态筛选：all | none（尚未重练）
   })
 
   const sortBy = ref('time_desc')
@@ -63,6 +64,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
         return count === 1
       case '2-3':
         return count >= 2 && count <= 3
+      case '2+':
+        return count >= 2
       case '4-5':
         return count >= 4 && count <= 5
       case '5+':
@@ -133,9 +136,6 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       // 时间筛选
       if (filters.value.time !== 'all' && !isWithinTimeRange(wq.added_at || wq.created_at, filters.value.time)) continue
 
-      // 错误次数筛选
-      if (filters.value.errorCount !== 'all' && !matchErrorCount(wq.error_count || 1, filters.value.errorCount)) continue
-
       // 标签筛选
       if (filters.value.tag !== 'all') {
         const question = wq.question || wq
@@ -179,6 +179,18 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       }
     } else {
       questions = base
+    }
+
+    // errorCount / practiceState 筛选必须在去重之后：dedupeWrongQuestions 会合并同题并
+    // 累加 error_count / practice_count（src/domain/questionIdentity.js#mergeGroup），
+    // 去重前筛会与统计卡（stats 基于去重后）口径不一致 —— 导致「重复出错 N」点进去
+    // 却显示 0 道（r159 修复）。
+    if (filters.value.errorCount !== 'all' || filters.value.practiceState !== 'all') {
+      questions = questions.filter(q => {
+        if (filters.value.errorCount !== 'all' && !matchErrorCount(q.error_count || 1, filters.value.errorCount)) return false
+        if (filters.value.practiceState === 'none' && (q.practice_count || 0) > 0) return false
+        return true
+      })
     }
 
     // 排序
@@ -235,12 +247,18 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
     let newCount = 0
     let review1 = 0
     let review2 = 0
+    let repeatCount = 0
+    let unpracticedCount = 0
 
     for (const wq of dedupedQuestions) {
       if (wq.lifecycle_status === LIFECYCLE_STATUS.MASTERED) mastered++
       if (wq.lifecycle_status === LIFECYCLE_STATUS.NEW) newCount++
       if (wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_1) review1++
       if (wq.lifecycle_status === LIFECYCLE_STATUS.REVIEW_2) review2++
+      // 重复出错 = 累计错 ≥2 次（与列表筛选口径一致，基于去重后数据）
+      if ((wq.error_count || 1) >= 2) repeatCount++
+      // 尚未重练 = practice_count 为 0 或空（与列表筛选口径一致）
+      if (!(wq.practice_count > 0)) unpracticedCount++
     }
 
     const pendingMaster = total - mastered
@@ -262,7 +280,9 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       masteryRate,
       rawTotal,
       duplicateCount,
-      dedupRate
+      dedupRate,
+      repeatCount,
+      unpracticedCount
     }
   })
 
@@ -466,7 +486,8 @@ export const useWrongBookStore = defineStore('wrongBook', () => {
       time: 'all',
       errorCount: 'all',
       tag: 'all',
-      category: 'all'
+      category: 'all',
+      practiceState: 'all'
     }
     sortBy.value = 'time_desc'
     searchQuery.value = ''

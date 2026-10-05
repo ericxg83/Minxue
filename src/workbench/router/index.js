@@ -134,16 +134,12 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫：PC检测
-router.beforeEach((to, from, next) => {
-  if (to.meta.requiresPC && window.innerWidth < 1200) {
-    // 不跳转，改为显示提示
-    next()
-  } else {
-    next()
-  }
-})
+// 路由守卫：PC 检测
+// 历史遗留：此处 before 守卫两个分支相同（空转死代码，注释承诺的"改为显示提示"从未实现）。
+// 桌面提示已由 App.vue 的 showDesktopNotice（监听 route.meta.requiresPC + window.innerWidth）承担，
+// 此守卫删除后行为不变。保留空守卫以维持"这里有 PC 检测逻辑"的定位，但不再写入死代码。
 
+// 注：实际 PC 检测实现见 App.vue#updateViewportNotice（r159 清理死代码时确认）。
 export default router
 
 

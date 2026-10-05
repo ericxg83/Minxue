@@ -18,11 +18,13 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 const route = useRoute()
 const showDesktopNotice = ref(false)
 const updateViewportNotice = () => { showDesktopNotice.value = Boolean(route.meta.requiresPC && window.innerWidth < 1200) }
+// 跨路由切换也要刷新提示：进入/离开 requiresPC 页面时内宽不变但提示应更新（r159 修复）
+watch(() => route.meta.requiresPC, updateViewportNotice)
 onMounted(() => { updateViewportNotice(); window.addEventListener("resize", updateViewportNotice) })
 onUnmounted(() => window.removeEventListener("resize", updateViewportNotice))
 import AppHeader from './components/layout/AppHeader.vue'
