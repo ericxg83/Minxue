@@ -18,6 +18,7 @@ import { createRequire } from 'module'
 import { readFileSync } from 'fs'
 import { query, TABLES } from '../config/neon.js'
 import { renderExamPDF } from './examPdfRenderer.js'
+import { toLocalYmd } from '../utils/period.js'
 // 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
 // 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
 import { resolveQuestionDisplayStem, getQuestionGroupKey, extractPrereqRefs, resolvePrereqHints } from '../utils/questionStem.js'
@@ -279,6 +280,27 @@ const buildExamHTML = ({ title, studentName, questions, qrSvg }) => {
  * @param {string} [args.publicBaseUrl] 二维码基址（默认 process.env.PUBLIC_BASE_URL，否则 https://minxue.pages.dev）
  * @returns {Promise<{pdfBuffer: Buffer, examId: string, qrContent: string, studentName: string, count: number}>}
  */
+
+/**
+ * 重练卷抬头名：`{学生}错题重练-YYYY-MM-DD`。
+ *
+ * ⛔ 日期必须走 `toLocalYmd`（本地日历日），**不许用 `new Date().toISOString().slice(0,10)`**：
+ * toISOString 是 UTC。生产跑在 UTC+8 的容器里，本地 00:00~08:00 时段 UTC 还是**前一天**
+ * ⇒ 这份 PDF 的抬头、下载文件名、以及 generated_exams.name（老师工作台列表里直接看到）
+ * 会整体印成昨天（r155 实测确认，是 r148 时区类的最后一处漏网）。
+ * 这条名字同时是 three-way 可见：① 老师列表 ② 打给学生的卷子抬头 ③ 磁盘文件名。
+ *
+ * 抽成纯函数是为了能真正跑断言（而不是 grep 源码假装测了）：
+ * 见 test/wrongRetryExamName.test.mjs，其反向自检套旧实现必判红。
+ *
+ * @param {string} studentName
+ * @param {Date} [at=new Date()] 注入用：默认取当前时刻
+ * @returns {string}
+ */
+export function buildRetryExamName(studentName, at = new Date()) {
+  return `${studentName}错题重练-${toLocalYmd(at)}`
+}
+
 export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, includeReview1 = false, publicBaseUrl }) {
   if (!UUID_RE.test(studentId)) {
     throw new Error('无效的 studentId')
@@ -337,7 +359,7 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, include
   }
 
   // 2. 创建 generated_exam（status 默认 'draft'；retry_task_id 暂不关联，等学生扫码上传答卷后 link）
-  const examName = `${studentName}错题重练-${new Date().toISOString().slice(0, 10)}`
+  const examName = buildRetryExamName(studentName)
   const { rows: examRows } = await query(
     `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids)
      VALUES ($1, $2, $3) RETURNING id`,
