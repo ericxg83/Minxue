@@ -241,6 +241,64 @@ export async function buildHandout(opts) {
       unlinkedRows,
     }
     log(`[0] 考点筛选: ${kpFilter.names.join('、')}（含子孙共 ${kpIdSet.size} 节点）→ 命中 ${rows.length}/${rawRows.length} 条错题（${unlinkedRows} 条无题目ID 无法判考点）`)
+
+    // ── r145：命中 0 条时给出可行动诊断，而不是让老师对着一句「没有符合条件的错题」猜 ──
+    //
+    // 实测踩坑（探针 _diag_weekend_kp_rows_1005.mjs）：老师选「二次根式」+ 初三，
+    // 接口报「该时段没有符合条件的错题」。真实原因是那 156 道二次根式错题
+    // **全部属于初二学生**（考点筛选逻辑本身没问题，是 grade 维度把它筛空了）。
+    // 不说清楚的话，老师只会反复调时段/难度，永远找不到真正的原因。
+    //
+    // 三个维度依次查，命中哪个说哪个（都查不到就只报确实没数据）：
+    //   ① 同考点换年级有没有题 → 最常见（考点树跨年级共用，但错题按学生分年级）
+    //   ② 同年级不加考点筛选时有没有题 → 说明是「这个考点在本年级没题」
+    //   ③ 完全不限（不限年级/时段/学科）有没有题 → 说明是时段太窄
+    if (rows.length === 0) {
+      const kpNameList = kpFilter.names.join('、')
+      const diag = { kpNames: kpFilter.names, hints: [] }
+
+      // ① 同考点，其他年级
+      {
+        const { rows: g } = await pool.query(
+          `SELECT s.grade, COUNT(DISTINCT wq.question_id)::int c
+             FROM wrong_questions wq
+             JOIN students s ON s.id = wq.student_id
+             JOIN question_knowledge qk ON qk.question_id = wq.question_id
+            WHERE qk.kp_id = ANY($1::uuid[])
+              AND ($2::text IS NULL OR s.grade <> $2)
+            GROUP BY 1 ORDER BY c DESC LIMIT 3`,
+          [[...kpIdSet], grade])
+        if (g.length) {
+          // switchGrades 给前端做「一键切年级」按钮，字段名与前端逐字对齐
+          diag.switchGrades = g.map((r) => ({ grade: r.grade, count: r.c }))
+          diag.hints.push(
+            `考点「${kpNameList}」在别的年级有错题：${g.map((r) => `${r.grade} ${r.c} 道`).join('、')}。当前年级是「${grade}」，把「年级」切到上面任一个即可看到题。`)
+        }
+      }
+      // ② 同年级，不筛考点
+      if (!diag.hints.length && rawRows.length > 0) {
+        diag.hints.push(
+          `本年级本时段共 ${rawRows.length} 条错题，但都不属于考点「${kpNameList}」。可清空考点筛选，或换一个在本年级有题的考点。`)
+      }
+      // ③ 放宽时段（不限年级）
+      if (!diag.hints.length) {
+        const { rows: wide } = await pool.query(
+          `SELECT COUNT(DISTINCT wq.question_id)::int c
+             FROM wrong_questions wq
+             JOIN students s ON s.id = wq.student_id
+             JOIN question_knowledge qk ON qk.question_id = wq.question_id
+            WHERE qk.kp_id = ANY($1::uuid[])`,
+          [[...kpIdSet]])
+        if (wide[0].c > 0) {
+          diag.hints.push(
+            `考点「${kpNameList}」全库有 ${wide[0].c} 道错题，但都不在「${grade} + 当前时段」内。把时段放宽试试。`)
+        } else {
+          diag.hints.push(`考点「${kpNameList}」目前还没有任何错题，先去批改几份作业让它有素材。`)
+        }
+      }
+      kpFilter.emptyDiagnosis = diag
+      log(`[0] ⚠️ 考点筛选命中 0，给出诊断：${diag.hints.join(' | ')}`)
+    }
   }
 
   const tasksById = new Map()
@@ -357,7 +415,17 @@ export async function buildHandout(opts) {
 
   log(`[2] 取数 OK: ${rows.length} 条错题`)
   if (rows.length === 0) {
-    throw new Error('该时段没有符合条件的错题，未生成课件。')
+    // ⛔ r145：筛考点后为空时，message 必须带上诊断（上面 emptyDiagnosis 查好的），
+    //   否则老师只看到「没有符合条件的错题」，会去反复调时段/难度而永远找不到真因。
+    //   实测真因通常是「这个考点的错题在别的年级」—— 考点树跨年级共用，但错题按学生分年级。
+    const diagHint = kpFilter?.emptyDiagnosis?.hints?.[0]
+    const e = new Error(
+      diagHint
+        ? `${diagHint}（本年级本时段原本有 ${kpFilter.droppedRows + kpFilter.matchedRows} 条错题，都不属于所选考点）`
+        : '该时段没有符合条件的错题，未生成课件。')
+    e.emptyDiagnosis = kpFilter?.emptyDiagnosis || null
+    e.kpFilter = kpFilter
+    throw e
   }
 
   // ── 组装 ──

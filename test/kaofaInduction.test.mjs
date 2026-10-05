@@ -12,7 +12,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { judgeMethodName, parseMethodResponse, induceMethodsForKp, MIN_ITEMS_PER_METHOD } from '../server/services/kaofaInduction.js'
+import { judgeMethodName, parseMethodResponse, induceMethodsForKp, MIN_ITEMS_PER_METHOD, MAX_KPS_PER_METHOD } from '../server/services/kaofaInduction.js'
 
 const VOCAB = ['平方根', '平方', '实数', '立方根', '根式化简', '二次根式', '方程求解', '分类讨论']
 
@@ -163,5 +163,53 @@ test('induceMethodsForKp：守卫不误伤合法调用（dryRun/fetchKpWrongQues
     } catch (e) {
       assert.doesNotMatch(e.message, /参数名错误/, `${okKey} 不该被判参数名错误`)
     }
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// 第四道质量闸：kps 数量上限（r145）
+//
+// ⛔ 为什么加这道闸（真实踩坑，非假想）：2026-10-05 端到端写库时，AI 对「三角形」产出
+//   「几何图形性质」，kps 挂了 **24 个**知识点 —— 二次根式的性质 / 根式的性质 / 对称性 /
+//   角平分线 / 平行线 / 抛物线 / 二次函数 / 全等三角形 / 三角函数 ……
+//   那不是「这套动作涉及哪些考点」，而是**这 11 道题的全部标签照抄**。
+//   这种条目进了「我的考法库」，老师点开看到 24 个考点关联 = 这功能在乱连。
+//
+// 为什么是「整条拒收」而不是「截断到 6 个」：截断会留下一个半截的关联，
+// 老师看到「几何图形性质 → 只挂 6 个考点」会以为另外 18 个是漏了，比没有更误导。
+// ─────────────────────────────────────────────────────────────────────────
+test('第四道闸：kps 超过上限的考法必须被拒收（防「把题目标签全量照抄」）', () => {
+  const manyKps = Array.from({ length: MAX_KPS_PER_METHOD + 18 }, (_, i) => `知识点${i + 1}`)
+  const text = JSON.stringify({
+    methods: [
+      { name: '几何图形性质', action: '看图性质', kps: manyKps, steps: ['读图'], items: [1, 2, 3] },
+      { name: '勾股定理应用', action: '应用勾股定理', kps: ['勾股定理'], steps: ['定边'], items: [1, 2] },
+    ],
+  })
+  const { methods, rejected } = parseMethodResponse(text, ['勾股定理'], 3)
+  assert.equal(methods.length, 1, '只该留下 kps 正常的那条')
+  assert.equal(methods[0].name, '勾股定理应用')
+  const bad = rejected.find((r) => r.name === '几何图形性质')
+  assert.ok(bad, '超限那条必须进 rejected，不能静默通过')
+  assert.match(bad.reason, new RegExp(String(manyKps.length)), `理由里要带出实际挂了多少个（实际 ${manyKps.length}）`)
+  assert.match(bad.reason, /标签|照抄/, '理由要说清是标签搬运，不是措辞问题')
+  // ⛔ 关键：被拒的条目绝不能混进 methods（那就是「截断」，是最糟的处理）
+  assert.ok(!methods.some((m) => m.name === '几何图形性质'), '被拒条目不得出现在 methods 里')
+})
+
+test('第四道闸：kps 恰好等于上限要放行（别把边界也卡掉）', () => {
+  const kps = Array.from({ length: MAX_KPS_PER_METHOD }, (_, i) => `知识点${i + 1}`)
+  const { methods, rejected } = parseMethodResponse(
+    JSON.stringify({ methods: [{ name: '综合判定与应用', kps, items: [1, 2] }] }), [], 2)
+  assert.equal(methods.length, 1, `${MAX_KPS_PER_METHOD} 个考点应放行`)
+  assert.equal(rejected.length, 0)
+})
+
+test('第四道闸：1~4 个考点是健康区间，全部放行（别把闸门修成门槛）', () => {
+  for (const n of [1, 2, 3, 4]) {
+    const kps = Array.from({ length: n }, (_, i) => `知识点${i + 1}`)
+    const { methods } = parseMethodResponse(
+      JSON.stringify({ methods: [{ name: `动作${n}号`, kps, items: [1, 2] }] }), [], 2)
+    assert.equal(methods.length, 1, `${n} 个考点应放行`)
   }
 })

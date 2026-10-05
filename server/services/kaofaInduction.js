@@ -44,11 +44,34 @@ import { query } from '../config/neon.js'
 
 const SUBJECT = '数学'
 const DEFAULT_DAYS = 90
-const DEFAULT_LIMIT_PER_KP = 12
+/**
+ * 单批供题量。r145 实测三档对照（探针 `_diag_kaofa_limit_ab_1005.mjs`，样本「三角形」171 道错题）：
+ *
+ *   limit | 耗时  | 通过 | 唯一覆盖 | 每考法证据题
+ *   ─────────────────────────────────────────────────
+ *     12  | 23.2s |  5   |   12/12   | 4/4/4/2/3
+ *     20  | 20.4s |  4   |   16/20   | 4/4/4/4
+ *     30  | 20.0s |  4   |   30/30✅ | 8/8/7/7
+ *
+ * ⇒ **30 是最优**：归类率 100%（12 档只覆盖 12 道、考法数反而更多 = 碎），
+ *   每考法证据题从 4 涨到 8（考法「立得住」的强度就是证据题数），
+ *   耗时反而**更短**（20.0s vs 23.2s，题多反而让 AI 更快看出共性，不用纠结）。
+ *
+ * ⛔ 别退回 12：那不是「省 token」，是让 AI 在 12 道题里硬凑 5 组，每组只2-4 道证据。
+ * ⛔ 也别只放宽 MIN_ITEMS_PER_METHOD（=2）：门槛降到 1 会让「一题一考法」进来，
+ *   那是把噪声当信号。正确方向是**多供题**。
+ */
+const DEFAULT_LIMIT_PER_KP = 30
 /** 每考法至少要有几道题才算立得住（低于此数的合并进最接近的考法，或整体丢弃） */
 export const MIN_ITEMS_PER_METHOD = 2
 /** 考法名最长字数（AI 常在解释时写出长句） */
 const MAX_NAME_LEN = 24
+/**
+ * 一条考法最多能关联几个考点（r145 第四道质量闸）。
+ * ⛔ 超过就是「把题目标签全量照抄」，不是归纳：实测「几何图形性质」挂了 24 个。
+ * 健康的考法是 1~4 个。取 6 留一点余量。
+ */
+export const MAX_KPS_PER_METHOD = 6
 
 // ─────────────────────────────────────────────────────────────────────────
 // 质量闸（纯函数，可单测 —— 判据不依赖 AI 行为，这是它能当闸的原因）
@@ -107,6 +130,22 @@ export function parseMethodResponse(text, kpVocab = [], expectedCount = 0) {
     }
     const kps = Array.isArray(m?.kps) ? [...new Set(m.kps.map((s) => String(s == null ? '' : s).trim()).filter(Boolean))] : []
     if (kps.length === 0) { rejected.push({ name, reason: 'kps 为空（无法建立考点关联）', items: items.length }); continue }
+    // ⛔ r145 第四道闸：kps 数量上限。
+    //   实测踩坑：AI 产出「几何图形性质」，kps 挂了 **24 个**知识点
+    //   （二次根式的性质/根式的性质/对称性/角平分线/平行线/抛物线/二次函数…）——
+    //   那不是「这个考法涉及哪些考点」，而是**这几道题的全部标签**照抄。
+    //   判据：一条考法最多关联 MAX_KPS_PER_METHOD 个考点。
+    //   为什么取 6：实测健康的考法是 1~4 个（勾股定理应用=1、相似三角形判定=2、
+    //   二次函数与方程的关系=4）；超过 6 基本都是标签搬运。
+    //   ⚠️ 这是**拒收整条**而不是截断 —— 截断会留下一个半截的关联，比没有更误导。
+    if (kps.length > MAX_KPS_PER_METHOD) {
+      rejected.push({
+        name,
+        reason: `挂了 ${kps.length} 个考点（> ${MAX_KPS_PER_METHOD}），多半是把题目标签全量照抄而非归纳考点`,
+        items: items.length, kpCount: kps.length,
+      })
+      continue
+    }
     methods.push({
       name,
       action: String(m?.action == null ? '' : m.action).trim().slice(0, 20),
@@ -170,14 +209,17 @@ function buildPrompt(kpName, kpVocab, items) {
 ❌ 不合格3（太泛）：解方程
 
 【粒度要求】
-- 归纳 2-4 个考法，**宁可粗不可碎**：每个考法至少 ${MIN_ITEMS_PER_METHOD} 道题。
+- 归纳 3-5 个考法，**宁可粗不可碎**：每个考法至少 ${MIN_ITEMS_PER_METHOD} 道题。
 - 同一考法内的题必须是"同一套动作"，只是数字/情境不同。
 - 若两组的动作其实一样，合并成一组。
 - 实在归不进去的题就别硬塞（宁可漏，不要错归）。
+- ⛔ 不要按题号顺序切段分组：同一套动作常散落在前后（例如 [1][3][8][12] 才是同一组），
+  必须**先把题读完再决定怎么分**。
 
 【字段要求】
 - action：4-8 字动宾短语，只写动作（辨析错解 / 反求原数 / 分类讨论）
-- kps：只能从这些知识点里挑（可多个）：${vocab}
+- kps：**最多 ${MAX_KPS_PER_METHOD} 个**，且只写"这套动作直接用到"的知识点。
+  ⛔ 严禁把题面里出现过的知识点全列上去（那不是考点关联，是标签搬运，会被整条拒收）。
 - steps：2-4 步关键动作链
 - pitfalls：学生最常犯的错
 - items：归入本考法的题号数组
@@ -378,7 +420,10 @@ export async function induceMethodsForKp({
     const { callTextCompletion } = await import('../config/ai.js')
     // ⛔ 归纳是纯文本任务，视觉模型无用（实测慢 10 倍+）。
     //   BigModel 免费且最快，作主；Bailian 付费作备（preferredVendor 直连绕开降级链，治理 429）。
-    return callTextCompletion({ ...payload, temperature: 0.3, maxTokens: 1600, preferredVendor: 'BigModel' })
+    // ⛔ maxTokens 必须给足：30 题的 items 数组是30+ 个数字，再加steps/pitfalls，
+    //   1600 会在 JSON 中途截断 ⇒ parseMethodResponse 直接判「解析失败」，白跑一次 20 秒。
+    //   实测 r145：1600 够 12 题，30 题提到 2400 才稳。
+    return callTextCompletion({ ...payload, temperature: 0.3, maxTokens: 2400, preferredVendor: 'BigModel' })
   })
 
   const startedAt = Date.now()
@@ -412,6 +457,10 @@ export async function induceMethodsForKp({
     questionCount: questions.length,
     methods,
     rejected,
+    // ⛔ r145：一道题可以同时属于多个考法（确实可能考好几套动作），
+    //   所以 sum(items.length) 会 > questionCount（实测 12 档出现 17/12 = 142%）。
+    //   统计「归类率」必须用这个**唯一题数**，别拿 sum 当分母/分子。
+    coveredCount: new Set(methods.flatMap((m) => m.items)).size,
     vendor, elapsedMs, error,
     dryRun,
     saved,

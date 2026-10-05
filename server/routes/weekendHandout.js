@@ -146,6 +146,11 @@ function applySelection(handout, selected) {
 /**
  * POST /api/weekend-ppt/preview
  * 题单预览（供前端展示与勾选）。不落盘、不生成文件。
+ *
+ * ⛔ r145：空结果不再只回一句「没有符合条件的错题」——
+ *   buildHandout 会带上 emptyDiagnosis（考点筛选为空时的可行动诊断，实测最常见真因是
+ *   「这个考点的错题都在别的年级」），路由原样透出，前端要显示出来，
+ *   否则老师会反复调时段/难度而永远找不到真因。
  */
 router.post('/api/weekend-ppt/preview', async (req, res) => {
   const t0 = Date.now()
@@ -155,8 +160,13 @@ router.post('/api/weekend-ppt/preview', async (req, res) => {
     console.log(`[weekendPpt] preview OK grade=${params.grade} 时段=${handout.periodLabel} 题=${handout.stats.topics} ${Date.now() - t0}ms`)
     res.json({ success: true, handout })
   } catch (error) {
-    console.error('[weekendPpt] preview 失败:', error)
-    res.status(400).json({ error: error.message })
+    console.error('[weekendPpt] preview 失败:', error.message)
+    res.status(400).json({
+      error: error.message,
+      // ⛔ 字段名与前端逐字对齐：前端读 error / emptyDiagnosis / kpFilter
+      emptyDiagnosis: error.emptyDiagnosis || null,
+      kpFilter: error.kpFilter || null,
+    })
   }
 })
 

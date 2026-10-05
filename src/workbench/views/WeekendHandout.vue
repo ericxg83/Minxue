@@ -166,6 +166,31 @@
         </div>
       </ContentCard>
 
+      <!--⛔ r145 空结果诊断：筛考点后一道题都没有时，必须说清「为什么」和「下一步怎么办」。
+           只弹一句「没有符合条件的错题」的话，老师会反复调时段/难度而永远找不到真因
+           （实测最常见：所选考点的错题都在别的年级 —— 考点树跨年级共用，错题却按学生分年级）。 -->
+      <div v-if="previewDiag" class="preview-diag" role="alert">
+        <div class="preview-diag-title">
+          <el-icon><WarningFilled /></el-icon>
+          没选出题：{{ previewDiag.kpNames?.join('、') }}在当前筛选下没有错题
+        </div>
+        <ul class="preview-diag-list">
+          <li v-for="(h, i) in previewDiag.hints" :key="i">{{ h }}</li>
+        </ul>
+        <div class="preview-diag-actions">
+          <el-button size="small" @click="params.kpIds = []; previewDiag = null">清空考点筛选</el-button>
+          <el-button
+            v-if="previewDiag.switchGrades?.length"
+            size="small"
+            type="primary"
+            plain
+            @click="switchToGrade(previewDiag.switchGrades[0].grade)"
+          >
+            切到{{ previewDiag.switchGrades[0].grade }}（{{ previewDiag.switchGrades[0].count }} 道）
+          </el-button>
+        </div>
+      </div>
+
       <!-- 题单预览 -->
       <ContentCard
         v-if="handout"
@@ -363,7 +388,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { MagicStick, Reading, Search } from '@element-plus/icons-vue'
+import { MagicStick, Reading, Search, WarningFilled } from '@element-plus/icons-vue'
 import { apiRequest, updateQuestion } from '../../services/apiService'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -413,6 +438,20 @@ const previewSlow = ref(false)
 let previewTimer = null
 const handout = ref(null)
 const selected = ref(new Set())
+// ⛔ r145：筛考点后空结果的可行动诊断（后端 emptyDiagnosis 透出）。
+//   null = 无诊断。字段名必须与后端逐字对齐：kpNames / hints / switchGrades[{grade,count}]。
+const previewDiag = ref(null)
+
+/** 诊断条上的「切到初二」按钮：换年级后重跑预览。
+ *  ⛔ 不要在这里手动调 loadChapterTree / 拉学生 —— grade 已有 watch 自动重拉章节目录，
+ *    学生选项是 computed 按 grade 过滤 students 全量列表。重复调用只会多打两次请求。*/
+async function switchToGrade(grade) {
+  params.value.grade = grade
+  // 学生是多选，换年级后原来选的学生可能不属于该年级 ⇒ 清空，避免后端 studentIds 过滤后空
+  params.value.students = []
+  previewDiag.value = null
+  await runPreview()
+}
 
 const periodOptions = [
   { label: '最近 7 天', value: 'days7' },
@@ -513,18 +552,34 @@ const gradeOptions = computed(() => {
 
 onMounted(async () => {
   await Promise.all([loadChapterTree(), loadKpTree()])
-  // 从考法库「按考点进入周末班课件」跳转过来：/weekend-ppt?kpIds=<uuid>（可多个，逗号分隔）
-  const q = route.query?.kpIds
-  if (q) {
-    const ids = String(q).split(',').map(s => s.trim()).filter(Boolean)
-    if (ids.length) params.value.kpIds = ids
-  }
+  applyKpIdsFromQuery()
   try {
     const res = await apiRequest('/students')
     students.value = (res.students || []).filter(s => s.enrollment_status !== 'archived')
   } catch (e) {
     ElMessage.warning('学生列表加载失败：' + (e.message || '网络错误'))
   }
+})
+
+/**
+ * 从 URL query 读考点筛选：/weekend-ppt?kpIds=<uuid>（可多个，逗号分隔）。
+ * 考法库「按考点讲题」按钮会带这个参数跳过来。
+ *
+ * ⛔ r145 踩坑：只在 onMounted 里读是不够的 ——
+ *   hash 路由下，从考法库跳过来时如果老师**已经停在周末班页**，
+ *   组件不会重新挂载（同一路由只是 query 变了），onMounted 不再跑 ⇒ kpIds 静默失效，
+ *   老师看到的是「参数没带过来」。所以必须再 watch 一路 route.query.kpIds。
+ */
+function applyKpIdsFromQuery() {
+  const q = route.query?.kpIds
+  if (!q) return
+  const ids = String(Array.isArray(q) ? q.join(',') : q).split(',').map(s => s.trim()).filter(Boolean)
+  params.value.kpIds = ids
+}
+
+// 同一路由内 query 变化（考法库 → 周末班页）也要生效
+watch(() => route.query?.kpIds, () => {
+  applyKpIdsFromQuery()
 })
 
 // ── 题单 ──
@@ -706,6 +761,7 @@ async function runPreview() {
   previewSlow.value = false
   handout.value = null
   selected.value = new Set()
+  previewDiag.value = null
   // 聚合是全年级多学生跨时段扫描，可能较慢；8 秒后给出非阻塞提示，
   // 避免按钮一直「正在聚合错题…」却无任何反馈，让用户以为卡死。
   previewTimer = setTimeout(() => { previewSlow.value = true }, 8000)
@@ -719,7 +775,15 @@ async function runPreview() {
     // 默认全选
     selected.value = new Set(res.handout.slides.filter(s => s.kind === 'question').map(q => q.index))
   } catch (e) {
-    ElMessage.error('预览失败：' + (e.message || '网络错误'))
+    // ⛔ r145：空结果必须给可行动诊断，不能只弹一句「没有符合条件的错题」。
+    //   apiService 的 httpCore 把服务端错误体挂在 `error.payload` 上（400 也一样），
+    //   后端 buildHandout 在考点筛空时会带 emptyDiagnosis{kpNames,hints,switchGrades}。
+    const diag = e?.payload?.emptyDiagnosis || null
+    if (diag && Array.isArray(diag.hints) && diag.hints.length) {
+      previewDiag.value = diag
+    } else {
+      ElMessage.error('预览失败：' + (e.message || '网络错误'))
+    }
   } finally {
     previewing.value = false
     clearTimeout(previewTimer)
@@ -845,6 +909,37 @@ function openBoard() {
   border: 1px dashed var(--wb-border, #e2e8f0);
   border-radius: 999px;
   background: #fffbeb;
+}
+
+/*⛔ r145 空结果诊断条：不是「报错红块」，是「下一步怎么办」。
+   用琥珀色（提醒）而非红色（错误）—— 筛选条件本身没错，只是这个组合选不出题。 */
+.preview-diag {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid #fcd34d;
+  border-left: 4px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+.preview-diag-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #92400e;
+}
+.preview-diag-list {
+  margin: 8px 0 0;
+  padding-left: 22px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #78350f;
+}
+.preview-diag-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
 }
 .select-toolbar {
   display: flex;
