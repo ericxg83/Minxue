@@ -6,11 +6,12 @@
  * VITE_API_URL=/api，r95 实证）；② 验「证书噪声」（ERR_CERT_COMMON_NAME_INVALID 等）的元凶请求。
  *
  * 前置：本机后端已起；BASE 指向带 --outDir 的隔离产物预览。
- * 跑法：node scripts/gate/cert_probe.mjs [BASE]   （默认 http://127.0.0.1:5227）
+ * 跑法：node scripts/gate/cert_probe.mjs [BASE]   （默认见 base.mjs 的统一默认端口）
  */
 import { chromium } from 'playwright'
+import { gateBase } from './base.mjs'
 
-const BASE = process.argv[2] || process.env.BASE || 'http://127.0.0.1:5227'
+const BASE = gateBase()
 const ROUTES = [
   '/workbench.html#/',
   '/workbench.html#/grade',

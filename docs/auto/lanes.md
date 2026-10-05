@@ -276,4 +276,24 @@
   仍提交并推送了 `4750cfa`** ⇒ **静默 ≠ 已死**；本轮两侧文件集不相交故零碰撞、零覆盖。
   后续兜底脉冲遇静默应**先只做只读工作**，跨过至少一个完整提交间隔再落笔。
 
+**第 158 轮（2026-10-05 22:23–，每小时兜底脉冲 → 本赛道「仓库卫生与门禁基线」）已交付：闸门脚本审计目标口径统一（修一处静默假绿）**
+- 为什么落在本赛道：与 r152 同因——本赛道（`scripts/**`、lint 棘轮、门禁基线）无活跃认领会话；
+  `overflow_audit.mjs` 漏认 `process.env.BASE` 属「门禁工具自己不可信」这一类，是 r152 的同款延伸。
+- 缺陷（实测）：5 个闸门脚本里**只有 `overflow_audit` 漏了 `process.env.BASE`**。
+  `BASE=http://127.0.0.1:5999 node scripts/gate/overflow_audit.mjs` 实测仍请求 **5235**；
+  对照组 text_audit / route_sweep 同命令正确请求 5999。5235 正是历史放陈旧 preview 的端口
+  ⇒ 审计到陈旧/空页面 ⇒ 打出 `0/14 全绿`（**假绿**，比假红危险）。
+- 修：新增 `scripts/gate/base.mjs`（解析顺序 `argv[2] > env BASE > 统一默认 5227`，默认值只留一处），
+  5 个脚本改走 `gateBase()` 并在开工回显审计目标；`scripts/gate/README.md` 补「BASE 怎么给」。
+  实际行为影响为零（所有文档化跑法与本循环各轮都显式传 BASE）。
+- 锁 `test/gateBase.test.mjs` 8 条；**反向对跑实测：同一把判据套 `git show HEAD:` 的修复前 5 个文件 = 5/5 判红**，
+  并逐条点名各自硬编码的端口（5227/5234/5235）。
+- 四道闸：单测 **1825/1825**｜lint **8e/126w**（与 r152 基线一致，本轮 7 文件零输出）｜
+  `dist_nightly_20261005r158`（37.10s）｜cert_probe 零外联 + render_smoke **8/8** +
+  正向对照 route_sweep 0/16 / text_audit 0/14 / overflow_audit 0/14 全 exit 0，
+  反向对照（死端口）overflow_audit **exit 1**（自证「既会红也会绿」）。
+- ⚠️ 跨赛道发现只提不改：`scripts/dailyBackup.mjs` 无退出码 + 「备份到空库也算成功」+ 目录名 UTC 口径
+  ⇒ 已入 backlog 提案⑱，属「服务端基础设施·定时任务」赛道。
+
+
 

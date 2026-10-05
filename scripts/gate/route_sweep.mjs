@@ -1,11 +1,12 @@
 /**
  * r106 全路由深扫：移动端 + 工作台全部路由，逐路由收集
  * 控制台错误 / 页面异常 / 失败请求（4xx-5xx）。
- * 跑法：node route_sweep.mjs [BASE]  （默认 http://127.0.0.1:5234）
+ * 跑法：node route_sweep.mjs [BASE]  （默认见 base.mjs 的统一默认端口）
  */
 import { chromium } from 'playwright'
+import { gateBase } from './base.mjs'
 
-const BASE = process.argv[2] || process.env.BASE || 'http://127.0.0.1:5234'
+const BASE = gateBase()
 const ROUTES = [
   // 移动端
   ['mobile:/', '/'],

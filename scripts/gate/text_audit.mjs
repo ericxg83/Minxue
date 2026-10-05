@@ -3,11 +3,12 @@
  *   ① 用户可见文本出现开发痕迹（undefined / NaN / [object / JSON 字符串）
  *   ② 破图（img 加载失败 naturalWidth===0）
  *   ③ 空文本可点按钮
- * 跑法：node text_audit.mjs [BASE]   （默认 http://127.0.0.1:5235）
+ * 跑法：node text_audit.mjs [BASE]   （默认见 base.mjs 的统一默认端口）
  */
 import { chromium } from 'playwright'
+import { gateBase } from './base.mjs'
 
-const BASE = process.argv[2] || process.env.BASE || 'http://127.0.0.1:5235'
+const BASE = gateBase()
 const ROUTES = [
   ['mobile:/', '/'],
   ['mobile:任务', '/tasks'],

@@ -11,11 +11,12 @@
  *  - 起预览后先 `node scripts/gate/cert_probe.mjs <BASE>` 验服务对象与零外联，再跑本冒烟。
  *
  * 前置：本机后端已起（`node server/index.js` → :4000）；preview 已带 --outDir 起好。
- * 跑法：node scripts/gate/render_smoke.mjs [BASE]   （默认 http://127.0.0.1:5227）
+ * 跑法：node scripts/gate/render_smoke.mjs [BASE]   （默认见 base.mjs 的统一默认端口）
  */
 import { chromium } from 'playwright'
+import { gateBase } from './base.mjs'
 
-const BASE = process.argv[2] || process.env.BASE || 'http://127.0.0.1:5227'
+const BASE = gateBase()
 const PAGES = [
   { name: '移动端首页', url: '/', mount: '#root', expect: ['敏学', '上传', '作业', '任务'] },
   { name: '工作台首页', url: '/workbench.html#/', mount: '#workbench-app', expect: ['工作台', '批改中心', '学习诊断'] },

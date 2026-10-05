@@ -1,6 +1,9 @@
 /** r108 布局溢出审计：横向滚动 / 元素出视口。跑法：node overflow_audit.mjs [BASE] */
 import { chromium } from 'playwright'
-const BASE = process.argv[2] || 'http://127.0.0.1:5235'
+import { gateBase } from './base.mjs'
+// r158：本行原为 `process.argv[2] || 'http://127.0.0.1:5235'` —— 漏了 process.env.BASE，
+// 用 `BASE=... node overflow_audit.mjs` 跑会静默审计 5235（实测设 5999 仍请求 5235）⇒ 假绿。
+const BASE = gateBase()
 const ROUTES = [
   ['mobile:/', '/'], ['mobile:任务', '/tasks'], ['mobile:错题本', '/wrongbook'], ['mobile:组卷历史', '/exams'],
   ['wb:工作台', '/workbench.html#/'], ['wb:批改中心', '/workbench.html#/grade'],

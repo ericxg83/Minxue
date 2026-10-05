@@ -18,11 +18,22 @@ MSYS_NO_PATHCONV=1 VITE_API_URL=/api CODEBUDDY_SAFE_DELETE_ENABLED=0 \
 npx vite preview --port 5227 --strictPort --outDir dist_nightly_$(date +%Y%m%d)rNN &
 ```
 
+## 审计目标（BASE）怎么给（r158 起统一）
+
+本目录所有脚本共用 `base.mjs`，解析顺序：**`argv[2]` > 环境变量 `BASE` > 统一默认值 5227**。
+每个脚本开工会先打印一行 `[gate] 审计目标 = ...（来源：argv / env BASE / 默认值）`。
+
+⛔ 历史坑（r158 实测）：`overflow_audit.mjs` 曾漏了 `process.env.BASE`，用 `BASE=...` 跑会静默审计 5235
+⇒ 审计了另一台服务器，空页面没有溢出 ⇒ 打出 0/14 全绿（**假绿**）。
+现在默认值只留在 `base.mjs` 一处；新增闸门脚本一律 `import { gateBase } from './base.mjs'`，
+回归锁 `test/gateBase.test.mjs` 会拦住硬编码地址的写法。
+
 ## 跑法
 
 ```bash
-node scripts/gate/cert_probe.mjs http://127.0.0.1:5227   # 先跑：零外部 origin、零 requestfailed
-node scripts/gate/render_smoke.mjs http://127.0.0.1:5227 # 再跑：双端真渲染 8 项全 PASS
+BASE=http://127.0.0.1:5227 node scripts/gate/cert_probe.mjs    # 先跑：零外部 origin、零 requestfailed
+BASE=http://127.0.0.1:5227 node scripts/gate/render_smoke.mjs  # 再跑：双端真渲染 8 项全 PASS
+# 也可直接把 BASE 当参数：node scripts/gate/render_smoke.mjs http://127.0.0.1:5227
 ```
 
 - `cert_probe` 若发现 `minxue-api.onrender.com` ⇒ 产物烤入了生产 base，重建（步骤 2）。
