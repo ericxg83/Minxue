@@ -107,6 +107,70 @@ export async function matchKnowledgePoints(tags, subject = '数学') {
 }
 
 /**
+ * 拼「打标 / 知识点匹配」用的完整题干。
+ *
+ * ⛔ 必须包含 parent_stem（多小问大题的公共题干原文）—— 2026-10-05 实测事故：
+ *   题目形如「content=求3a-b+c的平方根」+「parent_stem=已知5a+2的立方根是3，3a+b-1的
+ *   算术平方根是4，c是√15的整数部分」。只看 content 的话：
+ *     - 纯文本端（本地规则 / AI）根本判不出考点 → 返回 ["未分类"] → 零关联；
+ *     - 更糟的是判错：小问「计算：1/2+1/4+…+1/32」单独看毫无方向，
+ *       父题干「找规律，完成下列各题」才点明是等比数列求和。
+ *   答案链路（worker.js:2296）与几何链路（geometryWorker.js:280）早已踩过同一个坑
+ *   并留了注释，只有打标 → 知识点关联 → 掌握度这条链路漏了。
+ *
+ * 顺序固定为 parent_stem → content → 选项，缺项跳过（filter(Boolean)），
+ * 与答案链路的输入口径（[parent_stem, content].join('\n')）保持一致。
+ *
+ * 导出原因：这是纯函数，可被 test/ 直接 import 做回归锁，不依赖数据库。
+ *
+ * @param {Object} p
+ * @param {string|null} p.parentStem 公共题干
+ * @param {string|null} p.content    本小问题干
+ * @param {string[]|null} p.options  选项
+ * @returns {string}
+ */
+export function buildTaggingInput({ parentStem = null, content = null, options = null } = {}) {
+  const parts = []
+  if (parentStem && String(parentStem).trim()) parts.push(String(parentStem).trim())
+  if (content && String(content).trim()) parts.push(String(content).trim())
+  if (Array.isArray(options) && options.length > 0) {
+    const opts = options.map(o => (o == null ? '' : String(o).trim())).filter(Boolean)
+    if (opts.length) parts.push(`选项：${opts.join('；')}`)
+  }
+  return parts.join('\n')
+}
+
+/**
+ * 把 questions.ai_tags（**text 列**，不是 jsonb）归一成字符串数组。
+ *
+ * ⛔ 这不是可选的健壮性，是2026-10-05 实测发现的生产缺陷：
+ *   `questions.ai_tags` 列类型是 text，SELECT 出来是字符串
+ *   `'["抛物线方程", "抛物线上的点坐标"]'`。
+ *   而 normalizeQuestionTags 原来只做 `Array.isArray(aiTags) ? ... : []`
+ *   ⇒ **库里有 3011 道题的标签，一道都没被用上**，静默全部回落本地规则。
+ *   症状：改了知识树/加了 AI 打标却看不到任何关联变化，排查极难。
+ *
+ * 兼容三种形态：真数组 / JSON 字符串 / 老式逗号分隔串（"根式化简, 实数"）。
+ * ⚠️ 解析失败一律返回空数组（调用方回落本地规则），绝不抛错。
+ */
+export function coerceAiTags(raw) {
+  if (Array.isArray(raw)) return raw.map(t => String(t == null ? '' : t).trim()).filter(Boolean)
+  if (typeof raw !== 'string') return []
+  const s = raw.trim()
+  if (!s || s === '[]' || s === 'null' || s === 'undefined') return []
+  if (s.startsWith('[')) {
+    try {
+      const arr = JSON.parse(s)
+      return Array.isArray(arr) ? arr.map(t => String(t == null ? '' : t).trim()).filter(Boolean) : []
+    } catch { return [] }
+  }
+  // JSON 对象串（{"tags":[...]}）不是标签数组，落到下面的逗号切分会被切碎成垃圾标签。
+  if (s.startsWith('{')) return []
+  // 老式逗号/顿号/分号分隔
+  return s.split(/[,，;；、]/).map(t => t.trim()).filter(Boolean)
+}
+
+/**
  * 题目 → 归一化知识点列表（knowledgeService 核心入口）。
  *
  * 策略：
@@ -115,23 +179,26 @@ export async function matchKnowledgePoints(tags, subject = '数学') {
  *   3. 匹配知识树节点；按 score 排序，首节点 role=primary，其余 secondary
  *   4. subject 缺省时用 '数学'（当前知识树只播种了数学）
  *
+ * ⚠️ parentStem 必须由调用方传入（多小问大题的公共题干，见 buildTaggingInput 注释）。
+ *   漏传不会报错、只会静默判错考点 —— 存量未重算前，历史关联可能仍是旧口径。
+ * ⚠️ aiTags 允许传 text 列读出来的字符串，coerceAiTags 会解析（见其注释的生产缺陷说明）。
+ *
  * @param {Object} params
  * @param {string} params.content 题干
  * @param {string|null} params.subject 学科
  * @param {string[]|null} params.options 选项
- * @param {string[]|null} params.aiTags AI/本地标签
+ * @param {string[]|string|null} params.aiTags AI/本地标签（数组或 text 列字符串）
+ * @param {string|null} [params.parentStem] 多小问大题的公共题干
  * @returns {Promise<{subject, tagSource, kps: Array<{kp_id, name, level, role, weight, score}>}>}
  */
-export async function normalizeQuestionTags({ content, subject = null, options = null, aiTags = null } = {}) {
+export async function normalizeQuestionTags({ content, subject = null, options = null, aiTags = null, parentStem = null } = {}) {
   const resolvedSubject = subject && String(subject).trim() ? String(subject).trim() : '数学'
 
-  let tags = Array.isArray(aiTags) ? aiTags.filter(t => t && t !== '未分类') : []
+  let tags = coerceAiTags(aiTags).filter(t => t !== '未分类')
   let tagSource = 'ai'
 
   if (tags.length === 0) {
-    const fullContent = Array.isArray(options) && options.length > 0
-      ? `${content || ''}\n选项：${options.join('；')}`
-      : (content || '')
+    const fullContent = buildTaggingInput({ parentStem, content, options })
     // 英语走英语分析器（题型识别 + 细粒度语法点匹配）
     const local = resolvedSubject === '英语'
       ? classifyEnglishLocally(fullContent, '英语', options)

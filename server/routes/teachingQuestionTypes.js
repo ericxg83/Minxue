@@ -156,6 +156,121 @@ router.post('/:id/ignore', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 
+// ⛔ 共现（co-occurrence）只读侧现算，**不落库**。
+//   理由：落库就是第二份真相 —— 知识树一改、共现边就整体过期，且没有任何机制会提醒你。
+//   现状实测规模：全量 1553 边 / 294 节点（平均度 21.9），单次查询毫秒级，无需缓存。
+//   口径：**同题共现** —— 一道题同时挂上 kpA 与 kpB，则 (A,B) 记 1 次共现。
+//   不用「错题共现」是因为它受时间窗影响、每次结果都变，无法作为稳定的导航依据。
+//   节点权重 = 该考点自己挂了多少题（共现图里用它决定点的大小）。
+// ⛔ 写这段 SQL 时踩过的三个坑，改之前先读：
+//   ① 端点方向判据必须用 scope 比对（lo 是否在 scope 内），不能写成
+//      CASE WHEN <JOIN 进来的表>.id IS NOT NULL —— INNER JOIN 下恒为真，
+//      peer 就永远取 hi 端，uuid 比中心小的邻居会被误判成"自己"再被过滤掉
+//      （2026-10-05 实测：4 个大考点全部只返回 1-2 个节点而非 8 个）。
+//   ② 去重靠 pair 里的 b.kp_id > a.kp_id（每对只出现一次，天然无向），
+//      不要用 LEAST/GREATEST 二次去重 —— 那样要 SUM 合并，容易写错方向。
+//   ③ SQL 字符串内部只能用 -- 行注释，不能出现 //（Postgres 语法错误 42601），
+//      也不能出现反引号（会提前闭合 JS 模板字符串）。长注释请写在这一段外面。
+export async function getKpCooccurrence(kpId, limit = 8) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 8, 1), 20)
+  const { rows } = await query(
+    `WITH RECURSIVE scope AS (
+       SELECT id FROM knowledge_points WHERE id = $1::uuid
+       UNION ALL
+       SELECT k.id FROM knowledge_points k JOIN scope s ON k.parent_id = s.id
+     ),
+     pair AS (
+       SELECT a.kp_id AS lo, b.kp_id AS hi
+       FROM question_knowledge a
+       JOIN question_knowledge b ON b.question_id = a.question_id AND b.kp_id > a.kp_id
+     ),
+     edge AS (
+       SELECT lo, hi, COUNT(*)::int AS w FROM pair GROUP BY lo, hi
+     )
+     SELECT CASE WHEN e.lo IN (SELECT id FROM scope) THEN e.hi ELSE e.lo END AS kp_id,
+            kp.name, kp.level,
+            e.w AS cooccur,
+            COALESCE(ow.n, 0) AS own_count,
+            (e.lo IN (SELECT id FROM scope) AND e.hi IN (SELECT id FROM scope)) AS in_scope
+     FROM edge e
+     JOIN knowledge_points kp
+       ON kp.id = CASE WHEN e.lo IN (SELECT id FROM scope) THEN e.hi ELSE e.lo END
+     LEFT JOIN (SELECT kp_id, COUNT(*)::int AS n FROM question_knowledge GROUP BY kp_id) ow
+       ON ow.kp_id = kp.id
+     WHERE kp.subject = $2
+       AND kp.id <> $1::uuid
+       AND (e.lo IN (SELECT id FROM scope) OR e.hi IN (SELECT id FROM scope))
+     ORDER BY e.w DESC, own_count DESC
+     LIMIT $3::int`,
+    [kpId, subject, safeLimit])
+  return rows
+}
+
+// 折叠成图结构：nodes + links。
+// 同一个 peer 可能被 scope 内的多个节点连到（peer_count>1），此时合并成一条边、权重取和。
+// ⛔ 不落库（见 getKpCooccurrence 注释），但导出以便纯函数单测。
+// @param {string} centerId 选中的考点
+// @param {object|null} self 该考点的自身行（getKpCooccurrence 的结果里不含自己）
+// @param {Array} rows 共现邻居行
+export function buildCooccurGraph(centerId, self, rows) {
+  const peerMap = new Map()
+  for (const r of rows) {
+    const cur = peerMap.get(r.kp_id)
+    if (cur) { cur.cooccur += r.cooccur; cur.peer_count += 1; continue }
+    peerMap.set(r.kp_id, {
+      id: r.kp_id, name: r.name, level: r.level,
+      cooccur: r.cooccur, own_count: r.own_count || 0,
+      in_scope: !!r.in_scope, peer_count: 1,
+    })
+  }
+  const peers = [...peerMap.values()].sort((a, b) => b.cooccur - a.cooccur || b.own_count - a.own_count)
+  const nodes = [
+    ...(self ? [{ id: self.id, name: self.name, level: self.level, own_count: self.own_count || 0, is_center: true, peer_count: 0, in_scope: true }] : []),
+    ...peers.map(p => ({ ...p, is_center: false })),
+  ]
+  const links = peers.map(p => ({ source: centerId, target: p.id, value: p.cooccur }))
+  return { nodes, links }
+}
+
+/**
+ * GET /api/teaching-question-types/kp-cooccur?kpId=xxx&limit=8
+ * 「聚焦网状图」的数据源：选中考点 → 它自己 + 共现最强的 N 个邻居。
+ *
+ * 为什么是「聚焦」而不是全网：
+ *   全量共现有 1553 边 / 294 节点，摊开就是毛线球，找不到任何东西。
+ *   聚焦成 1 + 8 = 9 个节点后，每一条边都回答得了「我为什么该连它」。
+ */
+router.get('/kp-cooccur', async (req, res) => {
+  try {
+    const kpId = String(req.query.kpId || '')
+    if (!kpId) return res.status(400).json({ success: false, error: '缺少 kpId' })
+    const limit = Math.min(Math.max(Number(req.query.limit) || 8, 1), 20)
+    const [selfRows, rows] = await Promise.all([
+      query(`SELECT id, name, level FROM knowledge_points WHERE id = $1::uuid`, [kpId]),
+      getKpCooccurrence(kpId, limit),
+    ])
+    const self = selfRows.rows[0] || null
+    // 自己挂了多少题（决定中心点大小）
+    let ownCount = 0
+    if (self) {
+      const { rows: ownRows } = await query(
+        `SELECT count(*)::int AS n FROM question_knowledge WHERE kp_id = $1::uuid`, [kpId])
+      ownCount = ownRows[0]?.n || 0
+    }
+    res.json({
+      success: true,
+      kp: self ? { ...self, own_count: ownCount } : null,
+      // ⚠️ 必须把 own_count 一并喂给图：前端按 `is_center ? (own_count||1)` 算中心点半径，
+      //   只放在 kp 里的话图里的中心点 own_count 恒为 0 ⇒ 半径退化成 1，中心点几乎看不见。
+      //   （2026-10-05 r144 端到端复核时发现，纯函数测试没覆盖到，因为测试传入的 self 自带该字段。）
+      graph: buildCooccurGraph(kpId, self ? { ...self, own_count: ownCount } : null, rows),
+      note: '共现 = 同题共现（一道题同时挂两个考点记 1 次）。不落库、只现算：落库就成了第二份真相，树一改就过期。',
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
 /**
  * GET /api/teaching-question-types/kp-questions?kpId=xxx&includeChildren=1&onlyWrong=0&days=0&limit=60
  * 「按考点拉题」——考法库的核心出口：选中一个知识点（考点），把它下面挂的题目全拉出来，

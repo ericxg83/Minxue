@@ -30,6 +30,9 @@ import { judgeAnswer, normalizeQuestionType, extractChoiceLetters, isGradingComm
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
 import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, mergeCrossPageContinuation, buildCrossPageHint } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
+// buildTaggingInput：打标输入口径的唯一实现（parent_stem + content + 选项）。
+// 2026-10-05 抽出，因「小问只看 content」导致 681 道多小问大题的知识点关联判错。
+import { buildTaggingInput } from './services/knowledgeService.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
@@ -1622,27 +1625,183 @@ const recognizeQuestionsHybrid = async (imageBase64, taskId) => {
   return recognizeQuestions(imageBase64, taskId, 0, null, { prefetchedContent: mergedContent })
 }
 
-// 标签生成已改为本地规则分类（零 LLM / 零 API），治理 429 限流。
+// ============================================================
+// 标签生成（2026-10-05 恢复 AI 打标）
+//
+// 历史：曾因 429 限流整体降级为纯本地规则（classifyQuestionLocally，零 LLM）。
+//   实测本地 1.36 标签/题 vs AI 2.98，重合仅 5%，90.5% 的题本地给不出 AI 级标签
+//   ——「治理 429」的正解是锁一个免费文本模型 + 不走视觉降级链，而不是关掉 AI。
+//
+// 现状：AI 打标已恢复，BigModel 为主（免费，实测 ~2s/条）、Bailian 为备（付费 ~6s/条）。
+//   两家都是**纯文本**模型 —— 打标只需要题干文字（buildTaggingPrompt），
+//   ⛔ 视觉模型在这里无用且慢 10 倍+，严禁接进本链路（铁律：打标是纯文本任务）。
+//
+// 三条硬约束（改动前必读）：
+//   ① 输入必须含 parent_stem（多小问大题的公共题干）—— 只喂小问会判错，
+//      小问「求3a-b+c的平方根」+ 父题干「已知5a+2的立方根是3…」是完全不同的考点。
+//   ② 任何失败/脏输出必须回落 classifyQuestionLocally，**绝不阻塞批改主流程**
+//      （标签是增值数据，题都判错了还要打什么标）。
+//   ③ maxTokens 必须 800：300 会把 {"tags":[...6 个]} 截断成非法 JSON。
+// ============================================================
+
+/** 是否启用 AI 打标。关掉即回到纯本地规则（应急开关，默认开）。 */
+export const AI_TAGGING_ENABLED = process.env.AI_TAGGING_ENABLED !== '0'
+
+/** AI 打标厂商链：BigModel 免费主 → Bailian 付费备。禁加视觉/付费降级链（429 治理）。 */
+const AI_TAGGING_VENDOR_CHAIN = ['BigModel', 'Bailian']
+
+// 超时说明：单次调用超时由 config/ai.js 的 AI_CONFIG.TIMEOUT 统一控制
+//（callTextCompletion 未暴露单次 timeout 参数，此处不宜自造一个不生效的配置）。
+// 打标失败是"降级到本地规则"而非"报错"，所以超时多长都不影响批改正确性。
+
+/**
+ * 清洗 AI 返回的标签。
+ * 拦的脏输出（对应铁律 41b「待人工补充」= AI 自述不会）：
+ *   非数组 / 全空 / 「未分类」/ 「无法判断」/ 「待人工补充」/ 含换行的长句。
+ * @returns {string[]|null} null 表示不可用，调用方应回落本地规则
+ */
+export function sanitizeAiTags(raw, difficulty) {
+  if (!Array.isArray(raw)) return null
+  const BLACKLIST = new Set(['未分类', '无法判断', '无法确定', '待人工补充', '未知', '无', 'none', 'null', 'n/a'])
+  const cleaned = raw
+    .map(t => String(t == null ? '' : t).trim())
+    .filter(t => {
+      if (!t) return false
+      if (BLACKLIST.has(t.toLowerCase())) return false
+      if (t.length > 20) return false           // 长句 = 模型在解释，不是标签
+      if (/[\n\r]/.test(t)) return false
+      return true
+    })
+  if (cleaned.length === 0) return null
+  const d = Number(difficulty)
+  return {
+    tags: deduplicateTags(cleaned),
+    difficulty: Number.isInteger(d) && d >= 1 && d <= 5 ? d : 3,
+  }
+}
+
+/**
+ * 解析打标模型的文本输出 → {tags, difficulty}。
+ * 容错：容忍 ```json 包裹、容忍前后废话（取第一个 {…} 平衡块）。
+ * @returns {{tags: string[], difficulty: number}|null}
+ */
+export function parseTaggingResponse(text) {
+  if (typeof text !== 'string' || !text.trim()) return null
+  let raw = text.trim()
+  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fence) raw = fence[1].trim()
+  // 剥前后可能存在的解释性文字，只取第一个平衡的 {...}
+  const start = raw.indexOf('{')
+  if (start === -1) return null
+  let depth = 0, inStr = false, esc = false, end = -1
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i]
+    if (esc) { esc = false; continue }
+    if (ch === '\\') { esc = true; continue }
+    if (ch === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (ch === '{') depth++
+    else if (ch === '}') { depth--; if (depth === 0) { end = i; break } }
+  }
+  if (end === -1) return null
+  let obj
+  try { obj = JSON.parse(raw.slice(start, end + 1)) } catch { return null }
+  if (!obj || typeof obj !== 'object') return null
+  return sanitizeAiTags(obj.tags, obj.difficulty)
+}
+
+/**
+ * 单条 AI 打标。**任何异常都吞掉并返回 null**，绝不抛出 ——
+ * 调用方必须在此基础上回落 classifyQuestionLocally（铁律 11：核心写入不静默失败）。
+ * @returns {Promise<{tags: string[], difficulty: number}|null>}
+ */
+async function tagOneByAi(fullContent, subject) {
+  const { buildTaggingPrompt, callTextCompletion } = await import('./config/ai.js')
+  const systemContent = buildTaggingPrompt(subject)
+  for (const vendor of AI_TAGGING_VENDOR_CHAIN) {
+    try {
+      const res = await callTextCompletion({
+        systemContent,
+        userContent: fullContent,
+        temperature: 0.2,
+        maxTokens: 800,          // ⛔ 300 会截断 JSON（实测 tags 被切在数组中间）
+        model: undefined,        // 用厂商自己的 textModel
+        preferredVendor: vendor, // 直连指定厂商，绕开降级链（治理 429 的关键）
+      })
+      if (!res || !res.content) continue
+      const parsed = parseTaggingResponse(res.content)
+      if (parsed) return parsed
+    } catch (e) {
+      console.warn(`   ⚠️ [打标] ${vendor} 失败: ${String(e.message || e).slice(0, 80)}`)
+    }
+  }
+  return null
+}
+
 // 保留导出签名兼容旧调用方；难度统一 3，留待每日回填任务用 LLM 修正。
 export const generateTagsForQuestion = async (questionContent, subject = null) => {
   if (!questionContent || !questionContent.trim()) {
     return { success: true, tags: ['未分类'], difficulty: null }
   }
+  if (AI_TAGGING_ENABLED) {
+    const ai = await tagOneByAi(questionContent, subject)
+    if (ai) return { success: true, tags: ai.tags, difficulty: ai.difficulty, source: 'ai' }
+  }
   const { tags, difficulty } = classifyQuestionLocally(questionContent, subject)
-  return { success: true, tags: deduplicateTags(tags), difficulty }
+  return { success: true, tags: deduplicateTags(tags), difficulty, source: 'local' }
 }
 
 const generateTagsForQuestions = async (questions) => {
   if (!questions || questions.length === 0) return []
 
-  // 纯本地计算，无需 batch / 并发 / 网络
-  return questions.map((q) => {
-    const content = q.content || ''
-    const options = (q.options || []).join('；')
-    const fullContent = options ? `${content}\n选项：${options}` : content
-    const { tags, difficulty } = classifyQuestionLocally(fullContent, q.subject)
-    return { questionId: q.id, tags: deduplicateTags(tags), difficulty }
+  // ⛔ 输入口径必须是 parent_stem + content + 选项（knowledgeService.buildTaggingInput
+  //   是同一口径的唯一实现，改这里必须同步改那里）。
+  const buildInput = (q) => buildTaggingInput({
+    parentStem: q.parent_stem,
+    content: q.content,
+    options: q.options,
   })
+
+  if (!AI_TAGGING_ENABLED) {
+    // 纯本地计算，无需 batch / 并发 / 网络
+    return questions.map((q) => {
+      const { tags, difficulty } = classifyQuestionLocally(buildInput(q), q.subject)
+      return { questionId: q.id, tags: deduplicateTags(tags), difficulty, source: 'local' }
+    })
+  }
+
+  // AI 打标：并发 4（BigModel 免费额度并发友好，再高会 429），逐条独立失败即回落本地。
+  const CONCURRENCY = 4
+  const results = new Array(questions.length)
+  let aiOk = 0
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < questions.length) {
+      const i = cursor++
+      const q = questions[i]
+      const fullContent = buildInput(q)
+      let tags = null
+      let difficulty = 3
+      let source = 'local'
+      if (fullContent && fullContent.trim()) {
+        const ai = await tagOneByAi(fullContent, q.subject)
+        if (ai) { tags = ai.tags; difficulty = ai.difficulty; source = 'ai'; aiOk++ }
+      }
+      if (!tags) {
+        // 回落本地规则（绝不因为打标失败让整道题没有标签）
+        const local = classifyQuestionLocally(fullContent, q.subject)
+        tags = deduplicateTags(local.tags)
+        difficulty = local.difficulty
+        source = 'local'
+      }
+      results[i] = { questionId: q.id, tags, difficulty, source }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, questions.length) }, worker))
+  console.log(`   🏷 [打标] AI 成功 ${aiOk}/${questions.length}（其余回落本地规则）`)
+  return results
 }
 
 /**
@@ -7952,21 +8111,24 @@ await job.updateProgress(80)
       await job.updateProgress(85)
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 85 })
 
-      console.log(`📊 [Step 8/8] 生成本地标签...`)
+      console.log(`📊 [Step 8/8] 生成知识点标签...`)
       const tagResults = await generateTagsForQuestions(questions)
       const tagMap = {}
       const difficultyMap = {}
+      const tagSourceMap = {}
       for (const tr of tagResults) {
         tagMap[tr.questionId] = tr.tags
         difficultyMap[tr.questionId] = tr.difficulty
+        tagSourceMap[tr.questionId] = tr.source || 'local'
       }
 
       for (const q of questions) {
         const tags = tagMap[q.id]
-        // 本地规则分类必得标签（至少 ['未分类']）→ 标记来源为 local。
-        // 难度统一为默认值（3），留待每日回填任务用 LLM 修正。
+        // 本地规则分类必得标签（至少 ['未分类']）→ 来源按实际执行路径如实记 ai/local。
+        // ⛔ 别再无条件写 'local'：AI 打标已恢复（2026-10-05），写死 local 会让
+        //   「哪些题是 AI 标的」无法回溯，也会掩盖 AI 链路静默全失败。
         q.ai_tags = tags && tags.length > 0 ? tags : ['未分类']
-        q.tags_source = 'local'
+        q.tags_source = tagSourceMap[q.id] || 'local'
         q.difficulty = difficultyMap[q.id] ?? 3
       }
 
@@ -7976,7 +8138,8 @@ await job.updateProgress(80)
         difficulty: q.difficulty
       }))
       await batchUpdateQuestionTags(tagUpdates)
-      console.log(`✅ [Step 8/8] 本地标签保存成功`)
+      const aiCount = Object.values(tagSourceMap).filter(s => s === 'ai').length
+      console.log(`✅ [Step 8/8] 标签保存成功（AI ${aiCount} / 本地回落 ${questions.length - aiCount}）`)
 
       await job.updateProgress(87).catch(() => {})
       await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 87 }).catch(() => {})

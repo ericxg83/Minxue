@@ -188,7 +188,13 @@ export async function syncQuestionsKnowledgeAndMastery({ studentId, questions })
         content: q.content,
         subject: q.subject,
         options: q.options,
+        // ai_tags 是 text 列，读出来是字符串；normalizeQuestionTags 内部的
+        // coerceAiTags 会解析（见其注释）。**不要在这里自己 Array.isArray 判断** ——
+        // 2026-10-05 实测那个判断让全库 3011 道题的标签一道都没被用上。
         aiTags: q.ai_tags,
+        // ⚠️ 2026-10-05：多小问大题的公共条件只存在于 parent_stem，不传会让
+        //   小问的知识点关联判错（详见 knowledgeService.buildTaggingInput 注释）。
+        parentStem: q.parent_stem,
       })
       if (normalized.kps && normalized.kps.length > 0) {
         entries.push({ questionId: q.id, kps: normalized.kps })
@@ -250,7 +256,7 @@ export async function syncReviewResultsMastery({ studentId, results }) {
   let rows = []
   try {
     const { rows: qRows } = await query(
-      `SELECT id, content, subject, options, ai_tags, is_correct, answer_source
+      `SELECT id, content, subject, options, ai_tags, is_correct, answer_source, parent_stem
        FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
       [ids]
     )
