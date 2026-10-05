@@ -81,6 +81,26 @@ export function toLocalYmd(date) {
 }
 
 /**
+ * 「N 天前的本地日历日」（YYYY-MM-DD），供统计类接口的默认窗口起点使用。
+ *
+ * ⛔ 不要用 `new Date(Date.now() - days*86400000).toISOString().slice(0,10)`：
+ *    toISOString 印的是 UTC 日。生产容器在 UTC+8，本地 00:00~08:00 之间算出来的
+ *    窗口起点会退到**前一天**——r148/r151/r155 连续清过三轮时区类漏网
+ *    （weeklyReport / teaching / wrongRetryPdf），这是 r157 清掉的最后一处：
+ *    `server/index.js` 的误判统计接口默认 since。
+ *    该接口虽只影响管理员统计（影响 ≤1 天），但同一类错误每轮都要重新认一遍，
+ *    故收敛成一个纯函数，锁 test/adminStatsSince.test.mjs 盯死它。
+ *
+ * @param {number} days - 往前推多少天
+ * @param {Date|number} [now] - 当前时刻，便于注入做确定性断言
+ * @returns {string} YYYY-MM-DD（上海时区）
+ */
+export function localDaysAgoYmd(days, now = new Date()) {
+  const at = now instanceof Date ? now.getTime() : Number(now)
+  return toLocalYmd(new Date(at - days * 86400000))
+}
+
+/**
  * ISO 周数（周一为一周起始）
  */
 export function getIsoWeek(date) {

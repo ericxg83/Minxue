@@ -10,6 +10,8 @@ import {
   IN_FLIGHT_JOB_STATES,
   collectInFlightTaskIds,
 } from './pendingTaskRecovery.js'
+// 默认统计窗口起点必须按「本地日历日」算，⛔ 不许 toISOString（UTC 日）——见 localDaysAgoYmd 注释
+import { localDaysAgoYmd } from './utils/period.js'
 import { runMigrations } from './migrations/migrationLedger.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
@@ -4459,7 +4461,8 @@ app.get('/api/admin/backfill-tags/progress', (req, res) => {
 // 让产品/算法能看出"AI 误判主要发生在哪类题型"以指导后续 prompt/规则调优。
 app.get('/api/admin/judgements/misjudge-stats', async (req, res) => {
   try {
-    const since = req.query.since || new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 10)
+    // r157：默认 30 天窗口起点按本地日历日（上海），不再用 UTC 日印成前一天
+    const since = req.query.since || localDaysAgoYmd(30)
     const { rows: byType } = await query(
       `SELECT
          COALESCE(metadata->>'misjudgeType', 'unset') AS misjudge_type,
