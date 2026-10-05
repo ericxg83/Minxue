@@ -2066,3 +2066,5 @@ npm test 1760/1760｜lint 8e/141w｜构建 r137｜route_sweep 0/16 + render_smok
 
 npm test 1626/1626｜lint 9e/155w｜构建 r124｜route_sweep 0/16 + render_smoke 8/8 +
 _r91_smoke 33/33（首轮撞后端死亡窗口，守护自愈后重跑全绿）。
+
+> 更正：上一条记录误标「第 124 轮」，实为**第 138 轮**（1760/1760，后端死亡窗口守护自愈后重跑全绿）。
