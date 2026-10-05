@@ -61,6 +61,7 @@ import { migrateQuestionParentStem } from './migrations/057_add_question_parent_
 import { migrateWrongQuestionsLastWrongTaskId } from './migrations/058_add_wrong_questions_last_wrong_task_id.js'
 import { migrateWrongQuestionsIdentitySplit } from './migrations/059_wrongbook_identity_split.js'
 import { migrateTeachingMarks } from './migrations/060_teaching_marks.js'
+import { migrateKaofaMultiKp } from './migrations/061_kaofa_multi_kp.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -4739,7 +4740,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateQuestionParentStem', migrateQuestionParentStem],
         ['migrateWrongQuestionsLastWrongTaskId', migrateWrongQuestionsLastWrongTaskId],
         ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit],
-        ['migrateTeachingMarks', migrateTeachingMarks]
+        ['migrateTeachingMarks', migrateTeachingMarks],
+        ['migrateKaofaMultiKp', migrateKaofaMultiKp]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

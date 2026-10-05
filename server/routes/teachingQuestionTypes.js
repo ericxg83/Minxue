@@ -1,27 +1,33 @@
 import { Router } from 'express'
 import { query } from '../config/neon.js'
+// r145：只 import 路由真正用到的三个。取数/解析都封在 induceMethodsForKp 内部，
+// 路由层不直接调 parseMethodResponse，避免同一套质量闸出现第二个调用点走偏。
+import { induceMethodsForKp, fetchCandidateKps } from '../services/kaofaInduction.js'
 
 const router = Router()
 const DEFAULT_USER = 'default-user'
 const userOrDefault = (req) => (req.query.userId || req.body?.userId || req.headers['x-user-id'] || DEFAULT_USER).toString().trim()
 const subject = '数学'
-const DEFAULT_DAYS = 14
 
 function normalizeTags(value) {
   return Array.isArray(value) ? [...new Set(value.map(item => String(item).trim()).filter(Boolean))].slice(0, 12) : []
 }
 
-function autoName(knowledgeName, questionType) {
-  const label = { choice: '选择题方法辨析', fill: '填空题关键结论', judge: '判断题条件辨析', answer: '综合解答与建模' }[questionType] || questionType || '综合题'
-  return `${knowledgeName} · ${label}`
-}
+// ⛔ autoName 已于 r145 删除。
+//   它是 r144 存量 67 条 draft 机械拼接的罪魁祸首：
+//     `${knowledgeName} · ${label}`，label ∈ {选择题方法辨析, 填空题关键结论, 判断题条件辨析, 综合解答与建模}
+//   ——「考点 × 题型形式」，**0 条考法信息**（题型形式是 questions.question_type 的值，
+//   主管三次澄清：「老师嘴里的题型 = 考法 = 这道题在考哪套动作」，不是形式）。
+//   替代路径 = services/kaofaInduction.js 的 AI 归纳（按考点分批，动作导向命名 + 多对多考点关联）。
+//   ⛔ 别把它"恢复"回来。历史 draft 仍在库里（status='draft'，等老师确认或忽略）。
 
-function autoTeachingNotes(knowledgeName, errorReason) {
-  const reason = errorReason ? `重点回应学生常见问题：${errorReason}。` : '先让学生说出已知条件和目标，再通过一题示范完整推理链。'
-  return `先回顾「${knowledgeName}」的核心条件与方法，再用代表题带学生拆解：识别条件 → 选择方法 → 写出关键步骤 → 回代或检验。${reason}`
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isUuid = (v) => UUID_RE.test(String(v == null ? '' : v).trim())
 
 async function getTypeDetail(id, userId) {
+  // r145：脏 id（空/非 UUID）会让 Postgres 抛 22P02 invalid input syntax → 500。
+  // 「不存在」和「压根不是 id」对老师是同一件事，都该 404，不要泄漏数据库错误。
+  if (!isUuid(id)) return null
   const { rows } = await query(
     `SELECT t.*, kp.name AS knowledge_name,
       COALESCE(jsonb_agg(jsonb_build_object(
@@ -33,56 +39,26 @@ async function getTypeDetail(id, userId) {
      LEFT JOIN teaching_question_type_examples e ON e.type_id = t.id
      WHERE t.id = $1 AND t.user_id = $2
      GROUP BY t.id, kp.name`, [id, userId])
-  return rows[0] || null
+  const type = rows[0] || null
+  if (!type) return null
+  // r145：挂上多对多考点（考法天然跨知识点，见 services/kaofaInduction.js 文件头）
+  const { rows: kps } = await query(
+    `SELECT k.id, kp.name, kp.level, k.role, k.question_count
+       FROM teaching_question_type_kps k
+       JOIN knowledge_points kp ON kp.id = k.kp_id
+      WHERE k.type_id = $1
+      ORDER BY CASE k.role WHEN 'primary' THEN 0 ELSE 1 END, k.question_count DESC, kp.sort_order`, [id])
+  type.kps = kps
+  return type
 }
 
-async function getAutoGroups(days = DEFAULT_DAYS) {
-  const { rows } = await query(
-    `SELECT kp.id AS kp_id, kp.name AS knowledge_name, q.question_type,
-      COUNT(*)::int AS wrong_count, COUNT(DISTINCT wq.student_id)::int AS student_count,
-      (array_agg(wq.id ORDER BY wq.added_at DESC))[1] AS wrong_question_id,
-      (array_agg(q.id ORDER BY wq.added_at DESC))[1] AS question_id,
-      (array_agg(COALESCE(NULLIF(wq.error_reason, ''), NULLIF(wq.error_type, '')) ORDER BY wq.added_at DESC))[1] AS error_reason,
-      (array_agg(jsonb_build_object(
-        'content', q.content, 'options', q.options, 'answer', q.answer, 'analysis', q.analysis,
-        'questionType', q.question_type, 'subject', q.subject, 'imageUrl', q.image_url,
-        'studentAnswer', wq.student_answer, 'errorReason', wq.error_reason
-      ) ORDER BY wq.added_at DESC))[1] AS snapshot
-     FROM wrong_questions wq
-     JOIN questions q ON q.id = wq.question_id AND q.is_complete = TRUE
-     JOIN question_knowledge qk ON qk.question_id = q.id AND qk.role = 'primary'
-     JOIN knowledge_points kp ON kp.id = qk.kp_id AND kp.subject = $1
-     WHERE wq.added_at >= now() - ($2::int * interval '1 day')
-     GROUP BY kp.id, kp.name, q.question_type
-     HAVING COUNT(*) >= 1
-     ORDER BY wrong_count DESC, student_count DESC
-     LIMIT 30`, [subject, days])
-  return rows.map(row => ({ ...row, name: autoName(row.knowledge_name, row.question_type) }))
-}
-
-async function createAutoType(userId, group, status = 'draft') {
-  const summary = { wrongCount: group.wrong_count, studentCount: group.student_count, days: DEFAULT_DAYS, generatedAt: new Date().toISOString() }
-  const { rows } = await query(
-    `INSERT INTO teaching_question_types (user_id, kp_id, subject, name, teaching_notes, common_mistakes, tags, status, source, auto_summary)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, 'auto', $9::jsonb)
-     ON CONFLICT (user_id, kp_id, name) DO UPDATE SET
-       auto_summary = EXCLUDED.auto_summary,
-       status = CASE WHEN teaching_question_types.status = 'archived' THEN 'draft' ELSE teaching_question_types.status END,
-       updated_at = now()
-     RETURNING id`,
-    [userId, group.kp_id, subject, group.name, autoTeachingNotes(group.knowledge_name, group.error_reason), group.error_reason || '', JSON.stringify(['自动整理', '近期错题']), status, JSON.stringify(summary)])
-  const typeId = rows[0]?.id
-  if (!typeId) {
-    const existing = await query(`SELECT id FROM teaching_question_types WHERE user_id = $1 AND kp_id = $2 AND name = $3`, [userId, group.kp_id, group.name])
-    return existing.rows[0]?.id || null
-  }
-  await query(
-    `INSERT INTO teaching_question_type_examples (type_id, source_question_id, source_wrong_question_id, snapshot, note)
-     SELECT $1, $2, $3, $4::jsonb, '系统从近期错题自动选取的代表题'
-     WHERE NOT EXISTS (SELECT 1 FROM teaching_question_type_examples WHERE type_id = $1 AND source_wrong_question_id = $3)`,
-    [typeId, group.question_id, group.wrong_question_id, JSON.stringify(group.snapshot)])
-  return typeId
-}
+// ⛔ r145：`getAutoGroups` / `createAutoType` 已删除。
+//   旧实现按 `qk.role='primary'` **单值** + `GROUP BY kp.id, kp.name, q.question_type` 分组，
+//   产出「平方根 · 填空题关键结论」这类「考点 × 题型形式」的机械拼接 —— 0 条考法信息。
+//   它还有第二个毛病：`role='primary'` 单值会把跨考点的题压进一个桶，
+//   而考法**天然跨知识点**（主管：「考法本身就是知识点网的胶水」）⇒ 网退化成树。
+//   替代：`services/kaofaInduction.js`（按考点分批 AI 归纳 + 多对多考点关联）。
+//   ⛔ 别把这段"恢复"回来。
 
 router.get('/', async (req, res) => {
   try {
@@ -94,7 +70,14 @@ router.get('/', async (req, res) => {
     const clauses = ['t.user_id = $1', 't.subject = $2', "t.status <> 'archived'"]
     if (mode === 'recommended') clauses.push("t.status = 'draft' AND t.source = 'auto'")
     if (mode === 'library') clauses.push("t.status = 'active'")
-    if (kpId) { params.push(kpId); clauses.push(`t.kp_id = $${params.length}`) }
+    // r145：按考点筛选放宽到**多对多表** —— 落点仍是 (知识点, 考法)，
+    // 但一个考法可跨多个知识点，只按 t.kp_id 过滤会漏掉「作为 secondary 关联」的考法。
+    if (kpId && isUuid(kpId)) {
+      params.push(kpId)
+      clauses.push(`(t.kp_id = $${params.length}
+        OR EXISTS (SELECT 1 FROM teaching_question_type_kps k
+                    WHERE k.type_id = t.id AND k.kp_id = $${params.length}::uuid))`)
+    }
     if (keyword) { params.push(`%${keyword}%`); clauses.push(`(t.name ILIKE $${params.length} OR t.teaching_notes ILIKE $${params.length})`) }
     const { rows } = await query(
       `SELECT t.id, t.kp_id, t.name, t.teaching_notes, t.common_mistakes, t.tags, t.status, t.source, t.auto_summary, t.updated_at,
@@ -122,18 +105,81 @@ router.get('/summary', async (req, res) => {
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 
+/**
+ * POST /api/teaching-question-types/auto-organize
+ *
+ * r145 重做：从「按 primary 考点 × 题型形式分组」改成 **AI 按考点分批归纳考法**。
+ *
+ * ⛔ 三个必须知道的参数语义：
+ *   - `apply` 默认 **false**（只预演不写库）。AI 归纳每次 27-48 秒、还要花钱，
+ *     绝不能因为手滑就写一库 draft 让人去清理。确认结果满意再带 apply=true 重跑。
+ *   - `kpIds` 不传 = 按错题量取 Top N 个候选考点逐个归纳。
+ *   - 单个考点失败**不中断整轮**（AI 调用会 429/超时），失败项进 errors 数组原样返回。
+ */
 router.post('/auto-organize', async (req, res) => {
   try {
     const userId = userOrDefault(req)
-    const days = Math.min(Math.max(Number(req.body?.days) || DEFAULT_DAYS, 7), 90)
-    const groups = await getAutoGroups(days)
-    const typeIds = []
-    for (const group of groups) {
-      const id = await createAutoType(userId, group, 'draft')
-      if (id) typeIds.push(id)
+    const apply = req.body?.apply === true
+    const days = Math.min(Math.max(Number(req.body?.days) || 90, 7), 180)
+    const maxKps = Math.min(Math.max(Number(req.body?.maxKps) || 5, 1), 20)
+    const minWrong = Math.min(Math.max(Number(req.body?.minWrong) || 6, 3), 50)
+    const kpIds = Array.isArray(req.body?.kpIds) ? req.body.kpIds.map(String).filter(Boolean).slice(0, 20) : []
+
+    let targets = []
+    if (kpIds.length) {
+      const { rows } = await query(
+        `SELECT id, name, level FROM knowledge_points WHERE id = ANY($1::uuid[]) AND subject = $2`, [kpIds, subject])
+      targets = rows.map((r) => ({ id: r.id, name: r.name }))
+    } else {
+      targets = await fetchCandidateKps({ days, limit: maxKps, minWrong })
     }
-    res.json({ success: true, generated: typeIds.length, periodDays: days, message: typeIds.length ? `已整理 ${typeIds.length} 个待确认题型` : '近期没有可自动整理的已关联错题' })
-  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+
+    if (targets.length === 0) {
+      return res.json({
+        success: true, applied: apply, targets: 0, created: 0,
+        message: `近 ${days} 天没有错题量达到 ${minWrong} 道的考点可归纳`,
+      })
+    }
+
+    const results = []
+    const errors = []
+    let created = 0
+    for (const kp of targets) {
+      try {
+        // ⛔ 参数名必须与服务签名逐字一致：本服务收的是 `dryRun`，不是 `apply`。
+        //   r145 实测踩坑：路由传 `apply`、服务收 `dryRun`（默认 true）⇒ apply=true 也**永不写库**，
+        //   但接口照样返回 `applied: true, created: 0` ⇒ 老师点「写库」静默无效果。
+        //   服务侧已加 `apply` 未知参数硬断言，这里仍要显式取反传，别依赖默认值。
+        const r = await induceMethodsForKp({ userId, kpId: kp.id, kpName: kp.name, days, dryRun: !apply })
+        created += r.saved?.length || 0
+        results.push({
+          kpId: kp.id, kpName: kp.name,
+          questionCount: r.questionCount,
+          methods: (r.methods || []).map((m) => ({ name: m.name, action: m.action, kps: m.kps, items: m.items.length, saved: (r.saved || []).some((s) => s.name === m.name) })),
+          rejected: r.rejected || [],
+          elapsedMs: r.elapsedMs, vendor: r.vendor, skipped: r.skipped, reason: r.reason,
+        })
+      } catch (e) {
+        // 单个考点失败不中断整轮：AI 会 429/超时，一个挂掉不该让老师白等剩下几个
+        errors.push({ kpId: kp.id, kpName: kp.name, error: e.message })
+      }
+    }
+
+    const rejectedTotal = results.reduce((n, r) => n + r.rejected.length, 0)
+    res.json({
+      success: true, applied: apply,
+      targets: targets.length,
+      created,
+      results,
+      errors,
+      note: apply
+        ? '已写入 draft。**老师改过的名字不会被覆盖**（ON CONFLICT 只更新统计不改名）；不认可的用「忽略」归档。'
+        : '这是预演结果，没写库。确认满意后带 apply=true 重跑。',
+      rejectedTotal,
+    })
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
 })
 
 // r137（负责人裁决）：原 POST /auto-handout（把已确认题型编排成「周末课讲义初稿」再
@@ -359,19 +405,37 @@ router.get('/kp-questions', async (req, res) => {
   }
 })
 
+/**
+ * GET /api/teaching-question-types/candidates
+ * 「哪些考点值得归纳考法」—— 按错题量排序的候选清单。
+ *
+ * ⛔ r145 重做：旧版返回 `getAutoGroups` 的「考点 × 题型形式」桶（名字是机械拼接），
+ *   而且它**不调 AI 就先占库**（`/auto-organize` 直接 createAutoType），
+ *   老师会收到一屏「平方根 · 填空题关键结论」却不知道该拿它干什么。
+ *   现在只列候选考点，归纳动作由 POST /auto-organize 显式触发（默认 apply=false 预演）。
+ */
 router.get('/candidates', async (req, res) => {
   try {
-    const userId = userOrDefault(req)
-    const groups = await getAutoGroups(DEFAULT_DAYS)
-    const types = await Promise.all(groups.map(async group => ({ ...group, existing: await query(`SELECT id FROM teaching_question_types WHERE user_id = $1 AND kp_id = $2 AND name = $3 AND status <> 'archived'`, [userId, group.kp_id, group.name]) })))
-    res.json({ success: true, candidates: types.filter(item => item.existing.rows.length === 0).map(({ existing, ...item }) => item) })
+    const days = Math.min(Math.max(Number(req.query.days) || 90, 7), 180)
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50)
+    const minWrong = Math.min(Math.max(Number(req.query.minWrong) || 6, 3), 50)
+    const candidates = await fetchCandidateKps({ days, limit, minWrong })
+    res.json({
+      success: true,
+      candidates: candidates.map((c) => ({
+        kpId: c.id, kpName: c.name, level: c.level,
+        wrongCount: c.wrong_count,
+        hint: `近 ${days} 天 ${c.wrong_count} 道错题，可归纳考法`,
+      })),
+      note: '考法 = 这道题在考哪套动作（不是题型形式）。点「自动整理」会先预演，确认后才写库。',
+    })
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 
 router.get('/:id', async (req, res) => { try { const type = await getTypeDetail(req.params.id, userOrDefault(req)); if (!type) return res.status(404).json({ success: false, error: '题型不存在' }); res.json({ success: true, type }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
 router.post('/', async (req, res) => { try { const userId = userOrDefault(req); const { kpId, name, teachingNotes = '', commonMistakes = '', tags = [], status = 'active' } = req.body || {}; if (!kpId || !String(name || '').trim()) return res.status(400).json({ success: false, error: '知识点和题型名称必填' }); const { rows } = await query(`INSERT INTO teaching_question_types (user_id, kp_id, subject, name, teaching_notes, common_mistakes, tags, status) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8) RETURNING id`, [userId, kpId, subject, String(name).trim(), String(teachingNotes), String(commonMistakes), JSON.stringify(normalizeTags(tags)), status]); res.status(201).json({ success: true, type: await getTypeDetail(rows[0].id, userId) }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
-router.put('/:id', async (req, res) => { try { const userId = userOrDefault(req); const { name, teachingNotes, commonMistakes, tags, status, kpId } = req.body || {}; const { rowCount } = await query(`UPDATE teaching_question_types SET name = COALESCE($1, name), kp_id = COALESCE($2, kp_id), teaching_notes = COALESCE($3, teaching_notes), common_mistakes = COALESCE($4, common_mistakes), tags = COALESCE($5::jsonb, tags), status = COALESCE($6, status), updated_at = now() WHERE id = $7 AND user_id = $8`, [name == null ? null : String(name).trim(), kpId || null, teachingNotes == null ? null : String(teachingNotes), commonMistakes == null ? null : String(commonMistakes), tags === undefined ? null : JSON.stringify(normalizeTags(tags)), status || null, req.params.id, userId]); if (!rowCount) return res.status(404).json({ success: false, error: '题型不存在' }); res.json({ success: true, type: await getTypeDetail(req.params.id, userId) }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
+router.put('/:id', async (req, res) => { try { const userId = userOrDefault(req); if (!isUuid(req.params.id)) return res.status(404).json({ success: false, error: '题型不存在' }); const { name, teachingNotes, commonMistakes, tags, status, kpId } = req.body || {}; const { rowCount } = await query(`UPDATE teaching_question_types SET name = COALESCE($1, name), kp_id = COALESCE($2, kp_id), teaching_notes = COALESCE($3, teaching_notes), common_mistakes = COALESCE($4, common_mistakes), tags = COALESCE($5::jsonb, tags), status = COALESCE($6, status), updated_at = now() WHERE id = $7 AND user_id = $8`, [name == null ? null : String(name).trim(), kpId || null, teachingNotes == null ? null : String(teachingNotes), commonMistakes == null ? null : String(commonMistakes), tags === undefined ? null : JSON.stringify(normalizeTags(tags)), status || null, req.params.id, userId]); if (!rowCount) return res.status(404).json({ success: false, error: '题型不存在' }); res.json({ success: true, type: await getTypeDetail(req.params.id, userId) }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
 router.post('/:id/examples', async (req, res) => { try { const userId = userOrDefault(req); const type = await getTypeDetail(req.params.id, userId); if (!type) return res.status(404).json({ success: false, error: '题型不存在' }); const { sourceQuestionId = null, sourceWrongQuestionId = null, snapshot, note = '' } = req.body || {}; if ((!sourceQuestionId && !sourceWrongQuestionId) || !snapshot) return res.status(400).json({ success: false, error: '代表题来源和快照必填' }); await query(`INSERT INTO teaching_question_type_examples (type_id, source_question_id, source_wrong_question_id, snapshot, note) VALUES ($1, $2, $3, $4::jsonb, $5)`, [req.params.id, sourceQuestionId, sourceWrongQuestionId, JSON.stringify(snapshot), String(note)]); res.status(201).json({ success: true, type: await getTypeDetail(req.params.id, userId) }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
-router.delete('/:id', async (req, res) => { try { const { rowCount } = await query(`UPDATE teaching_question_types SET status = 'archived', updated_at = now() WHERE id = $1 AND user_id = $2`, [req.params.id, userOrDefault(req)]); if (!rowCount) return res.status(404).json({ success: false, error: '题型不存在' }); res.json({ success: true }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
+router.delete('/:id', async (req, res) => { try { if (!isUuid(req.params.id)) return res.status(404).json({ success: false, error: '题型不存在' }); const { rowCount } = await query(`UPDATE teaching_question_types SET status = 'archived', updated_at = now() WHERE id = $1 AND user_id = $2`, [req.params.id, userOrDefault(req)]); if (!rowCount) return res.status(404).json({ success: false, error: '题型不存在' }); res.json({ success: true }) } catch (error) { res.status(500).json({ success: false, error: error.message }) } })
 
 export default router

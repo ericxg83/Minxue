@@ -196,7 +196,10 @@ test('index.js 的迁移清单与 import 严格对位，且不允许退回裸 aw
   const items = [...listBlock[1].matchAll(/\['([^']+)',\s*(\w+)\]/g)]
     .map(([, key, fn]) => ({ key, fn }))
 
-  assert.equal(items.length, 50, `迁移清单必须完整，实际 ${items.length} 项`)
+  // 50 → 51：r145 新增 061_kaofa_multi_kp（考法多对多承载表 teaching_question_type_kps）。
+  //   新增迁移时**必须**同步改这里，否则回归锁会误报「迁移清单不完整」，
+  //   而真实风险（键名与函数名不对位、台账被绕过）反而没人看。
+  assert.equal(items.length, 51, `迁移清单必须完整，实际 ${items.length} 项`)
 
   for (const { key, fn } of items) {
     assert.equal(key, fn, `迁移键与函数名必须一致，发现 ['${key}', ${fn}]`)
