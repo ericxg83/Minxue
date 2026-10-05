@@ -35,7 +35,7 @@ export function snapshotDirName(now = new Date()) {
  * 快照目录名 → 本地零点的时刻；不是合法目录名则返回 null。
  * 与 snapshotDirName 保持同口径（+08:00），故命名与年龄判断不会互相错位。
  */
-export function parseSnapshotDir(name, now = new Date()) {
+export function parseSnapshotDir(name) {
   if (!DIR_RE.test(name)) return null
   const [y, m, d] = name.split('-').map(Number)
   // 用本地构造（new Date(y, m-1, d)），避免按 UTC 解析又退一天
@@ -55,7 +55,7 @@ export function isSnapshotDirName(name) {
 export function planExpiredSnapshots(entries, now = new Date(), keepDays = KEEP_DAYS) {
   const expired = []
   for (const name of entries ?? []) {
-    const at = parseSnapshotDir(name, now)
+    const at = parseSnapshotDir(name)
     if (!at) continue
     const ageDays = (now.getTime() - at.getTime()) / 86400000
     if (ageDays > keepDays) expired.push(name)
