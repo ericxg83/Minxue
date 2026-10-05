@@ -260,3 +260,20 @@
 - 四道闸：单测 1788/1788｜lint 8e/142w（与基线一致）｜`dist_nightly_20261005r148`（35.27s）｜
   cert_probe 零外联 + render_smoke 8/8 + route_sweep 0/16。
 
+**第 152 轮（2026-10-05，每小时兜底脉冲 → 本赛道「仓库卫生与门禁基线」）已交付：审计/门禁脚本 fail-open ×3 + 审计工具自始崩坏 ×1**
+- 为什么落在本赛道：本赛道（`scripts/**`、lint 棘轮、门禁基线）目前**无活跃认领会话**，
+  而 r148/r151 那类「本地日期印成 UTC」缺陷已被 r151 扫清 ⇒ 按「没有可做项就换无人认领赛道」转过来。
+- 交付：`scripts/gate/{route_sweep,text_audit,overflow_audit}.mjs` 补非零退出码（旧版对死端口
+  16/16、14/14、14/14 全坏仍 **exit 0**，串进自动化即假绿）；`scripts/auditStoreContract.mjs` 修
+  **自 `a7ace3e` 首次提交起就崩**的「模板字面量吃掉正则反斜杠」bug（顺带：解构正则补回 `?`、
+  前瞻排除补 `/` 防把 import 路径 `demoStore.js` 误报成 `.js`）。
+- 锁：`test/gateExitCode.test.mjs` 4 条 + `test/auditStoreContractWorks.test.mjs` 5 条
+  （后者是行为锁，纯 fs 无浏览器，0.4s）。
+- 四道闸：单测 1802/1802｜lint 8e/**126w**（error 零新增，warning −16）｜
+  `dist_nightly_20261005r152`（与 r152b **逐文件一致**，聚合 sha256 相同）｜
+  cert_probe 零外联 + render_smoke 8/8 + 三个闸**正向对照** 0/16、0/14、0/14 全 exit 0。
+- ⚠️ 并发实记：开工时 r151 会话已静默 10 分钟（HEAD 未动、无写入、锁未更新），但它在 **19:05:08
+  仍提交并推送了 `4750cfa`** ⇒ **静默 ≠ 已死**；本轮两侧文件集不相交故零碰撞、零覆盖。
+  后续兜底脉冲遇静默应**先只做只读工作**，跨过至少一个完整提交间隔再落笔。
+
+

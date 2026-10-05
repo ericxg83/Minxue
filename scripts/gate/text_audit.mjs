@@ -67,3 +67,5 @@ for (const [name, route] of ROUTES) {
 }
 await browser.close()
 console.log(`\n════ ${dirty}/${ROUTES.length} 路由有专业度问题 ════`)
+// r152：闸门必须「有脏即非零退出」。旧版只打印计数、恒退 0 ⇒ 串进 `&&` / 自动化即假绿。
+process.exit(dirty === 0 ? 0 : 1)

@@ -57,3 +57,6 @@ for (const r of report) {
   for (const b of [...new Set(r.bad)].slice(0, 3)) console.log(`     http: ${b}`)
 }
 console.log(`\n════ ${dirty}/${report.length} 路由有异常 ════`)
+// r152：闸门必须「有脏即非零退出」。旧版只打印计数、恒退 0 ⇒ 任何人把它串进
+// `&&` / 自动化都会被假绿放过（r111 曾出现 route_sweep 4/16 仍算通过的实例）。
+process.exit(dirty === 0 ? 0 : 1)

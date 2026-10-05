@@ -2257,3 +2257,77 @@ route_sweep 0/16 + text_audit 0/14 + overflow_audit 0/14。
 
 - 第 0 步健康采样：`uptime 45min(17:39) → 53min(18:47)` 单调上升，期间无崩溃循环；响应 1090ms、接口 778ms、21 名学生可读、无失败/卡住任务；唯一黄色是「Render 后台看磁盘用量」（Read 环境无解）。
 - 构建产物比对：`r151` 与 `r149` 的 63 个 js 有 20 个不同 —— 来自他人 `262ecd5`（考法库独立关系图入口）等提交，**本轮前端零改动**。
+
+## 第 152 轮（2026-10-05 19:06–，每小时兜底脉冲）：审计/门禁脚本这一类「自己不可信」——3 个 fail-open + 1 个彻底崩掉
+
+- **开工背景**：锁为 `halted / 150`（未识别状态）。先做环境自检再动手：工作区干净、`_loop_state.json`
+  mtime 18:01、近 25 分钟无文件写入。19:06:50 写 `running / 152` 后开工。
+- ⚠️ **时序实记（本轮最重要的教训）**：r151 会话在 18:54:40 后静默了 **10 分钟**（我 18:59 探到
+  「HEAD 未动、无文件写入、锁未更新」），随后仍在 **19:05:08 提交并推送 `4750cfa`**（backlog 入库）。
+  ⇒ **静默 5–10 分钟不足以判定会话已死**（它在跑闸门/写文档）。本轮幸运在两侧文件集**完全不相交**
+  （r151 = `server/routes/teaching.js` + docs；r152 = `scripts/**` + `test/**`），零碰撞、零覆盖。
+  ⇒ **后续兜底脉冲：遇静默先只做只读工作，跨过至少一个完整提交间隔再落笔。** 锁状态不可信（r150 已记）。
+- **本轮缺陷类**：`scripts/**` 的**审计/门禁脚本自己不可信** —— 把「检出问题」算出来了，却
+  ①不设退出码（假绿）或 ②压根跑不起来（静默死掉）。两者都因「没人看退出码」而长期无人发现。
+
+### 缺陷 1（3 个脚本）：算出失败计数却恒退 0 —— fail-open
+
+实测（对死端口跑，2026-10-05）：
+
+| 脚本 | 实测输出 | 旧退出码 |
+|---|---|---|
+| `scripts/gate/route_sweep.mjs` | 16/16 路由有异常 | **0** |
+| `scripts/gate/text_audit.mjs` | 14/14 路由有专业度问题 | **0** |
+| `scripts/gate/overflow_audit.mjs` | 14/14 路由有布局问题 | **0** |
+
+同目录 `cert_probe.mjs` / `render_smoke.mjs` 早就有 `process.exit(pass === results.length ? 0 : 1)`，
+`scripts/check-skill-refs.mjs` 也有 `process.exit(errors === 0 ? 0 : 1)` —— **唯独这三个漏了**。
+后果：串进 `&&` / CI / 任何看 `$?` 的自动化，**全坏也算绿**。不是假设：backlog 记过
+`route_sweep 4/16`（学生管理/学生档案 500）真出现过，靠人肉读输出才发现。
+修：三处各补 `process.exit(dirty === 0 ? 0 : 1)`，放在 `browser.close()` 与汇总打印之后（不截断报告）。
+
+### 缺陷 2（`scripts/auditStoreContract.mjs`）：自首次提交起就崩，一条结果都出不来
+
+- 症状：`node scripts/auditStoreContract.mjs` → `SyntaxError: Invalid regular expression: /…s*useXxxStore(/g: Unterminated group`（第一个 store 就抛）。
+- 根因：三处正则写在**普通模板字面量**里，而模板字面量**吃掉反斜杠**（`\s`→`s`、`\w`→`w`、`\(`→`(`），
+  于是 `new RegExp(\`…\s*${fn}\(\`)` 生成 `…s*useXxxStore(`，括号永不闭合。
+  ⭐ **ESLint 一直在报**：该文件修复前有 **16 条 `no-useless-escape`**（「反斜杠没用」= 正是被吃掉的证据）。
+- 同一处还带出两个次生问题：解构那条正则丢了 `?`（只认 `storeToRefs` 形式，与注释写明的两种形式不符）；
+  `varName.field` 的前瞻排除漏了 `/` ⇒ `import … from '../stores/demoStore.js'` 被误报成「读未暴露字段 `.js`」（实测踩到）。
+- 修：三处改 `String.raw` + 插值转义（新增 `escapeRe`）；解构补回 `(?:storeToRefs\()?`；前瞻排除集补 `/` 与引号。
+- 该文件自 `a7ace3e`（2026-10-02）**首次提交起就是坏的**（提交信息写「首轮 0 哑弹」，实际是跑在轮内
+  另一份内联版本上，转正时把转义弄丢了）。修后实测：真实树 **0 处**（与当时结论一致）、退出码 0。
+- ⭐ **行为自证（防「静默 0 处」）**：合成最小工作台树（一个 store + 一个 view）真跑，坏样本命中
+  「读未暴露字段 .notExposed」+「解构未暴露字段 missingField」**恰好 2 处、退出码 1**，且不再误报 `.js`。
+
+### 回归锁（2 个新文件，均含反向自检）
+
+- `test/gateExitCode.test.mjs` 4 条：源码契约（退出码须由运行结果决定、不得无条件 `exit(0)`、退出须在打印之后）；
+  反向自检套 `git HEAD` 真实旧版 **4/4 判红**、当前树 4/4 判绿，另有「不得误伤正确写法」防永远判红。
+- `test/auditStoreContractWorks.test.mjs` 5 条：**行为锁**（真跑脚本 + 合成坏样本，纯 fs、无浏览器、0.4s）
+  + 两条纯逻辑反向自检（旧写法必抛 `Unterminated group`；宽松前瞻必误报）。
+- ⛔ 为什么行为验证没进常驻套件：真 Chromium 对死端口实测**单脚本 34.7s**（16 路由 × ~2.2s），
+  三个 ≈ 100s；且全仓 `test/` 目前无任何用例依赖 playwright（刻意把浏览器检查留在闸门侧）。
+  端到端行为证据以 `_r152_reverse_probe.mjs` 落在仓库根（已 gitignore）。
+
+### 四道闸（r152）
+
+- 单测 **1802/1802 fail 0**（基线 1793 + 本轮 9 条）｜lint **8e/126w**（基线 8e/142w：error 零新增，
+  warning **−16**，正是那批被吃掉的转义）。
+- 隔离构建 `dist_nightly_20261005r152`（35.63s）与 `…r152b`（35.40s）**逐文件完全一致**
+  （聚合 sha256 同为 `c833525c…`）⇒ 佐证 `scripts/**`+`test/**` 改动不进包。
+  ⚠️ 就地重建会失败：本机 safe-delete 对已存在的输出目录 fail-closed（vite `emptyDir` 被拦），需换新目录名。
+- 闸④：cert_probe **零外联 + 0 失败请求**｜render_smoke **8/8**（exit 0）｜
+  **正向对照**（对健康应用跑修好的三个闸）：route_sweep **0/16 exit 0**、text_audit **0/14 exit 0**、
+  overflow_audit **0/14 exit 0** —— 证明修完的闸**既会红也会绿**，不是「永远红」。
+  反向对照（对死端口）：三者均 **exit 1**。
+
+### 本轮提案（只提不动）
+
+| # | 内容 | 等级 | 说明 |
+|---|---|---|---|
+| ⑦ | `server/routes/teaching.js` 的 `period` 是**死字段**（前端 dayjs 自算，从不读） | B | r151 已把它修对（时区口径），但 r150 审计确认全仓零消费方。留着无害，删了少一处会误导人的输出。属删输出字段，等负责人点头。 |
+| ⑧ | `scripts/` 里 5 条 `no-var`（`construct-labeled-figures-0927.mjs`） | A（下轮可做） | lint 8e → 3e 的下一步。该脚本是几何方向一次性脚本，改 `let/const` 前需确认没依赖 `var` 的函数级重复声明。 |
+| ⑨ | 三个 `no-control-regex`（`worksheets.js` / `neonService.js` / `pdfService.js`） | A（下轮可做） | 实测三处**都已是 `\uXXXX` 转义文本**（不是裸控制字节，git 按文本存），属防御性代码的规则误报 ⇒ 加带说明的 scoped disable 即可，**不得改判据**。 |
+| ⑩ | 闸门脚本默认端口各自不同且已陈旧（route_sweep 5234 / text_audit 5235 / overflow_audit 5235 / render_smoke 5227） | A | 建议统一为 `BASE` 环境变量优先、默认值只留一处，避免「跑错端口以为全绿」。 |
+
