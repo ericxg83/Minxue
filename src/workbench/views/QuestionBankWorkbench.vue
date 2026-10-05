@@ -65,8 +65,11 @@ onMounted(async()=>{
   // 支持从周末班课件「考点」回跳：/question-bank?kpId=xxx&mode=knowledge
   if (route.query.mode === 'knowledge') activeMode.value = 'knowledge';
   try{tree.value=await getKnowledgeTree('数学')}catch{ElMessage.warning('知识点目录加载失败')}
-  await autoOrganize(true);
+  // ⛔ r145 关键修复：autoOrganize 可能极慢（模型归纳/慢查询），在 onMounted 里 await
+  //   会阻塞 loadKpQuestions + loadCooccur，导致「知识点蜘蛛网」和题目清单永远显示空状态。
+  //   产品上也更合理：老师打开页面要先看到已有数据，整理动作后台静默跑即可。
   await Promise.all([activeMode.value==='knowledge'?loadKpQuestions():loadTypes(),loadSummary()])
+  autoOrganize(true).catch(()=>{})
 })
 </script>
 <style scoped>
