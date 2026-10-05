@@ -2121,3 +2121,42 @@ lint **8e/142w**（errors 持平；+1 warning = 12dea5c 引入 `kaofaInduction.j
 `vocab`，并行赛道活跃文件，只记录未碰）｜隔离构建 `dist_nightly_20261005r147`（33.65s）｜
 cert_probe 零外联 + render_smoke 8/8。巡检：route_sweep 0/16 + text_audit 0/14 +
 overflow_audit 0/14。无新缺陷、本轮无代码改动。
+
+## 第 148 轮（2026-10-05，每小时兜底脉冲）：家长可见产出物「学习周期」日期差一天 / 月徽章差一个月 —— 已修
+
+- 开工锁 `finished/147`，工作区干净 ⇒ 接管 **r148**。r135–r147 连续 13 轮「按文件巡检」零发现，
+  按 r129 的成法改**按缺陷类扫**：本轮扫的是「**本地时间算出来的日期，被用 UTC 格式化印出去**」。
+- **真缺陷（实测，非推测）**：`server/routes/weeklyReport.js` 的 `period.start/end` 由
+  `periodStart.toISOString().split('T')[0]` 生成 —— `toISOString()` 是 **UTC**，而周期边界是
+  `server/utils/period.js` 用 `new Date(y, m, d)` 按**本地时区**算的。UTC+8 的本地 00:00 换算成
+  UTC 会退到**前一天**。三个响应体全中（单学生版 / 全班版 / `fetchPeriodCompare` 上一周期版）：
+  | 模式 | 真实边界(local) | 旧印出来 | 影响 |
+  |---|---|---|---|
+  | week | Mon 10/05 00:00 | 2026-10-04（周日） | 家长看到的「学习周期」比屏幕上早一天，且与工作台/移动端页面用 dayjs isoWeek 算的「10/05 ~ 10/11」自相矛盾 |
+  | month | Oct 01 00:00 | 2026-09-30 | PDF 封面月徽章 `dayjs(period.start).format('M月')` 直接写成**「9月」**（每份月报都错，不是边界偶发）；`shareCardTemplate.js` 的 `_monthLabel` 同理 |
+  | prev | Mon 09/28 00:00 | 2026-09-27 | PDF 对比页「上周 …」标签同错 |
+- 两个**家长可见产出物**都吃这个字段：学习诊断 PDF（`src/utils/weeklyReportGenerator.js`）与家长分享卡
+  （`server/routes/shareCard.js` → 同源 `fetchStudentWeeklyReport`）。旁证：`shareCardTemplate.js:248`
+  的注释写「卡片下方本来就用中文写着「学习周期 09/27 ~ 10/04」」—— 那是作者照**实际（错的）输出**抄的；
+  `test/shareCardZeroPeriodCopy.test.mjs:29` 的样本 `start:'2026-10-04'` 也是照实产输出抄的。
+- **修法**：`server/utils/period.js` 新增 `toLocalYmd(date)`（`Intl.DateTimeFormat('en-CA',
+  {timeZone:'Asia/Shanghai'})`，与 `server/lib/weekendHandout.js:45` 的 `toYmd` 同一口径、同一实现）；
+  weeklyReport 三处改为 `start: toLocalYmd(periodStart)` +
+  `end: toLocalYmd(new Date(periodEnd.getTime() - 1))`（end 是**排他**边界，对家长要说「最后一天」，
+  与 `weekendHandout.js:1131` 一致）。`all` 模式保留 `2000-01-01 / 2099-12-31` 哨兵值（`periodLabelText` 靠它识别「全部」）。
+  ⚠️ `end` 的**字符串结果没变**（旧写法错打正着），只有 `start` 由错变对 —— 所以这是「只修错的那一半」，无回归面。
+- 新锁 `test/weeklyReportPeriodLocalDate.test.mjs`（6 条）：行为判据一律用**带显式 +08:00 偏移**的
+  Date 构造（若用 `getWeekRange()` 现算再断言，跑在 UTC 机器上旧写法会「碰巧」判绿 = 空锁）；
+  + 源码锁（剔掉整行注释再匹配，防「注释里引用旧写法当反面教材」被误判）+ 内联合成坏样本。
+  **反向自检实测：把判据套到 `git show HEAD:server/routes/weeklyReport.js`（修复前真实版本）⇒ 源码锁红 4 条；
+  行为判据 2/2 全红；新树 6/6 绿。**
+- 端到端取证（零 DB）：`_r148_e2e_probe.mjs` 用 `mock.module` 把 `server/config/neon.js` 的 `query`
+  换成桩，真跑三个响应体 ⇒ week `2026-10-05`(周一)、month `2026-10-01`、月徽章**「10月」**（旧为 9月）、
+  prev `2026-09-28`(周一)。全程 45 次打桩，未连任何数据库。
+- 四道闸：单测 **1788/1788 fail 0**（1782 → +6 即本锁，无他人用例被带红）｜lint **8e/142w**（与 r147 基线
+  完全一致，改动文件 0 error）｜隔离构建 `dist_nightly_20261005r148`（35.27s）｜cert_probe 零外联 +
+  render_smoke **8/8** + route_sweep **0/16**。
+- ⚠️ **赛道归属**：本轮动的 `server/routes/weeklyReport.js` + `server/utils/period.js` 属「**服务端基础设施**」
+  赛道（该赛道由「敏学常驻巡检循环」每日 21:30 认领）。开工时锁 `finished`、工作区干净、无并行会话
+  ⇒ 无碰撞风险，按 r142 先例跨赛道执行并在此点名，**归属请负责人定**（见 lanes.md 本轮备注）。
+

@@ -244,3 +244,19 @@
   render_smoke 8/8 + 定向页探针 14/14（讲义页用 route.abort 拦生成请求，零写库）。
 - 本赛道待办（未动，留接手）：`WeeklyReportWorkbench.loadStudents/loadGrades` catch 只 warn（影响低）。
 - ⚠️ 在制区未碰：`QuestionDetailPanel.vue` + `test/reviewExcludeNoUndo.test.mjs`（另一会话，仍为未提交态）。
+
+**第 148 轮（2026-10-05，每小时兜底脉冲）已交付：家长可见产出物的「学习周期」日期差一天 / 月徽章差一个月**
+- ⚠️ **跨赛道实记（请负责人定归属）**：本轮改的是 `server/routes/weeklyReport.js` +
+  `server/utils/period.js`，按本表属「**服务端基础设施（非批改）**」赛道（认领方 = 常驻巡检会话，
+  每日 21:30）。开工时 `_loop_state.json` = `finished/147`、`git status` 干净、无并行会话 ⇒ **零碰撞风险**，
+  按 r142 先例执行并点名。若负责人认为该赛道应专属于 21:30 会话，请回复，后续兜底脉冲不再动它。
+- 缺陷：周期边界是本地时区算的（`period.js` 的 `new Date(y,m,d)`），却用 `toISOString()`（UTC）印出去
+  ⇒ UTC+8 的本地 00:00 退到前一天。周模式「周一 10/05」印成「周日 10/04」；月模式 10 月印成 `09-30`
+  ⇒ PDF 封面月徽章写成「**9月**」。三个响应体全中，学习诊断 PDF 与家长分享卡两个产出物一起错。
+- 修：`period.js` 新增 `toLocalYmd()`（与 `weekendHandout.js:45` 的 `toYmd` 同口径同实现），三处改引它；
+  `end` 走「排他边界 −1ms」说成「最后一天」。`all` 模式哨兵值不动。
+- 锁 `test/weeklyReportPeriodLocalDate.test.mjs` 6 条（行为判据用显式 +08:00 构造，防换时区变空锁）；
+  反向自检套修复前真实版本：源码锁红 4 / 行为红 2/2，新树 6/6。
+- 四道闸：单测 1788/1788｜lint 8e/142w（与基线一致）｜`dist_nightly_20261005r148`（35.27s）｜
+  cert_probe 零外联 + render_smoke 8/8 + route_sweep 0/16。
+

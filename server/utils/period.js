@@ -65,6 +65,22 @@ export function getWeekRange(offset = 0) {
 }
 
 /**
+ * 把 Date 格式化成「本地日历日」YYYY-MM-DD（显式 Asia/Shanghai）。
+ *
+ * ⛔ 不要用 `d.toISOString().split('T')[0]`：toISOString 是 UTC，
+ *   而本模块的周期边界全部由 `new Date(y, m, d)` 按**本地时区**算，
+ *   UTC+8 的本地 00:00 换算成 UTC 会退到**前一天**（r148 实测，家长可见产出物）：
+ *     · 周模式：周一 10/05 印成周日 10/04 —— 比屏幕上早一天，且与工作台/移动端
+ *       页面用 dayjs isoWeek 算出的「10/05 ~ 10/11」自相矛盾；
+ *     · 月模式：10 月周期的 start 印成 09-30 ⇒ PDF 封面月徽章
+ *       `dayjs(period.start).format('M月')` 直接写成「9月」（每份月报都错）。
+ *   与 server/lib/weekendHandout.js 的 toYmd 同一口径（同实现，勿再各写一份）。
+ */
+export function toLocalYmd(date) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(date)
+}
+
+/**
  * ISO 周数（周一为一周起始）
  */
 export function getIsoWeek(date) {
