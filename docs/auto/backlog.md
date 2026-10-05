@@ -2501,3 +2501,47 @@ backlog 闭环与 3 条新提案
 | ⑮ | 周报全班版逐学生查库（21 学生 × N 条 SQL），实测 1.93~2.29s | 观察 | 目前可接受，未达缺陷线；要降可把单人聚合合成一条 `GROUP BY student_id` 的批量查询（属本赛道，下轮可做） |
 | ⑯ | 全班版单人取数失败仍返回 `success:true` + 该生 `stats:null`（`weeklyReport.js:570/579`） | B | 即原提案⑬，已补实测行号：老师「一键生成」时某个孩子静默缺席，页面无提示。改需前后端一起定文案 |
 | ⑰ | 时区类缺陷已清零，建议把「新加日期输出必须走 toLocalYmd」写进 AGENTS.md 或 lint 规则，防第 5 次复发 | B | 本类已修 4 轮（r148/r151/r155/r157），每轮都要重新扫一遍同款写法 |
+
+## 第 160 轮（2026-10-06 00:02–，每小时兜底脉冲 → 测试套件门禁基线）：修复过期回归锁，`npm test` 恢复全绿
+
+- **开工判据（三级）**：锁 `_loop_state.json` = `running / r159`（同时带 `finishedAt`，自相矛盾；`startedAt` 为 8.5h 前
+  ⇒ 不满足「running 且 <3h」退出条件）｜`git status -uall` **完全干净**｜最近提交 22.8 分钟前、近 25 分钟**零文件写入**
+  ⇒ 判定主循环已空闲，兜底接管 r160。
+- **赛道**：测试套件门禁基线（「仓库卫生与门禁基线」延伸；r152/r158 先例——该赛道无活跃认领会话）。
+
+### 缺陷（A 级 · 实测取证）：唯一一条红的回归锁是「源码字面量过期」而非真缺陷
+
+- 开工时套件 = **1838 通过 / 1 红**，红 = `test/wrongBookLifecycleRollback.test.mjs:73`「切出「重复出错」必须重置 errorCount」。
+- 该锁断言的是 `setSummary` 里的**精确字面量** `setFilter('errorCount', '2-3')`；而 23:30:57 他人提交 `431d4df`
+  已把口径由 `'2-3'` 改为 `'2+'`（并新增 `practiceState` 重置）。**核实过代码是对的**：
+  `wrongBookStore.js` 的 `matchErrorCount` 明确支持 `'2+'`（`count >= 2`，与 `stats.repeatCount` 的 `>= 2` 口径一致），
+  旧 `'2-3'`（仅 2~3）反而与 KPI 对不上。⇒ **锁过期，不是代码错**（假红）。
+
+### 修法（只改测试文件，零产品代码）
+
+- 第 4 条判据从「锁死旧字面量 `'2-3'`」改为「锁**口径 + 重置语义**」：
+  `setFilter('errorCount', key === 'repeat' ? '2+' : 'all')`；并补一条同类断言
+  `setFilter('practiceState', key === 'unpracticed' ? 'none' : 'all')`（431d4df 新增的重置）。
+- 顺带把切片窗口从固定 `+300` 改为**切到下一个函数边界**（`function applySubject`）——
+  `setSummary` 变长后 `+300` 会截断尾部断言（本轮差点因此又假红）。
+- 未动 `WrongBookCenterRedesign.vue` / `wrongBookStore.js` 任何一行产品代码。
+
+### 反向自检（实测）
+
+- 同一把判据套 `431d4df^` 的**旧版视图**（隔离临时树 `tmp/_r160_rev_root/`，跑完即删）⇒ **判红**
+  （错误信息点名「非 repeat 档未重置」）｜新版视图 ⇒ 绿。锁非空转。
+
+### 四道闸（r160）
+
+- 单测 **1839/1839 fail 0**（修复前 1838/1839）｜lint **8e/126w**（与基线逐项一致，本轮文件零输出）｜
+  `dist_nightly_20261006r160` **38.96s**（main chunk 哈希 `fUIYQgPv` 与 r158 相同 = 零产品代码改动，符合预期）｜
+  preview:5296 隔离产物（curl 验对象 `main-fUIYQgPv.js` = `text/javascript`）：
+  `cert_probe` 零外部 origin + 零失败请求 exit 0，`render_smoke` **8/8** exit 0（0 控制台错误 / 0 个 4xx5xx）。
+
+### 本轮提案（只提不动）
+
+| # | 内容 | 等级 | 说明 |
+|---|---|---|---|
+| ⑳ | `test/wrongBookLifecycleRollback.test.mjs:73` 判据过期 | **✅ 本轮已闭环** | 见上——改为锁新口径 `'2+'` + `practiceState` 重置，并加固切片窗口。只改测试文件。 |
+| ⑲ | 备份脚本没有任何调用方 | **B（需拍板，仍未决）** | 沿用 r159：本轮全仓 grep 复核确认 `scripts/dailyBackup.mjs` 仍**无任何调用方**，`D:/Minxue_Backup/` 仍只有 `2026-10-02` 一份快照。二选一见 r159 表。 |
+| ㉑（新） | 源码级回归锁大量用「精确字面量」匹配，代码一改即假红 | B | 本类已第 2 次（r155 `/dashboard`、本轮 `'2-3'`）。建议：源码锁尽量断言**语义/行为**（如本轮改成的「口径 + 重置」），或至少切到函数边界而非固定偏移；可考虑加一条「锁不得用固定 `+NNN` 偏移切片」的元判据。 |

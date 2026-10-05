@@ -309,5 +309,21 @@
 - ⚠️ 单测基线现 1839 条 / 1 红 = `test/wrongBookLifecycleRollback.test.mjs:73` 锁过期（他人 `431d4df`
   把 `errorCount` 改 `2+` 档），属 PC 工作台赛道，提案 ⑳，本轮未动。
 
+**第 160 轮（2026-10-06 00:02–，每小时兜底脉冲 → 测试套件门禁基线）已交付：过期回归锁修复，`npm test` 恢复全绿**
+
+- 为什么落在本赛道：开工套件 **1838 / 1 红**，唯一的红 = `test/wrongBookLifecycleRollback.test.mjs:73`，
+  是「源码锁锁死旧字面量 `'2-3'`」而代码 `431d4df` 已按正确口径改成 `'2+'` ⇒ **假红**
+  （假红让门禁失真、并会掩盖真回归）。本赛道（测试套件门禁基线 / 仓库卫生）无活跃认领会话，按 r152/r158 先例接手。
+- 交付（只改测试文件，零产品代码）：`test/wrongBookLifecycleRollback.test.mjs` 第 4 条判据改为锁「口径 + 重置语义」
+  （`errorCount: repeat ? '2+' : 'all'` + `practiceState: unpracticed ? 'none' : 'all'`），切片窗口由固定 `+300`
+  改为切到下一个函数边界（防 `setSummary` 变长后截断漏判）。
+- 反向自检实测：同一把判据套 `431d4df^` 旧版视图（隔离临时树，跑完即删）⇒ 判红；新版 ⇒ 绿。
+- 四道闸：单测 **1839/1839**｜lint **8e/126w**（与基线一致）｜`dist_nightly_20261006r160`（38.96s）｜
+  cert_probe 零外联 exit 0 + render_smoke **8/8** exit 0。
+- ⚠️ 跨赛道实记（请负责人定归属）：改的是 `test/wrongBookLifecycleRollback.test.mjs`，按本表属「PC 工作台」赛道
+  （认领方记为第 91-92/103-104 轮，非活跃会话）。开工锁 finished、工作区干净、无并行会话 ⇒ 零碰撞风险，
+  按 r142/r148 先例执行并点名。**只改测试文件、未碰 PC 工作台的任何产品代码。**
+- 新提案 ㉑：源码锁「精确字面量」假红已第 2 次（r155 `/dashboard`、本轮 `'2-3'`），建议源码锁改断言语义/行为。
+
 
 
