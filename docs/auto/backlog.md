@@ -2061,3 +2061,8 @@ render_smoke 8/8。并行会话考法库在制推进（含 worker.js 与重算�
 
 npm test 1760/1760｜lint 8e/141w｜构建 r137｜route_sweep 0/16 + render_smoke 8/8。
 并行会话考法库继续在制（worker.js 等 5 文件），未碰。上轮收尾 backlog 记录核对完好。
+
+## 第 124 轮（2026-10-04）：例行巡检——全绿
+
+npm test 1626/1626｜lint 9e/155w｜构建 r124｜route_sweep 0/16 + render_smoke 8/8 +
+_r91_smoke 33/33（首轮撞后端死亡窗口，守护自愈后重跑全绿）。
