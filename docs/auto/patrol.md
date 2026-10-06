@@ -28,3 +28,11 @@
 **遗留**
 - 并行会话的 kaofa 改动（`teachingQuestionTypes.js` + `QuestionBankWorkbench.vue` + `kaofaLayoutR218.test.mjs`）未提交，属其 WIP，本轮不动。
 - 死导出 89 处（历史存量，`pruneDeadDeclarations` 可清理但需谨慎，列入后续轮次候选）。
+| 2 | 2026-10-06T13:52:11 | tests=1985/0 | lint=0 | build=skipped | server=ok | dirty=0 |
+
+### R2 — 2026-10-06 21:52
+
+**体检**：server ✅ / mobile ✅ / tests **1985-0** / lint 0 / dirty **0**（并行会话的 kaofa WIP 已自行提交 `d8e708b`）
+**冒烟**：上轮 12/12 已锁，本轮无 src 改动，未重跑。
+**动作**：无。一切正常，无 bug 可修、无优化可做。
+**遗留**：并行会话仍在活跃（持续提交中）；死导出 89 处存量未动。
