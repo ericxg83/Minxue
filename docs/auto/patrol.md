@@ -59,3 +59,19 @@
 | 8 | 2026-10-06T14:28:46 | tests=2002/1 | lint=0 | build=ok | server=ok | dirty=4 |
 | 9 | 2026-10-06T14:31:28 | tests=2003/0 | lint=0 | build=ok | server=DOWN(ECONNREFUSED) | dirty=5 |
 | 10 | 2026-10-06T14:36:01 | tests=2003/0 | lint=0 | build=ok | server=ok | dirty=11 |
+
+### R5 — 2026-10-06 22:40（P-1 死导出清理执行）
+
+**体检**：tests **2003/0**（并行会话 r220 加 DB 依赖测试后，巡逻器曾误报 2002/1 —— 根因是我的 patrol.mjs 没加载 .env，已修）/ build ✅ / 冒烟 12/12 ✅ / lint 0 errors
+
+**P-1 执行结果（改判）**：
+- 原提案「89 处死导出可清理」**过时**：`pruneDeadDeclarations.mjs` 演练确认可安全删除 **0 条**（84 条里 0 条机器可证明安全；26 条函数局部/14 条唯一导入副作用/14 条多导入/13 条副作用初始化/8 条函数参数/7 条几何红线/2 条多声明子句）
+- 实际清理分三批，**全部零逻辑改动**：
+  1. **巡逻器自清 3 处**（lint 死变量/spawnSync/link）+ **修复巡逻器缺陷**：测试前未加载 .env，导致并行会话 DB 依赖测试误报 fail → 加 `--env-file=.env`（`d5ec5bc`）
+  2. **11 处占位参数加 `_` 前缀**：analyze_env/index/backfill-blank/verify-orig/weekend-handout/worker/imageProcessor/geomDsl.test/wrongCount.test/vite.config（`9a1becd`）
+  3. **几何重绘目录 2 处（commands.js/residual.js）按负责人裁决红线③跳过**，未动
+- **剩余 lint warnings 全部为「有意保留」**：检测中间量（inTx/poolInTx）、副作用初始化、唯一导入保护、几何红线——非真死代码，**不建议删**（删了会改语义或碰红线）
+
+**回归**：2003/2003 全绿、build 通过、冒烟 12/12、console error 0
+
+**遗留**：几何重绘目录 4 处占位参数 + 5 个死 import 仍按红线保留，等负责人开口；lint warnings ~70 条全为有意保留，非门禁、不阻塞。
