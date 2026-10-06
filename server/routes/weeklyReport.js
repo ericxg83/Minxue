@@ -113,7 +113,7 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
     const { rows: taskRows } = await query(
       `SELECT
         COUNT(*)::int AS total_tasks,
-        COUNT(*) FILTER (WHERE status = 'done')::int AS completed_tasks
+        COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
       FROM ${TABLES.TASKS}
       WHERE student_id = $1
         AND created_at >= $2
@@ -503,7 +503,7 @@ router.get('/', async (req, res) => {
         const { rows: taskRows } = await query(
           `SELECT
             COUNT(*)::int AS total_tasks,
-            COUNT(*) FILTER (WHERE status = 'done')::int AS completed_tasks
+            COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
           FROM ${TABLES.TASKS}
           WHERE student_id = $1
             AND created_at >= $2
@@ -675,7 +675,7 @@ export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mo
     query(
       `SELECT
         COUNT(*)::int AS total_tasks,
-        COUNT(*) FILTER (WHERE status = 'done')::int AS completed_tasks
+        COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
       FROM ${TABLES.TASKS}
       WHERE student_id = $1 AND created_at >= $2 AND created_at < $3 AND deleted_at IS NULL`,
       [studentId, periodStart, periodEnd]
