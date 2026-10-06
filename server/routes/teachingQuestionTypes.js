@@ -157,6 +157,10 @@ router.post('/auto-organize', async (req, res) => {
           questionCount: r.questionCount,
           methods: (r.methods || []).map((m) => ({ name: m.name, action: m.action, kps: m.kps, items: m.items.length, saved: (r.saved || []).some((s) => s.name === m.name) })),
           rejected: r.rejected || [],
+          //⛔ r220：这些关联考点名对不上知识树（如「几何图形性质」树里没这个节点），
+          //   如实透出让老师知道「有 N 个关联没挂进树」，不静默丢。
+          unmatchedKpNames: r.unmatchedKpNames || [],
+          coveredCount: r.coveredCount ?? null,
           elapsedMs: r.elapsedMs, vendor: r.vendor, skipped: r.skipped, reason: r.reason,
         })
       } catch (e) {
@@ -166,6 +170,8 @@ router.post('/auto-organize', async (req, res) => {
     }
 
     const rejectedTotal = results.reduce((n, r) => n + r.rejected.length, 0)
+    // ⛔ r220：汇总所有「关联考点名对不上知识树」的，回给UI 如实告知
+    const unmatchedKpNames = [...new Set(results.flatMap(r => r.unmatchedKpNames || []))]
     res.json({
       success: true, applied: apply,
       targets: targets.length,
@@ -176,6 +182,7 @@ router.post('/auto-organize', async (req, res) => {
         ? '已写入 draft。**老师改过的名字不会被覆盖**（ON CONFLICT 只更新统计不改名）；不认可的用「忽略」归档。'
         : '这是预演结果，没写库。确认满意后带 apply=true 重跑。',
       rejectedTotal,
+      unmatchedKpNames,
     })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })

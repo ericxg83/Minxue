@@ -184,6 +184,99 @@ function extractJsonObject(text) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// 考点名对齐（r220）
+// ─────────────────────────────────────────────────────────────────────────
+/**
+ * 把 AI 造的考点名对回知识树的真实节点。
+ *
+ * ⛔ r219 实测踩到的坑：不对齐就会留一批**挂不上树的考法**。
+ *   AI 造的 6 个考点名里 3 个在树里查不到：
+ *     「相似三角形判定」 → 树里真名是「相似三角形的**的**判定」
+ *     「相似三角形性质」 → 树里是「相似三角形的性质」
+ *     「几何图形性质」   → 树里**根本没有**（该丢弃并如实告知）
+ *   后果：`teaching_question_type_kps` 一行都写不进去 ⇒考法在树上「找不到」，
+ *   「按考点找这批题」会漏掉它们，而老师完全不知道自己漏了什么。
+ *
+ * 对齐策略（按优先级，命中即停）：
+ *   1. **精确**同名
+ *   2. **去「的」**后同名 —— 树里 15+ 个节点带「的」（「相似三角形的判定」「一次函数的图象和性质」…），
+ *      AI 会习惯性省掉「的」。实测去「的」后**零撞名**（探针 `_diag_r220_check.mjs`）
+ *      ⇒ 这一步可安全自动化，不会张冠李戴
+ *   3. 树名**包含**AI 名，或 AI 名**包含**树名（长度差 ≥ 2 才算，避免「三角形」这种泛词乱匹配）
+ *   4. 都不中⇒ **丢弃并如实回报**，绝不猜
+ *
+ * @param {string[]} aiNames AI 产出的考点名
+ * @param {Array<{id:string,name:string}>} treeNodes 该学科全部知识树节点
+ * @returns {{matched: Array, unmatched: string[]}}
+ *   matched: [{ ai, id, name, how }]，how ∈ exact|strip-de|contains
+ *   unmatched: 对不上的 AI 名（原样返回，供 UI 如实告知）
+ */
+export function alignKpNames(aiNames, treeNodes) {
+  const nodes = Array.isArray(treeNodes) ? treeNodes.filter(n => n && n.id && n.name) : []
+  const strip = (s) => String(s).replace(/的/g, '')
+  const byExact = new Map(nodes.map(n => [n.name, n]))
+  const byStripped = new Map()
+  for (const n of nodes) {
+    const k = strip(n.name)
+    // 同一个 stripped 撞名时**不登记** —— 与其猜一个，不如让AI 名走后面的策略或被丢弃
+    if (byStripped.has(k)) byStripped.set(k, null)
+    else byStripped.set(k, n)
+  }
+
+  const matched = []
+  const unmatched = []
+  const usedIds = new Set()
+
+  for (const raw of Array.isArray(aiNames) ? aiNames : []) {
+    const ai = String(raw || '').trim()
+    if (!ai) continue
+
+    if (byExact.has(ai)) {
+      matched.push({ ai, ...pick(byExact.get(ai)), how: 'exact' })
+      continue
+    }
+    const s = strip(ai)
+    const strippedHit = byStripped.get(s)
+    if (strippedHit) {
+      matched.push({ ai, ...pick(strippedHit), how: 'strip-de' })
+      continue
+    }
+    // 包含匹配：要求长度差 ≥ 2，否则「三角形」会匹配上一堆东西
+    const cand = nodes.find(n =>
+      Math.abs(n.name.length - ai.length) >= 2 &&
+      (n.name.includes(ai) || ai.includes(n.name)))
+    if (cand) {
+      matched.push({ ai, ...pick(cand), how: 'contains' })
+      continue
+    }
+    unmatched.push(ai)
+  }
+
+  function pick(n) { return { id: n.id, name: n.name } }
+
+  // 一个节点被多个 AI 名抢到：只保留第一个，其余退回 unmatched（避免同一节点重复写）
+  const seen = new Set()
+  const finalMatched = []
+  for (const m of matched) {
+    if (seen.has(m.id)) { unmatched.push(m.ai); continue }
+    seen.add(m.id)
+    usedIds.add(m.id)
+    finalMatched.push(m)
+  }
+  return { matched: finalMatched, unmatched }
+}
+
+/** 拉全学科知识树节点（对齐用；树有 521 节点，一次查完缓存给整轮用） */
+let _treeCache = null
+export async function loadKpTreeNodes(force = false) {
+  if (_treeCache && !force) return _treeCache
+  const { rows } = await query(
+    `SELECT id, name FROM knowledge_points WHERE subject = $1 ORDER BY level, sort_order`, [SUBJECT])
+  _treeCache = rows
+  return rows
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // 提示词
 // ─────────────────────────────────────────────────────────────────────────
 function buildPrompt(kpName, kpVocab, items) {
@@ -302,12 +395,29 @@ export async function fetchCandidateKps({ days = DEFAULT_DAYS, limit = 10, minWr
  *   2. `teaching_question_types.kp_id` = 传入的主考点（落点 = (知识点, 考法)），
  *      同时往 `teaching_question_type_kps` 写 1 行 primary + N 行 secondary。
  */
-export async function saveMethod({ userId, kpId, method, exampleQuestions, commonMistakes = '' }) {
+export async function saveMethod({ userId, kpId, method, exampleQuestions, commonMistakes = '', kpTreeNodes = null }) {
+  //⛔⛔ r220铁律：先算对齐、再写库。**任何写入之前**把所有可能失败的纯计算做完。
+  //   实测事故：原先把考点名对齐放在 INSERT 之后，而关联写入因类型错（text=uuid）失败
+  //   ⇒ teaching_question_types 里留下1 条「0 考点 0 题」的僵尸 draft。
+  //   「写一半」比「没写」更糟：老师会看到一个空考法还以为自己操作错了。
+  //   现在对齐失败/无命中都在 INSERT 之前暴露，不会产生半成品。
+  const tree = kpTreeNodes || await loadKpTreeNodes()
+  const { matched: kpHits, unmatched: kpMisses } = alignKpNames(method.kps || [], tree)
+  // 主考点恒在：它由调用方传入、必然是树里的真实节点，不走AI 名对齐
+  if (!kpHits.some(h => h.id === kpId)) {
+    kpHits.unshift({ ai: null, id: kpId, name: tree.find(n => n.id === kpId)?.name || null, how: 'primary' })
+  }
+  // 一条关联都写不进去 ⇒ 明确失败，不留僵尸行（老师会看到 errors 而不是空考法）
+  if (!kpHits.length) {
+    throw new Error(`考法「${method.name}」的关联考点一个都对不上知识树（${kpMisses.join('、')}），已跳过写入以免留下空考法`)
+  }
+
   const summary = {
     action: method.action || '',
     steps: method.steps || [],
     pitfalls: method.pitfalls || '',
     kps: method.kps || [],
+    kpAligned: kpHits.map(h => h.name).filter(Boolean),
     itemCount: (method.items || []).length,
     inducedBy: 'ai',
     generatedAt: new Date().toISOString(),
@@ -333,18 +443,29 @@ export async function saveMethod({ userId, kpId, method, exampleQuestions, commo
   const typeId = rows[0]?.id
   if (!typeId) return null
 
+  //⛔ r220 考点名对齐（写入前置）：不对齐这批关联一行都写不进去。
+  //   r219 实测：AI 造的「相似三角形判定」树里真名是「相似三角形的判定」，
+  //   「几何图形性质」树里压根没有 ⇒ 不对齐 = 考法挂不上树 + 老师不知道自己漏了什么。
+  //   对不上的**如实回报**（unmatchedKpNames），由接口透出到 UI，不静默丢。
+  // （对齐已在上方 INSERT 之前完成 —— 那里的顺序是刻意的，见「先算后写」注释）
+
   // 多对多考点：primary 1 行 + secondary N 行
   // ⛔ 不动 teaching_question_types.kp_id：那是主考点，由上面的 upsert 决定。
   await query(
-    `INSERT INTO teaching_question_type_kps (type_id, kp_id, role)
-     SELECT $1, kp.id, CASE WHEN kp.id = $2::uuid THEN 'primary' ELSE 'secondary' END
-       FROM knowledge_points kp
-      WHERE kp.name = ANY($3::text[])
-     ON CONFLICT (type_id, kp_id) DO NOTHING`,
-    [typeId, kpId, method.kps || []])
+      `INSERT INTO teaching_question_type_kps (type_id, kp_id, role)
+       SELECT $1, x.id, CASE WHEN x.id = $2::uuid THEN 'primary' ELSE 'secondary' END
+         FROM unnest($3::uuid[]) AS x(id)
+       WHERE EXISTS (SELECT 1 FROM knowledge_points k WHERE k.id = x.id)
+       ON CONFLICT (type_id, kp_id) DO NOTHING`,
+      [typeId, kpId, kpHits.map(h => h.id)])
 
-  // 代表题快照：只挂 items 里点名的那几道（不是整批）
+  // 整组题快照：挂 items 里点名的**全部**题（不是一个代表题）。
+  // ⛔ r220：这才是「一个考法 = 一组题」的落点 —— 老师的核心诉求
+  //   「把很多题目归类整理，让学生看出这都是考你一个东西」。
+  //   表上没有 (type_id, source_question_id) 唯一约束（只有 PK + CHECK），
+  //   所以同一道题**可以**同时进多个考法 —— 这符合现实（一题确实可能考好几套动作）。
   for (const q of exampleQuestions) {
+    if (!q?.questionId) continue
     await query(
       `INSERT INTO teaching_question_type_examples (type_id, source_question_id, snapshot, note)
        SELECT $1, $2::uuid, $3::jsonb, $4
@@ -355,7 +476,8 @@ export async function saveMethod({ userId, kpId, method, exampleQuestions, commo
       [typeId, q.questionId, JSON.stringify({
         content: q.content, parentStem: q.parentStem, options: q.options,
         questionType: q.questionType, subject: SUBJECT, kps: method.kps,
-      }), 'AI 从近期错题归纳的代表题'])
+        wrongCount: q.wrongCount || 0,
+      }), 'AI 从近期错题归纳的考法题目'])
   }
 
   // 刷新 question_count 展示缓存（⛔ 派生数据，不当真相同来源）
@@ -372,7 +494,7 @@ export async function saveMethod({ userId, kpId, method, exampleQuestions, commo
       WHERE k.type_id = t.id AND t.id = $1`,
     [typeId])
 
-  return { typeId, inserted: rows[0]?.inserted === true }
+  return { typeId, inserted: rows[0]?.inserted === true, unmatchedKpNames: kpMisses, matchedKps: kpHits.map(h => h.name).filter(Boolean) }
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -442,13 +564,23 @@ export async function induceMethodsForKp({
   const { methods, rejected } = parseMethodResponse(content, [...kpVocab], questions.length)
 
   const saved = []
+  // 考点名对不上树的 AI 考点名（如「几何图形性质」——树里没这个节点）。
+  // ⛔ 必须如实回报而不是静默丢：老师需要知道「有 2 个关联考点没能挂进知识树」。
+  const unmatchedKpNames = []
+  const kpTreeNodes = await loadKpTreeNodes()
   if (!dryRun && methods.length && userId) {
     for (const m of methods) {
       const r = await saveMethod({
         userId, kpId, method: m,
         exampleQuestions: m.items.map((n) => questions[n - 1]).filter(Boolean),
+        kpTreeNodes,
       })
-      if (r) saved.push({ ...r, name: m.name })
+      if (r) {
+        saved.push({ ...r, name: m.name })
+        for (const miss of r.unmatchedKpNames || []) {
+          if (!unmatchedKpNames.includes(miss)) unmatchedKpNames.push(miss)
+        }
+      }
     }
   }
 
@@ -464,5 +596,6 @@ export async function induceMethodsForKp({
     vendor, elapsedMs, error,
     dryRun,
     saved,
+    unmatchedKpNames,
   }
 }
