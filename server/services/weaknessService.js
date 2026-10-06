@@ -191,7 +191,7 @@ export async function getRetryOverview() {
        FROM ${TABLES.GENERATED_EXAMS} ge
        JOIN ${TABLES.TASKS} t ON t.generated_exam_id = ge.id
        WHERE t.deleted_at IS NULL
-         AND t.status = 'graded'`
+         AND ge.status = 'graded'`
     ),
     query(
       `SELECT COUNT(DISTINCT student_id)::int AS n

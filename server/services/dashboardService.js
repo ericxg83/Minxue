@@ -76,7 +76,7 @@ export async function getDailyTrend(days = 7) {
               COUNT(*)::int AS n
        FROM ${TABLES.TASKS}
        WHERE deleted_at IS NULL
-         AND status IN ('done', 'graded')
+         AND status IN ('done', 'reviewed')
          AND created_at >= NOW() - make_interval(days => $1::int)
        GROUP BY day`,
       [lower]
