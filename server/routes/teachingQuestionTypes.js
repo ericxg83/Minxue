@@ -129,6 +129,11 @@ router.post('/auto-organize', async (req, res) => {
     const maxKps = Math.min(Math.max(Number(req.body?.maxKps) || 5, 1), 20)
     const minWrong = Math.min(Math.max(Number(req.body?.minWrong) || 6, 3), 50)
     const kpIds = Array.isArray(req.body?.kpIds) ? req.body.kpIds.map(String).filter(Boolean).slice(0, 20) : []
+    // r221：分批喂。limit=30 是 r145 实测最优值，但每考点只跑一批 ⇒ 超 30 道的错题全漏
+    //（实测三角形 171 道只喂 30 道、合计约 920 道漏跑）。maxBatches>1 时分批跑，
+    // 第 2 批起把已有考法当候选喂给 AI 复用（不重复造考法）。
+    // ⛔ 默认 1 = 旧行为，单次请求仍只跑一批（35 批 ×25s 会超 HTTP 超时）。
+    const maxBatches = Math.min(Math.max(Number(req.body?.maxBatches) || 1, 1), 10)
 
     let targets = []
     if (kpIds.length) {
@@ -155,11 +160,13 @@ router.post('/auto-organize', async (req, res) => {
         //   r145 实测踩坑：路由传 `apply`、服务收 `dryRun`（默认 true）⇒ apply=true 也**永不写库**，
         //   但接口照样返回 `applied: true, created: 0` ⇒ 老师点「写库」静默无效果。
         //   服务侧已加 `apply` 未知参数硬断言，这里仍要显式取反传，别依赖默认值。
-        const r = await induceMethodsForKp({ userId, kpId: kp.id, kpName: kp.name, days, dryRun: !apply })
+        const r = await induceMethodsForKp({ userId, kpId: kp.id, kpName: kp.name, days, maxBatches, dryRun: !apply })
         created += r.saved?.length || 0
         results.push({
           kpId: kp.id, kpName: kp.name,
           questionCount: r.questionCount,
+          // r221：进度要透出到 UI（跑批要 15 分钟，老师不能干等）
+          progress: r.progress || null,
           methods: (r.methods || []).map((m) => ({ name: m.name, action: m.action, kps: m.kps, items: m.items.length, saved: (r.saved || []).some((s) => s.name === m.name) })),
           rejected: r.rejected || [],
           //⛔ r220：这些关联考点名对不上知识树（如「几何图形性质」树里没这个节点），

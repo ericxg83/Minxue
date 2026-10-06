@@ -137,10 +137,12 @@ test('写入路径必须走对齐（否则改了纯函数也没人调用）', ()
 
 test('整组题：examples 必须挂 items 全组（不是 1 条代表题）', () => {
   // saveMethod 的调用处：exampleQuestions 应来自 m.items 全组
+  // ⛔ 箭头函数的括号是可选的（`m.items.map(n => …)`），正则不能写死 `(n) =>`，
+  //   否则只是格式一变就假红（r221 分批改造时踩过）。
   assert.match(
     SRC,
-    /exampleQuestions:\s*m\.items\.map\(\(n\)\s*=>\s*questions\[n\s*-\s*1\]\)\.filter\(Boolean\)/,
-    '每个考法必须挂它 items 里的全部题—— 这就是「一个考法 = 一组题」的落点。',
+    /exampleQuestions:\s*m\.items\.map\(\s*\(?n\)?\s*=>\s*questions\[\s*n\s*-\s*1\s*\]\s*\)\.filter\(Boolean\)/,
+    '每个考法必须挂它 items 里的全部题 —— 这就是「一个考法 = 一组题」的落点。',
   )
   assert.match(
     SRC,

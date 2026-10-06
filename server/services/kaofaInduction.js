@@ -279,7 +279,7 @@ export async function loadKpTreeNodes(force = false) {
 // ─────────────────────────────────────────────────────────────────────────
 // 提示词
 // ─────────────────────────────────────────────────────────────────────────
-function buildPrompt(kpName, kpVocab, items) {
+function buildPrompt(kpName, kpVocab, items, existingMethods = []) {
   const block = items.map((it, i) => {
     const stem = it.parentStem ? String(it.parentStem).replace(/\s+/g, ' ').slice(0, 180) : ''
     const body = String(it.content || '').replace(/\s+/g, ' ').slice(0, 300)
@@ -287,6 +287,23 @@ function buildPrompt(kpName, kpVocab, items) {
     return head + (stem ? `\n     题干：${stem}` : '') + `\n     小问：${body}`
   }).join('\n')
   const vocab = kpVocab.join('、')
+
+  // ── r221 分批喂：第 2 批起把已有考法当候选给 AI ────────────────────
+  // 目的：覆盖 100% 的同时**不新增考法**。实测第一批判 30 道就产出 5 个考法，
+  // 后续批次的题大概率落进这 5 个里 ⇒ 考法数收敛而不是线性膨胀。
+  // ⛔ 不能让AI「重新命名」已有考法（老师改过的名字绝不能被覆盖，见 saveMethod 的 ON CONFLICT）。
+  const reuseSection = existingMethods.length
+    ? `
+【本考点已有 ${existingMethods.length} 个考法（优先复用，不要重复造）】
+${existingMethods.map((m, i) => `${i + 1}. ${m.name}${m.action ? `（动作：${m.action}，现有 ${m.count} 道题）` : `（现有 ${m.count} 道题）`}`).join('\n')}
+
+⛔ **本轮优先把题归进上面的已有考法**。判断标准只有一个：**动作是否相同**（不是数字、不是情境）。
+  - 能归进某个已有考法 → 在该考法的 items 里写这个考法的 **原名**
+  - 确实哪套动作都不沾→ 才新建一个考法（新考法不要与已有考法重名）
+- 只有当这批题里**没有任何一道**能进已有考法时，才允许全部新建。
+`
+    : ''
+
   return {
     system: `你是资深初中数学教研员，帮老师整理"考法库"。
 
@@ -300,7 +317,7 @@ function buildPrompt(kpName, kpVocab, items) {
 ❌ 不合格1（拼接题型形式）：${kpName} · 填空题关键结论
 ❌ 不合格2（就是知识点名）：${kpName}
 ❌ 不合格3（太泛）：解方程
-
+${reuseSection}
 【粒度要求】
 - 归纳 3-5 个考法，**宁可粗不可碎**：每个考法至少 ${MIN_ITEMS_PER_METHOD} 道题。
 - 同一考法内的题必须是"同一套动作"，只是数字/情境不同。
@@ -332,7 +349,28 @@ function buildPrompt(kpName, kpVocab, items) {
  *   2026-10-05 实测「平方根」桶里 12 道题有 2 组重复，AI 看到 [3] 和 [5] 一模一样，
  *   会误以为「这两道题是同一考法的两道独立证据」，把粒度算错。
  */
-export async function fetchKpWrongQuestions(kpId, { days = DEFAULT_DAYS, limit = DEFAULT_LIMIT_PER_KP } = {}) {
+/**
+ * 按考点取真实错题（**题目级去重**）。
+ *
+ * ⛔ r221 新增 `excludeQuestionIds` / `offset` —— 分批喂的前提：
+ *   `limit=30` 是 r145 三档实测的最优值（归类率 100%、每考法证据题 8 道、耗时更短），
+ *   但 auto-organize 每考点只跑一批 ⇒ 超 30 道的错题全漏（实测合计约 920 道）。
+ *   分批时**必须排除已归类的题**，否则第二遍会把同一道题重新归纳、考法数量翻倍。
+ *
+ * @param {string} kpId
+ * @param {object} opts
+ * @param {number} opts.days
+ * @param {number} opts.limit本批取几条
+ * @param {string[]} [opts.excludeQuestionIds] 已归入某个考法的题（source_question_id）
+ * @param {number} [opts.offset] 跳过前 N 条 —— 与 exclude 配合做「第 2 批起」
+ * @returns {Array} 题目数组
+ */
+export async function fetchKpWrongQuestions(kpId, {
+  days = DEFAULT_DAYS,
+  limit = DEFAULT_LIMIT_PER_KP,
+  excludeQuestionIds = [],
+  offset = 0,
+} = {}) {
   const { rows } = await query(
     `SELECT q.id, q.question_type, q.content, q.parent_stem, q.options,
             COUNT(DISTINCT wq.student_id)::int AS wrong_count,
@@ -350,10 +388,16 @@ export async function fetchKpWrongQuestions(kpId, { days = DEFAULT_DAYS, limit =
           SELECT 1 FROM question_knowledge qk3
            WHERE qk3.question_id = q.id AND qk3.kp_id = $1::uuid
         )
+        -- r221：已归类的题不再重复供给（分批喂的关键防重）
+        AND NOT EXISTS (
+          SELECT 1 FROM teaching_question_type_examples e
+           WHERE e.source_question_id = q.id
+        )
+        AND ($5::uuid[] = '{}'::uuid[] OR q.id <> ALL ($5::uuid[]))
       GROUP BY q.id, s.name
       ORDER BY wrong_count DESC, q.id
-      LIMIT $3`,
-    [kpId, days, limit])
+      LIMIT $3 OFFSET $4`,
+    [kpId, days, limit, offset, excludeQuestionIds])
   return rows.map((r) => ({
     questionId: r.id,
     questionType: r.question_type,
@@ -363,6 +407,22 @@ export async function fetchKpWrongQuestions(kpId, { days = DEFAULT_DAYS, limit =
     wrongCount: r.wrong_count || 0,
     allKps: r.all_kps,
   }))
+}
+
+/** 该考点还有多少错题**没被归进任何考法（用于分批进度显示；不连 AI、纯 count）
+ */
+export async function fetchKpRemainingCount(kpId, { days = DEFAULT_DAYS } = {}) {
+  const { rows } = await query(
+    `SELECT COUNT(DISTINCT q.id)::int AS n
+       FROM wrong_questions wq
+       JOIN questions q ON q.id = wq.question_id
+      WHERE wq.added_at >= now() - ($2::int * interval '1 day')
+        AND EXISTS (SELECT 1 FROM question_knowledge qk
+                     WHERE qk.question_id = q.id AND qk.kp_id = $1::uuid)
+        AND NOT EXISTS (SELECT 1 FROM teaching_question_type_examples e
+                         WHERE e.source_question_id = q.id)`,
+    [kpId, days])
+  return rows[0]?.n || 0
 }
 
 /** 候选考点：按错题量取 TopN（有最低门槛，低于门槛的考点不值得花 30+ 秒归纳） */
@@ -432,13 +492,27 @@ export async function saveMethod({ userId, kpId, method, exampleQuestions, commo
        (user_id, kp_id, subject, name, teaching_notes, common_mistakes, tags, status, source, auto_summary)
      VALUES ($1, $2::uuid, $3, $4, $5, $6, $7::jsonb, 'draft', 'auto', $8::jsonb)
      ON CONFLICT (user_id, kp_id, name) DO UPDATE SET
-       auto_summary = EXCLUDED.auto_summary,
+       auto_summary = teaching_question_types.auto_summary || EXCLUDED.auto_summary
+         || jsonb_build_object(
+              -- ⛔ r221 分批喂：复用已有考法时题数必须**累加**，不能被本批覆盖。
+              --   旧写法是 auto_summary = EXCLUDED.auto_summary（整块替换）——
+              --   第 2 批把 13 道题的考法归进 5 道时，itemCount 会从 13 退成 5，
+              --   而 examples 表因为 NOT EXISTS 判断仍在追加 ⇒ **两处数据对不上**。
+              -- ⛔⛔ 这里的括号不能省：写成 auto_summary->'items'::jsonb 会按运算符优先级
+              --   解析成 auto_summary -> ('items'::jsonb)，即把字符串 'items' 转jsonb，
+              --   实测直接报 invalid input syntax for type json，整轮写入全失败。
+              'itemCount', (SELECT COUNT(*)::int FROM teaching_question_type_examples x
+                             WHERE x.type_id = teaching_question_types.id)
+                          + COALESCE(jsonb_array_length(EXCLUDED.auto_summary->'items'), 0),
+              'batchMergedAt', to_jsonb(now()::text)),
        status = CASE WHEN teaching_question_types.status = 'archived' THEN 'draft'
                      ELSE teaching_question_types.status END,
        updated_at = now()
      RETURNING id, (xmax = 0) AS inserted`,
     [userId, kpId, SUBJECT, method.name, notes, commonMistakes || method.pitfalls || '',
-     JSON.stringify(['AI 归纳', ...(method.kps || []).slice(0, 4)]), JSON.stringify(summary)])
+     JSON.stringify(['AI 归纳', ...(method.kps || []).slice(0, 4)]),
+     // items 数组带进summary，让上面能算出本批新增几道
+     JSON.stringify({ ...summary, items: method.items || [] })])
 
   const typeId = rows[0]?.id
   if (!typeId) return null
@@ -505,6 +579,9 @@ export async function saveMethod({ userId, kpId, method, exampleQuestions, commo
  * @param {string} opts.userId
  * @param {string} opts.kpId
  * @param {boolean} opts.dryRun  true = 只返回结果不写库（默认 true，防手滑）
+ * @param {number} opts.maxBatches 最多跑几批（**默认 1 = 旧行为**）。r221：limit=30 是
+ *   r145 三档实测的最优值，但每考点只跑一批 ⇒ 超 30 道的错题全漏（实测合计约 920 道）。
+ *   传 >1 时分批喂，第 2 批起把已有考法当候选给 AI 复用（考法数收敛而不是线性膨胀）。
  * @param {Function} opts.callText 注入式 AI 调用（默认走生产 callTextCompletion）
  */
 export async function induceMethodsForKp({
@@ -515,6 +592,7 @@ export async function induceMethodsForKp({
   limit = DEFAULT_LIMIT_PER_KP,
   minWrong = 3,
   dryRun = true,
+  maxBatches = 1,
   callText,
   // ⛔ r145 事故留痕：调用方曾传 `apply: true`，而本函数只解构 `dryRun`（默认 true）
   //   ⇒ 写库被静默跳过，接口还返回 `applied: true`，老师点「写库」毫无反应且无报错。
@@ -527,75 +605,139 @@ export async function induceMethodsForKp({
       `induceMethodsForKp 参数名错误：收到 ${Object.keys(unknown).join(',')}，本函数只认 dryRun（true=预演不写库）。`
     )
   }
-  const questions = await fetchKpWrongQuestions(kpId, { days, limit })
-  if (questions.length < minWrong) {
-    return { kpId, kpName, skipped: true, reason: `只有 ${questions.length} 道错题，低于门槛 ${minWrong}`, questions: questions.length }
+  const batches = Math.min(Math.max(Number(maxBatches) || 1, 1), 10)
+  const kpTreeNodes = await loadKpTreeNodes()
+  // 该考点总共有多少错题还没归类（纯 count，不喂 AI；用于进度显示）
+  const remainingBefore = await fetchKpRemainingCount(kpId, { days })
+
+  // ── 分批跑（r221）────────────────────────────────────────────────
+  // 每批：取**未归类**的 30 道 → 第 2 批起把已有考法当候选 → AI 归纳 → 落库
+  const allMethods = []
+  const allRejected = []
+  const savedAll = []
+  const unmatchedKpNames = []
+  const batchInfo = []
+  let processed = 0
+  let skipped = false
+  let skipReason = ''
+  let consecutiveErrors = 0
+
+  for (let b = 1; b <= batches; b++) {
+    //⭐ excludeQuestionIds 在 SQL 里排除已归类的题 ⇒ 第二批不会重复归纳第一批的题
+    const questions = await fetchKpWrongQuestions(kpId, { days, limit })
+    if (questions.length < minWrong) {
+      if (questions.length === 0) skipReason = '这个考点的错题都已归类完毕'
+      else { skipReason = `只剩 ${questions.length} 道未归类，低于门槛 ${minWrong}`; skipped = true }
+      break
+    }
+
+    const kpVocab = new Set([kpName])
+    for (const q of questions) if (q.allKps) q.allKps.split('、').forEach(x => x.trim() && kpVocab.add(x.trim()))
+
+    // 第 2 批起：把该考点已有的考法当候选喂给 AI ⇒ 复用而不是重复造
+    const existing = b === 1 ? [] : await fetchExistingMethods(userId, kpId)
+    const { system, user } = buildPrompt(kpName, [...kpVocab], questions, existing)
+    const res = await callTextOnce({ system, user, callText })
+
+    const { methods, rejected } = res.error
+      ? { methods: [], rejected: [{ name: null, reason: `AI 调用失败：${res.error}` }] }
+      : parseMethodResponse(res.content, [...kpVocab], questions.length)
+
+    let batchSaved = 0
+    if (!dryRun && methods.length && userId) {
+      for (const m of methods) {
+        const r = await saveMethod({
+          userId, kpId, method: m,
+          exampleQuestions: m.items.map(n => questions[n - 1]).filter(Boolean),
+          kpTreeNodes,
+        })
+        if (r) {
+          savedAll.push({ ...r, name: m.name, batch: b })
+          batchSaved++
+          for (const miss of r.unmatchedKpNames || []) {
+            if (!unmatchedKpNames.includes(miss)) unmatchedKpNames.push(miss)
+          }
+        }
+      }
+    }
+
+    allMethods.push(...methods)
+    allRejected.push(...rejected)
+    processed += questions.length
+    batchInfo.push({
+      batch: b, questionCount: questions.length,
+      methods: methods.length, rejected: rejected.length, saved: batchSaved,
+      reusedExisting: existing.length,
+      elapsedMs: res.elapsedMs, vendor: res.vendor, error: res.error,
+    })
+
+    // 单批失败不中断整轮（沿用 r145 容错）；但连续 2 批失败要停，否则白烧 token
+    consecutiveErrors = res.error ? consecutiveErrors + 1 : 0
+    if (consecutiveErrors >= 2) {
+      skipReason = `连续 2 批 AI 调用失败，已停止：${res.error}`
+      skipped = true
+      break
+    }
   }
 
-  // 词表 = 主考点 + 这批题实际关联到的全部知识点（供「不等于知识点名」判据与 kps 约束）
-  const kpVocab = new Set([kpName])
-  for (const q of questions) if (q.allKps) q.allKps.split('、').forEach((x) => x.trim() && kpVocab.add(x.trim()))
+  const remainingAfter = await fetchKpRemainingCount(kpId, { days })
+  return {
+    kpId, kpName,
+    questionCount: processed,
+    // ⭐ 进度：r221 要求「第几批 / 还剩多少」可见 —— 跑批要 15 分钟，不能让人干等
+    progress: {
+      batchesRun: batchInfo.length,
+      requestedBatches: batches,
+      processedThisRun: processed,
+      remainingBefore,
+      remainingAfter,
+      // 已归类总数 = 跑之前的待归类数 - 跑完还剩的（dryRun 时两者相等 ⇒ 进度不前进，符合预期）
+      coveredTotal: Math.max(remainingBefore - remainingAfter, 0),
+      allDone: remainingAfter === 0,
+      detail: batchInfo,
+    },
+    methods: allMethods,
+    rejected: allRejected,
+    coveredCount: processed,
+    saved: savedAll,
+    unmatchedKpNames,
+    dryRun,
+    skipped,
+    reason: skipReason,
+  }
+}
 
-  const { system, user } = buildPrompt(kpName, [...kpVocab], questions)
+/** 该考点已有的考法（第 2 批起当候选喂给 AI；带题数帮 AI 判断粒度） */
+async function fetchExistingMethods(userId, kpId) {
+  const { rows } = await query(
+    `SELECT t.name AS name, t.auto_summary->>'action' AS action,
+            (SELECT COUNT(*)::int FROM teaching_question_type_examples e WHERE e.type_id = t.id) AS count
+       FROM teaching_question_types t
+      WHERE t.kp_id = $1::uuid AND t.status <> 'archived'
+        AND ($2::text IS NULL OR t.user_id = $2)
+      ORDER BY count DESC, t.name LIMIT 12`, [kpId, userId || null])
+  return rows
+}
 
+/**
+ * 单次 AI 调用 + 计时。
+ * 把 callText 注入点收在一处 —— 分批循环才不会被绕过（之前内联在函数体里，批次一多就会漏判错）。
+ */
+async function callTextOnce({ system, user, callText }) {
   const call = callText || (async (payload) => {
     const { callTextCompletion } = await import('../config/ai.js')
     // ⛔ 归纳是纯文本任务，视觉模型无用（实测慢 10 倍+）。
     //   BigModel 免费且最快，作主；Bailian 付费作备（preferredVendor 直连绕开降级链，治理 429）。
-    // ⛔ maxTokens 必须给足：30 题的 items 数组是30+ 个数字，再加steps/pitfalls，
+    // ⛔ maxTokens 必须给足：30 题的 items 数组是 30+ 个数字，再加 steps/pitfalls，
     //   1600 会在 JSON 中途截断 ⇒ parseMethodResponse 直接判「解析失败」，白跑一次 20 秒。
     //   实测 r145：1600 够 12 题，30 题提到 2400 才稳。
     return callTextCompletion({ ...payload, temperature: 0.3, maxTokens: 2400, preferredVendor: 'BigModel' })
   })
-
   const startedAt = Date.now()
-  let content = ''
-  let vendor = null
-  let error = null
   try {
     const res = await call({ systemContent: system, userContent: user })
-    content = String(res?.content || '')
-    vendor = res?.vendor || null
+    return { content: String(res?.content || ''), vendor: res?.vendor || null, elapsedMs: Date.now() - startedAt, error: null }
   } catch (e) {
-    error = e.message
-  }
-  const elapsedMs = Date.now() - startedAt
-
-  const { methods, rejected } = parseMethodResponse(content, [...kpVocab], questions.length)
-
-  const saved = []
-  // 考点名对不上树的 AI 考点名（如「几何图形性质」——树里没这个节点）。
-  // ⛔ 必须如实回报而不是静默丢：老师需要知道「有 2 个关联考点没能挂进知识树」。
-  const unmatchedKpNames = []
-  const kpTreeNodes = await loadKpTreeNodes()
-  if (!dryRun && methods.length && userId) {
-    for (const m of methods) {
-      const r = await saveMethod({
-        userId, kpId, method: m,
-        exampleQuestions: m.items.map((n) => questions[n - 1]).filter(Boolean),
-        kpTreeNodes,
-      })
-      if (r) {
-        saved.push({ ...r, name: m.name })
-        for (const miss of r.unmatchedKpNames || []) {
-          if (!unmatchedKpNames.includes(miss)) unmatchedKpNames.push(miss)
-        }
-      }
-    }
-  }
-
-  return {
-    kpId, kpName,
-    questionCount: questions.length,
-    methods,
-    rejected,
-    // ⛔ r145：一道题可以同时属于多个考法（确实可能考好几套动作），
-    //   所以 sum(items.length) 会 > questionCount（实测 12 档出现 17/12 = 142%）。
-    //   统计「归类率」必须用这个**唯一题数**，别拿 sum 当分母/分子。
-    coveredCount: new Set(methods.flatMap((m) => m.items)).size,
-    vendor, elapsedMs, error,
-    dryRun,
-    saved,
-    unmatchedKpNames,
+    return { content: '', vendor: null, elapsedMs: Date.now() - startedAt, error: e.message }
   }
 }
