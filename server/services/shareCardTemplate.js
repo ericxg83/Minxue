@@ -217,7 +217,12 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
   const dailyTrend = Array.isArray(rawDailyTrend) ? rawDailyTrend : []
 
   const mode = period.mode || 'week'
-  const periodWord = mode === 'month' ? '本月' : '本周'
+  // ⚠️ 三种模式必须各自有词：**'all' 是跨数月的「成长总览」**，旧写法
+  // （`month ? '本月' : '本周'`）把 'all' 一路当成周 ⇒ 卡片徽章写「成长总览」、
+  // 学习周期印着 01/01 ~ 10/06，寄语却写「**本周**作业完成情况尚可」，
+  // 知识点空态也写「本周暂无薄弱知识点」——家长拿到的自相矛盾（2026-10-06 r211 实测发现）。
+  // 未知 mode 仍兜底成「本周」（偏窄不说错），与改动前行为一致。
+  const periodWord = mode === 'month' ? '本月' : mode === 'all' ? '这段时间' : '本周'
   const s = {
     totalTasks: num(stats.totalTasks),
     completedTasks: num(stats.completedTasks),
