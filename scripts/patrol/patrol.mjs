@@ -98,6 +98,16 @@ if (FORCE_BUILD || srcChanged) {
   console.log('  vite build 跳过（src 无改动 + 未强制）')
 }
 
+/* ── D2. 冒烟（构建通过且 src 有改动时自动跑，让 daemon 轮自足）── */
+let smoke = null
+if ((FORCE_BUILD || srcChanged) && buildOk === 'ok') {
+  const s = run(process.execPath, [path.join(ROOT, 'scripts', 'patrol', 'smoke.mjs'), 'http://127.0.0.1:5173'], { timeout: 200000, silent: true })
+  const m = (s.stdout || '').match(/patrol smoke[^\n]*: (\d+)\/(\d+)/)
+  smoke = m ? { pass: +m[1], total: +m[2], ok: s.status === 0 } : { pass: 0, total: 0, ok: false }
+  console.log(`  冒烟 ${smoke.pass}/${smoke.total}${smoke.ok ? '' : '  ⚠️ 有失败或解析不了'}`)
+  if (!smoke.ok) console.log('  ' + ((s.stdout || s.stderr || '').split('\n').filter(Boolean).slice(-10).join('\n  ')))
+}
+
 /* ── E. lint + 死声明 ── */
 section('E. lint + 死声明')
 const lint = run('node', [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'], { timeout: 180000, silent: true })
@@ -116,6 +126,7 @@ const entry = {
   round, startedAt: started, finishedAt: now(),
   health, dirtyCount: dirty.length, dirty,
   tests: { pass, fail }, build: buildOk, lintErrors: errCount >= 0 ? errCount : null,
+  smoke: smoke ? `${smoke.pass}/${smoke.total}` : 'n/a',
 }
 const lines = []
 for (const l of dirty) lines.push('    ' + l)
