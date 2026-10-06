@@ -15,14 +15,16 @@
  *   ④ navGroups 用到的图标必须都 import 了（漏 import ⇒ `<component :is>` 拿到 undefined）。
  *   ⛔ 别为了让自己变绿去删判据 —— 它们守的是「入口仍可达」。
  *
- * 反向自检（内联合成样本，不依赖 git / 不依赖历史目录，见文件末尾两个 test）：
- *   把 r101 收纳版的形状喂进 collectFailures 必须判红；空源码必须判红（防「永远是空锁」）。
+ * 反向自检（内联合成样本，不依赖 git / 不依赖历史目录，见文件末尾三个 test）：
+ *   把 r101 收纳版的形状喂进 collectFailures 必须判红；空源码必须判红（防「永远是空锁」）；
+ *   把 r16x+2 的**多行格式化**形状喂进去必须判**绿**（防「一次纯格式化把锁打成假红」，2026-10-06 真实踩过）。
  */
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { flatSource } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -38,10 +40,14 @@ export const EXPECTED_ENTRIES = [
   ['周末班课件', '/weekend-ppt'],
 ]
 
-/** 一级项：`{label:'X',path:'Y',icon:Z` —— 有 icon 才算可渲染的一级项。 */
-const TOP_ITEM_RE = /\{label:'([^']*)',path:'([^']*)',icon:([A-Za-z_$][\w$]*)/g
-/** 二级项声明：`children:[...]`（方括号内容不嵌套，够用）。 */
-const CHILDREN_RE = /children:\[([^\]]*)\]/g
+/**
+ * 一级项：`{ label: 'X', path: 'Y', icon: Z }` —— 有 icon 才算可渲染的一级项。
+ * ⚠️ `\s*` 容忍空白（r214）：同一份 navGroups 被格式化成多行后，旧写法
+ * `/\{label:'([^']*)',path:'([^']*)'/` 一条都抽不到 ⇒ 8 个入口全判「缺失」= 假红。
+ */
+const TOP_ITEM_RE = /\{\s*label:\s*'([^']*)'\s*,\s*path:\s*'([^']*)'\s*,\s*icon:\s*([A-Za-z_$][\w$]*)/g
+/** 二级项声明：`children:[...]`（方括号内容不嵌套，够用）。同样容忍空白。 */
+const CHILDREN_RE = /children:\s*\[([^\]]*)\]/g
 /** 图标导入行。 */
 const ICON_IMPORT_RE = /import\s*\{([^}]*)\}\s*from\s*'@element-plus\/icons-vue'/
 
@@ -62,7 +68,9 @@ export function collectFailures(src) {
   const bad = (msg, cond) => { if (!cond) fails.push(msg) }
 
   const topItems = collectAll(TOP_ITEM_RE, src).map((m) => ({ label: m[1], path: m[2], icon: m[3] }))
-  const childBlocks = collectAll(CHILDREN_RE, src).map((m) => m[1]).join('|')
+  // 子项内容压掉空白再比 —— 比较用的字面量 `path:'/paper'` 是紧凑写法，
+  // 若源码被格式化成 `path: '/paper'` 就会漏判（r214）。
+  const childBlocks = collectAll(CHILDREN_RE, src).map((m) => flatSource(m[1])).join('|')
 
   // ① 每个入口都必须是一级项（有 label + path + icon），且 path 必须与期望一致
   for (const [label, path] of EXPECTED_ENTRIES) {
@@ -135,4 +143,72 @@ test('锁健全性：空源码必须判红（防「永远是空锁」）', () =>
   const failures = collectFailures('<template></template>')
   assert.ok(failures.length >= EXPECTED_ENTRIES.length,
     `空源码应报 ≥${EXPECTED_ENTRIES.length} 处，实际 ${failures.length}`)
+})
+
+/**
+ * r16x+2（`2a5ab25` 侧栏深色母版）把同一份 navGroups 从单行拆成多行后的**真实形状**。
+ * 语义与紧凑版逐字相同 ⇒ 本锁必须判**绿**。
+ * 2026-10-06 实测：这次纯格式化曾让 3 把侧栏锁同时判红（假红）。
+ */
+const PRETTY_SAMPLE = `<template>
+  <aside class="app-sidebar">
+    <nav aria-label="主导航">
+      <section v-for="group in navGroups" :key="group.label" class="nav-group">
+        <button v-for="item in group.items" :key="item.path" type="button" @click="go(item.path)">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span>{{ item.label }}</span>
+        </button>
+      </section>
+    </nav>
+  </aside>
+</template>
+<script setup>
+import { Collection, DataAnalysis, DocumentChecked, Files, HomeFilled, Notebook, Tickets, User } from '@element-plus/icons-vue'
+const navGroups = [
+  { label: '', items: [{ label: '工作台', path: '/', icon: HomeFilled }] },
+  {
+    label: '教学工作',
+    items: [
+      { label: '批改中心', path: '/grade', icon: DocumentChecked },
+      { label: '学习诊断', path: '/weekly-report', icon: DataAnalysis },
+      { label: '学生管理', path: '/students', icon: User }
+    ]
+  },
+  {
+    label: '教学资源',
+    items: [
+      { label: '练习册管理', path: '/worksheets', icon: Notebook },
+      { label: '试卷答案库', path: '/paper', icon: Tickets },
+      { label: '我的考法库', path: '/question-bank', icon: Collection },
+      { label: '周末班课件', path: '/weekend-ppt', icon: Files }
+    ]
+  }
+]
+</script>`
+
+test('锁健全性：多行格式化后的同一份 navGroups 必须判绿 —— 锁盯语义不盯缩进', () => {
+  assert.deepEqual(
+    collectFailures(PRETTY_SAMPLE),
+    [],
+    '一次纯格式化把入口锁打成假红（2026-10-06 真实踩过：2a5ab25 只改缩进，3 把锁同红）'
+  )
+})
+
+/**
+ * 行为级守卫（r214）：把**真实** AppSidebar.vue 的空白打乱（`{` / `,` / `:` 后补换行缩进，
+ * 等价于一次 prettier 格式化），结论必须与原文一致。
+ * 比「扫 test/ 找坏写法」的文本规则可靠 —— 文本规则区分不了「同一个字符串字面量」与
+ * 「相邻两个字面量」，会误报 `includes('difficulty:')` 这类无关写法。
+ */
+test('锁健全性：真实 AppSidebar 被打乱空白后结论不变 —— 锁盯语义不盯缩进', () => {
+  const mangled = SIDEBAR
+    .replace(/\{/g, '{\n      ')
+    .replace(/,/g, ',\n      ')
+    .replace(/:/g, ': ')
+  assert.notEqual(mangled, SIDEBAR, '空白打乱没生效，本测试会退化成空锁')
+  assert.deepEqual(
+    collectFailures(mangled),
+    collectFailures(SIDEBAR),
+    '一次纯格式化改变了入口锁的结论 —— 锁对空白敏感（2026-10-06 真实踩过）'
+  )
 })

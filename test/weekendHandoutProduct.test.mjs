@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { includesLit } from './sourceLockKit.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const LIB_SRC = readFileSync(resolve(ROOT, 'server/lib/weekendHandout.js'), 'utf8')
@@ -75,7 +76,9 @@ test('PPTX 渲染：敏学品牌 token + 图片 base64 data URI', () => {
 test('工作台入口：路由 + 侧栏菜单存在', () => {
   assert.ok(ROUTER_SRC.includes("path: '/weekend-ppt'"), '路由必须注册 /weekend-ppt')
   assert.ok(ROUTER_SRC.includes("import('../views/WeekendHandout.vue')"), '路由必须指向 WeekendHandout.vue')
-  assert.ok(SIDEBAR_SRC.includes("path:'/weekend-ppt'"), '侧栏必须挂周末班课件入口')
+  // ⚠️ 空白容忍（r214）：侧栏 navGroups 被格式化成 `path: '/weekend-ppt'` 后，
+  // 旧的紧凑字面量断言 `includes("path:'/weekend-ppt'")` 会假红（2026-10-06 实测踩过）。
+  assert.ok(includesLit(SIDEBAR_SRC, "path:'/weekend-ppt'"), '侧栏必须挂周末班课件入口')
   assert.ok(SIDEBAR_SRC.includes('周末班课件'), '侧栏菜单名必须为中文「周末班课件」')
   assert.ok(VIEW_SRC.includes('/weekend-ppt/preview'), '页面必须调用 preview 接口')
   assert.ok(VIEW_SRC.includes('/api/weekend-ppt/generate'), '页面必须调用 generate 接口')

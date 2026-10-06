@@ -25,6 +25,12 @@
  * 反向自检：`test/fixtures/failOpenLockSample.txt` 是一份故意写坏的合成样本，
  * 探测器必须能报出 ≥2 条（证明判据不是空锁）。样本放 fixtures 而不是内联，
  * 是为了让本文件自己也能被扫（本文件正文里不许出现坏写法，注释里的说明会被剔除）。
+ *
+ * ⚠️ 另一类失效（「一次纯格式化把锁打成假红」，2026-10-06 `2a5ab25` 侧栏深色母版真实踩过：
+ *   navGroups 从单行拆成多行，语义一字未改，却让 3 把侧栏锁同红）**不在这里扫**——
+ *   试过写成文本规则（拦「紧凑配置字面量 `键:'值'`」），但正则无法可靠区分「同一个字符串字面量」
+ *   与「相邻两个字面量」，实测对 `includes('difficulty:')` 等无关写法大量误报（误报本身就是假红）。
+ *   ⇒ 改用**行为级**守卫：见 `test/resourceFold.test.mjs` 末尾的「打乱空白后结论不变」测试。
  */
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -105,6 +111,7 @@ export function scanFailOpen(src, filename = '(inline)') {
       )
     })
   }
+
   return violations
 }
 

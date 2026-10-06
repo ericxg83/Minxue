@@ -60,3 +60,30 @@ export function anchoredRange(src, fromNeedle, toNeedle, label, fails) {
   }
   return src.slice(a, b)
 }
+
+/**
+ * 把源码压掉所有空白，供「配置字面量存在性」断言使用（r214）。
+ *
+ * 为什么需要它（本仓真实踩过，一次踩出 3 把假红）：
+ *   侧栏 `navGroups` 原本是单行紧凑写法 `{label:'工作台',path:'/',icon:HomeFilled}`，
+ *   多把锁直接 `src.includes("path:'/weekend-ppt'")`，或用
+ *   `/\{label:'([^']*)',path:'([^']*)'/` 抽条目。
+ *   2026-10-06 `2a5ab25`（侧栏深色母版）只是把同一份 navGroups **格式化成多行**
+ *   （`{ label: '工作台', path: '/', icon: HomeFilled }`），**一个字的语义都没改**，
+ *   却让 `dataPageMerge` / `resourceFold` / `weekendHandoutProduct` 三条锁同时判红。
+ *   ⇒ 锁盯的是「入口还在不在」，不是「缩进长什么样」。**一次纯格式化不该把锁打成假红。**
+ *
+ * 用法：`includesLit(SIDEBAR_SRC, "path:'/weekend-ppt'")`
+ *
+ * ⚠️ 只用于**字面量存在性**断言。凡是要匹配模板/多 token 结构（如
+ * `v-for="child in item.children||"`）的，压空白会把词粘起来 ⇒ 改用 `\s*` 容忍的正则，
+ * 不要用它。
+ */
+export function flatSource(src) {
+  return String(src).replace(/\s+/g, '')
+}
+
+/** 两边都压空白后再判子串 —— 结果与格式化（换行/缩进）无关。 */
+export function includesLit(src, literal) {
+  return flatSource(src).includes(flatSource(literal))
+}

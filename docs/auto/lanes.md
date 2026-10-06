@@ -350,3 +350,36 @@
   preview:5337 + cert_probe 零外联 + render_smoke **8/8**。
 - ⚠️ 3 条红测归属 `2a5ab25`（并行会话工作台侧栏改版），未删未放宽。
 - 提案 ㉝（B，观察）：本机/生产存在跑旧代码现象，与 ㉜ 同源。
+
+**第 214 轮（2026-10-06 18:31–，每小时兜底脉冲 → 本赛道「测试套件门禁基线」）已交付：一次纯格式化把 3 把侧栏锁打成假红（`npm test` 恢复全绿）**
+
+- 开工判据（三级）：锁 = `finished / r213`（`finishedAt` 18:05，26 分钟前）｜`git status -uall` **完全干净**｜
+  最近提交 `223b691`(18:00:49) 已 30 分钟、近 30 分钟零文件写入 ⇒ 判定 5 分钟主循环空闲，兜底接管
+  r214（`scripts/loopGuard.mjs acquire` → round=214）。
+- 赛道：**测试套件门禁基线**（「仓库卫生与门禁基线」延伸，r152/r158/r160/r167 先例；该赛道无活跃认领会话）。
+- **命中真问题（红套件：1876 条里 3 红）**：`2a5ab25`（r16x+2 侧栏深色母版）把 `AppSidebar.vue` 的
+  `navGroups` 从单行拆成多行，**语义一字未改**，却让三把侧栏锁同时判红 ——
+  - `test/dataPageMerge.test.mjs:139` `indexOf("label:'教学工作'")` 找不到锚点 ⇒ 切出空串；
+  - `test/resourceFold.test.mjs:42` `TOP_ITEM_RE = /\{label:'…',path:'…',icon:…/` 一条都抽不到 ⇒ 8 个入口全判「缺失」；
+  - `test/weekendHandoutProduct.test.mjs:78` `includes("path:'/weekend-ppt'")` 对不上。
+- 判「代码错 vs 锁过期」：`git show 2a5ab25` 逐条核对 —— navGroups 的 **8 个入口与分组逐字未变**，
+  只动了缩进/换行 ⇒ **锁过期（假红）**，不是产品回归。
+- 修（**只改测试文件，零产品代码**）：`test/sourceLockKit.mjs` 新增 `flatSource` / `includesLit`
+  （压空白后比对，附完整事故记录）；三把锁改走它 / 改 `\s*` 容忍正则。
+- 新增 2 条锁：①「多行格式化后的同一份 navGroups 必须判**绿**」合成样本；
+  ②「**真实** AppSidebar.vue 打乱空白后 `collectFailures` 结论不变」的行为级不变式。
+- **反向自检实测**：把 `git show HEAD:` 的**旧版三把锁**导出成临时文件跑当前源码 ⇒ **3 红**
+  （正是卡住套件的那 3 条）；新树 29/29 绿。
+- 四道闸：单测 **1878/1878 fail 0**（修复前 1876 里 3 红）｜eslint **0e / 126w**（与基线逐项一致）｜
+  `dist_nightly_20261006r214` **35.63s**，main chunk `main-Dg_0tVgF.js` / `main-DAeTCjRt.css`
+  与 r213 **同名**（零产品代码改动）｜cert_probe 零外联 exit 0 + render_smoke **8/8** exit 0 +
+  route_sweep **0/16** exit 0（render_smoke 实测工作台侧栏 8 入口中文标签全部渲染）。
+- ⚠️ **跨赛道实记（请负责人定归属）**：改的 3 个测试文件按本表属「PC 工作台」
+  （`resourceFold` / `dataPageMerge`）与「周末班课件 + 白板」（`weekendHandoutProduct`）赛道；
+  开工锁 finished、工作区干净、无并行会话 ⇒ 零碰撞，按 r142/r148/r160/r210 先例执行并点名。**零产品代码改动。**
+- ⛔ **走过的弯路（记下来防重犯）**：先在元判据里试过加「规则D：禁止紧凑配置字面量 `键:'值'`」的
+  **文本规则**，实测误报 7 处（正则区分不了「同一个字符串字面量」与「相邻两个字面量」，
+  `includes('difficulty:')` 被当成坏写法）⇒ **已撤除**，改走上面的行为级不变式。
+  **文本规则越省事，越容易自己变成新的假红源。**
+- 提案 ㉟（A，建议）：其余源码锁若也用「紧凑配置字面量」盯源码，建议逐步改走
+  `flatSource` / `includesLit` 或 `\s*` 正则；本轮只修踩红的三把，不做全仓 sweep 以免扩大改动面。

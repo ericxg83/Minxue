@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { flatSource } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel) => readFileSync(join(ROOT, rel), 'utf8')
@@ -136,7 +137,13 @@ test('⛔ 知识点下钻抽屉（openDrill）不得复活：它依赖已删除�
 // ─────────────────── ② 页面真的下线了 ───────────────────
 
 test('侧栏「教学工作」只剩 3 项，成长中心与错题中心都不在菜单里', () => {
-  const group = SIDEBAR_SRC.slice(SIDEBAR_SRC.indexOf("label:'教学工作'"))
+  // ⚠️ 压掉空白再切片（r214）：navGroups 被格式化成多行后，旧的
+  // `indexOf("label:'教学工作'")` 找不到锚点 ⇒ 切出空串 ⇒ 三条「少了 XX」全红（假红，
+  // 2026-10-06 实测踩过）。见 test/sourceLockKit.mjs#flatSource。
+  const flat = flatSource(SIDEBAR_SRC)
+  const at = flat.indexOf("label:'教学工作'")
+  assert.ok(at >= 0, '侧栏找不到「教学工作」分组锚点 —— 锚点已改名，请同步本锁（别让它静默失效）')
+  const group = flat.slice(at)
   const line = group.slice(0, group.indexOf(']'))
   assert.ok(!line.includes('/growth'), '侧栏还有成长中心入口')
   assert.ok(!line.includes('/wrongbook'), '侧栏还有错题中心入口')
