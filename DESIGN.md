@@ -79,14 +79,16 @@
 
 ## 8. 导航（AppSidebar）契约
 
-- 一级项：图标 + label，min-height 40px，圆角 8px，hover `--wb-bg-hover`，active `--wb-primary` 字色 + `--wb-primary-mist` 底（不用左缘指示条，背景+字重已足够）
+- **侧栏独立深色底**（r16x+2 裁决 2026-10-06：浅色模板感重，改深靛蓝 `#1b1a33`，与右侧浅色内容区形成明暗对比）：本地 token 前缀 `--sd-*`，不动全局主题 token
+- 一级项：图标 + label，min-height 40px，圆角 6px，hover `rgba(255,255,255,0.06)`，active 白字 600 + 淡 Indigo 渐变底（`rgba(99,102,241,.24→.08)`）+ `inset 0 0 0 1px rgba(99,102,241,.28)` 微描边（不用左缘指示条，背景+描边已足够）
+- **活数据徽标**：`/grade` = `noti.summary.pendingReview`，`/weekly-report` = `noti.summary.todayNewWrongQuestions`（复用 AppHeader 轮询，不新增请求）；徽标仅在 >0 时显示
 - 分组：`教学工作` / `教学资源` 两组。练习册管理 / 试卷答案库 / 我的考法库 是**平级一级项**，
   **不再有父子收纳**（r16x 裁决 2026-10-06：三者是不同对象；r101 的二级收纳已撤销）
-- 分组标签：caption 11px，字重 700，`letter-spacing .08em`，中文语境克制呈现；`nav` 顶部接发丝分隔线（`--wb-border-light`）
+- 分组标签：caption 11px，字重 700，`letter-spacing .08em`，中文语境克制呈现，深底下用 `rgba(255,255,255,.75)` 保障对比；`nav` 顶部接 1px 发丝分隔线（`rgba(255,255,255,.08)`）
 - **禁止半档字号**：字号只从 §4 token 档取（r16x 已清掉 12.5px，勿再引入）
 - 分组间距 20px，组内项间距 0（连续列表）
 - 导航项圆角、hover/active 状态不得使用阴影，仅颜色/边框
-- footer：32px 头像圆 + 名称 + 菜单，独立浅底圆角卡（`--wb-bg` + `inset 0 0 0 1px --wb-border-light`）
+- footer：32px 头像圆 + 名称 + 菜单，深色半透雾面卡（`rgba(255,255,255,.05)` + `inset 0 0 0 1px rgba(255,255,255,.08)`）
 - ⛔ 入口可达性由 `test/resourceFold.test.mjs` 盯着：8 个入口必须在侧栏、对应路由不得删、
   不得出现「声明了 children 却没渲染」的孤儿子项（只删不接 = 入口静默消失）
 
