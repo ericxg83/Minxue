@@ -141,9 +141,16 @@
         <EmptyState v-if="!organizeReport.results?.length" :icon="Collection" title="没有可整理的考点" :description="`近 ${organizeReport.days || 14} 天没有错题量达到门槛的考点。`" compact />
         <section v-for="r in organizeReport.results" :key="r.kpId" class="organize-kp">
           <div class="organize-kp-head"><strong>{{ r.kpName }}</strong><small>{{ r.questionCount }} 道错题素材 · {{ r.elapsedMs }}ms<template v-if="r.vendor"> · {{ r.vendor }}</template></small></div>
+          <!-- ⭐ r221 进度：跑批要好几分钟，老师必须看得见「跑到第几批/ 还剩多少」 -->
+          <div v-if="r.progress" class="organize-progress">
+            <div class="progress-line"><span>已跑 {{ r.progress.batchesRun }} 批 · 本次处理 {{ r.progress.processedThisRun }} 道</span><strong>{{ r.progress.remainingAfter === 0 ? '这个考点已全部分类完毕' : `还剩 ${r.progress.remainingAfter} 道未归类` }}</strong></div>
+            <div class="progress-track"><div class="progress-fill" :style="{width: progressPercent(r.progress)}"></div></div>
+            <ul v-if="r.progress.detail?.length" class="batch-list"><li v-for="b in r.progress.detail" :key="b.batch"><span>第 {{ b.batch }} 批</span><span>{{ b.questionCount }} 题 → {{ b.methods }} 个考法<template v-if="b.reusedExisting">（复用已有 {{ b.reusedExisting }} 个）</template></span><span v-if="b.error" class="batch-err">失败：{{ b.error }}</span><span v-else>{{ (b.elapsedMs/1000).toFixed(1) }}s</span></li></ul>
+          </div>
           <div v-if="r.reason" class="organize-note">{{ r.reason }}</div>
           <ul v-if="r.methods?.length" class="organize-methods"><li v-for="m in r.methods" :key="m.name"><strong>{{ m.name }}</strong><small>{{ m.items }} 道题<template v-if="m.kps?.length"> · 挂 {{ m.kps.join('、') }}</template><template v-if="m.saved"> · 已入库</template></small></li></ul>
           <div v-if="r.rejected?.length" class="organize-rejected"><small>被质量闸拒掉 {{ r.rejected.length }} 条：</small><span v-for="(x,i) in r.rejected" :key="i">{{ x.name }} —— {{ x.reason }}</span></div>
+          <div v-if="r.unmatchedKpNames?.length" class="organize-rejected"><small>有 {{ r.unmatchedKpNames.length }} 个关联考点没能挂进知识树（题库里没有同名考点）：</small><span>{{ r.unmatchedKpNames.join('、') }}</span></div>
         </section>
         <section v-if="organizeReport.errors?.length" class="organize-errors"><strong>失败 {{ organizeReport.errors.length }} 个</strong><span v-for="(e,i) in organizeReport.errors" :key="i">{{ e.kpName }}：{{ e.error }}</span></section>
       </div>
@@ -259,6 +266,13 @@ function formatOptions(raw){if(!raw)return '';if(typeof raw==='string')return ra
 //   它是「题目形式」，不是考法 —— 显示成「综合题/answer」只会让人困惑。
 const TYPE_LABEL={answer:'解答题',fill:'填空题',choice:'选择题',judge:'判断题',proof:'证明题',calc:'计算题',comprehensive:'综合题'}
 const typeLabel=(t)=>TYPE_LABEL[t]||'题目'
+// r221 进度条百分比：已归类 /（跑前待归类）。分母为 0 时按 0 起算，别出NaN。
+function progressPercent(p){
+  const total=Number(p?.remainingBefore)||0
+  if(!total) return '100%'
+  const done=Math.min(Number(p?.coveredTotal)||0,total)
+  return Math.round(done/total*100)+'%'
+}
 async function selectType(id){selectedId.value=id;detailLoading.value=true;try{const data=await apiRequest(`/teaching-question-types/${id}`);selectedType.value=data.type}catch(error){ElMessage.error(error.message||'加载详情失败')}finally{detailLoading.value=false}}
 async function confirmType(){confirming.value=true;try{await apiRequest(`/teaching-question-types/${selectedType.value.id}/confirm`,{method:'POST'});ElMessage.success('已收录到考法库');selectedType.value.status='active';await Promise.all([loadTypes(),loadSummary()])}catch(error){ElMessage.error(error.message||'确认失败')}finally{confirming.value=false}}
 const blankEditor=()=>({kpId:selectedKpId.value||'',name:'',teachingNotes:'',commonMistakes:'',tags:[]})
@@ -394,6 +408,17 @@ onMounted(async()=>{
 .organize-kp-head strong{color:var(--wb-text);font-size:13px}
 .organize-kp-head small{color:var(--wb-text-tertiary);font-size:11px}
 .organize-note{color:var(--wb-text-secondary);font-size:12px}
+/* ⭐ r221 跑批进度：15 分钟的等待必须有进度条，否则老师只能干等 */
+.organize-progress{display:grid;gap:8px;padding:10px;border-radius:8px;background:var(--wb-bg-subtle)}
+.progress-line{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:12px;color:var(--wb-text-secondary)}
+.progress-line strong{color:var(--wb-primary);font-weight:500}
+.progress-track{height:6px;border-radius:3px;background:var(--wb-bg-card);overflow:hidden;border:0.5px solid var(--wb-border-light)}
+.progress-fill{height:100%;border-radius:3px;background:var(--wb-primary);transition:width .3s ease}
+.batch-list{display:grid;gap:4px;margin:0;padding:0;list-style:none}
+.batch-list li{display:flex;align-items:baseline;gap:10px;font-size:11px;color:var(--wb-text-tertiary)}
+.batch-list li span:first-child{flex:0 0 52px;color:var(--wb-text-secondary)}
+.batch-list li span:last-child{flex:0 0 auto;margin-left:auto}
+.batch-err{color:var(--wb-danger)}
 .organize-methods{display:grid;gap:6px;margin:0;padding-left:18px}
 .organize-methods li{display:grid;gap:2px}
 .organize-methods strong{font-size:13px}
