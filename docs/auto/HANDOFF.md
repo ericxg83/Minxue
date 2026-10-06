@@ -695,3 +695,35 @@ render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 
 **下轮首选**：㉘（141 题口径拍板）/ ㊱（几何赛道修完纳入套件）/ ㉚ / ⑲；
 另需负责人查 Render 两条部署链路（㉜）。
+
+---
+
+## 第 216 轮（2026-10-06 19:41–19:55，每小时兜底脉冲 → 测试套件门禁基线）：假绿门禁的第二层
+
+**交付**：`test/testSuiteCoverageKit.mjs`（新增 `auditTestFileDiscovery`）+ `test/testSuiteCoverage.test.mjs`
+（fs 扫描 + 6 条反向自检）。**只改测试文件，零产品代码**（main chunk `main-Dg_0tVgF.js` 与 r213–r215 同名可证）。
+
+**为什么这一条值钱**：r215 刚修掉「9 个测试文件从来没被执行过」，但它的修法是**显式清单**
+（`MUST_COVER` + 反向自检）—— 而那份判据**只能证明「清单里写的文件在清单里」，
+看不见磁盘上多出来的文件**。也就是说 r215 修掉的那类缺陷可以原样复发：
+谁往 `server/tests/` 加一个 `foo.test.mjs`、忘了同步 `package.json`，那个文件永远不跑，门禁依旧全绿。
+还有一半同族：`test/*.test.mjs` 只罩「test/ 直下一层 + `.test.mjs`」，
+在 `test/` 下写 `foo.test.js` 或塞进 `test/sub/` 同样永不执行。
+
+**修法**：判据改成「对着磁盘的真实清单判」——
+`test/` 下的测试文件必须被主 glob 罩到；其余位置必须出现在 `MUST_COVER` 或 `EXCLUDED` 里。
+`TEST_FILE_RE` / `MAIN_GLOB_RE` 只有一份，扫描侧与审计侧共用（防两边漂移成假绿）。
+扫描结果为空时**判红**（否则扫描一坏就退化成永真门禁）。
+
+**反向自检（三层，不是只喂合成样本）**：
+① 合成坏样本三种（未登记新文件 / `test/x.test.js` / `test/sub/x.test.mjs`）各判红并点名；
+② **真实文件级**：真造 `server/tests/zzz_r216_probe_unlisted.test.mjs` 跑锁 ⇒ 判红并逐字点名，探针已删；
+③ **旧判据盲区实证**：同一份坏样本喂 `auditCoverage()` 判绿、喂新判据判红 —— 洞是实测的，不是推测。
+
+**四道闸**：单测 **1961/1961 fail 0**（r215 基线 1953 + 本轮 8）｜eslint **0e / 126w**（同基线，
+改动 2 文件零输出）｜`dist_nightly_20261006r216` **40.69s**｜preview `5352` + curl 验对象
+`text/javascript` + cert_probe 零外联 exit 0 + render_smoke **8/8** + route_sweep **0/16**。
+
+**未做（仍待负责人拍板）**：㉘（141 题口径）/ ㉚（分享卡渲染超时阈值）/ ⑲（备份脚本挂不挂定时任务）/
+㊱（几何配图 `figureRegionRefiner` 纵向保护失效 —— 本轮这把锁的 `EXCLUDED` 就是它，几何赛道修好后
+本锁会自动要求把它挪进 `MUST_COVER`）；另需负责人处理 Render 两条部署链路（㉜/㉝）。
