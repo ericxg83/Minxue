@@ -8,6 +8,7 @@ import { Download } from 'lucide-react'
 import { useStudentStore } from '../../store'
 import { getWeeklyReport } from '../../services/apiService'
 import { generateWeeklyReport } from '../../utils/weeklyReportGenerator'
+import { periodWord } from '../../utils/reportPeriodWord'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -32,23 +33,30 @@ function colorForAccuracy(acc) {
   return acc >= 80 ? T.success : acc >= 60 ? T.warning : T.danger
 }
 
+/**
+ * 周期词由 `../../utils/reportPeriodWord` 统一提供（r212）。
+ * ⛔ 别再在本文件里抄一份：旧写法无论选周/月/全部，屏幕上永远写「本周」，
+ *   与上方周期选择器自相矛盾；两处各抄一份的结果就是改一处漏一处。
+ */
+
 /** 老师寄语 */
-function buildComment(stats, weakestTag) {
+function buildComment(stats, weakestTag, mode = 'week') {
+  const w = periodWord(mode)
   const parts = []
   const completeRate = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0
-  if (completeRate >= 0.8) parts.push('本周学习态度认真，作业完成情况良好')
-  else if (completeRate >= 0.4) parts.push('本周作业完成情况尚可，仍有提升空间')
-  else parts.push('本周作业完成率偏低，请督促孩子按时完成练习')
+  if (completeRate >= 0.8) parts.push(`${w}学习态度认真，作业完成情况良好`)
+  else if (completeRate >= 0.4) parts.push(`${w}作业完成情况尚可，仍有提升空间`)
+  else parts.push(`${w}作业完成率偏低，请督促孩子按时完成练习`)
   if (stats.accuracy >= 85) parts.push('整体正确率优秀，继续保持')
   else if (stats.accuracy >= 60) parts.push(`整体正确率 ${stats.accuracy}%，${weakestTag ? '「' + weakestTag + '」' : '部分知识点'}仍需加强练习`)
-  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习本周错题，夯实基础`)
+  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习${w}错题，夯实基础`)
   return parts.join('，') + '！'
 }
 
 /** 老师建议 */
-function buildAdvice(subjectDiagnosis) {
+function buildAdvice(subjectDiagnosis, mode = 'week') {
   if (!subjectDiagnosis || subjectDiagnosis.length === 0) {
-    return '本周暂无明显薄弱知识点，建议保持练习节奏，适当拓展提高题型。'
+    return `${periodWord(mode)}暂无明显薄弱知识点，建议保持练习节奏，适当拓展提高题型。`
   }
   const tips = subjectDiagnosis.slice(0, 2).map(s => {
     const top = s.topTags && s.topTags[0]
@@ -129,7 +137,7 @@ export default function WeeklyReport() {
       // - 开发环境：mode='download'，含 pdfBlob（直接 saveAs 下载）
       const result = await generateWeeklyReport(currentStudent.id, { mode: periodMode, offset: periodOffset })
       if (!result) {
-        Toast.show({ icon: 'fail', content: '本周暂无学习数据' })
+        Toast.show({ icon: 'fail', content: `${periodWord(periodMode)}暂无学习数据` })
         return
       }
       if (result.mode === 'print') {
@@ -164,8 +172,8 @@ export default function WeeklyReport() {
   for (const s of subjectDiagnosis) {
     if (s.topTags && s.topTags[0]) { weakestTag = s.topTags[0].tag; break }
   }
-  const teacherComment = stats ? buildComment(stats, weakestTag) : ''
-  const teacherAdvice = subjectDiagnosis.length > 0 ? buildAdvice(subjectDiagnosis) : ''
+  const teacherComment = stats ? buildComment(stats, weakestTag, periodMode) : ''
+  const teacherAdvice = subjectDiagnosis.length > 0 ? buildAdvice(subjectDiagnosis, periodMode) : ''
 
   return (
     <div style={{ background: T.bg, minHeight: '100%' }}>
@@ -263,7 +271,7 @@ export default function WeeklyReport() {
                   minWidth: '22px', height: '22px', padding: '0 6px', borderRadius: 'var(--radius-6)',
                   background: T.primary, color: '#fff', fontSize: 'var(--fs-12)', fontWeight: 700
                 }}>01</span>
-                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>本周学习概览</span>
+                <span style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: T.text }}>{periodWord(periodMode)}学习概览</span>
               </div>
               {stats ? (
                 <>
@@ -360,7 +368,7 @@ export default function WeeklyReport() {
                   }}>
                     <span style={{ fontSize: 'var(--fs-14)', lineHeight: '20px' }}>⚠️</span>
                     <div style={{ fontSize: 'var(--fs-12)', color: '#9A3412', lineHeight: 1.6 }}>
-                      <strong>本周高频薄弱点：</strong>
+                      <strong>{periodWord(periodMode)}高频薄弱点：</strong>
                       {topWeakTags.map(t => `「${t.tag}」正确率 ${t.accuracy}%`).join('；')}
                     </div>
                   </div>

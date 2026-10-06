@@ -3,6 +3,7 @@ import { triggerCustomHTMLPrint } from './browserPrint'
 import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
 import { buildPaperCSS, renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
+import { periodWord } from './reportPeriodWord'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
 
@@ -110,24 +111,25 @@ function periodLabelText(period) {
 }
 
 /** 学习寄语（依据统计自动拼装模板话术） */
-function buildTeacherComment(stats, weakestTag) {
+function buildTeacherComment(stats, weakestTag, mode = 'week') {
+  const w = periodWord(mode)
   const parts = []
   const completeRate = stats.totalTasks > 0 ? stats.completedTasks / stats.totalTasks : 0
-  if (completeRate >= 0.8) parts.push('本周学习态度认真，作业完成情况良好')
-  else if (completeRate >= 0.4) parts.push('本周作业完成情况尚可，仍有提升空间')
-  else parts.push('本周作业完成率偏低，请督促孩子按时完成练习')
+  if (completeRate >= 0.8) parts.push(`${w}学习态度认真，作业完成情况良好`)
+  else if (completeRate >= 0.4) parts.push(`${w}作业完成情况尚可，仍有提升空间`)
+  else parts.push(`${w}作业完成率偏低，请督促孩子按时完成练习`)
 
   if (stats.accuracy >= 85) parts.push('整体正确率优秀，继续保持')
   else if (stats.accuracy >= 60) parts.push(`整体正确率 ${stats.accuracy}%，${weakestTag ? '「' + weakestTag + '」' : '部分知识点'}仍需加强练习`)
-  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习本周错题，夯实基础`)
+  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习${w}错题，夯实基础`)
 
   return parts.join('，') + '！'
 }
 
 /** 学习建议（按薄弱学科自动生成） */
-function buildTeacherAdvice(subjectDiagnosis) {
+function buildTeacherAdvice(subjectDiagnosis, mode = 'week') {
   if (!subjectDiagnosis || subjectDiagnosis.length === 0) {
-    return '本周暂无明确薄弱知识点，暂不增加题量，保持观察并在出现重复错误时安排针对训练。'
+    return `${periodWord(mode)}暂无明确薄弱知识点，暂不增加题量，保持观察并在出现重复错误时安排针对训练。`
   }
   const tips = subjectDiagnosis.slice(0, 2).map(s => {
     const top = s.topTags && s.topTags[0]
@@ -674,8 +676,8 @@ export function buildDiagnosisHTML(reportData) {
     if (s.topTags && s.topTags[0]) { weakestTag = s.topTags[0].tag; break }
   }
 
-  const teacherComment = buildTeacherComment(stats, weakestTag)
-  const teacherAdvice = buildTeacherAdvice(subjectDiagnosis)
+  const teacherComment = buildTeacherComment(stats, weakestTag, mode)
+  const teacherAdvice = buildTeacherAdvice(subjectDiagnosis, mode)
   const teachingSummary = buildTeachingSummary(stats, subjectDiagnosis)
 
   // 品牌 Logo Lockup
@@ -709,7 +711,7 @@ export function buildDiagnosisHTML(reportData) {
         <tbody>${rows}</tbody>
       </table>
     </div>`
-  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>本周暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">当前没有形成明确薄弱点，可继续观察后再安排训练</div></div>`
+  }).join('') : `<div class="empty-state"><div class="empty-icon" style="font-size:32px;margin-bottom:8px">--</div><div>${periodWord(mode)}暂无薄弱知识点</div><div class="empty-sub" style="font-size:13px;color:${T.textTer};margin-top:6px">当前没有形成明确薄弱点，可继续观察后再安排训练</div></div>`
 
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -1040,13 +1042,13 @@ export function buildDiagnosisHTML(reportData) {
         ${logoSm}
         <div class="ph-right"><div class="week-badge">${badgeLabel}</div><div class="ph-cap">学习成长记录</div></div>
       </div>
-      <div class="sec-title"><span class="sec-num">02</span>本周学习概览</div>
+      <div class="sec-title"><span class="sec-num">02</span>${periodWord(mode)}学习概览</div>
       <div class="sec-sub">从本周期学习记录中提炼的观察结果</div>
 
-      <div class="sub-label">本周学习概览</div>
+      <div class="sub-label">${periodWord(mode)}学习概览</div>
       <div class="kpi-row">
         <div class="kpi"><div class="kpi-v">${stats.completedTasks}<span class="u">次</span></div><div class="kpi-l">完成作业</div></div>
-        <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">本周记录题量</div></div>
+        <div class="kpi"><div class="kpi-v">${stats.totalQuestions}<span class="u">题</span></div><div class="kpi-l">${periodWord(mode)}记录题量</div></div>
         <div class="kpi ring-kpi">
           <div class="ring"><div class="ring-t">${stats.accuracy}%</div></div>
           <div class="ring-side"><div class="rl">整体正确率</div><div class="rv">${stats.correctCount}/${stats.totalQuestions} 题</div></div>
@@ -1284,7 +1286,7 @@ async function resolveReusableExamId(studentId, examName, wrongQuestionIds) {
   }
 }
 
-async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName, totalCount = 0) {
+async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName, totalCount = 0, mode = 'week') {
   if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
   // 1. 拉取完整题目数据
@@ -1312,13 +1314,14 @@ async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestion
   // 3. 渲染 HTML（含可选二维码）
   // embedPaperCssInBody：把 buildPaperCSS scoped 内嵌到 body，合并周报时样式随 body 保留，
   // 排版与移动端「生成试卷」（PrintPreview）完全一致
-  // 标题如实标注「精选 N / 本周共 M」，让家长知道这是优先重练的一小批、其余在错题本。
+  // 标题如实标注「精选 N / 本周期共 M」，让家长知道这是优先重练的一小批、其余在错题本。
+  const pw = periodWord(mode)
   const shown = fullQs.length
   const titleSuffix = totalCount > shown
-    ? `（精选 ${shown} 题 · 本周共 ${totalCount} 题）`
+    ? `（精选 ${shown} 题 · ${pw}共 ${totalCount} 题）`
     : `（${shown} 题）`
   return await renderFullHTML({
-    title: studentName + ' - 本周错题再测' + titleSuffix,
+    title: studentName + ` - ${pw}错题再测` + titleSuffix,
     studentName,
     questions: fullQs,
     showAnswers: false,
@@ -1406,7 +1409,7 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
   const [diagnosisHTML, examHTML] = await Promise.all([
     renderDiagnosisFullHTML(reportData),
     wrongIds.length > 0
-      ? renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName, retryTotal)
+      ? renderExamFullHTMLForReport(studentId, studentName, wrongIds, examName, retryTotal, mode)
           .catch((e) => {
             console.warn('[weeklyReport] 错题再测卷渲染失败，仅返回诊断报告:', e)
             return ''
