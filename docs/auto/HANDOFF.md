@@ -510,3 +510,36 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 - 四道闸：单测 1838 通过 / 1 红（归属如上）｜lint 我方 3 文件零输出｜`dist_nightly_20261005r159` 36.53s｜
   preview:5295 + `cert_probe` 零外联 exit 0 + `render_smoke` **8/8**（0 控制台错误 / 0 个 4xx5xx）。
 
+
+## 第 198 轮（2026-10-06 11:45–11:52，本赛道「服务端基础设施（非批改）」）：磁盘体检从「永远亮着的黄灯」改成真数字
+
+- **缺陷（可观测性，A 级）**：`scripts/healthcheck.mjs` 里「服务器磁盘」这一项写的是一句**常量警告**——
+  不管剩多少、有没有数据，每次采样都打「体检读不到磁盘用量」，于是每次结论都是
+  「没有致命问题，但有 1 项想提醒你」。而 `GET /api/health` 从设计上**就没有任何磁盘字段**，
+  所以那句「读不到」不是偶发失败，是这个接口答不出这个问题。
+  ⚠️ **恒定亮着的黄灯等于没有黄灯**：它会把「批改失败 / 队列积压」这些真告警一起淹掉，看久了直接跳过。
+- **修法（三处，一个判据一个测量，不重造）**：
+  1. 新增 `server/utils/diskUsage.js`（唯一测量实现，用 Node 自带的 `fs.statfs`，不装包；
+     量不到时**打日志**并返回 null，不静默吞）；
+  2. `server/index.js` 的 `/api/health` 回显 `disk: { freeMb, totalMb, path }`（纯新增字段，零消费方破坏）；
+  3. 新增 `scripts/healthDiskState.mjs` 承载**唯一判定实现** `resolveDiskState()`
+     （剩余 < 200MB ⇒ warn 并给后果与动作，否则 ok；拿不到 ⇒ warn 但必须指路），
+     `healthcheck.mjs` 只 import 它，不再自抄阈值。
+- ⭐ **文案说人话（且不夸大）**：初版写了「磁盘满会让拍照上传失败」——**这是错的**：作业图片存在 OSS，
+  这个盘只是临时空间（分享卡 / 重练卷 PDF 渲染会往这儿写临时文件）。已改成准确说法，
+  并加了一条判据**禁止**再出现「上传失败」式夸大白话 —— 说错了会让人照着做错动作，回归锁就是守这句的。
+- **回归锁** `test/healthDiskGuard.test.mjs` **11 条**（阈值边界 + 单一实现 + 源码契约）。
+  **反向自检实测**：同一把判据套 HEAD 修复前两个文件 ⇒ 旧树 **4 红 / 新树 0 红**；
+  探针还自带「判据字面量与测试文件逐字一致」的自证钩子（第一次就靠它抓出正则末尾少一个 `\)` 的假通过）。
+- ⭐ **顺带用数据撤销了 backlog 提案 ⑮（周报全班版改 `GROUP BY` 批量查询）**：实测 EXPLAIN——
+  21 学生一条 `student_id = ANY(...)` 走 **Seq Scan on questions**（27.04ms，过滤掉全部 3011 行），
+  而按学生单条走 `idx_questions_student_id` 索引扫描只要 **1.74ms**。批量反而慢一个数量级
+  ⇒ ⑮ 这条"优化"不该做，已改判为「实测证伪」。
+- ⚠️ **并发实记**：开工时锁 = `finished/197`，随后在 11:48 被**另一会话改写成 `running/198`**（与本轮同轮号）。
+  两侧文件集不相交（对方 = `server/routes/worksheets.js` / `neonService.js` / `pdfService.js` / lint 类），
+  本轮只动 `server/index.js` + `scripts/**` + 新测试。**按纪律未争抢锁，故收尾未写 `finished`**，
+  由在跑方自行收尾；下一轮 opening 时若锁不是 finished，先确认不是同一批在制品。
+- 四道闸：单测 **1854/1854 fail 0**（基线 1843 + 本轮 11）｜lint 我方 5 文件 **0 error**、
+  6 条 warning 全部既存（healthcheck 的 existsSync/ROOT、index.js:4654 `next`）｜
+  `dist_nightly_20261006r198` **41.20s**｜preview:5312 + `cert_probe` 零外联 exit 0 + `render_smoke` **8/8**。
+- 提交 `cda3aa6`（5 files changed, +226/−4），**只推了这一个 commit**（`git push origin cda3aa6:main`）。
