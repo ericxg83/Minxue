@@ -8,7 +8,7 @@
       @pointermove="onPointerMove"
       @pointerup="onPointerUp"
       @pointercancel="onPointerUp"
-      @pointerleave="onPointerUp"
+      @pointerleave="onPointerLeave"
       @lostpointercapture="onLostCapture"
     />
     <!-- 激光笔迹层：独立 canvas，pointer-events:none，画「像笔一样书写的激光笔迹」，
@@ -317,6 +317,29 @@ function endPinch() {
 }
 
 // ── 落笔 ────────────────────────────────────────────────────────────
+/**
+ * 笔尖是否真的贴在屏幕上（iPad 书写体验修复 2026-10-06）。
+ *
+ * ⛔ 旧判据只看 `buttons & 1`，在 iPad 上会把**每一笔的第一下**误判成
+ * 「笔杆键悬空按下」而丢弃（onPointerDown 直接 return，不落墨）——
+ * 老师感知就是「有的时候要写 2 次才出字」。原因有二：
+ *   ① iPadOS 的 WebKit 在笔尖刚贴屏的那一帧不保证 `buttons` 的笔尖位已置上，
+ *      常常还是 0；
+ *   ② 手掌搭在屏幕上时，Apple Pencil 会被 WebKit 整段吞掉后续 pointer 事件
+ *      （WebKit bug 269535，2024-02 报、2025-2026 仍未修，Canva 同样受害），
+ *      靠「等 pointermove 里 buttons 变 1 再补起笔」这条兜底救不回来。
+ *
+ * 新判据：`buttons` 的笔尖位 **或** 压感大于 0。Apple Pencil 悬空时
+ * pressure 恒为 0，笔尖贴屏立即 > 0 —— 这是 iOS 上唯一可靠的落笔信号，
+ * 且不影响 PC 端：鼠标仍走 `buttons & 1`（鼠标按键时 pressure 恒为 0.5，
+ * 若把 pressure 也当判据，鼠标的**右键/中键**会被误判成落笔）。
+ */
+function isPenTipDown(e) {
+  if ((e.buttons & 1) === 1) return true
+  if (e.pointerType !== 'pen') return false
+  return e.pressure > 0
+}
+
 function onPointerDown(e) {
   if (props.disabled) return
   if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
@@ -339,11 +362,14 @@ function onPointerDown(e) {
   if (drawing && activePointerId !== e.pointerId) return
   try { canvasRef.value.setPointerCapture(e.pointerId) } catch { /* 指针已消失：仍可画，只是失去捕获 */ }
   activePointerId = e.pointerId
-  // 触控笔的笔杆键悬空按下（buttons=32、无笔尖）会先触发一次 pointerdown：
+  // 触控笔的笔杆键悬空按下（笔尖未贴屏）会先触发一次 pointerdown：
   // 此时进入「待命」而不落墨 —— 握笔误碰笔杆不应在悬空点留杂点。笔尖随后
   // 贴屏不会再补发 pointerdown，由 pointermove 里检测到笔尖贴上时补起笔，
   // 这样「碰着笔杆写字」的整笔不会丢（旧代码两头都丢，一笔画不出）。
-  if (e.pointerType === 'pen' && (e.buttons & 1) !== 1 && e.button !== 5) {
+  //
+  // ⛔ iPad 判据换成 isPenTipDown（含压感）：只认 buttons 的笔尖位会把
+  // 每一笔的第一下丢掉，表现为「要写两次才出字」。详见 isPenTipDown 注释。
+  if (e.pointerType === 'pen' && !isPenTipDown(e) && e.button !== 5) {
     penArmed = true
     return
   }
@@ -385,9 +411,9 @@ function onPointerMove(e) {
   }
   if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
   if (!drawing) {
-    // 「待命」中的笔杆键 + 笔尖此刻贴屏 → 补起笔
+    // 「待命」中的笔杆键 + 笔尖此刻贴屏 → 补起笔（同 isPenTipDown 判据）
     if (penArmed && e.pointerId === activePointerId
-        && e.pointerType === 'pen' && (e.buttons & 1) === 1) {
+        && e.pointerType === 'pen' && isPenTipDown(e)) {
       startStroke(e, false)
     }
     return
@@ -613,6 +639,20 @@ function endLaser(e) {
 function onLostCapture() {
   finishStroke()
   endLaser()
+}
+
+/**
+ * 笔/指针移出画布边界。
+ *
+ * ⛔ 不能直接绑 onPointerUp（2026-10-06 iPad 修复）：iOS 上 Apple Pencil
+ * 只要笔尖略微抬离屏幕（写字时正常的悬停弧线、手腕转动）就会派发
+ * pointerleave，于是笔画被从中间截断，书写变成一截一截的短线。
+ * 笔没抬起时移出边界不算收笔 —— 交给 pointerup / lostpointercapture 收。
+ * 鼠标同理：拖出画布仍按住左键不该丢笔。
+ */
+function onPointerLeave() {
+  if (drawing || laserActive) return
+  if (penArmed) penArmed = false
 }
 
 /** 切走激光笔（换笔 / 橡皮）时结束当前笔，让它照常 1 秒渐隐（而不是一直留在屏上） */
@@ -961,6 +1001,11 @@ defineExpose({
   inset: 0;
   overflow: hidden;
   z-index: 3;
+  /* iPad 书写区漂移修复（2026-10-06）：与祖先链同一条，见 WeekendBoard
+     .board-page 注释。overscroll-behavior:none 断掉回弹链，
+     避免书写时整页被橡皮筋拖走、左缘露出 body 背景。 */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .dc-canvas {
   display: block;

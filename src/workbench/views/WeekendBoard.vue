@@ -1419,6 +1419,17 @@ onBeforeUnmount(() => {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  /* ── iPad 书写区漂移 / 冒出左框（2026-10-06 修复）──────────────────
+     touch-action 是**逐元素**判定、且 iOS Safari 的橡皮筋回弹只认它 ——
+     原来只有最内层 .dc-canvas 设了 none，祖先链全是 auto，于是笔一落屏
+     Safari 认定这是「可拖动页面」的触摸手势，把 position:fixed 的白板连
+     整个文档一起拖走且回弹不到位：书写区漂移，页面左缘露出 body 背景
+     （就是那条「左框」）。这里把整条祖先链钉死。
+     overscroll-behavior:none 断掉回弹链，与全局 html/body 上的那条叠加。 */
+  touch-action: none;
+  overscroll-behavior: none;
+  /* 拖动时禁止 iOS 选中文本（与上面的禁选互补，Safari 对已选中态的拖拽无效） */
+  -webkit-user-drag: none;
   /* 父容器是「工作台内容区」（100vh 减顶栏 52px）。这里必须用 100% 跟随父容器，
      用 100vh 会超出 52px 并被父级 overflow:hidden 裁掉——底栏「上一题/下一题」
      正是这样被裁到视口外的。 */
@@ -1448,6 +1459,11 @@ onBeforeUnmount(() => {
   height: 100vh;
   height: 100dvh;
   --s-mode: 1.34;
+  /* iPad 书写区漂移修复：这一层是 position:fixed 的整屏层，被拖走时整块白板
+     都会跟着动（老师说的「书写区域老是会移动」在这一层最明显）。单列出来是
+     为了让回归测试能逐条锁死，见 .board-page 注释。 */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 /* 大屏 / 投影：再放大一档，保证后排可读 */
 @media (min-width: 1440px) {
@@ -1587,6 +1603,9 @@ onBeforeUnmount(() => {
   min-height: 0;
   overflow: hidden;
   margin: 12px 16px;
+  /* iPad 书写区漂移修复：与 .board-page 同一条链，必须逐层都设，见 .board-page 注释 */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .question-wrap {
   position: relative;
@@ -1595,6 +1614,10 @@ onBeforeUnmount(() => {
   border: 1px solid var(--wb-border, #e2e8f0);
   border-radius: 12px;
   overflow: hidden;
+  /* iPad 书写区漂移修复：见 .board-page 注释。画布层自己设了 touch-action:none，
+     但兜不住浏览器的页面级拖拽 —— 祖先链每一层都要 none，整条链才生效。 */
+  touch-action: none;
+  overscroll-behavior: none;
 }
 .question-layer {
   position: absolute;

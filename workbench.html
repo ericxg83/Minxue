@@ -10,7 +10,13 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="敏学工作台" />
     <title>敏学成长工作台</title>
+    <!-- PWA：装到 iPad 主屏后独立窗口、无地址栏，requestFullscreen 在 iOS 上
+         本来就拿不到，靠这条才是真正的全屏（白板讲题要它）。
+         顺带修死链：原来只引 /icon-192x192.png，而 public 下并没有这个文件，
+         「添加到主屏幕」只能拿到网页截图当图标。 -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" type="image/png" href="/icon-192x192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   </head>
   <body>
     <div id="workbench-app"></div>
