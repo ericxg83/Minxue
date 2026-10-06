@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { anchoredSlice } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -48,9 +49,11 @@ export function collectFailures(root) {
   if (page !== null) {
     if (!page.includes('hasReportData')) fails.push('WeeklyReport(移动): 缺 hasReportData 空数据判定')
     // 下载按钮 disabled 必须包含 !hasReportData（空数据禁点）
-    const bi = page.indexOf('onClick={handleDownloadPDF}')
-    const seg = bi < 0 ? '' : page.slice(bi, bi + 400)
-    if (bi >= 0 && !seg.includes('!hasReportData')) fails.push('WeeklyReport(移动): 下载按钮空数据时未禁用')
+    // ⚠️ r167：原先 `bi < 0 ? '' : ...` + `if (bi >= 0 && !seg...)` 在锚点被改名时
+    // 静默通过（fail-open），改走 anchoredSlice（锚点不在 ⇒ 记一条失败）。
+    const BTN_LABEL = 'WeeklyReport(移动): 下载按钮空数据时未禁用'
+    const seg = anchoredSlice(page, 'onClick={handleDownloadPDF}', 400, BTN_LABEL, fails)
+    if (seg !== null && !seg.includes('!hasReportData')) fails.push(BTN_LABEL)
     // 点击前置拦截（双保险，防止绕过 disabled）
     if (!page.includes('本周期暂无学习数据')) fails.push('WeeklyReport(移动): handleDownloadPDF 缺空数据前置提示')
   }

@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { anchoredSlice, anchoredRange } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -94,8 +95,8 @@ export function collectFailures(dir) {
 
   const ws = file(join('components', 'WorksheetPicker', 'index.jsx'))
   if (ws !== null) {
-    const lw = ws.slice(ws.indexOf('const loadWorksheets'), ws.indexOf('const loadDefault'))
-    if (!lw.includes('Toast.show')) fails.push('WorksheetPicker: 加载练习册失败必须 Toast')
+    const lw = anchoredRange(ws, 'const loadWorksheets', 'const loadDefault', 'WorksheetPicker: 加载练习册失败必须 Toast', fails)
+    if (lw !== null && !lw.includes('Toast.show')) fails.push('WorksheetPicker: 加载练习册失败必须 Toast')
     const s0 = ws.indexOf('const handleSetDefault')
     const sd = s0 < 0 ? '' : ws.slice(s0, s0 + 500)
     if (!sd.includes('Toast.show')) fails.push('WorksheetPicker: 设为默认失败必须 Toast')
@@ -109,8 +110,8 @@ export function collectFailures(dir) {
     const iGet = app.indexOf('console.error(\'获取学生数据失败:\', err)')
     if (iGet < 0) fails.push('App.jsx: 学生名单失败锚点不在（改动前请先同步本锁）')
     else if (!app.slice(iGet, iGet + 400).includes('Toast.show')) fails.push('App.jsx: 冷启动拉不到学生名单必须 Toast（空首页不得误导为「没学生」）')
-    const iInit = app.indexOf("console.error('初始化失败:', error)")
-    if (iInit >= 0 && !app.slice(iInit, iInit + 300).includes('Toast.show')) fails.push('App.jsx: 初始化失败必须 Toast')
+    const initSeg = anchoredSlice(app, "console.error('初始化失败:', error)", 300, 'App.jsx: 初始化失败必须 Toast', fails)
+    if (initSeg !== null && !initSeg.includes('Toast.show')) fails.push('App.jsx: 初始化失败必须 Toast')
   }
 
   const np = file(join('components', 'NotificationsPanel.jsx'))
@@ -127,23 +128,36 @@ export function collectFailures(dir) {
   }
 
   if (app !== null) {
-    const lm = app.indexOf("console.error('加载更多错题失败:', error)")
-    if (lm >= 0 && !app.slice(lm, lm + 300).includes('Toast.show')) fails.push('App.jsx: 错题 loadMore 失败必须 Toast（静默失败会让老师以为「就这些题」）')
-    const wb = app.indexOf("console.error('加载错题失败:', error)")
-    if (wb >= 0 && !app.slice(wb, wb + 400).includes('Toast.show')) fails.push('App.jsx: 首页无缓存时错题本加载失败必须 Toast')
+    // ⚠️ r167：以下 4 条原先是 `if (lm >= 0 && !app.slice(...))` —— 锚点被改名时
+    // 短路成「不报错」，锁静默失效（改坏代码的那次重构顺手关掉了锁）。统一改走
+    // anchoredSlice（锚点不在 ⇒ 记一条失败）。
+    const LM_LABEL = 'App.jsx: 错题 loadMore 失败必须 Toast（静默失败会让老师以为「就这些题」）'
+    const lmSeg = anchoredSlice(app, "console.error('加载更多错题失败:', error)", 300, LM_LABEL, fails)
+    if (lmSeg !== null && !lmSeg.includes('Toast.show')) fails.push(LM_LABEL)
+
+    const WB_LABEL = 'App.jsx: 首页无缓存时错题本加载失败必须 Toast'
+    const wbSeg = anchoredSlice(app, "console.error('加载错题失败:', error)", 400, WB_LABEL, fails)
+    if (wbSeg !== null && !wbSeg.includes('Toast.show')) fails.push(WB_LABEL)
+
     // r110q：作业列表无缓存时加载失败也必须 Toast（与错题本同口径，不得停在「暂无任务」）
-    const lt = app.indexOf("console.error('加载任务失败:', error)")
-    if (lt >= 0 && !app.slice(lt, lt + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存时作业列表加载失败必须 Toast')
+    const LT_LABEL = 'App.jsx: 无缓存时作业列表加载失败必须 Toast'
+    const ltSeg = anchoredSlice(app, "console.error('加载任务失败:', error)", 400, LT_LABEL, fails)
+    if (ltSeg !== null && !ltSeg.includes('Toast.show')) fails.push(LT_LABEL)
+
     // r111q：试卷首次加载且无缓存时失败也必须 Toast（轮询失败不弹，防噪）
-    const le = app.indexOf("console.error('加载试卷失败:', error)")
-    if (le >= 0 && !app.slice(le, le + 400).includes('Toast.show')) fails.push('App.jsx: 无缓存首次加载试卷失败必须 Toast')
+    const LE_LABEL = 'App.jsx: 无缓存首次加载试卷失败必须 Toast'
+    const leSeg = anchoredSlice(app, "console.error('加载试卷失败:', error)", 400, LE_LABEL, fails)
+    if (leSeg !== null && !leSeg.includes('Toast.show')) fails.push(LE_LABEL)
 
     // r112q（提案⑱-2）：错题本两个加载函数落地前必须校验当前学生，防串数据
     const GUARD = 'useStudentStore.getState().currentStudent?.id !== studentId'
-    const wbFn = app.slice(app.indexOf('const loadWrongBookData'), app.indexOf('const loadMoreWrongQuestions'))
-    if (wbFn.length > 0 && !wbFn.includes(GUARD)) fails.push('App.jsx: loadWrongBookData 缺「切换学生竞态」守卫（⑱-2）')
-    const lmFn = app.slice(app.indexOf('const loadMoreWrongQuestions'), app.indexOf('// Exam: Load generated exams'))
-    if (lmFn.length > 0 && !lmFn.includes(GUARD)) fails.push('App.jsx: loadMoreWrongQuestions 缺「切换学生竞态」守卫（⑱-2）')
+    const WB_FN_LABEL = 'App.jsx: loadWrongBookData 缺「切换学生竞态」守卫（⑱-2）'
+    const wbFn = anchoredRange(app, 'const loadWrongBookData', 'const loadMoreWrongQuestions', WB_FN_LABEL, fails)
+    if (wbFn !== null && !wbFn.includes(GUARD)) fails.push(WB_FN_LABEL)
+
+    const LM_FN_LABEL = 'App.jsx: loadMoreWrongQuestions 缺「切换学生竞态」守卫（⑱-2）'
+    const lmFn = anchoredRange(app, 'const loadMoreWrongQuestions', '// Exam: Load generated exams', LM_FN_LABEL, fails)
+    if (lmFn !== null && !lmFn.includes(GUARD)) fails.push(LM_FN_LABEL)
   }
 
   const api = file(join('services', 'apiService.js'))

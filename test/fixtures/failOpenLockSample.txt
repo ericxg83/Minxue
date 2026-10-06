@@ -1,0 +1,14 @@
+const src = readFileSync('src/App.jsx', 'utf8')
+
+// 坏样本 1（规则A）：锚点被改名 ⇒ i 变 -1 ⇒ `i >= 0 &&` 短路 ⇒ 锁静默通过（fail-open）
+const i = src.indexOf("console.error('初始化失败:', error)")
+if (i >= 0 && !src.slice(i, i + 300).includes('Toast.show')) fails.push('初始化失败必须 Toast')
+
+// 坏样本 2（规则B）：切片窗口两端都来自 indexOf，`.length > 0 &&` 在锚点缺失时同样短路
+const fn = src.slice(src.indexOf('const loadWrongBookData'), src.indexOf('const loadMoreWrongQuestions'))
+if (fn.length > 0 && !fn.includes('GUARD')) fails.push('缺竞态守卫')
+
+// 坏样本 3（规则C）：锚点缺失时三元兜底切出空串，外面再用 `>= 0 &&` 守卫 ⇒ 双保险一起失效
+const bi = src.indexOf('onClick={handleDownloadPDF}')
+const seg = bi < 0 ? '' : src.slice(bi, bi + 400)
+if (bi >= 0 && !seg.includes('!hasReportData')) fails.push('下载按钮空数据时未禁用')

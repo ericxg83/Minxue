@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { anchoredRange } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -53,9 +54,12 @@ export function collectFailures(dir) {
       fails.push('App.jsx: 仍存在裸 <main.overflow-scroll-area>，下拉刷新未接管滚动容器')
     }
     // 下拉刷新必须含「无学生时重取名名单」恢复分支（App 错误文案「下拉可重试」靠它兜底）
-    const pr = app.slice(app.indexOf('pullRefreshRef.current'), app.indexOf('const handlePullRefresh'))
-    if (pr.length > 0 && !pr.includes('getStudents')) {
-      fails.push('App.jsx: 下拉刷新缺「无学生时重取名名单」恢复分支（冷启动失败后下拉重试的兑现）')
+    // ⚠️ r167：原先 `app.slice(indexOf(a), indexOf(b))` + `if (pr.length > 0 && ...)` 在
+    // 锚点被改名时切出空串 ⇒ 静默通过（fail-open），改走 anchoredRange。
+    const PR_LABEL = 'App.jsx: 下拉刷新缺「无学生时重取名名单」恢复分支（冷启动失败后下拉重试的兑现）'
+    const pr = anchoredRange(app, 'pullRefreshRef.current', 'const handlePullRefresh', PR_LABEL, fails)
+    if (pr !== null && !pr.includes('getStudents')) {
+      fails.push(PR_LABEL)
     }
   }
 
