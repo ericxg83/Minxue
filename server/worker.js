@@ -2270,7 +2270,7 @@ const resolveCopiedAnswerViaTextOnly = async (q, original = {}) => {
 const generateMissingAnswers = async (questions, imageBuffer = null, taskId = null) => {
   if (!questions || questions.length === 0) return { updated: 0, total: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }
 
-  const needAnswer = questions.filter(q => true)
+  const needAnswer = questions.filter(_q => true)
   if (needAnswer.length === 0) {
     console.log('   所有题目已有参考答案，跳过生成')
     return { updated: 0, total: 0, exceptions: 0, cacheHits: 0, cacheMisses: 0 }

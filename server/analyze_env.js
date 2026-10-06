@@ -10,7 +10,7 @@ console.log(`.env文件总大小: ${raw.length} bytes`)
 console.log(`前20字节(hex): ${raw.subarray(0, 20).toString('hex')}`)
 
 const lines = raw.toString('utf-8').split('\n')
-lines.filter((line, i) => line.includes('OSS_ACCESS_KEY_SECRET')).forEach((line, idx) => {
+lines.filter((line, _i) => line.includes('OSS_ACCESS_KEY_SECRET')).forEach((line, _idx) => {
     const i = lines.indexOf(line)
     console.log(`\n第${i + 1}行:`)
     console.log(`  完整行: "${line}"`)

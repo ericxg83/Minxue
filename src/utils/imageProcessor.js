@@ -72,7 +72,7 @@ export async function processExamImage(source, options = {}) {
  * 通过颜色通道差异识别蓝色墨水并设为白色
  * 打印文字通常是纯黑色(R≈G≈B且值很低)，蓝色墨水则B通道明显偏高
  */
-function removeHandwritingPixels(data, width, height) {
+function removeHandwritingPixels(data, _width, _height) {
   for (let i = 0; i < data.length; i += 4) {
     const r = data[i], g = data[i + 1], b = data[i + 2]
     const avg = (r + g + b) / 3

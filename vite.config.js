@@ -49,7 +49,7 @@ const katexFontInlinePlugin = () => ({
   }
 })
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode: _mode }) => ({
   plugins: [
     react(),
     vue(),

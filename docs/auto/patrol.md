@@ -55,3 +55,7 @@
 - **Windows 退出崩溃 `0xC0000409`**（STATUS_STACK_BUFFER_OVERRUN，libuv `src\win\async.c:76` `UV_HANDLE_CLOSING` 断言）。巡检期间并行会话提交了 healthcheck 冷启动修复 `7828fe2` + 回归测试 `healthcheckSpeed.test.mjs`（5 用例），但测试在本机**红 1 条**：假后端冷启动场景下，healthcheck 子进程退出码 3221226505。A/B 复现定位根因——`process.exit()` 强杀未闭合的 `fetch`/`AbortSignal.timeout()` 句柄。修复：改 `process.exitCode = ...`，让事件循环自然排空。**A/B 验证**：原版退出码 3221226505 + stderr 断言；新版退出码 0 且干净。**回归**：healthcheckSpeed 5/5，全量 1990/1990，bad 路径退出码 1 语义保留。
 - 修复最小化（1 行），未动并行会话的判据逻辑。
 **遗留**：死导出 89 处存量待清理（候选，待批准）。
+| 7 | 2026-10-06T14:25:00 | tests=2003/0 | lint=0 | build=skipped | server=ok | dirty=3 |
+| 8 | 2026-10-06T14:28:46 | tests=2002/1 | lint=0 | build=ok | server=ok | dirty=4 |
+| 9 | 2026-10-06T14:31:28 | tests=2003/0 | lint=0 | build=ok | server=DOWN(ECONNREFUSED) | dirty=5 |
+| 10 | 2026-10-06T14:36:01 | tests=2003/0 | lint=0 | build=ok | server=ok | dirty=11 |

@@ -41,7 +41,7 @@ async function main () {
 
   // ── ② 超时路径：拦截 OSS 图片请求，让它永远 pending ──
   page = await browser.newPage({ viewport: { width: 1600, height: 950 } })
-  await page.route(/minxue-app-oss\.oss-cn-shanghai\.aliyuncs\.com/, async (route) => {
+  await page.route(/minxue-app-oss\.oss-cn-shanghai\.aliyuncs\.com/, async (_route) => {
     // 挂起不回应 → img 永远 pending
     await new Promise(() => {})
   })

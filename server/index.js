@@ -4651,7 +4651,7 @@ app.use(weekendHandoutRouter)
 app.use(teachingMarksRouter)
 
 // 错误处理中间件（必须在路由之后，才能捕获路由中的未处理异常）
-app.use((err, req, res, next) => {
+app.use((err, req, res, _next) => {
   console.error('服务器错误:', err)
   if (err instanceof multer.MulterError) {
     if (err.code === 'LIMIT_FILE_SIZE') {

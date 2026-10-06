@@ -31,7 +31,7 @@ const pool = new Pool({ connectionString: process.env.NEON_DATABASE_URL })
 
 // 让 addWrongQuestions / query 用上 pool:我们用最简路径直接 query/insert。
 const target = { name: 'backfill-blank' }
-const { query } = await import('../config/neon.js').then(m => ({
+const { query } = await import('../config/neon.js').then(_m => ({
   query: (text, params) => pool.query(text, params),
 }))
 

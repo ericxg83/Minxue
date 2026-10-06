@@ -784,7 +784,7 @@ function renderTopic(t, idx) {
 
   const stem = (t.parentStem ? `<div class="parent-stem">${mathText(t.parentStem)}</div>` : '')
     + (t.subParts && t.subParts.length > 1
-        ? `<div class="stem subparts">${t.subParts.map((s, i) =>
+        ? `<div class="stem subparts">${t.subParts.map((s, _i) =>
             `<div class="subpart ${s.subNo === String(t.subNo) && t.subNo ? 'is-wrong' : ''}"><span class="sub-tag">(${esc(s.subNo)})</span>${mathText(s.content)}</div>`
           ).join('')}</div>
            ${t.missingSubs && t.missingSubs.length ? `<div class="missing-subs">⚠ 本题错在第 ${esc(t.missingSubs.join('/'))} 问，但题库缺该小问的题干 — 讲前请看「原卷」图</div>` : ''}`

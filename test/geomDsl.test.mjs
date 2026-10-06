@@ -519,7 +519,7 @@ test('parseDslReply：只有 VERDICT OK、没有 DSL 也可解析', () => {
 
 test('correctDslByVision：从空 DSL 生成 → 模型修一版 → 确认通过（两轮闭环）', async () => {
   let calls = 0
-  const callVision = async ({ systemPrompt, userText, imageDataURL }) => {
+  const callVision = async ({ systemPrompt, userText, _imageDataURL }) => {
     calls++
     assert.ok(systemPrompt.includes('可用命令'), 'system prompt 应包含命令参考')
     if (calls === 1) {
