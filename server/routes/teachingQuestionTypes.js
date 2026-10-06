@@ -79,15 +79,20 @@ router.get('/', async (req, res) => {
                     WHERE k.type_id = t.id AND k.kp_id = $${params.length}::uuid))`)
     }
     if (keyword) { params.push(`%${keyword}%`); clauses.push(`(t.name ILIKE $${params.length} OR t.teaching_notes ILIKE $${params.length})`) }
+    // r220：action / wrong_students 直接从 jsonb 取，别让前端再算一遍。
+    //   action 是「这套题在考什么动作」—— 清单上就能看出是「一类题」而不是一堆散题。
     const { rows } = await query(
       `SELECT t.id, t.kp_id, t.name, t.teaching_notes, t.common_mistakes, t.tags, t.status, t.source, t.auto_summary, t.updated_at,
-              kp.name AS knowledge_name, COUNT(e.id)::int AS example_count
-       FROM teaching_question_types t
-       JOIN knowledge_points kp ON kp.id = t.kp_id
-       LEFT JOIN teaching_question_type_examples e ON e.type_id = t.id
-       WHERE ${clauses.join(' AND ')}
-       GROUP BY t.id, kp.name
-       ORDER BY CASE WHEN t.status = 'draft' THEN 0 ELSE 1 END, MIN(kp.sort_order), t.sort_order, t.updated_at DESC`, params)
+              t.auto_summary->>'action' AS action,
+              COUNT(e.id)::int AS example_count,
+              COALESCE(MAX((e.snapshot->>'wrongCount')::int), 0) AS wrong_students,
+              kp.name AS knowledge_name
+         FROM teaching_question_types t
+         JOIN knowledge_points kp ON kp.id = t.kp_id
+         LEFT JOIN teaching_question_type_examples e ON e.type_id = t.id
+         WHERE ${clauses.join(' AND ')}
+         GROUP BY t.id, kp.name
+         ORDER BY CASE WHEN t.status = 'draft' THEN 0 ELSE 1 END, MIN(kp.sort_order), t.sort_order, t.updated_at DESC`, params)
     res.json({ success: true, types: rows })
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })

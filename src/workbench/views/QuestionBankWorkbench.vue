@@ -99,19 +99,31 @@
           <EmptyState v-else-if="!types.length" :icon="subMode === 'recommended' ? CircleCheck : Collection" :title="subMode === 'recommended' ? '本周没有待确认考法' : '还没有已确认考法'" :description="subMode === 'recommended' ? '点右上角「整理本周考法」，系统会先预演给你看，满意再写入。' : '先确认系统整理的考法，或手动补充一个。'">
             <template #actions><ActionButton v-if="subMode === 'recommended'" @click="runOrganize">整理本周考法</ActionButton><ActionButton v-else variant="primary" @click="startCreate">手动补充考法</ActionButton></template>
           </EmptyState>
-          <div v-else class="type-list"><button v-for="item in types" :key="item.id" type="button" :class="['type-row',{active:selectedId===item.id}]" @click="selectType(item.id)"><span class="row-main"><strong>{{ item.name }}</strong><small>{{ item.knowledge_name }} · {{ item.example_count }} 道代表题</small></span><span class="row-evidence" v-if="item.auto_summary?.wrongCount">{{ item.auto_summary.wrongCount }} 次错误<br>{{ item.auto_summary.studentCount }} 名学生</span><el-icon><ArrowRight /></el-icon></button></div>
+          <div v-else class="type-list"><button v-for="item in types" :key="item.id" type="button" :class="['type-row',{active:selectedId===item.id}]" @click="selectType(item.id)"><span class="row-main"><strong>{{ item.name }}</strong><small>{{ item.knowledge_name }} · {{ item.action ? item.action : '' }}</small></span><span class="row-evidence">{{ item.example_count }} 道题<template v-if="item.wrong_students"> · {{ item.wrong_students }} 人错过</template></span><el-icon><ArrowRight /></el-icon></button></div>
         </ContentCard>
-        <ContentCard class="type-inspector" title="考法详情" :description="selectedType ? `${selectedType.knowledge_name} · ${selectedType.status === 'draft' ? '系统建议，等待确认' : '已确认教学资产'}` : '选一个考法看讲解建议、易错点和代表题'" flush>
+        <ContentCard class="type-inspector" title="考法详情" :description="selectedType ? `${selectedType.knowledge_name} · ${selectedType.status === 'draft' ? '系统建议，等待确认' : '已确认教学资产'}` : '选一个考法，看它归纳了哪些题'" flush>
           <div v-if="detailLoading" class="detail-loading"><el-skeleton animated :rows="10" /></div>
-          <EmptyState v-else-if="!selectedType" :icon="Reading" title="选一个考法" description="右边会展示系统依据、讲解建议和代表题。" compact />
+          <EmptyState v-else-if="!selectedType" :icon="Reading" title="选一个考法" description="左边选一个考法，这里显示它的动作、步骤和归纳出的整组题。" compact />
           <article v-else class="type-detail">
             <div class="detail-heading"><div><div class="knowledge-label">{{ selectedType.knowledge_name }}</div><h2>{{ selectedType.name }}</h2></div><el-dropdown @command="handleDetailAction"><el-button text aria-label="考法操作"><el-icon><MoreFilled /></el-icon></el-button><template #dropdown><el-dropdown-menu><el-dropdown-item command="edit">编辑考法</el-dropdown-item><el-dropdown-item command="ignore" v-if="selectedType.status==='draft'" divided>忽略本次建议</el-dropdown-item><el-dropdown-item command="archive" v-else divided>归档考法</el-dropdown-item></el-dropdown-menu></template></el-dropdown></div>
-            <div class="recommendation" v-if="selectedType.status==='draft'"><strong>系统建议</strong><span>近 {{ selectedType.auto_summary?.days || 14 }} 天内，{{ selectedType.auto_summary?.studentCount || 0 }} 名学生出现 {{ selectedType.auto_summary?.wrongCount || 0 }} 次相关错误。</span></div>
-            <div v-if="selectedType.tags?.length" class="detail-tags"><el-tag v-for="tag in selectedType.tags" :key="tag" size="small">{{tag}}</el-tag></div>
-            <section class="detail-section"><h3>建议课堂讲法</h3><p>{{selectedType.teaching_notes || '暂未生成讲法。'}}</p></section>
-            <section class="detail-section"><h3>典型易错点</h3><p>{{selectedType.common_mistakes || '暂未收集到明确错因。'}}</p></section>
-            <section class="detail-section examples"><div class="section-heading"><h3>代表题</h3><span>{{selectedType.examples?.length || 0}} 道</span></div><article v-for="example in selectedType.examples" :key="example.id" class="example-card"><div class="example-content">{{example.snapshot?.content || '题目内容快照不可用'}}</div><div class="example-meta"><span>{{example.snapshot?.questionType || '综合题'}}</span><span v-if="example.snapshot?.answer">答案：{{example.snapshot.answer}}</span></div><el-button v-if="example.sourceQuestionId" text size="small" :loading="variantLoadingId===example.id" @click="generateVariants(example)">生成变式练习</el-button></article></section>
-            <div class="detail-actions" v-if="selectedType.status==='draft'"><el-button @click="editSelected">先修改</el-button><el-button type="primary" :loading="confirming" @click="confirmType">确认收录</el-button></div>
+            <!-- 一句话说清「这是哪一类题」：这是「让学生看出都是考一个东西」的关键 -->
+            <div v-if="selectedType.action" class="method-pitch"><strong>这类题</strong><span>都在考同一个动作：{{ selectedType.action }}</span></div>
+            <div v-if="selectedType.kps?.length" class="detail-tags"><span class="tag-label">关联考点</span><el-tag v-for="k in selectedType.kps" :key="k.id" size="small" :type="k.role==='primary'?'primary':'info'">{{ k.name }}</el-tag></div>
+            <section class="detail-section" v-if="selectedType.teaching_notes"><h3>怎么讲</h3><p>{{selectedType.teaching_notes}}</p></section>
+            <section class="detail-section" v-if="selectedType.common_mistakes"><h3>易错提醒</h3><p>{{selectedType.common_mistakes}}</p></section>
+            <!-- 整组题：这就是「把很多题目放在一个知识点下」的核心交付 -->
+            <section class="detail-section examples">
+              <div class="section-heading"><h3>这类题 · {{ selectedType.examples?.length || 0 }} 道</h3><span v-if="selectedType.examples?.length">同一套动作，不同数字</span></div>
+              <EmptyState v-if="!selectedType.examples?.length" :icon="Collection" title="这个考法还没关联题目" description="重新整理一次，或手动编辑考法挂上题目。" compact />
+              <article v-for="(example,i) in selectedType.examples" :key="example.id" class="example-card">
+                <div class="example-idx">{{ i + 1 }}</div>
+                <div class="example-body">
+                  <div class="example-content">{{example.snapshot?.content || '题目内容快照不可用'}}</div>
+                  <div class="example-meta"><span v-if="example.snapshot?.questionType">{{typeLabel(example.snapshot.questionType)}}</span><span v-if="example.snapshot?.wrongCount">{{example.snapshot.wrongCount}} 人错过</span><el-button v-if="example.sourceQuestionId" text size="small" :loading="variantLoadingId===example.id" @click="generateVariants(example)">生成变式</el-button></div>
+                </div>
+              </article>
+            </section>
+            <div class="detail-actions" v-if="selectedType.status==='draft'"><el-button @click="editSelected">先改名字</el-button><el-button type="primary" :loading="confirming" @click="confirmType">确认收录</el-button></div>
           </article>
         </ContentCard>
       </main>
@@ -243,6 +255,10 @@ const cooccurOption=computed(()=>{const nodes=cooccurNodes.value;if(!nodes.lengt
 function onCooccurClick(params){const hit=cooccurNodes.value.find(n=>n.id===params?.data?.id||n.name===params?.name);if(hit&&!hit.is_center)jumpToKp(hit.id)}
 async function loadCooccur(){if(!selectedKpId.value){cooccurNodes.value=[];cooccurLinks.value=[];return}cooccurLoading.value=true;try{const p=new URLSearchParams({kpId:selectedKpId.value,limit:String(COOCUR_LIMIT)});const data=await apiRequest(`/teaching-question-types/kp-cooccur?${p}`);cooccurNodes.value=data.graph?.nodes||[];cooccurLinks.value=data.graph?.links||[]}catch(error){cooccurNodes.value=[];cooccurLinks.value=[];console.warn('共现图加载失败',error.message||error)}finally{cooccurLoading.value=false}}
 function formatOptions(raw){if(!raw)return '';if(typeof raw==='string')return raw;try{const arr=Array.isArray(raw)?raw:JSON.parse(raw);return (arr||[]).map(o=>typeof o==='string'?o:(o.label||o.text||o.value||'')).filter(Boolean).join('  ')}catch(e){return String(raw)}}
+// ⛔ 别把 questions.question_type 的枚举值直接甩给老师看（记忆铁律：技术状态要翻译）。
+//   它是「题目形式」，不是考法 —— 显示成「综合题/answer」只会让人困惑。
+const TYPE_LABEL={answer:'解答题',fill:'填空题',choice:'选择题',judge:'判断题',proof:'证明题',calc:'计算题',comprehensive:'综合题'}
+const typeLabel=(t)=>TYPE_LABEL[t]||'题目'
 async function selectType(id){selectedId.value=id;detailLoading.value=true;try{const data=await apiRequest(`/teaching-question-types/${id}`);selectedType.value=data.type}catch(error){ElMessage.error(error.message||'加载详情失败')}finally{detailLoading.value=false}}
 async function confirmType(){confirming.value=true;try{await apiRequest(`/teaching-question-types/${selectedType.value.id}/confirm`,{method:'POST'});ElMessage.success('已收录到考法库');selectedType.value.status='active';await Promise.all([loadTypes(),loadSummary()])}catch(error){ElMessage.error(error.message||'确认失败')}finally{confirming.value=false}}
 const blankEditor=()=>({kpId:selectedKpId.value||'',name:'',teachingNotes:'',commonMistakes:'',tags:[]})
@@ -349,15 +365,23 @@ onMounted(async()=>{
 .detail-heading h2{margin:0;font-size:21px}
 .recommendation{display:grid;gap:4px;margin:16px 0;padding:11px 12px;border:1px solid #dbe4ff;border-radius:8px;color:#42526e;font-size:12px;background:#f7f9ff}
 .recommendation strong{color:var(--wb-primary)}
-.detail-tags{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0}
+/* ⭐ r220「这类题」一句话 —— 让老师/学生一眼看出「这批题是考一个东西」 */
+.method-pitch{display:flex;align-items:baseline;gap:8px;margin:14px 0 4px;padding:12px 14px;border:1px solid var(--wb-border);border-left:3px solid var(--wb-primary);border-radius:8px;background:var(--wb-bg-subtle)}
+.method-pitch strong{flex:0 0 auto;color:var(--wb-primary);font-size:12px}
+.method-pitch span{color:var(--wb-text);font-size:14px;line-height:1.6}
+.tag-label{margin-right:2px;color:var(--wb-text-tertiary);font-size:11px}
+.detail-tags{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:14px 0}
+/* 整组题：编号 + 题干 + 错次，一眼看清「这一组」 */
+.example-card{display:flex;gap:10px;padding:12px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-subtle)}
+.example-idx{flex:0 0 auto;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--wb-primary-soft);color:var(--wb-primary);font-size:11px;font-weight:600}
+.example-body{min-width:0;flex:1}
+.example-body .example-meta{display:flex;align-items:center;gap:12px;margin:8px 0 0;color:var(--wb-text-tertiary);font-size:11px}
 .detail-section{padding:17px 0;border-top:1px solid var(--wb-border-light)}
 .detail-section h3{margin:0 0 8px;font-size:12px}
 .detail-section p{margin:0;color:var(--wb-text-secondary);font-size:13px;line-height:1.75}
 .kp-content{white-space:pre-wrap}
 .examples{display:grid;gap:10px}
-.example-card{padding:12px;border:1px solid var(--wb-border-light);border-radius:8px;background:var(--wb-bg-subtle)}
 .example-content{display:-webkit-box;overflow:hidden;font-size:13px;line-height:1.6;-webkit-box-orient:vertical;-webkit-line-clamp:3}
-.example-meta{display:flex;gap:10px;margin:9px 0;color:var(--wb-text-tertiary);font-size:11px}
 .detail-actions{padding-top:18px;border-top:1px solid var(--wb-border-light);align-items:center;justify-content:flex-end}
 .drawer-actions{display:flex;justify-content:flex-end;gap:8px}
 /* 整理预演结果（r218：results/rejected/errors 不再丢掉） */
