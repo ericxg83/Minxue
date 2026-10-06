@@ -83,7 +83,7 @@ test('⛔ 同一张卡不许出现「完成题量」这个别名（r217 实测�
   assert.equal(
     html.includes(ALIAS),
     false,
-    `卡上又出现别名「${ALIAS}」→ 同一字段\(totalQuestions\)被起了两个名字`
+    `卡上又出现别名「${ALIAS}」→ 同一个字段（totalQuestions）被起了两个名字`
   )
 })
 
