@@ -784,3 +784,23 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - 四道闸：单测 1990/1990 fail 0｜lint 3 文件零输出｜`dist_nightly_20261006r218` 38.38s｜
   preview 5391 + cert_probe + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
 - 未做：㉘ / ㉚ / ㊱ / ⑲ / ㊲ / ㊴，全部留待拍板。
+
+## 第 219 轮（2026-10-06 23:11–23:45）：后端死端点门禁（commit `2dbed43`，已推送）
+
+- **做了什么**：给「后端新挂的 API 有没有人在调」装了一道门禁。后端共暴露 155 条 API，
+  实测 20 条零调用方（业务 7 / 运维 13）。这 7 条业务死端点全部写进
+  `test/apiDeadEndpoints.json` 并逐条写明「为什么还留着」+ 归属赛道。
+- **最重要的实证**：`POST /api/wrong-questions/export-retry-pdf`（服务端重练卷 PDF + 二维码）
+  零调用方 —— 学生扫的二维码是手机端现算的。同类第三枚（前两枚：提案 19 的备份脚本、
+  r217 的 nightlyAudit.mjs）。**这一类缺口读代码看不出来，只有「扫端点 + 扫调用方」才看得见。**
+- **待办（交负责人）**：
+  - **㊸**：服务端那条重练卷导出链路 —— 留着？删掉？还是接到工作台上去？
+    建议先删（手机端已有等价能力），要接再说。
+  - **㉘**（141 题 is_complete 口径）／**㊴**（两条渲染路径加 60s 超时）／**⑲**（备份脚本挂不挂定时任务）仍待拍板。
+  - **㊹**（观察）：另 6 条业务死端点（teaching / weakness / batch-update-tags / figure-relocate）零调用方，
+    其中几何、考法两条是别人在跑的赛道，本轮只登记未动手。
+- ⛔ **写这类门禁时最容易踩的坑（本轮当场踩到一次）**：门禁自己的测试文件若在「调用方语料」里，
+  它列的死端点清单会**用自己那串字符串**把这些端点判成「有人调」⇒ **锁自己变假绿**。
+  `test/apiCallerAuditKit.mjs` 里的 `GATE_SELF_FILES` 就是为这个存在的，别删。
+- 四道闸全绿：单测 2015/2015｜lint 零输出｜`dist_nightly_20261006r219` 37.32s｜
+  preview 5405 + cert_probe + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
