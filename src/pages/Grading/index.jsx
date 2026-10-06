@@ -117,11 +117,6 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
     }
     setGradingResults(newResults)
 
-    // 本地暂存防丢失
-    try {
-      localStorage.setItem(`grading_temp_${studentId}`, JSON.stringify(newResults))
-    } catch { /* 本地暂存防丢失尽力而为，配额满则跳过 */ }
-
     if (currentQuestionIndex < questions.length - 1) {
       setTimeout(() => setCurrentQuestionIndex(currentQuestionIndex + 1), 300)
     } else {
@@ -184,8 +179,6 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
           await markGeneratedExamGraded(generatedExamId)
         }
       }
-
-      try { localStorage.removeItem(`grading_temp_${studentId}`) } catch { /* 清理失败无碍 */ }
 
       const stats = calcStats()
       onComplete?.({

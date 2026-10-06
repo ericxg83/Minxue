@@ -50,7 +50,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 按 eslint 口径加 _ 前缀标明「故意不读」，而不是假装它是个有效状态。
   const [_paperId, setPaperId] = useState('')
   const [qrContent, setQrContent] = useState('')
-  const [showGradingModal, setShowGradingModal] = useState(false)
   const examRecorded = useRef(false)
   const [pdfBlobUrl, setPdfBlobUrl] = useState('')
   const [generatingPdf, setGeneratingPdf] = useState(false)
@@ -436,10 +435,6 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     }
   }, [pdfBlobUrl])
 
-  const handleSimulateScan = () => {
-    setShowGradingModal(!showGradingModal)
-  }
-
   if (previewQuestions.length === 0) {
     return (
       <AnimatePresence>
@@ -475,9 +470,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
             返回
           </button>
           <h2 style={{ fontSize: 'var(--fs-15)', fontWeight: 600, color: 'var(--text)' }}>打印预览</h2>
-          <button onClick={handleSimulateScan} style={{ fontSize: 'var(--fs-12)', color: 'var(--primary-hover)' }}>
-            {showGradingModal ? '关闭模拟' : '模拟扫码'}
-          </button>
+          <div className="w-10" />
         </div>
 
         {/* Preview Area — A4 真实宽度渲染后按视口缩放，手机端完整呈现 */}
