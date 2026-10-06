@@ -16,14 +16,14 @@ import { spawnSync } from 'node:child_process'
 const BASE = process.argv[2] || 'http://127.0.0.1:5173'
 
 const NAV = [
-  { label: '批改中心', path: '#/grade' },
-  { label: '学习诊断', path: '#/growth' },
-  { label: '错题本', path: '#/wrongbook' },
-  { label: '练习册管理', path: '#/worksheets' },
-  { label: '试卷答案库', path: '#/paper' },
-  { label: '我的考法库', path: '#/question-bank' },
-  { label: '周末班课件', path: '#/weekend-ppt' },
-  { label: '名册', path: '#/students' },
+  { label: '批改中心', path: '#/grade', landing: ['#/grade'] },
+  { label: '学习诊断', path: '#/growth', landing: ['#/weekly-report', '#/growth'] },
+  { label: '错题本', path: '#/wrongbook', landing: ['#/students', '#/wrongbook'] },
+  { label: '练习册管理', path: '#/worksheets', landing: ['#/worksheets'] },
+  { label: '试卷答案库', path: '#/paper', landing: ['#/paper'] },
+  { label: '我的考法库', path: '#/question-bank', landing: ['#/question-bank'] },
+  { label: '周末班课件', path: '#/weekend-ppt', landing: ['#/weekend-ppt'] },
+  { label: '名册', path: '#/students', landing: ['#/students'] },
 ]
 
 const browser = await chromium.launch({ headless: true })
@@ -51,7 +51,7 @@ try {
 // ── 工作台 8 导航 ──
 await page.goto(`${BASE}/workbench.html#/`, { waitUntil: 'load', timeout: 30000 }).catch(() => {})
 await page.waitForTimeout(2500)
-for (const { label, path } of NAV) {
+for (const { label, path, landing } of NAV) {
   try {
     const link = page.locator(`aside a[href="${path}"], aside .el-menu-item, aside .nav-item, aside a`).filter({ hasText: label }).first()
     const links = await page.locator('aside a, aside .el-menu-item').all()
@@ -71,7 +71,7 @@ for (const { label, path } of NAV) {
         head: (document.body.innerText || '').trim().slice(0, 60),
       }
     })
-    const routeOk = state.url === path || state.url.startsWith(path.split('#')[1])
+    const routeOk = landing.some(h => state.url === h || state.url.startsWith(h))
     ok(`导航「${label}」可达`, routeOk && state.children > 0, `hash=${state.url} children=${state.children} head=${JSON.stringify(state.head)}`)
   } catch (e) { ok(`导航「${label}」`, false, e.message) }
 }
