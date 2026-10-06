@@ -21,6 +21,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { resolveDiskState } from './healthDiskState.mjs'
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
 const JSON_ONLY = argv.includes('--json')
@@ -121,10 +123,11 @@ if (health) {
 }
 
 // ── 6. 服务器磁盘会不会满（图片存服务器上，这是最容易忽略的坑）───────────
-// 说明：Render 免费实例磁盘只有约 1GB，图片一多就可能写不进去。
-// 这里只能间接判断（读不到 Render 后台配额），故给 warn 而不是 ok。
+// r198：/api/health 会回 disk（实测剩余 MB），所以**真能报出数字就不该再挂着「读不到」的黄灯**——
+// 恒定亮着的黄灯会把「批改失败 / 队列积压」这些真告警一起淹掉。判据收敛到 healthDiskState.mjs。
 if (health) {
-  record('服务器磁盘', 'warn', '体检读不到磁盘用量。图片存本地磁盘时请定期在 Render 后台看用量（免费额度约 1GB，接近上限会导致上传失败）')
+  const diskState = resolveDiskState(health.disk)
+  record('服务器磁盘', diskState.status, diskState.detail)
 }
 
 // ── 追加采样日志（一行一条，便于事后按时间窗口分析）────────────────────

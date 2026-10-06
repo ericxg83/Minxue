@@ -12,6 +12,7 @@ import {
 } from './pendingTaskRecovery.js'
 // 默认统计窗口起点必须按「本地日历日」算，⛔ 不许 toISOString（UTC 日）——见 localDaysAgoYmd 注释
 import { localDaysAgoYmd } from './utils/period.js'
+import { measureDiskUsage } from './utils/diskUsage.js'
 import { runMigrations } from './migrations/migrationLedger.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
@@ -257,7 +258,11 @@ const upload = multer({
 // 只能靠盲等。这里回显 Render 注入的 git commit 与进程启动时间，
 // 部署是否生效变成一次 curl 就能确认的事。
 const BOOT_AT = new Date().toISOString()
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
+  // disk：所在文件系统的剩余空间（只读探测，测不到时为 null）。
+  // r198：体检脚本据此把「永远亮着的黄灯」换成真数字——磁盘满会让**拍照上传**失败，
+  // 而这件事老师只在现场撞见，事后查不到。探测走 diskUsage.js 单一实现。
+  const disk = await measureDiskUsage()
   res.json({
     status: 'ok',
     timestamp: new Date().toISOString(),
@@ -266,6 +271,7 @@ app.get('/api/health', (req, res) => {
     bootAt: BOOT_AT,
     uptimeSec: Math.round(process.uptime()),
     visionTimeoutMs: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
+    disk
   })
 })
 
