@@ -295,7 +295,12 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
       compareItem('正确率', s.accuracy, num(prevStats.accuracy), true, '%'),
       compareItem('新增错题', s.newWrongCount, num(prevStats.newWrongCount), false, ' 题'),
       compareItem('还在攻克', s.notStartedCount, num(prevStats.notStartedCount), false, ' 题'),
-      compareItem('完成题量', s.totalQuestions, num(prevStats.totalQuestions), true, ' 题')
+      // ⚠️ 这里必须和 :502 顶部 KPI 用同一个词「批改题量」（r217 实测统一）：
+      // 两处读的是**同一个字段 `s.totalQuestions`**，旧写法顶部叫「批改题量」、
+      // 这里叫「完成题量」——家长在同一张卡上看到「批改题量 176 题」和
+      // 「完成题量 +12 题」，分不清是同一个数还是两个数。
+      // 只改文案、不改取值，行为保持（对比的 goodWhenUp / 单位 / 涨跌方向一律没动）。
+      compareItem('批改题量', s.totalQuestions, num(prevStats.totalQuestions), true, ' 题')
     ]
     compareHtml = `
     <div class="card-block">
