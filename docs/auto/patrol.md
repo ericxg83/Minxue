@@ -108,3 +108,19 @@
     - ?? public/icon-512x512.png
     - ?? public/icon-maskable-512x512.png
     - ?? public/manifest.webmanifest
+| 18 | 2026-10-06T15:51:49 | tests=2016/0 | lint=0 | build=ok | server=ok | dirty=9 |
+
+### R18 — 2026/10/6 23:51:49（daemon 自动报告）
+
+**体检**：tests **2016/0** | lint 0 | build ok | server=ok  mobile-dev=ok | 冒烟 12/12 | 脏 9
+
+⚠️ 发现异常：脏文件 9 个（ M src/workbench/components/DrawingCanvas.vue,  M src/workbench/views/WeekendBoard.vue,  M workbench.html…）（需 agent 深修时下轮处理）
+    -  M src/workbench/components/DrawingCanvas.vue
+    -  M src/workbench/views/WeekendBoard.vue
+    -  M workbench.html
+    - ?? public/apple-touch-icon.png
+    - ?? public/icon-192x192.png
+    - ?? public/icon-512x512.png
+    - ?? public/icon-maskable-512x512.png
+    - ?? public/manifest.webmanifest
+    - ?? test/boardIpadWriting.test.mjs
