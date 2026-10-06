@@ -17,13 +17,10 @@
  *   3) 某一项失败不能中断整体体检——每项各自 try/catch，坏的显示"查不了"而不是崩。
  */
 
-import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 import { resolveDiskState } from './healthDiskState.mjs'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const argv = process.argv.slice(2)
 const JSON_ONLY = argv.includes('--json')
 const argOf = (name, dflt) => {
@@ -38,8 +35,6 @@ const LOG = argOf('--log', '')
 const isProd = !API.includes('127.0.0.1') && !API.includes('localhost')
 
 const C = { ok: '✅', warn: '⚠️ ', bad: '❌', info: 'ℹ️ ' }
-const out = []
-const say = (s) => { if (!JSON_ONLY) console.log(s) }
 const results = []
 function record(name, status, detail) {
   results.push({ name, status, detail })
@@ -64,10 +59,18 @@ if (health) {
   try {
     const t0 = Date.now()
     await fetch(`${API}/api/health`, { signal: AbortSignal.timeout(20000) })
-    const ms = Date.now() - t0
+    const recheckMs = Date.now() - t0
+    // ⛔ 2026-10-06 r218 实测抓到的漏判：**第一次**调用（含冷连接/冷启动）最慢，
+    // 旧版只拿第二次的耗时去判 —— 结果同一行体检里「后端在线」报 2211ms（很慢），
+    // 「接口速度」却用复查的 335ms 判 ok，结论照旧「一切正常」。
+    // 冷启动慢是老师最该知道的（发布后头几分钟打不开），却被判据漏掉。
+    // ⇒ 判据取两次里**最慢的一次**，并把两个数字都印出来，别让人猜。
+    const firstMs = health.rt
+    const ms = Math.max(firstMs, recheckMs)
     const limit = isProd ? 2000 : 500
     record('接口速度', ms <= limit ? 'ok' : 'warn',
-      `${ms}ms${ms > limit ? `（超过 ${limit}ms，${isProd ? '多为网络往返，可稍后再试或让服务器换到离国内更近的机房' : '本地偏慢，查连接池'}）` : '（正常）'}`)
+      `${ms}ms${ms > limit ? `（超过 ${limit}ms，${isProd ? '多为网络往返，可稍后再试或让服务器换到离国内更近的机房' : '本地偏慢，查连接池'}）` : '（正常）'}` +
+      `｜首次 ${firstMs}ms${recheckMs === firstMs ? '' : ` / 复查 ${recheckMs}ms`}`)
   } catch (e) {
     record('接口速度', 'warn', `测不了：${e.message}`)
   }
