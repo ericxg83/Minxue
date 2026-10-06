@@ -141,3 +141,43 @@ test('✅ 未知 mode 兜底成「本周」（偏窄不说错，与改动前一�
   const c = commentOf(buildShareCardHTML(sample('weird怪'), {}))
   assert.ok(c.includes('本周'), `兜底分支丢了 →「${c}」`)
 })
+
+// ── r213 追加：低正确率分支（正确率 <60）的周期词 ───────────────────────────
+// r211 只修了 periodWord 这个变量本身，漏了 99 行低正确率分支里的硬编码「本周」。
+// 实测：21 名学生里 10 名「成长总览」正确率 <60（李哲瀚 47.2% / 丁嘉炜 21.9% / 汤一诺 37.5%…）
+// ⇒ 这批孩子的成长总览卡会同时出现「成长总览 / 01/01~10/06」和「复习本周错题」。
+/** 低正确率样本（<60 ⇒ 走「建议重点复习…错题」分支） */
+const lowAccSample = (mode, acc = 47.2) => ({
+  ...sample(mode),
+  stats: { ...sample(mode).stats, accuracy: acc, totalQuestions: 123, correctCount: 58, wrongCount: 65 }
+})
+
+test('⛔ 成长总览低正确率不许说「本周错题」（r213 实测补漏）', () => {
+  const html = buildShareCardHTML(lowAccSample('all'), {})
+  const c = commentOf(html)
+  assert.equal(c.includes('本周'), false, `all 模式低正确率寄语仍有窄口径 →「${c}」`)
+  assert.ok(c.includes('这段时间错题'), `实际寄语：「${c}」`)
+  assert.equal(/\u672c\u5468/.test(html), false, 'all 模式低正确率整卡仍有「本周」')
+})
+
+test('✅ 周低正确率仍逐字说「本周错题」（行为保持，防过度改动）', () => {
+  const c = commentOf(buildShareCardHTML(lowAccSample('week'), {}))
+  assert.equal(
+    c,
+    '本周作业完成情况尚可，仍有提升空间，整体正确率 47.2%，建议重点复习本周错题，夯实基础！',
+    `实际寄语：「${c}」`
+  )
+})
+
+test('✅ 月低正确率说「本月错题」', () => {
+  const c = commentOf(buildShareCardHTML(lowAccSample('month'), {}))
+  assert.ok(c.includes('本月错题'), `实际寄语：「${c}」`)
+  assert.equal(c.includes('本周'), false, `月模式低正确率寄语混进「本周」→「${c}」`)
+})
+
+test('✅ 高/中正确率分支不受影响（不用补周期词的地方没被动到）', () => {
+  const c = commentOf(buildShareCardHTML(sample('all'), {}))
+  // 61.7 ≥60 ⇒ 走 98 行「仍需加强练习」分支，不出现「错题」
+  assert.ok(c.includes('整体正确率 61.7%'), `实际寄语：「${c}」`)
+  assert.equal(c.includes('错题'), false, `中正确率分支不该出现「错题」→「${c}」`)
+})

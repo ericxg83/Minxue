@@ -96,7 +96,12 @@ function buildShareComment(stats, weakestTag, periodWord, ctx = {}) {
 
   if (stats.accuracy >= 85) parts.push('整体正确率优秀，继续保持')
   else if (stats.accuracy >= 60) parts.push(`整体正确率 ${stats.accuracy}%，${weakestTag ? '「' + weakestTag + '」' : '部分知识点'}仍需加强练习`)
-  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习本周错题，夯实基础`)
+  // ⚠️ 这里必须走 periodWord（r213 实测补漏）：低正确率分支原先写死「本周错题」，
+  // 与 225 行那个 bug 同源——r211 只修了周期词变量本身，漏了这一处硬编码。
+  // 实测：21 名学生里 10 名「成长总览」正确率 <60%（李哲瀚 47.2% / 丁嘉炜 21.9% / 汤一诺 37.5%…），
+  // 他们的卡徽章写「成长总览」、周期印 01/01~10/06，末句却说「建议重点复习**本周**错题」。
+  // 行为保持：周模式下拼出的字符串与改动前逐字相同。
+  else parts.push(`整体正确率 ${stats.accuracy}%，建议重点复习${periodWord}错题，夯实基础`)
 
   return parts.join('，') + '！'
 }
