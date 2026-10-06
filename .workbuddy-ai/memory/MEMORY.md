@@ -27,5 +27,10 @@
 
 ## 2. 前端验证纪律
 - ⛔ 源码级回归锁必须反向自检（旧版上判红；新锁可删除前先跑，无需导出旧版）。
+- ⛔ 源码锁**必须 fail-closed**：禁止 `if (idx >= 0 && !src.slice(...))` / `sliceVar.length > 0 &&` 这类短路守卫
+  （锚点一改名锁就静默失效，等于改坏代码时顺手把锁关掉）⇒ 一律走 `test/sourceLockKit.mjs` 的
+  `anchoredSlice`/`anchoredRange`；元判据 `test/sourceLockFailClosed.test.mjs` 全量拦（规则 A/B/C）。
+- ⛔ SFC 解析器不得假定 `<template>` 在 `<script>` 之前（`<script setup>` 在前会被静默跳过）；
+  解析缺口必须报错，且地板值要贴着真实覆盖率（r167 实测 57 个只扫 51 个仍判绿）。
 - ⛔ 「点了白屏/没反应」只打 Vue warning，0-error 断言抓不到 ⇒ 常驻入口锁 `workbenchRouteTargets`+`workbenchClickHandlers`。
 - ⛔ Playwright：`addInitScript` 的 fn 被序列化 ⇒ 闭包变量拿不到，字面量走参数。
