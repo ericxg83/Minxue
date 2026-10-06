@@ -45,3 +45,13 @@
 **动作**：增强 `patrol.mjs`——daemon 轮自足：构建通过且 src 有改动时自动跑 Playwright 冒烟，把冒烟结果写进轮次状态（`smoke` 字段），不再依赖 agent 手动补跑。
 **冒烟**：n/a（本轮无 src 改动，冒烟由上一轮 12/12 覆盖）
 **遗留**：并行会话（考法库 r218 系列）仍活跃；死导出 89 处存量待清理（候选）。
+| 5 | 2026-10-06T14:04:53 | tests=1989/1 | lint=0 | build=skipped | server=ok | dirty=3 |
+| 6 | 2026-10-06T14:14:46 | tests=1989/1 | lint=0 | build=skipped | server=ok | dirty=1 |
+
+### R4 — 2026-10-06 22:11
+
+**体检**：server ✅ / mobile ✅ / tests **1990-0**（本轮发现并行会话 healthcheck WIP 曾 1989/1，现已修复）/ lint 0 / dirty 0
+**发现并修复的真 bug**：
+- **Windows 退出崩溃 `0xC0000409`**（STATUS_STACK_BUFFER_OVERRUN，libuv `src\win\async.c:76` `UV_HANDLE_CLOSING` 断言）。巡检期间并行会话提交了 healthcheck 冷启动修复 `7828fe2` + 回归测试 `healthcheckSpeed.test.mjs`（5 用例），但测试在本机**红 1 条**：假后端冷启动场景下，healthcheck 子进程退出码 3221226505。A/B 复现定位根因——`process.exit()` 强杀未闭合的 `fetch`/`AbortSignal.timeout()` 句柄。修复：改 `process.exitCode = ...`，让事件循环自然排空。**A/B 验证**：原版退出码 3221226505 + stderr 断言；新版退出码 0 且干净。**回归**：healthcheckSpeed 5/5，全量 1990/1990，bad 路径退出码 1 语义保留。
+- 修复最小化（1 行），未动并行会话的判据逻辑。
+**遗留**：死导出 89 处存量待清理（候选，待批准）。
