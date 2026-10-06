@@ -576,8 +576,23 @@ router.get('/', async (req, res) => {
       }
     }))
 
+    // 单学生取数失败不能静默成「本周无数据」——必须显式上报，否则消费方
+    // （批量 PDF 生成器 weeklyReportGenerator.js、工作台班级视图）会把失败
+    // 渲染成 skipped/空数据，老师误以为该生这周没作业。见 stats===null 语义。
+    const failed = reports
+      .filter(r => r && r.stats === null)
+      .map(r => ({ id: r.student?.id, name: r.student?.name, error: r.error || '未知错误' }))
+    if (failed.length > 0) {
+      console.error(`全班周报：${failed.length}/${reports.length} 名学生取数失败：`,
+        failed.map(f => `${f.name}(${f.error})`).join('；'))
+    }
+
     res.json({
       success: true,
+      // 部分失败信号（纯新增字段，向后兼容）：stats===null 的 report 不可当作无数据
+      partialFailure: failed.length > 0
+        ? { count: failed.length, total: reports.length, students: failed }
+        : null,
       period: {
         // 同上（全班版）：必须按本地日历日印，别用 toISOString 的 UTC 日 —— 见本文件上方单学生版的注释
         start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),

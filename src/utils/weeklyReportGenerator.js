@@ -1481,8 +1481,30 @@ export async function generateAllWeeklyReports({ mode = 'week', offset = 0, onPr
   // 串行为每个学生生成（避免浏览器内存爆炸）
   for (const report of targetReports) {
     const { student, stats } = report
-    if (!stats || stats.totalQuestions === 0) {
-      // 本周无数据 → 跳过但记录
+    if (!stats) {
+      // stats===null = 后端取数失败（不是「本周无数据」）。绝不能当作 skipped，
+      // 否则老师批量生成时该生报告被静默跳过，看似「这周没作业」。
+      // 先单独重试一次单学生接口（全班版失败常是并发瞬时错误）。
+      onProgress?.(student.name, 'retrying')
+      let ok = false
+      try {
+        const one = await generateWeeklyReport(student.id, { mode, offset, forceMode: 'download' })
+        if (one?.pdfBlob) {
+          results.push({ student, pdfBlob: one.pdfBlob, status: 'done' })
+          onProgress?.(student.name, 'done')
+          ok = true
+        }
+      } catch (err) {
+        console.error(`重试生成 ${student.name} 的报告失败:`, err)
+      }
+      if (!ok) {
+        results.push({ student, pdfBlob: null, status: 'failed', error: report.error || '取数失败' })
+        onProgress?.(student.name, 'failed')
+      }
+      continue
+    }
+    if (stats.totalQuestions === 0) {
+      // 真·本周无数据 → 跳过但记录
       onProgress?.(student.name, 'skipped')
       results.push({ student, pdfBlob: null, status: 'skipped' })
       continue

@@ -81,9 +81,9 @@
               <el-checkbox :model-value="checkedIds.includes(report.student.id)" @click.stop @change="value => toggleCheck(report.student.id, value)" />
               <el-avatar :size="34">{{ report.student.name?.slice(0, 1) }}</el-avatar>
               <div class="student-identity"><strong>{{ report.student.name }}</strong><small>{{ report.student.grade || '暂无年级' }}</small></div>
-              <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
+              <StatusTag :tone="studentRiskLevel(report).key === 'critical' ? 'danger' : studentRiskLevel(report).key === 'attention' ? 'warning' : studentRiskLevel(report).key === 'error' ? 'danger' : 'success'">{{ studentRiskLevel(report).label }}</StatusTag>
               <div class="student-metrics"><span><b>{{ hasStats(report) ? `${report.stats.accuracy}%` : '—' }}</b>正确率</span><span><b>{{ hasStats(report) ? report.stats.newWrongCount : '—' }}</b>新增错题</span><span><b>{{ hasStats(report) ? securedOf(report.stats) : '—' }}</b>已掌握</span></div>
-              <div class="student-next"><span>建议动作</span><strong>{{ !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
+              <div class="student-next"><span>建议动作</span><strong>{{ studentRiskLevel(report).key === 'error' ? '取数失败，请稍后重试' : !hasStats(report) ? '等待有效学习数据' : studentRiskLevel(report).key === 'critical' ? '优先查看错题并安排重练' : studentRiskLevel(report).key === 'attention' ? '检查薄弱知识点' : '保持观察' }}</strong></div>
               <el-icon class="row-arrow"><ArrowRight /></el-icon>
             </article>
           </div>
@@ -542,8 +542,18 @@ async function loadSummary() {
   summaryError.value = ''
   try {
     const data = await getAllWeeklyReports({ mode: periodMode.value, offset: periodOffset.value })
-    if (data.success) summaryData.value = data
-    else summaryError.value = data.error || '加载失败'
+    if (data.success) {
+      summaryData.value = data
+      // 后端 partialFailure：某些学生取数失败（stats===null）。不提示的话，
+      // 这些学生会被渲染成「暂无数据」，老师误以为本周没作业。
+      const pf = data.partialFailure
+      if (pf?.count > 0) {
+        ElMessage.warning({
+          message: `${pf.total} 名学生中有 ${pf.count} 名取数失败：${(pf.students || []).map(s => s.name).join('、')}——已在卡片上标为「数据异常」，可切换周期或稍后重试`,
+          duration: 6000
+        })
+      }
+    } else summaryError.value = data.error || '加载失败'
   } catch (e) {
     console.warn('加载周统计失败:', e)
     summaryError.value = e?.message || '加载失败'
@@ -916,6 +926,8 @@ function hasStats(report) {
 
 function studentRiskLevel(report) {
   const stats = report?.stats
+  // stats===null 且带 error = 后端取数失败，不能与「本周期无作答」混为一谈
+  if (stats === null && report?.error) return { key: 'error', label: '数据异常' }
   if (!stats || !stats.totalQuestions) return { key: 'normal', label: '暂无数据' }
   if (stats.accuracy < 60 || stats.pendingCount >= 5 || stats.newWrongCount >= 5) return { key: 'critical', label: '重点关注' }
   if (stats.accuracy < 80 || stats.pendingCount > 0 || stats.newWrongCount > 0) return { key: 'attention', label: '需要关注' }
