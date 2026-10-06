@@ -9,11 +9,11 @@
     </div>
 
     <div class="wb-page__inner">
-      <!-- 页头：按时段问候 + 一句话状态 + 全页唯一主操作 -->
+      <!-- 页头：按时段问候 + 今日日期 + 一句话状态 + 全页唯一主操作 -->
       <PageHeader
-        :eyebrow="todayLabel"
+        eyebrow="教学工作 / 工作台"
         :title="`${greeting}，老师`"
-        :description="briefHeadline"
+        :description="`${todayLabel} · ${briefHeadline}`"
       >
         <template #actions>
           <ActionButton variant="primary" @click="go('/grade')">
@@ -23,7 +23,7 @@
         </template>
       </PageHeader>
 
-      <!-- 学生规模摘要：低频信息收敛为一行灰字（替代原三列 MiniStat 卡片） -->
+      <!-- 学生规模摘要：低频信息收敛为一行灰字 -->
       <p v-if="!initialLoading && hasStudents" class="roster-line">
         在读 {{ activeCount }} 人 · 停课 {{ pausedCount }} 人 · 近 {{ INACTIVE_DAYS }} 天未交作业 {{ inactiveCount }} 人
         <router-link to="/students" class="roster-line__link">管理</router-link>
@@ -36,191 +36,162 @@
       </div>
 
       <!-- 加载骨架 -->
-      <div v-if="initialLoading" class="cockpit" aria-busy="true" aria-label="加载工作台">
-        <div class="cockpit__main">
-          <div class="skeleton-strip">
-            <span v-for="i in 3" :key="i" class="skeleton-block skeleton-block--kpi" />
-          </div>
-          <span class="skeleton-block skeleton-block--chart" />
-        </div>
-        <div class="cockpit__side">
-          <span class="skeleton-block skeleton-block--panel" />
-          <span class="skeleton-block skeleton-block--panel" />
-        </div>
+      <div v-if="initialLoading" class="ledger" aria-busy="true" aria-label="加载工作台">
+        <span class="skeleton-block skeleton-block--row" />
+        <span class="skeleton-block skeleton-block--row" />
+        <span class="skeleton-block skeleton-block--row" />
+        <span class="skeleton-block skeleton-block--chart" />
       </div>
 
-      <!-- 两栏驾驶舱：左=行动与趋势，右=实时与提醒 -->
-      <div v-else class="cockpit">
-        <!-- ───── 左列：主工作流 ───── -->
-        <div class="cockpit__main">
-          <!-- ① KPI 三卡：单位统一（份/道/道），去描述文案，脚注给可核对的衍生指标 -->
-          <div class="kpi-strip">
-            <router-link
-              v-for="k in kpiCards"
-              :key="k.key"
-              :to="k.to"
-              class="kpi-card"
-              :class="`is-${k.tone}`"
-              :aria-label="`${k.title}，${k.count} ${k.unit}`"
-            >
-              <span class="kpi-card__title">{{ k.title }}</span>
-              <span class="kpi-card__value">
-                <strong>{{ k.count }}</strong>
-                <small>{{ k.unit }}</small>
-              </span>
-              <span class="kpi-card__foot">
-                <span
-                  v-if="k.delta != null"
-                  class="kpi-card__delta"
-                  :class="k.delta > 0 ? 'is-up-bad' : k.delta < 0 ? 'is-down-good' : 'is-flat'"
-                >
-                  {{ k.delta > 0 ? '▲' : k.delta < 0 ? '▼' : '—' }} {{ Math.abs(k.delta) }}
-                </span>
-                {{ k.foot }}
-              </span>
+      <!-- 教案本三段式：待办 → 已完成 → 需要关注 -->
+      <div v-else class="ledger">
+        <!-- ───── ① 今日待办 ───── -->
+        <section class="ledger-day" aria-label="今日待办">
+          <header class="ledger-day__head">
+            <h2 class="ledger-day__title">待办</h2>
+            <span v-if="todoCount > 0" class="ledger-day__count">{{ todoCount }} 件</span>
+            <router-link v-else to="/grade" class="ledger-day__done">
+              没有待办，看看已完成
+              <el-icon aria-hidden="true"><ArrowRight /></el-icon>
             </router-link>
-          </div>
+          </header>
 
-          <!-- ② 近 7 日趋势：柱=作业量，线=新增错题（双轴） -->
-          <section class="panel" aria-label="近 7 日趋势">
-            <header class="panel__head">
-              <h2 class="panel__title">近 7 日趋势</h2>
-              <span class="panel__legend">
-                <span class="legend-dot is-bar" />作业量
-                <span class="legend-dot is-line" />新增错题
+          <ul v-if="todoRows.length" class="ledger-list">
+            <li
+              v-for="t in todoRows"
+              :key="t.key"
+              class="ledger-row"
+              :class="`is-${t.tone}`"
+              @click="go(t.to)"
+            >
+              <span class="ledger-row__dot" aria-hidden="true" />
+              <span class="ledger-row__body">
+                <span class="ledger-row__title">{{ t.title }}</span>
+                <span class="ledger-row__desc">{{ t.description }}</span>
               </span>
-            </header>
-            <div v-if="hasTrend" ref="trendChartRef" class="chart chart--trend" />
-            <EmptyState
-              v-else
-              compact
-              title="近 7 日暂无批改记录"
-              description="开始批改作业后，这里会显示每日作业量与新增错题的走势。"
-            />
-          </section>
+              <span class="ledger-row__count">{{ t.count }}{{ t.unit }}</span>
+              <span class="ledger-row__go">
+                <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+              </span>
+            </li>
+          </ul>
 
-          <!-- ③ 错题消化：进度环 + 班级薄弱知识点 Top5 横向条 -->
-          <section class="panel" aria-label="错题消化与薄弱点">
-            <header class="panel__head">
-              <h2 class="panel__title">错题消化</h2>
-              <router-link to="/students" class="panel__link">
-                按学生查看 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
-              </router-link>
-            </header>
-            <div class="digest">
-              <div v-if="digestTotal > 0" class="digest__donut">
-                <div ref="digestChartRef" class="chart chart--donut" />
-              </div>
-              <div v-else class="digest__donut digest__donut--empty">
-                <EmptyState compact title="暂无错题数据" description="批改产生的错题会在这里汇总消化进度。" />
-              </div>
+          <EmptyState
+            v-else
+            compact
+            title="今天没有待处理事项"
+            description="待复核、识别异常、待补入的错题都会出现在这里。"
+          />
+        </section>
 
-              <div class="digest__weak">
-                <div class="digest__weak-head">
-                  <span class="digest__weak-title">班级薄弱知识点 Top 5</span>
-                  <router-link to="/question-bank" class="panel__link">知识中心</router-link>
-                </div>
-                <ul v-if="weakBars.length" class="weak-list">
-                  <li v-for="kp in weakBars" :key="kp.kpId" class="weak-row" @click="goWeakness(kp)">
-                    <span class="weak-row__name">{{ kp.name }}</span>
-                    <span class="weak-row__track">
-                      <span class="weak-row__fill" :style="{ width: kp.pct + '%' }" />
-                    </span>
-                    <span class="weak-row__count">{{ kp.studentCount }} 人</span>
+        <!-- ───── ② 今日已完成 + 7 日趋势 ───── -->
+        <section class="ledger-day" aria-label="今日已完成">
+          <header class="ledger-day__head">
+            <h2 class="ledger-day__title">已完成</h2>
+            <span class="ledger-day__meta">今日已批改 {{ todayCell.tasksDone || 0 }} 份 · 新增错题 {{ todayCell.newWrong || 0 }} 道</span>
+          </header>
+
+          <!-- 近 7 日趋势：柱=作业量，线=新增错题（双轴） -->
+          <div v-if="hasTrend" ref="trendChartRef" class="chart chart--trend" />
+          <EmptyState
+            v-else
+            compact
+            title="近 7 日暂无批改记录"
+            description="开始批改作业后，这里会显示每日作业量与新增错题的走势。"
+          />
+        </section>
+
+        <!-- ───── ③ 需要关注 ───── -->
+        <section class="ledger-day" aria-label="需要关注">
+          <header class="ledger-day__head">
+            <h2 class="ledger-day__title">需要关注</h2>
+            <router-link to="/students" class="ledger-day__link">
+              全部学生 <el-icon aria-hidden="true"><ArrowRight /></el-icon>
+            </router-link>
+          </header>
+
+          <div class="ledger-grid">
+            <!-- 待关注学生 -->
+            <div class="ledger-col">
+              <h3 class="ledger-col__title">学生</h3>
+              <ul v-if="attentionStudents.length" class="mini-list">
+                <li v-for="s in attentionStudents" :key="s.id">
+                  <ListRow
+                    variant="student"
+                    :title="s.name"
+                    :description="s.summary"
+                    :aria-label="`${s.name} · ${s.summary} · ${s.label}`"
+                    @click="goAttentionStudent(s)"
+                  >
+                    <template #leading>
+                      <span class="mini-avatar is-student">{{ s.name.slice(0, 1) }}</span>
+                    </template>
+                    <template #trailing>
+                      <StatusTag v-if="s.tone && s.tone !== 'default'" :tone="s.tone" :label="s.label" />
+                    </template>
+                  </ListRow>
+                </li>
+              </ul>
+              <p v-else class="ledger-col__empty">暂无需要特别关注的学生</p>
+
+              <!-- 批改中（轮询实时进度） -->
+              <template v-if="notiStore.hasInProgress">
+                <h3 class="ledger-col__title ledger-col__title--mt">批改中</h3>
+                <ul class="mini-list">
+                  <li v-for="t in notiStore.inProgressTasks.slice(0, 3)" :key="t.id">
+                    <ListRow
+                      variant="generic"
+                      :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
+                      :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
+                      :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} 正在批改`"
+                      @click="go('/grade')"
+                    >
+                      <template #leading>
+                        <span class="mini-avatar is-primary">
+                          <el-icon v-if="!t.isStalled" :size="15" class="is-spinning"><Loading /></el-icon>
+                          <el-icon v-else :size="15"><WarningFilled /></el-icon>
+                        </span>
+                      </template>
+                      <template #trailing>
+                        <StatusTag :tone="t.isStalled ? 'danger' : 'info'" :label="t.isStalled ? '卡住' : '批改中'" />
+                      </template>
+                    </ListRow>
                   </li>
                 </ul>
-                <EmptyState v-else compact title="无明显薄弱点" description="继续观察，数据沉淀后会逐步出现。" />
+              </template>
+            </div>
+
+            <!-- 错题消化 + 薄弱点 -->
+            <div class="ledger-col">
+              <h3 class="ledger-col__title">错题消化</h3>
+              <div class="digest">
+                <div v-if="digestTotal > 0" class="digest__donut">
+                  <div ref="digestChartRef" class="chart chart--donut" />
+                </div>
+                <div v-else class="digest__donut digest__donut--empty">
+                  <EmptyState compact title="暂无错题数据" description="批改产生的错题会在这里汇总消化进度。" />
+                </div>
+
+                <div class="digest__weak">
+                  <div class="digest__weak-head">
+                    <span class="digest__weak-title">班级薄弱知识点 Top 5</span>
+                    <router-link to="/question-bank" class="panel__link">知识中心</router-link>
+                  </div>
+                  <ul v-if="weakBars.length" class="weak-list">
+                    <li v-for="kp in weakBars" :key="kp.kpId" class="weak-row" @click="goWeakness(kp)">
+                      <span class="weak-row__name">{{ kp.name }}</span>
+                      <span class="weak-row__track">
+                        <span class="weak-row__fill" :style="{ width: kp.pct + '%' }" />
+                      </span>
+                      <span class="weak-row__count">{{ kp.studentCount }} 人</span>
+                    </li>
+                  </ul>
+                  <EmptyState v-else compact title="无明显薄弱点" description="继续观察，数据沉淀后会逐步出现。" />
+                </div>
               </div>
             </div>
-          </section>
-        </div>
-
-        <!-- ───── 右列：实时 + 提醒 + 待关注 ───── -->
-        <div class="cockpit__side">
-          <!-- ④ 系统提醒带：识别异常 + 待补入 合并，0/0 时整卡消失 -->
-          <section v-if="reminderRows.length" class="panel panel--warn" aria-label="系统提醒">
-            <header class="panel__head">
-              <h2 class="panel__title">需要处理</h2>
-              <span class="panel__badge">{{ reminderTotal }}</span>
-            </header>
-            <ul class="remind-list">
-              <li v-for="r in reminderRows" :key="r.key">
-                <ListRow
-                  variant="generic"
-                  :title="r.title"
-                  :description="r.description"
-                  :aria-label="`${r.title}，${r.count} ${r.unit}`"
-                  @click="go(r.to)"
-                >
-                  <template #leading>
-                    <span class="remind-icon" :class="`is-${r.tone}`">
-                      <el-icon :size="15"><WarningFilled /></el-icon>
-                    </span>
-                  </template>
-                  <template #trailing>
-                    <span class="remind-count" :class="`is-${r.tone}`">{{ r.count }}{{ r.unit }}</span>
-                  </template>
-                </ListRow>
-              </li>
-            </ul>
-          </section>
-
-          <!-- ⑤ 批改中：轮询实时进度，无任务时整卡消失 -->
-          <section v-if="notiStore.hasInProgress" class="panel" aria-label="批改中">
-            <header class="panel__head">
-              <h2 class="panel__title">批改中</h2>
-              <span class="panel__live"><span class="live-dot" />{{ notiStore.inProgressCount }} 份</span>
-            </header>
-            <ul class="mini-list">
-              <li v-for="t in notiStore.inProgressTasks.slice(0, 5)" :key="t.id">
-                <ListRow
-                  variant="generic"
-                  :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
-                  :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
-                  :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} 正在批改`"
-                  @click="go('/grade')"
-                >
-                  <template #leading>
-                    <span class="mini-avatar is-primary">
-                      <el-icon v-if="!t.isStalled" :size="15" class="is-spinning"><Loading /></el-icon>
-                      <el-icon v-else :size="15"><WarningFilled /></el-icon>
-                    </span>
-                  </template>
-                  <template #trailing>
-                    <StatusTag :tone="t.isStalled ? 'danger' : 'info'" :label="t.isStalled ? '卡住' : '批改中'" />
-                  </template>
-                </ListRow>
-              </li>
-            </ul>
-          </section>
-
-          <!-- ⑥ 待关注学生 Top3 -->
-          <section class="panel" aria-label="待关注学生">
-            <header class="panel__head">
-              <h2 class="panel__title">待关注学生</h2>
-              <router-link to="/students" class="panel__link">全部</router-link>
-            </header>
-            <ul v-if="attentionStudents.length" class="mini-list">
-              <li v-for="s in attentionStudents" :key="s.id">
-                <ListRow
-                  variant="student"
-                  :title="s.name"
-                  :description="s.summary"
-                  :aria-label="`${s.name} · ${s.summary} · ${s.label}`"
-                  @click="goAttentionStudent(s)"
-                >
-                  <template #leading>
-                    <span class="mini-avatar is-student">{{ s.name.slice(0, 1) }}</span>
-                  </template>
-                  <template #trailing>
-                    <StatusTag v-if="s.tone && s.tone !== 'default'" :tone="s.tone" :label="s.label" />
-                  </template>
-                </ListRow>
-              </li>
-            </ul>
-            <EmptyState v-else compact title="暂无需要特别关注的学生" description="出现反复错题或长期未掌握时会列在这里。" />
-          </section>
-        </div>
+          </div>
+        </section>
       </div>
     </div>
   </div>
@@ -292,7 +263,7 @@ const failedCount = computed(() => notiStore.summary.failedTasks || 0)
 const wrongCount = computed(() => notiStore.summary.todayNewWrongQuestions || 0)
 const undigestedCount = computed(() => retryOverview.value?.undigested || 0)
 
-// 近 7 日趋势派生：今/昨对比，供 KPI 脚注和环比使用
+// 近 7 日趋势派生：今/昨对比
 const hasTrend = computed(() => trend.value.some(d => (d.tasksDone || 0) + (d.newWrong || 0) > 0))
 const todayCell = computed(() => trend.value[trend.value.length - 1] || { tasksDone: 0, newWrong: 0 })
 const ydayCell = computed(() => trend.value[trend.value.length - 2] || { tasksDone: 0, newWrong: 0 })
@@ -301,7 +272,7 @@ const wrongDelta = computed(() => {
   return (todayCell.value.newWrong || 0) - (ydayCell.value.newWrong || 0)
 })
 
-// 总"件事"（以行为单位，避免与"多少道"混淆）
+// 总"件事"（以行为单位）
 const totalCount = computed(() =>
   (pendingCount.value > 0 ? 1 : 0) +
   (failedCount.value > 0 ? 1 : 0) +
@@ -312,61 +283,12 @@ const briefHeadline = computed(() =>
   totalCount.value === 0 ? '今天没有待处理事项' : `今日 ${totalCount.value} 件事需要处理`
 )
 
-// ① KPI 三卡：单位统一 份/道/道，脚注是可核对的衍生指标（非固定营销文案）
-const kpiCards = computed(() => [
-  {
-    key: 'pending',
-    title: '待复核',
-    count: pendingCount.value,
-    unit: '份',
-    foot: `今日已批改 ${todayCell.value.tasksDone || 0} 份`,
-    delta: null,
-    tone: pendingCount.value > 0 ? 'primary' : 'default',
-    to: '/grade'
-  },
-  {
-    key: 'wrong',
-    title: '今日新增错题',
-    count: wrongCount.value,
-    unit: '道',
-    foot: '较昨日',
-    delta: wrongDelta.value,
-    tone: wrongCount.value > 0 ? 'warning' : 'default',
-    to: '/students'
-  },
-  {
-    key: 'undigested',
-    title: '待消化错题',
-    count: undigestedCount.value,
-    unit: '道',
-    foot: `已完全掌握 ${retryOverview.value.fullyMasteredRate || 0}%`,
-    delta: null,
-    tone: undigestedCount.value > 0 ? 'success' : 'default',
-    to: { path: '/students', query: { filter: 'retry' } }
-  }
-])
-
-// ③ 消化进度环数据
-const digestTotal = computed(() => retryOverview.value?.total || 0)
-const digestData = computed(() => [
-  { name: '完全掌握', value: retryOverview.value.fullyMastered || 0 },
-  { name: '基本掌握', value: retryOverview.value.basicMastered || 0 },
-  { name: '未消化', value: retryOverview.value.undigested || 0 }
-])
-
-// ③ 薄弱知识点 Top5 横向条（按未掌握人数归一化）
-const weakBars = computed(() => {
-  const list = dashboardWeakness.value.slice(0, 5)
-  const max = list.reduce((m, k) => Math.max(m, k.studentCount || 0), 0)
-  return list.map(k => ({
-    ...k,
-    pct: max > 0 ? Math.round(((k.studentCount || 0) / max) * 100) : 0
-  }))
-})
-
-// ④ 系统提醒带：识别异常（>0）+ 待补入（>0）合并
-const reminderRows = computed(() => {
+// ① 待办行：待复核 / 识别异常 / 待补入 / 卡住
+const todoRows = computed(() => {
   const rows = []
+  if (pendingCount.value > 0) {
+    rows.push({ key: 'pending', title: '待复核', description: '批改结果需要你确认', count: pendingCount.value, unit: '份', tone: 'primary', to: '/grade' })
+  }
   if (failedCount.value > 0) {
     rows.push({ key: 'failed', title: '识别异常', description: 'AI 识别失败，可重新处理或查看原图', count: failedCount.value, unit: '份', tone: 'danger', to: { path: '/grade', query: { status: 'failed' } } })
   }
@@ -375,7 +297,7 @@ const reminderRows = computed(() => {
   }
   return rows
 })
-const reminderTotal = computed(() => reminderRows.value.reduce((s, r) => s + r.count, 0))
+const todoCount = computed(() => todoRows.value.reduce((s, r) => s + r.count, 0))
 
 const hasAnyData = computed(() =>
   pendingCount.value > 0 || failedCount.value > 0 || wrongCount.value > 0 ||
@@ -394,6 +316,24 @@ const inactiveCount = computed(() => {
     if (!s.last_task_at) return true
     return new Date(s.last_task_at).getTime() < cutoff
   }).length
+})
+
+// ③ 消化进度环数据
+const digestTotal = computed(() => retryOverview.value?.total || 0)
+const digestData = computed(() => [
+  { name: '完全掌握', value: retryOverview.value.fullyMastered || 0 },
+  { name: '基本掌握', value: retryOverview.value.basicMastered || 0 },
+  { name: '未消化', value: retryOverview.value.undigested || 0 }
+])
+
+// ③ 薄弱知识点 Top5 横向条（按未掌握人数归一化）
+const weakBars = computed(() => {
+  const list = dashboardWeakness.value.slice(0, 5)
+  const max = list.reduce((m, k) => Math.max(m, k.studentCount || 0), 0)
+  return list.map(k => ({
+    ...k,
+    pct: max > 0 ? Math.round(((k.studentCount || 0) / max) * 100) : 0
+  }))
 })
 
 const attentionStudents = computed(() => {
@@ -442,10 +382,10 @@ const renderTrend = () => {
   if (!trendChartRef.value || !hasTrend.value) return
   if (trendChart) trendChart.dispose()
   trendChart = echarts.init(trendChartRef.value)
-  const primary = cssVar('--wb-primary', '#6366F1')
-  const warn = cssVar('--wb-status-warning-fg', '#D97706')
-  const text2 = cssVar('--wb-text-secondary', '#64748B')
-  const border = cssVar('--wb-border-light', '#F1F5F9')
+  const primary = cssVar('--wb-primary', '#B4530A')
+  const warn = cssVar('--wb-status-warning-fg', '#B4530A')
+  const text2 = cssVar('--wb-text-secondary', '#57534E')
+  const border = cssVar('--wb-border-light', '#F5F4F2')
   trendChart.setOption({
     animation: !reduceMotion,
     tooltip: {
@@ -453,7 +393,7 @@ const renderTrend = () => {
       backgroundColor: '#fff',
       borderColor: border,
       borderWidth: 1,
-      textStyle: { color: cssVar('--wb-text', '#1E293B') }
+      textStyle: { color: cssVar('--wb-text', '#1C1917') }
     },
     grid: { left: 36, right: 36, top: 18, bottom: 26 },
     xAxis: {
@@ -506,8 +446,8 @@ const renderTrend = () => {
         itemStyle: { color: warn },
         areaStyle: {
           color: new LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(217, 119, 6, 0.16)' },
-            { offset: 1, color: 'rgba(217, 119, 6, 0.01)' }
+            { offset: 0, color: 'rgba(180, 83, 9, 0.16)' },
+            { offset: 1, color: 'rgba(180, 83, 9, 0.01)' }
           ])
         }
       }
@@ -519,10 +459,10 @@ const renderDigest = () => {
   if (!digestChartRef.value || digestTotal.value <= 0) return
   if (digestChart) digestChart.dispose()
   digestChart = echarts.init(digestChartRef.value)
-  const success = cssVar('--wb-status-success-fg', '#16A34A')
-  const info = cssVar('--wb-status-info-fg', '#2563EB')
-  const warn = cssVar('--wb-status-warning-fg', '#D97706')
-  const text = cssVar('--wb-text', '#1E293B')
+  const success = cssVar('--wb-status-success-fg', '#15803D')
+  const info = cssVar('--wb-status-info-fg', '#57534E')
+  const warn = cssVar('--wb-status-warning-fg', '#B4530A')
+  const text = cssVar('--wb-text', '#1C1917')
   digestChart.setOption({
     animation: !reduceMotion,
     tooltip: { trigger: 'item', formatter: '{b}：{c} 道（{d}%）' },
@@ -532,7 +472,7 @@ const renderDigest = () => {
       top: 'center',
       itemWidth: 10,
       itemHeight: 10,
-      textStyle: { color: cssVar('--wb-text-secondary', '#64748B'), fontSize: 12 }
+      textStyle: { color: cssVar('--wb-text-secondary', '#57534E'), fontSize: 12 }
     },
     series: [
       {
@@ -547,7 +487,7 @@ const renderDigest = () => {
           formatter: () => `{v|${digestTotal.value}}\n{t|错题总数}`,
           rich: {
             v: { color: text, fontSize: 26, fontWeight: 700, lineHeight: 32 },
-            t: { color: cssVar('--wb-text-tertiary', '#94A3B8'), fontSize: 12 }
+            t: { color: cssVar('--wb-text-tertiary', '#A8A29E'), fontSize: 12 }
           }
         },
         emphasis: { scale: false },
@@ -659,118 +599,151 @@ onBeforeUnmount(() => {
 }
 .dashboard-note__retry:hover { color: var(--wb-text); }
 
-/* ── 两栏驾驶舱 ── */
-.cockpit {
-  display: grid;
-  grid-template-columns: minmax(0, 1.62fr) minmax(0, 1fr);
-  gap: var(--wb-space-5);
-  align-items: start;
-}
-.cockpit__main,
-.cockpit__side {
+/* ── 教案本三段式 ── */
+.ledger {
   display: flex;
   flex-direction: column;
-  gap: var(--wb-space-5);
-  min-width: 0;
-}
-@media (max-width: 1080px) {
-  .cockpit { grid-template-columns: 1fr; }
+  gap: var(--wb-space-6);
 }
 
-/* ── ① KPI 三卡 ── */
-.kpi-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1px;
-  background: var(--wb-border-light);
+/* 日区块：无卡片感，靠发丝边与留白分层 */
+.ledger-day {
+  padding: var(--wb-space-6) var(--wb-space-7);
+  background: var(--wb-bg-card);
   border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-  overflow: hidden;
+  border-radius: var(--wb-radius-lg);
   box-shadow: var(--wb-elev-card);
 }
-.kpi-card {
-  position: relative;
+.ledger-day__head {
   display: flex;
-  flex-direction: column;
-  gap: var(--wb-space-2);
-  min-height: 116px;
-  padding: var(--wb-space-4) var(--wb-space-5);
-  color: inherit;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--wb-space-3);
+  margin-bottom: var(--wb-space-4);
+  padding-bottom: var(--wb-space-3);
+  border-bottom: 1px solid var(--wb-border-light);
+}
+.ledger-day__title {
+  margin: 0;
+  color: var(--wb-text);
+  font-size: var(--wb-fs-section);
+  font-weight: var(--wb-fw-semibold);
+  line-height: var(--wb-lh-tight);
+}
+.ledger-day__count {
+  color: var(--wb-primary);
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-day__done {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-space-1);
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
   text-decoration: none;
-  background: var(--wb-bg-card);
-  box-shadow: inset 3px 0 0 transparent;
+}
+.ledger-day__done:hover { color: var(--wb-primary); }
+.ledger-day__meta {
+  color: var(--wb-text-tertiary);
+  font-size: var(--wb-fs-meta);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-day__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--wb-space-1);
+  color: var(--wb-primary);
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-medium);
+  text-decoration: none;
+}
+.ledger-day__link:hover { color: var(--wb-primary-hover); }
+
+/* 待办行 */
+.ledger-list { margin: 0; padding: 0; list-style: none; }
+.ledger-row {
+  display: flex;
+  align-items: center;
+  gap: var(--wb-space-4);
+  padding: var(--wb-space-4) var(--wb-space-2);
+  border-radius: var(--wb-radius-sm);
+  cursor: pointer;
   transition: background var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.kpi-card:hover { background: var(--wb-bg-hover); }
-.kpi-card:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; z-index: 1; }
-.kpi-card.is-primary { box-shadow: inset 3px 0 0 var(--wb-primary); }
-.kpi-card.is-warning { box-shadow: inset 3px 0 0 var(--wb-status-warning-fg); }
-.kpi-card.is-success { box-shadow: inset 3px 0 0 var(--wb-status-success-fg); }
-.kpi-card.is-default { box-shadow: inset 3px 0 0 transparent; }
+.ledger-row + .ledger-row { border-top: 1px solid var(--wb-border-light); }
+.ledger-row:hover { background: var(--wb-bg-hover); }
+.ledger-row:focus-visible { outline: 2px solid var(--wb-primary); outline-offset: -2px; }
 
-.kpi-card__title {
+.ledger-row__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--wb-text-tertiary);
+}
+.ledger-row.is-primary .ledger-row__dot { background: var(--wb-primary); }
+.ledger-row.is-danger .ledger-row__dot { background: var(--wb-status-danger-fg); }
+.ledger-row.is-warning .ledger-row__dot { background: var(--wb-status-warning-fg); }
+
+.ledger-row__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.ledger-row__title { color: var(--wb-text); font-size: var(--wb-fs-body); font-weight: var(--wb-fw-medium); }
+.ledger-row__desc { color: var(--wb-text-tertiary); font-size: var(--wb-fs-caption); }
+.ledger-row__count {
+  color: var(--wb-text);
+  font-size: var(--wb-fs-body);
+  font-weight: var(--wb-fw-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.ledger-row.is-danger .ledger-row__count { color: var(--wb-status-danger-fg); }
+.ledger-row.is-warning .ledger-row__count { color: var(--wb-status-warning-fg); }
+.ledger-row__go { color: var(--wb-text-tertiary); opacity: 0; transition: opacity var(--wb-motion-fast) var(--wb-motion-ease); }
+.ledger-row:hover .ledger-row__go { opacity: 1; }
+
+/* 需要关注：两列 */
+.ledger-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: var(--wb-space-6);
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .ledger-grid { grid-template-columns: 1fr; }
+}
+.ledger-col { min-width: 0; }
+.ledger-col__title {
+  margin: 0 0 var(--wb-space-3);
   color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
   font-weight: var(--wb-fw-medium);
 }
-.kpi-card__value {
-  display: flex;
-  align-items: baseline;
-  gap: var(--wb-space-1);
-  margin-top: auto;
-  font-variant-numeric: tabular-nums;
-}
-.kpi-card__value strong {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-stat);
-  font-weight: var(--wb-fw-bold);
-  line-height: var(--wb-lh-tight);
-  letter-spacing: -0.01em;
-}
-.kpi-card__value small { color: var(--wb-text-tertiary); font-size: var(--wb-fs-meta); }
-.kpi-card.is-primary .kpi-card__value strong { color: var(--wb-primary); }
-.kpi-card.is-warning .kpi-card__value strong { color: var(--wb-status-warning-fg); }
-.kpi-card.is-success .kpi-card__value strong { color: var(--wb-status-success-fg); }
-.kpi-card.is-default .kpi-card__value strong { color: var(--wb-text-tertiary); }
+.ledger-col__title--mt { margin-top: var(--wb-space-5); }
+.ledger-col__empty { margin: 0; color: var(--wb-text-tertiary); font-size: var(--wb-fs-meta); }
 
-.kpi-card__foot {
-  display: flex;
+/* 迷你列表 */
+.mini-list { margin: 0; padding: 0; list-style: none; }
+.mini-list li { border-top: 1px solid var(--wb-border-light); }
+.mini-list li:first-child { border-top: 0; }
+.mini-list :deep(.ds-list-row) { padding: var(--wb-space-3) 0; }
+.mini-avatar {
+  display: inline-flex;
   align-items: center;
-  gap: var(--wb-space-1);
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-caption);
-}
-.kpi-card__delta { font-weight: var(--wb-fw-semibold); font-variant-numeric: tabular-nums; }
-.kpi-card__delta.is-up-bad { color: var(--wb-status-danger-fg); }
-.kpi-card__delta.is-down-good { color: var(--wb-status-success-fg); }
-.kpi-card__delta.is-flat { color: var(--wb-text-tertiary); }
-@media (max-width: 720px) {
-  .kpi-strip { grid-template-columns: 1fr; }
-}
-
-/* ── 通用面板 ── */
-.panel {
-  padding: var(--wb-space-5) var(--wb-space-6);
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-  box-shadow: var(--wb-elev-card);
-}
-.panel--warn { border-left: 3px solid var(--wb-status-danger-fg); }
-.panel__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--wb-space-3);
-  margin-bottom: var(--wb-space-4);
-}
-.panel__title {
-  margin: 0;
-  color: var(--wb-text);
-  font-size: var(--wb-fs-card-title);
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  font-size: var(--wb-fs-meta);
   font-weight: var(--wb-fw-semibold);
-  line-height: var(--wb-lh-tight);
 }
+.mini-avatar.is-primary { color: var(--wb-primary); background: var(--wb-primary-soft); }
+.mini-avatar.is-student { color: var(--wb-primary); background: var(--wb-primary-soft); }
+.is-spinning { animation: ledger-spin 1.4s linear infinite; }
+@keyframes ledger-spin { to { transform: rotate(360deg); } }
+
+/* 趋势图 */
+.chart--trend { width: 100%; height: 220px; }
 .panel__link {
   display: inline-flex;
   align-items: center;
@@ -781,51 +754,8 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 .panel__link:hover { color: var(--wb-primary-hover); }
-.panel__badge {
-  min-width: 22px;
-  height: 22px;
-  padding: 0 6px;
-  color: #fff;
-  font-size: var(--wb-fs-caption);
-  font-weight: var(--wb-fw-semibold);
-  line-height: 22px;
-  text-align: center;
-  background: var(--wb-status-danger-fg);
-  border-radius: 11px;
-}
-.panel__live {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--wb-space-2);
-  color: var(--wb-text-secondary);
-  font-size: var(--wb-fs-meta);
-}
-.live-dot {
-  width: 8px;
-  height: 8px;
-  background: var(--wb-primary);
-  border-radius: 50%;
-  animation: cockpit-pulse 1.4s ease-in-out infinite;
-}
-@keyframes cockpit-pulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.4; transform: scale(0.7); }
-}
 
-/* ── ② 趋势图 ── */
-.panel__legend {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--wb-space-1);
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-caption);
-}
-.legend-dot { display: inline-block; width: 10px; height: 10px; margin-left: var(--wb-space-3); border-radius: 3px; }
-.legend-dot.is-bar { background: var(--wb-primary); margin-left: 0; }
-.legend-dot.is-line { background: var(--wb-status-warning-fg); border-radius: 50%; }
-.chart--trend { width: 100%; height: 220px; }
-
-/* ── ③ 消化环 + 薄弱条 ── */
+/* 消化环 + 薄弱条 */
 .digest {
   display: grid;
   grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
@@ -837,7 +767,6 @@ onBeforeUnmount(() => {
 }
 .chart--donut { width: 100%; height: 200px; }
 .digest__donut--empty { display: flex; align-items: center; justify-content: center; min-height: 160px; }
-
 .digest__weak { min-width: 0; }
 .digest__weak-head {
   display: flex;
@@ -869,14 +798,14 @@ onBeforeUnmount(() => {
 .weak-row__track {
   height: 8px;
   background: var(--wb-bg-hover);
-  border-radius: 4px;
+  border-radius: var(--wb-radius-pill);
   overflow: hidden;
 }
 .weak-row__fill {
   display: block;
   height: 100%;
   background: linear-gradient(90deg, var(--wb-primary-soft), var(--wb-primary));
-  border-radius: 4px;
+  border-radius: var(--wb-radius-pill);
   transition: width var(--wb-motion-slow) var(--wb-motion-ease);
 }
 .weak-row__count {
@@ -887,75 +816,24 @@ onBeforeUnmount(() => {
 }
 .weak-row:hover .weak-row__name { color: var(--wb-primary); }
 
-/* ── ④ 提醒带 ── */
-.remind-list { margin: 0; padding: 0; list-style: none; }
-.remind-list li { border-top: 1px solid var(--wb-border-light); }
-.remind-list li:first-child { border-top: 0; }
-.remind-list :deep(.ds-list-row) { padding: var(--wb-space-3) 0; }
-.remind-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-.remind-icon.is-danger { color: var(--wb-status-danger-fg); background: var(--wb-status-danger-bg); }
-.remind-icon.is-warning { color: var(--wb-status-warning-fg); background: var(--wb-status-warning-bg); }
-.remind-count { font-size: var(--wb-fs-body); font-weight: var(--wb-fw-bold); font-variant-numeric: tabular-nums; }
-.remind-count.is-danger { color: var(--wb-status-danger-fg); }
-.remind-count.is-warning { color: var(--wb-status-warning-fg); }
-
-/* ── ⑤⑥ 迷你列表 ── */
-.mini-list { margin: 0; padding: 0; list-style: none; }
-.mini-list li { border-top: 1px solid var(--wb-border-light); }
-.mini-list li:first-child { border-top: 0; }
-.mini-list :deep(.ds-list-row) { padding: var(--wb-space-3) 0; }
-.mini-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  font-size: var(--wb-fs-meta);
-  font-weight: var(--wb-fw-semibold);
-}
-.mini-avatar.is-primary { color: var(--wb-primary); background: var(--wb-primary-soft); }
-.mini-avatar.is-student { color: var(--wb-primary); background: var(--wb-primary-soft); }
-.is-spinning { animation: cockpit-spin 1.4s linear infinite; }
-@keyframes cockpit-spin { to { transform: rotate(360deg); } }
-
 /* ── 骨架 ── */
-@keyframes cockpit-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@keyframes ledger-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .skeleton-block {
   display: block;
   background: linear-gradient(90deg, var(--wb-bg-hover), var(--wb-border-light), var(--wb-bg-hover));
   background-size: 200% 100%;
-  animation: cockpit-shimmer 1.4s linear infinite;
+  animation: ledger-shimmer 1.4s linear infinite;
   border-radius: var(--wb-radius-md);
 }
-.skeleton-strip { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; }
-.skeleton-block--kpi { height: 116px; }
-.skeleton-block--chart { height: 300px; margin-top: var(--wb-space-5); }
-.skeleton-block--panel { height: 220px; }
+.skeleton-block--row { height: 48px; margin-bottom: var(--wb-space-3); }
+.skeleton-block--chart { height: 260px; }
 
 /* ── 错峰入场 + reduced-motion ── */
-.kpi-strip {
-  animation: wb-fade-up 0.42s var(--wb-motion-ease-out) both;
-}
-.cockpit__main > .panel,
-.cockpit__side > .panel { animation: wb-fade-up 0.42s var(--wb-motion-ease-out) both; }
-.cockpit__main > .panel:nth-child(2) { animation-delay: 0.18s; }
-.cockpit__main > .panel:nth-child(3) { animation-delay: 0.26s; }
-.cockpit__side > .panel:nth-child(1) { animation-delay: 0.20s; }
-.cockpit__side > .panel:nth-child(2) { animation-delay: 0.28s; }
-.cockpit__side > .panel:nth-child(3) { animation-delay: 0.36s; }
+.ledger-day { animation: wb-fade-up 0.42s var(--wb-motion-ease-out) both; }
+.ledger-day:nth-child(2) { animation-delay: 0.16s; }
+.ledger-day:nth-child(3) { animation-delay: 0.24s; }
 @media (prefers-reduced-motion: reduce) {
-  .live-dot, .is-spinning { animation: none; }
-  .kpi-strip,
-  .cockpit__main > .panel, .cockpit__side > .panel, .skeleton-block { animation: none !important; }
+  .is-spinning { animation: none; }
+  .ledger-day, .skeleton-block { animation: none !important; }
 }
 </style>
