@@ -555,7 +555,36 @@ export async function buildHandout(opts) {
     const gKey = rep.q_task_id && rep.question_number != null
       ? `${rep.q_task_id}#${rep.question_number}`
       : null
-    const group = gKey ? (subRowsByQGroup.get(gKey) || null) : null
+    let group = gKey ? (subRowsByQGroup.get(gKey) || null) : null
+    // ── 跨页题号撞车护栏·小问版（r213，2026-10-06 负责人报障）──────────────
+    // 分组键 (task_id, question_number) 不含 page_number。下面那条护栏只覆盖「整题行」
+    // （sub_no 为空）撞车，覆盖不到「组内全是小问行」的情况 —— 而这正是线上白板第1题的
+    // 事故：同一份卷（数学作业 09/24）第 2 页的「第13题＝4×4 网格填空/作图」与第 4 页的
+    // 「第13题＝△ABC/△ADE 求证 AF·AC=AG·AE、2DF·OE=OA·CE」各有两个小问行，落进同一组后
+    // 合并出的题干凭空多出两条「求证」小问（原试卷根本没有）。
+    // 判据：组内出现 ≥2 个互不相同的非空 parent_stem ⇒ 组里混进了不同的题；
+    // 只保留与错题行 rep 同 parent_stem 的行（rep 无 parent_stem 时按同页收窄）。
+    // 宁可拆细，不可错并；收窄后同样禁用同大题配图兜底（它按同一个撞车键取图，
+    // 不拦的话会拿邻题的图）。
+    let pageStemCollision = false
+    if (group && group.length > 1) {
+      const normPs = (v) => String(v || '').replace(/\s+/g, '')
+      const stemsInGroup = [...new Set(group.map(x => normPs(x.parent_stem)).filter(Boolean))]
+      if (stemsInGroup.length > 1) {
+        const repStem = normPs(rep.parent_stem)
+        const repPage = rep.page_number ?? null
+        const kept = group.filter(x => {
+          const s = normPs(x.parent_stem)
+          if (repStem) return s === repStem
+          return (x.page_number ?? null) === repPage
+        })
+        if (kept.length > 0 && kept.length < group.length) {
+          pageStemCollision = true
+          log(`   [合并收窄] ${gKey} 组内含 ${stemsInGroup.length} 个不同 parent_stem（跨页题号撞车），只保留与错题行同题的 ${kept.length}/${group.length} 行`)
+          group = kept
+        }
+      }
+    }
     // 题号撞车护栏（2026-09-21 白板第125题事故）：分组键 (task_id, question_number) 不含
     // page_number，同一卷不同页各自从 1 编号时，多道互不相关的「整题行」（sub_no 为空）
     // 会落进同一组。此前 wholeItem 取第一条、answer 取组内最长，结果题干/答案/选项
@@ -575,7 +604,7 @@ export async function buildHandout(opts) {
     }
     if (!group || group.length <= 1) {
       const stem = rep.content || rep.wq_content || rep.wq_correct_answer || ''
-      return { stem, parentStem: rep.parent_stem || '', subParts: [], missingSubs: [], answer: '', mergedSubNos: [], numberCollision: false }
+      return { stem, parentStem: rep.parent_stem || '', subParts: [], missingSubs: [], answer: '', mergedSubNos: [], numberCollision: pageStemCollision }
     }
     const sorted = [...group].sort((a, b) =>
       (a.sub_no ?? '') < (b.sub_no ?? '') ? -1 : (a.sub_no ?? '') > (b.sub_no ?? '') ? 1 : 0)
@@ -619,7 +648,7 @@ export async function buildHandout(opts) {
     if (missingSubs.length) {
       log(`   [合并] ${gKey} 缺小问: 组内=${mergedSubNos.join('/') || '整题'} 错题涉及=${missingSubs.join('/')} — 渲染端会标注「见原卷图」`)
     }
-    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, wholeQuestionId: wholeItem?.id || null, numberCollision: false }
+    return { stem, parentStem, subParts, missingSubs, answer, mergedSubNos, wholeQuestionId: wholeItem?.id || null, numberCollision: pageStemCollision }
   }
 
   /**
