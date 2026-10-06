@@ -843,6 +843,7 @@ async function doParse(worksheetId, file, precomputedAnswers = null, isCombined 
     // 或文字层含 NUL 等 C0 损坏字符（数学上标/分数线被打碎的直接证据）。
     // 命中即丢弃文字层结果，走逐页视觉 OCR——视觉模型按版面正确阅读双栏。
     const seqAnomalies = textLayerLowConfidence.filter(x => x && x.kind === 'question_seq_anomaly')
+    // eslint-disable-next-line no-control-regex -- 判据本身就是检测文字层损坏的 NUL/C0（练习册答案质量闸，见 AGENTS.md），故意匹配非误写
     const hasBrokenControlChars = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(fullText)
     if (parsedAnswers.length > 0 && (seqAnomalies.length >= 3 || hasBrokenControlChars)) {
       console.warn(`[解析] PDF 文字层解析出 ${parsedAnswers.length} 条答案，但质量门禁命中`

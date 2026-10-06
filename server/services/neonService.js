@@ -1568,6 +1568,7 @@ const dedupeByDbKey = (answers, unitIdOf) => {
  */
 const sanitizeText = (v) => {
   if (typeof v !== 'string') return v
+  // eslint-disable-next-line no-control-regex -- 清洗器职责就是剥掉 NUL/C0 防 0x00 入库崩溃，故意匹配非误写
   return v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
 }
 

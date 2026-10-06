@@ -103,7 +103,7 @@ const s3 = {
 // ── 配方四 4bb93a21：A 系纸嵌套折叠图（外框 A₃，逐次对折得 A₄..A₈）──
 // 全部折线与标签位置已用裁片 5 个标签的像素坐标反推验证吻合；裁片右侧/底部被切掉的
 // 边界由「A系纸长宽比恒为√2 + 逐次对折」唯一确定，不是猜。
-{
+const s4 = (() => {
   const W = 6 * Math.SQRT2, H = 6
   // 自检：所有 A 型纸长宽比 = √2（题干"长宽之比是定值"）
   const ratio = (w, h) => Math.max(w, h) / Math.min(w, h)
@@ -114,7 +114,7 @@ const s3 = {
     if (!near(ratio(w, h), Math.SQRT2, 1e-9)) { console.error(`⛔ 4bb93a21: ${k} 长宽比 ${r2(ratio(w, h))} ≠ √2`); process.exit(1) }
   }
   const aux = (label, x, y) => ({ label, x: r2(x), y: r2(y) })
-  var s4 = {
+  return {
     figure_type: 'geometry',
     points: [
       aux('_c1', 0, 0), aux('_c2', W, 0), aux('_c3', W, H), aux('_c4', 0, H),
@@ -134,7 +134,7 @@ const s3 = {
       V(W / 8, 5 * H / 8, 'A₇'), V(3 * W / 16, 7 * H / 8, 'A₈'),
     ],
   }
-}
+})()
 
 // ── 配方五 d6bdb7e3：与 fe7f2bc4 同题（数轴 a<-√3<0<b<√3），裁片曾错裁成学生手写，
 //   已 relocate 重裁为正确数轴（模型框人工目检 + --no-refine 落库），复用配方三结构 ──
@@ -142,7 +142,7 @@ const s5 = JSON.parse(JSON.stringify(s3))
 
 // ── 配方六 40bb33a0：A₀ 嵌套折叠图（relocate 重裁后人工目检：外框 + 7 条逐次对折线，
 //   右半 A₂、左列嵌套 A₃..A₈、A₀ 标注在外框底边折脚下、最左上小矩形无标签）──
-{
+const s6 = (() => {
   const W = 6 * Math.SQRT2, H = 6
   // 自检：对折链上每个区域长宽比都是 √2（题干"长宽之比是定值"）
   const ratio = (w, h) => Math.max(w, h) / Math.min(w, h)
@@ -154,7 +154,7 @@ const s5 = JSON.parse(JSON.stringify(s3))
     if (!near(ratio(w, h), Math.SQRT2, 1e-9)) { console.error(`⛔ 40bb33a0: ${k} 长宽比 ${r2(ratio(w, h))} ≠ √2`); process.exit(1) }
   }
   const aux = (label, x, y) => ({ label, x: r2(x), y: r2(y) })
-  var s6 = {
+  return {
     figure_type: 'geometry',
     points: [
       aux('_c1', 0, 0), aux('_c2', W, 0), aux('_c3', W, H), aux('_c4', 0, H),
@@ -178,11 +178,11 @@ const s5 = JSON.parse(JSON.stringify(s3))
       V(3 * W / 32, 15 * H / 16, 'A₈'), V(W / 2, -0.32, 'A₀'),
     ],
   }
-}
+})()
 
 // ── 配方七 033d6738：羊圈示意图（矩形 ABCD，AD 靠墙：墙线带斜杠阴影且两端延伸；
 //   底边 BC 上 E、F 两点，中间标「出口」）──
-{
+const s7 = (() => {
   const W = 13, H = 7
   const aux = (label, x, y) => ({ label, x: r2(x), y: r2(y) })
   const hatchPts = []
@@ -192,7 +192,7 @@ const s5 = JSON.parse(JSON.stringify(s3))
     hatchPts.push(aux(`_h${i}a`, x, H), aux(`_h${i}b`, x - 0.45, H + 0.55))
     hatchSegs.push({ from: `_h${i}a`, to: `_h${i}b` })
   }
-  var s7 = {
+  return {
     figure_type: 'geometry',
     points: [
       { label: 'A', x: 0, y: H }, { label: 'B', x: 0, y: 0 },
@@ -206,12 +206,12 @@ const s5 = JSON.parse(JSON.stringify(s3))
     ],
     labels: [ V(8.4, 0.55, '出口') ],
   }
-}
+})()
 
 
 // ── 配方八 dc357206：4×3 格点三等分作图题（A(1,3)、B(0,0)、C(4,1)，
 //   作图痕迹 = 网格对角线 y=x-1/x-2/x-3，与 BC 交点即三等分点 E(4/3,1/3)、F(8/3,2/3)）──
-{
+const s8 = (() => {
   const aux = (label, x, y) => ({ label, x: r2(x), y: r2(y) })
   const E = [4 / 3, 1 / 3], F = [8 / 3, 2 / 3]
   // 自检：E、F 三等分 BC
@@ -220,7 +220,7 @@ const s5 = JSON.parse(JSON.stringify(s3))
   if (!near(s1v[0], s2v[0]) || !near(s1v[1], s2v[1]) || !near(s2v[0], s3v[0]) || !near(s2v[1], s3v[1])) {
     console.error('⛔ dc357206: E/F 非三等分点'); process.exit(1)
   }
-  var s8 = {
+  return {
     figure_type: 'geometry',
     grid: { x: 0, y: 0, unit: 1, cols: 4, rows: 3 },
     points: [
@@ -236,13 +236,13 @@ const s5 = JSON.parse(JSON.stringify(s3))
     ],
     labels: [],
   }
-}
+})()
 // ── 配方九：多面板格点相似三角形选择题（第3题，4 道同文重复收录共用此配方）──
 // 题图 △ABC：B(0,0)、C(4,0)、A(1,1)，边 {√2,√10,4}；
 // 选项 A {√5,√5,4}、B {√5,3,2√5}、C {2,2√5,4√2}、D {√10,√13,√17}。
 // 自检：仅 C 与题图相似（放大 2 倍），A/B/D 必须不相似 —— 转录自洽闸。
 // 交叉验证：cceab838 原卷上的学生手写边长标注（2√5/3/√5、2√5/4√2/2）与转录逐边吻合。
-{
+const s9 = (() => {
   const aux = (label, x, y) => ({ label, x: r2(x), y: r2(y) })
   const panelGrid = (x0) => {
     const pts = [], segs = []
@@ -293,8 +293,8 @@ const s5 = JSON.parse(JSON.stringify(s3))
     pts.push(...t.pts); segs.push(...t.segs)
     labels.push(V(x0 + 2, -0.62, k + '.'))
   }
-  var s9 = { figure_type: 'geometry', points: pts, segments: segs, labels }
-}
+  return { figure_type: 'geometry', points: pts, segments: segs, labels }
+})()
 const JOBS = [
   { qid: '9b409c35-1248-4d25-9fbe-56d8e799b50c', tag: '9b409c35', structure: s1 },
   { qid: '2d0554b8-9c5a-484f-b2c4-042eb2ed275d', tag: '2d0554b8', structure: s2 },

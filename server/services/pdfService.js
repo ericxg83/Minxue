@@ -95,6 +95,7 @@ export const getPdfPageCount = async (fileBuffer, timeoutMs = 30000) => {
 // 直接抛 "Convert String to CString failed"（本地与 Render 均实测整页崩溃），
 // 导致逐页 OCR 解析全挂。这些字符来自隐形文字层、本来就没有可见字形，
 // 渲染前剥掉即可，不影响扫描图像本身。
+// eslint-disable-next-line no-control-regex -- 剥离 NUL/C0/孤立代理对防 canvas CString 渲染崩溃，故意匹配非误写
 const UNSAFE_TEXT_RE = /[\u0000-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
 const sanitizeRenderText = (s) => {
   if (typeof s !== 'string' || s.length === 0) return s
