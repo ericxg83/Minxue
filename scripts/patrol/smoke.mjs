@@ -11,7 +11,6 @@
  *  - 每页收集 console error，全流程汇总
  */
 import { chromium } from 'playwright'
-import { spawnSync } from 'node:child_process'
 
 const BASE = process.argv[2] || 'http://127.0.0.1:5173'
 
@@ -53,7 +52,6 @@ await page.goto(`${BASE}/workbench.html#/`, { waitUntil: 'load', timeout: 30000 
 await page.waitForTimeout(2500)
 for (const { label, path, landing } of NAV) {
   try {
-    const link = page.locator(`aside a[href="${path}"], aside .el-menu-item, aside .nav-item, aside a`).filter({ hasText: label }).first()
     const links = await page.locator('aside a, aside .el-menu-item').all()
     let clicked = false
     for (const el of links) {

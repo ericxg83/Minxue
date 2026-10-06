@@ -77,7 +77,7 @@ for (const f of [
   'server/tests/repairAIJson.test.mjs', 'server/tests/uploadValidatorHeic.test.mjs',
   'server/utils/aiParseSelfCheck.test.js', 'server/utils/answerConsensus.test.js',
 ]) testFiles.push(f)
-const t = run(process.execPath, ['--test', ...testFiles], { timeout: 300000, silent: true })
+const t = run(process.execPath, ['--env-file=.env', '--test', ...testFiles], { timeout: 300000, silent: true })
 const passMatch = (t.stdout || '').match(/^ℹ pass (\d+)/m) || (t.stdout || '').match(/# pass (\d+)/m)
 const failMatch = (t.stdout || '').match(/^ℹ fail (\d+)/m) || (t.stdout || '').match(/# fail (\d+)/m)
 const pass = passMatch ? +passMatch[1] : 0
@@ -110,7 +110,7 @@ if ((FORCE_BUILD || srcChanged) && buildOk === 'ok') {
 
 /* ── E. lint + 死声明 ── */
 section('E. lint + 死声明')
-const lint = run('node', [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'], { timeout: 180000, silent: true })
+run('node', [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'], { timeout: 180000, silent: true })
 let errCount = 0, unusedVars = 0
 try {
   const report = JSON.parse(fs.readFileSync(path.join(ROOT, 'tmp', 'prune-lint.json'), 'utf8'))
