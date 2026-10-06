@@ -359,6 +359,58 @@ router.get('/kp-cooccur', async (req, res) => {
 })
 
 /**
+ * GET /api/teaching-question-types/kp-ranking?days=14&limit=0
+ * 考点选择器的排序依据 —— **近 N 天真实错题量**。
+ *
+ * ⛔ r218 为什么必须有这个接口：
+ *   原前端用 `getKnowledgeTree()` 拿 521 个节点平铺进下拉，每项用全角空格缩进表示层级。
+ *   实测 521 个节点里**只有 151 个（29%）在近 14 天有错题**，另外 370 个是死选项 ——
+ *   老师要翻两屏才能找到自己真错过的地方，而"没考过的考点"对他毫无意义。
+ *
+ * 返回结构对齐树的层级（每个节点带 level/parentId），前端可：
+ *   - 默认只显示 wrongCount > 0 的节点（有错题的），把 370 个死选项藏进"显示全部"
+ *   - 按 wrongCount DESC 排序，让"最该讲"的排在最前
+ *
+ * ⛔ 不落库：这是错题的读侧聚合，与共现同理（树一改就过期）。
+ */
+router.get('/kp-ranking', async (req, res) => {
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 180)
+    // limit=0 = 不限，返回全部节点（前端要靠它拼出完整树，只高亮有错题的那些）
+    const limit = Math.min(Math.max(Number(req.query.limit) || 0, 0), 600)
+    const params = [subject, days]
+    let limitClause = ''
+    if (limit > 0) { params.push(limit); limitClause = `LIMIT $${params.length}::int` }
+    const { rows } = await query(
+      `SELECT kp.id, kp.name, kp.level, kp.parent_id,
+              COUNT(DISTINCT qk.question_id)::int AS question_count,
+              COUNT(DISTINCT wq.id)::int AS wrong_count
+         FROM knowledge_points kp
+         LEFT JOIN question_knowledge qk ON qk.kp_id = kp.id
+         LEFT JOIN wrong_questions wq
+           ON wq.question_id = qk.question_id
+          AND wq.added_at >= now() - ($2::int * interval '1 day')
+          AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
+        WHERE kp.subject = $1
+        GROUP BY kp.id, kp.name, kp.level, kp.parent_id
+        ORDER BY wrong_count DESC, question_count DESC, kp.sort_order
+        ${limitClause}`, params)
+    const activeCount = rows.filter(r => r.wrong_count > 0).length
+    res.json({
+      success: true,
+      days,
+      nodes: rows,
+      // 供前端直接写文案：「151 个考点近期有错题，其余 370 个暂未涉及」
+      stats: {
+        total: rows.length,
+        withWrong: activeCount,
+        deadOptions: rows.length - activeCount,
+      },
+    })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+/**
  * GET /api/teaching-question-types/kp-questions?kpId=xxx&includeChildren=1&onlyWrong=0&days=0&limit=60
  * 「按考点拉题」——考法库的核心出口：选中一个知识点（考点），把它下面挂的题目全拉出来，
  * 带错次/错的学生，供老师勾选后送进周末班课件讲题。
