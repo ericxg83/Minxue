@@ -280,23 +280,40 @@ export function buildCooccurGraph(centerId, self, rows) {
 
 /**
  * GET /api/teaching-question-types/hot-kp
- * 「关系图」独立入口的默认考点：挑关联题数最多（最"网感"）的考点自动展开，
- * 老师一进考法库就能看到蜘蛛网，不用先手动选考点。
+ * 「关系图」独立入口的默认考点。
  *
  * r145：之前蜘蛛网藏在「按考点选题 → 还得先选一个考点」三级之后，老师根本找不到。
  *   独立「关系图」入口默认就选一个最热闹的考点直接出图，首屏即见。
+ *
+ * ⛔ r218 改判据：原判据是 `COUNT(DISTINCT qk.question_id)`（题库里有几道题挂这个考点），
+ *   实测默认落在「实数」（475 题）。但「实数」的 8 个共现邻居实测全是泛代数词 ——
+ *   平方239 / 平方根 235 / 无理数 82 / 二次根式 81 / 绝对值 62 / 数轴 58 / 方程 50 / 立方根 44，
+ *   对"周末班该讲什么"零指导意义（这些是同一堆题的近义标签，不是可区分的教学考点）。
+ *   判据换成**近 14 天真实错题量**—— 老师的痛点是"哪儿没讲牢"，不是"哪个考点题库最大"。
+ *   实测按新判据：三角形 90 / 相似 77 / 相似三角形 67 / 二次根式 61 / 根式化简 49。
+ *
+ * ⛔ 排序键必须带 `wrong_questions` 的时间窗，不能用题库总量——否则又退回"题多≠ 要讲"。
+ *   保留 `question_count` 作为并列时的次级键（错题量相同时选覆盖面大的）。
  */
 router.get('/hot-kp', async (req, res) => {
   try {
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 90)
     const { rows } = await query(
-      `SELECT kp.id, kp.name, COUNT(DISTINCT qk.question_id)::int AS question_count
+      `SELECT kp.id, kp.name,
+              COUNT(DISTINCT qk.question_id)::int AS question_count,
+              COUNT(DISTINCT wq.id)::int AS wrong_count
          FROM knowledge_points kp
          JOIN question_knowledge qk ON qk.kp_id = kp.id
+         LEFT JOIN wrong_questions wq
+           ON wq.question_id = qk.question_id
+          AND wq.added_at >= now() - ($2::int * interval '1 day')
+          AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
         WHERE kp.subject = $1
         GROUP BY kp.id, kp.name
-        ORDER BY question_count DESC
-        LIMIT 1`, [subject])
-    res.json({ success: true, kp: rows[0] || null })
+       HAVING COUNT(DISTINCT wq.id) > 0
+        ORDER BY wrong_count DESC, question_count DESC
+        LIMIT 1`, [subject, days])
+    res.json({ success: true, kp: rows[0] || null, days })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
@@ -369,7 +386,26 @@ router.get('/kp-questions', async (req, res) => {
          SELECT id, name, level FROM knowledge_points WHERE id = $1::uuid
          UNION ALL
          SELECT k.id, k.name, k.level FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
-       )
+       ),
+       matched AS (
+         SELECT DISTINCT q.id AS question_id
+           FROM question_knowledge qk
+           JOIN sub sc ON sc.id = qk.kp_id
+           JOIN questions q ON q.id = qk.question_id AND q.is_complete = TRUE
+          WHERE ($2::boolean OR sc.id = $1::uuid)
+       ),
+       -- ⛔ r218：filtered 必须把 onlyWrong / days 这两个条件**先**应用上，
+       --   否则 totalMatched 会在过滤前统计（实测 onlyWrong=0 和 =1 都返回 435，等于没筛）。
+       filtered AS (
+         SELECT m.question_id
+           FROM matched m
+          WHERE ($4::boolean = false OR EXISTS (
+                  SELECT 1 FROM wrong_questions w2
+                   WHERE w2.question_id = m.question_id
+                     AND COALESCE(w2.lifecycle_status, 'new') <> 'mastered'
+                     AND ($3::int = 0 OR w2.added_at >= now() - ($3::int * interval '1 day'))))
+       ),
+       totals AS (SELECT COUNT(*)::int AS n FROM filtered)
        SELECT q.id AS question_id,
               q.content, q.options, q.answer, q.analysis,
               q.question_type, q.subject, q.difficulty, q.image_url,
@@ -379,18 +415,17 @@ router.get('/kp-questions', async (req, res) => {
               COALESCE((SELECT jsonb_agg(jsonb_build_object('id', k2.id, 'name', k2.name))
                           FROM question_knowledge qk2
                           JOIN knowledge_points k2 ON k2.id = qk2.kp_id
-                         WHERE qk2.question_id = q.id), '[]'::jsonb) AS kps
-         FROM question_knowledge qk
-         JOIN sub sc ON sc.id = qk.kp_id
-         JOIN questions q ON q.id = qk.question_id AND q.is_complete = TRUE
+                         WHERE qk2.question_id = q.id), '[]'::jsonb) AS kps,
+              totals.n AS total_matched
+         FROM filtered f
+         JOIN questions q ON q.id = f.question_id
+         CROSS JOIN totals
          LEFT JOIN wrong_questions wq
            ON wq.question_id = q.id
           AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
           AND ($3::int = 0 OR wq.added_at >= now() - ($3::int * interval '1 day'))
          LEFT JOIN students s ON s.id = wq.student_id
-        WHERE ($2::boolean OR sc.id = $1::uuid)
-        GROUP BY q.id
-        HAVING ($4::boolean = false OR COUNT(wq.id) > 0)
+        GROUP BY q.id, totals.n
         ORDER BY wrong_count DESC, student_count DESC, q.id
         LIMIT $5::int`,
       [kpId, includeChildren, days, onlyWrong, limit])
@@ -404,10 +439,19 @@ router.get('/kp-questions', async (req, res) => {
          SELECT k.id FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
        ) SELECT COUNT(*)::int AS n FROM sub`, [kpId])
 
+    const totalMatched = rows[0]?.total_matched ?? rows.length
     res.json({
       success: true,
       kp: kpRows[0] || null,
-      scope: { includeChildren, onlyWrong, days, expandedNodes: subCount[0]?.n || 0 },
+      scope: {
+        includeChildren, onlyWrong, days,
+        expandedNodes: subCount[0]?.n || 0,
+        // ⛔ r218：命中总数必须一起返回。limit 截断是静默的（实测「实数」475 道只给 120），
+        //   老师会以为"这个考点就 120 道题"。前端据此显示「共 N 道，已显示 M 道，还有 X 道未显示」。
+        limit,
+        totalMatched,
+        truncated: totalMatched > rows.length,
+      },
       questions: rows.map(r => ({
         questionId: r.question_id,
         content: r.content,
