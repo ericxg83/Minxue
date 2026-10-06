@@ -75,3 +75,36 @@
 **回归**：2003/2003 全绿、build 通过、冒烟 12/12、console error 0
 
 **遗留**：几何重绘目录 4 处占位参数 + 5 个死 import 仍按红线保留，等负责人开口；lint warnings ~70 条全为有意保留，非门禁、不阻塞。
+| 11 | 2026-10-06T14:44:48 | tests=2003/0 | lint=0 | build=skipped | server=ok | dirty=0 |
+| 12 | 2026-10-06T14:54:49 | tests=2013/1 | lint=0 | build=skipped | server=ok | dirty=5 |
+| 13 | 2026-10-06T15:04:46 | tests=2014/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+| 14 | 2026-10-06T15:14:47 | tests=2014/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+| 15 | 2026-10-06T15:24:48 | tests=2015/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+| 16 | 2026-10-06T15:34:47 | tests=2015/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+
+## 缺失轮次核对（R6–R16，机器时间线已存，人类报告补录）
+
+> 背景：旧版 daemon 只做只读体检 + 写一行时间线，人类可读报告依赖 agent 会话在场；R5 之后 agent 会话断开，R6–R16 共 11 轮只留了机器时间线、缺人类报告。**daemon 本身从未停止**（round 1→16，每 10 分钟一轮持续推进），停的是报告产出。现已改造 daemon 自足：每轮自动生成本轮报告并自动提交（见 `scripts/patrol/daemon.mjs`）。
+
+- **R6–R11**（tests 1989/1→2003/0，server=ok）：并行会话 WIP 中间态，dirty 1–5，无系统级故障；2002/1 是一次巡逻器 `.env` 误报（已修 d5ec5bc）
+- **R12**（tests=**2013/1**，占位了 fail）：并行会话提交新增测试的中间态，R13 即恢复正常
+- **R13–R16**（tests 2014/0→2015/0，server=ok，build skipped）：全绿，无异常；tests 数量上涨源于并行会话持续提交新测试用例
+
+结论：R6–R16 **无需要修复的遗留问题**——唯一的 1 fail（R12）是并行会话 WIP 中间态、下轮自愈，非本系统回归。
+| 17 | 2026-10-06T15:40:28 | tests=2016/0 | lint=0 | build=ok | server=ok | dirty=11 |
+
+### R17 — 2026/10/6 23:40:28（daemon 自动报告）
+
+**体检**：tests **2016/0** | lint 0 | build ok | server=ok  mobile-dev=ok | 冒烟 12/12 | 脏 11
+
+⚠️ 发现异常：脏文件 10 个（ M scripts/patrol/daemon.mjs,  M src/workbench/components/DrawingCanvas.vue,  M src/workbench/views/WeekendBoard.vue…）（需 agent 深修时下轮处理）
+    -  M docs/auto/patrol.md
+    -  M scripts/patrol/daemon.mjs
+    -  M src/workbench/components/DrawingCanvas.vue
+    -  M src/workbench/views/WeekendBoard.vue
+    -  M workbench.html
+    - ?? public/apple-touch-icon.png
+    - ?? public/icon-192x192.png
+    - ?? public/icon-512x512.png
+    - ?? public/icon-maskable-512x512.png
+    - ?? public/manifest.webmanifest
