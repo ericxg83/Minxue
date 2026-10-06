@@ -35,17 +35,18 @@
         </div>
       </FilterBar>
 
-      <ContentCard title="学生学习状态" description="点任意一张卡片进入学生档案，安排下一步" flush class="student-workspace">
-        <div v-if="loading" class="student-skeleton student-grid" aria-label="正在加载学生">
-          <div v-for="index in 6" :key="index" class="student-card student-card--skeleton">
+      <ContentCard title="学生学习状态" description="点任意一行进入学生档案，安排下一步" flush class="student-workspace">
+        <div v-if="loading" class="student-skeleton" aria-label="正在加载学生">
+          <div v-for="index in 5" :key="index" class="skeleton-row">
             <el-skeleton animated>
               <template #template>
                 <div class="skeleton-content">
                   <el-skeleton-item variant="circle" class="skeleton-avatar" />
                   <el-skeleton-item variant="text" class="skeleton-name" />
-                  <el-skeleton-item variant="text" class="skeleton-grade" />
-                  <el-skeleton-item variant="button" class="skeleton-status" />
                   <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="text" class="skeleton-metric" />
+                  <el-skeleton-item variant="button" class="skeleton-status" />
                 </div>
               </template>
             </el-skeleton>
@@ -61,28 +62,43 @@
           </div>
         </div>
 
-        <div v-else-if="filteredStudents.length" class="student-grid" aria-label="学生学习状态">
-          <article
-            v-for="student in filteredStudents"
-            :key="student.id"
-            tabindex="0"
-            :class="['student-card', {
-              'is-risk': student.hasRisk,
-              'is-paused': student.paused
-            }]"
-            :aria-label="`查看${student.name || '未命名学生'}的学习档案，${student.taskCount} 份作业，${student.wrongCount} 道未掌握错题，${student.retryCount} 份待重练，状态${student.status}`"
-            @click="openStudent(student.id)"
-            @keydown.enter.prevent="openStudent(student.id)"
-            @keydown.space.prevent="openStudent(student.id)"
-          >
-            <header class="student-card__head">
-              <el-avatar :size="40" :src="student.avatar">{{ initial(student.name) }}</el-avatar>
-              <div class="student-identity">
-                <strong>{{ student.name || '未命名学生' }}</strong>
-                <small>{{ student.grade || student.class || '暂无年级信息' }}</small>
+        <div
+          v-else-if="filteredStudents.length"
+          class="student-table"
+          role="table"
+          aria-label="学生学习状态"
+        >
+          <div role="rowgroup">
+            <div role="row" class="table-head" aria-hidden="true">
+              <div role="columnheader">学生</div>
+              <div role="columnheader">作业记录</div>
+              <div role="columnheader">未掌握错题</div>
+              <div role="columnheader">待重练</div>
+              <div role="columnheader">当前状态</div>
+              <div role="columnheader" class="op-col"><span class="sr-only">操作</span></div>
+            </div>
+          </div>
+          <div role="rowgroup" class="student-rowgroup">
+            <div
+              v-for="student in filteredStudents"
+              :key="student.id"
+              role="row"
+              tabindex="0"
+              :class="['student-row', { 'is-paused': student.paused }]"
+              :aria-label="`查看${student.name || '未命名学生'}的学习档案，${student.taskCount} 份作业，${student.wrongCount} 道未掌握错题，${student.retryCount} 份待重练，状态${student.status}`"
+              @click="openStudent(student.id)"
+              @keydown.enter.prevent="openStudent(student.id)"
+              @keydown.space.prevent="openStudent(student.id)"
+            >
+              <div role="cell" class="student-cell">
+                <el-avatar :size="38" :src="student.avatar">{{ initial(student.name) }}</el-avatar>
+                <span class="student-identity"><strong>{{ student.name || '未命名学生' }}</strong><small>{{ student.grade || student.class || '暂无年级信息' }}</small></span>
               </div>
-              <span class="student-card__status"><StatusTag :label="student.status" :tone="student.statusTone" /></span>
-              <div class="row-action" @click.stop>
+              <div role="cell" class="metric-cell"><small>作业记录</small><strong>{{ student.taskCount }}</strong><em>份</em></div>
+              <div role="cell" class="metric-cell" :class="{ danger: student.wrongCount > 0 }"><small>未掌握错题</small><strong>{{ student.wrongCount }}</strong><em>道</em></div>
+              <div role="cell" class="metric-cell" :class="{ warning: student.retryCount > 0 }"><small>待重练</small><strong>{{ student.retryCount }}</strong><em>份</em></div>
+              <div role="cell" class="status-cell"><StatusTag :label="student.status" :tone="student.statusTone" /></div>
+              <div role="cell" class="row-action" @click.stop>
                 <el-dropdown trigger="click" placement="bottom-end" @command="command => handleRowCommand(command, student)">
                   <ActionButton
                     variant="ghost"
@@ -103,23 +119,8 @@
                   </template>
                 </el-dropdown>
               </div>
-            </header>
-
-            <footer class="student-card__metrics">
-              <div class="metric">
-                <span class="metric__label">作业记录</span>
-                <span class="metric__value"><strong>{{ student.taskCount }}</strong><em>份</em></span>
-              </div>
-              <div class="metric" :class="{ 'metric--warn': !student.paused && student.wrongCount > 0 }">
-                <span class="metric__label">未掌握错题</span>
-                <span class="metric__value"><strong>{{ student.wrongCount }}</strong><em>道</em></span>
-              </div>
-              <div class="metric" :class="{ 'metric--warn': !student.paused && student.retryCount > 0 }">
-                <span class="metric__label">待重练</span>
-                <span class="metric__value"><strong>{{ student.retryCount }}</strong><em>份</em></span>
-              </div>
-            </footer>
-          </article>
+            </div>
+          </div>
         </div>
 
         <EmptyState v-else :icon="User" :title="emptyTitle" :description="emptyDescription">
@@ -368,7 +369,7 @@ const loadStudents = async () => {
       const examList = Array.isArray(exams) ? exams : []
       return {
         ...student,
-        // 重练卷答卷不算「作业记录」：卡片底部「待重练」已按 generated_exams
+        // 重练卷答卷不算「作业记录」：同一行右侧的「待重练」列已按 generated_exams
         // 单独统计，计入这里会重复计数（2026-09-24）。判据同源 isRetryPaperTask。
         taskCount: Array.isArray(tasks) ? tasks.filter(t => !isRetryPaperTask(t)).length : 0,
         wrongCount: wrongList.filter(item => item.lifecycle_status !== 'mastered').length,
@@ -444,84 +445,65 @@ onMounted(loadStudents)
 .filter-tabs span {
   margin-left: var(--wb-space-1);
   color: var(--wb-text-secondary);
-  font-size: var(--wb-fs-caption);
+  font-size: 10px;
 }
 
 .student-workspace { margin-top: var(--wb-space-4); overflow: hidden; }
 
-/* ── 名册卡片网格（方向 C：卡片有轻重） ── */
-.student-grid {
+.student-table { display: block; }
+.table-head, .student-row {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  grid-template-columns: minmax(250px, 1.5fr) minmax(100px, .65fr) minmax(110px, .7fr) minmax(100px, .65fr) minmax(100px, .65fr) 44px;
+  align-items: center;
   gap: var(--wb-space-4);
-  padding: var(--wb-space-5);
+  padding: 0 20px;
 }
-
-.student-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--wb-space-4);
-  min-width: 0;
-  padding: var(--wb-space-4) var(--wb-space-5);
+.table-head {
+  min-height: 40px;
+  color: var(--wb-text-secondary);
+  font-size: var(--wb-fs-eyebrow);
+  background: var(--wb-bg-elevated);
+  border-bottom: 1px solid var(--wb-border-light);
+  font-weight: var(--wb-fw-semibold);
+  letter-spacing: 0.01em;
+}
+.student-row {
+  width: 100%;
+  min-height: 76px;
   box-sizing: border-box;
   color: inherit;
   text-align: left;
-  background: var(--wb-bg-card);
-  border: 1px solid var(--wb-border-light);
-  border-radius: var(--wb-radius-md);
-  cursor: pointer;
-  transition: border-color var(--wb-motion-fast) var(--wb-motion-ease),
-              background var(--wb-motion-fast) var(--wb-motion-ease),
-              transform var(--wb-motion-fast) var(--wb-motion-ease);
-}
-/* 正常卡：近无框的"纸片"，弱化边框，hover 才浮现 */
-.student-card:not(.is-risk):not(.is-paused) {
-  border-color: var(--wb-border-subtle);
   background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--wb-border-light);
+  cursor: pointer;
+  transition: background var(--wb-motion-fast) var(--wb-motion-ease);
 }
-.student-card:not(.is-risk):not(.is-paused) .student-card__metrics {
-  border-top-color: var(--wb-border-light);
-}
-.student-card:hover {
-  background: var(--wb-card);
-  border-color: var(--wb-border-strong);
-  transform: translateY(-1px);
-}
-/* 风险卡：暖色左边线 + 白底 + 更大内边距，获得真实视觉重量 */
-.student-card.is-risk {
-  padding-left: calc(var(--wb-space-5) + 2px);
-  border: 1px solid var(--wb-border);
-  border-left: 3px solid var(--wb-status-warning-fg);
-  background: var(--wb-bg-card);
-}
-.student-card.is-risk .student-identity strong { color: var(--wb-text); }
-/* 停课卡：全灰弱化 */
-.student-card.is-paused { opacity: 0.72; background: var(--wb-bg-elevated); }
-.student-card.is-paused .student-card__head :deep(.el-avatar) {
-  color: var(--wb-text-tertiary);
-  background: var(--wb-bg-hover);
-}
-
-.student-card:focus-visible {
+.student-row:last-child { border-bottom: 0; }
+.student-row:hover { background: var(--wb-bg-hover); }
+.student-row:focus-visible {
   position: relative;
   z-index: 1;
   outline: 2px solid var(--wb-primary);
   outline-offset: -2px;
 }
-
-.student-card__head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
+.student-row.is-paused .student-identity strong,
+.student-row.is-paused .metric-cell strong { color: var(--wb-text-tertiary); }
+.student-row.is-paused :deep(.el-avatar) {
+  color: var(--wb-text-tertiary);
+  background: var(--wb-bg-elevated);
 }
-.student-card__head :deep(.el-avatar) {
+.student-row.is-paused .metric-cell.danger strong,
+.student-row.is-paused .metric-cell.warning strong { color: var(--wb-text-tertiary); }
+
+.student-cell { display: flex; align-items: center; min-width: 0; gap: 12px; }
+.student-cell :deep(.el-avatar) {
   flex: 0 0 auto;
   color: var(--wb-primary);
   font-weight: var(--wb-fw-semibold);
   background: var(--wb-primary-soft);
 }
-.student-identity { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
+.student-identity { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
 .student-identity strong {
   overflow: hidden;
   color: var(--wb-text);
@@ -531,61 +513,34 @@ onMounted(loadStudents)
   white-space: nowrap;
 }
 .student-identity small { color: var(--wb-text-secondary); font-size: var(--wb-fs-meta); }
-.student-card__status { flex: 0 0 auto; }
-.row-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  flex: 0 0 auto;
-}
-.row-more { color: var(--wb-text-secondary); }
 
-.student-card__metrics {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--wb-space-2);
-  padding-top: var(--wb-space-3);
-  border-top: 1px solid var(--wb-border-light);
-}
-.metric { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.metric__label {
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-caption);
-  white-space: nowrap;
-}
-.metric__value {
+.metric-cell {
   color: var(--wb-text-secondary);
   font-size: var(--wb-fs-meta);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
 }
-.metric__value strong {
-  color: var(--wb-text);
-  font-size: var(--wb-fs-body);
-  font-weight: var(--wb-fw-semibold);
-}
-.metric__value em {
-  margin-left: 2px;
-  color: var(--wb-text-tertiary);
-  font-size: var(--wb-fs-caption);
-  font-style: normal;
-}
-.metric--warn strong { color: var(--wb-status-warning-fg); }
+.metric-cell small { display: none; }
+.metric-cell strong { color: var(--wb-text); font-size: var(--wb-fs-body); font-weight: var(--wb-fw-semibold); }
+.metric-cell em { margin-left: 3px; color: var(--wb-text-tertiary); font-size: 10px; font-style: normal; }
+.metric-cell.danger strong { color: var(--wb-danger); }
+.metric-cell.warning strong { color: var(--wb-warning); }
 
-/* 骨架 */
-.student-card--skeleton { pointer-events: none; }
+.status-cell { display: flex; align-items: center; }
+.row-action { display: inline-flex; align-items: center; justify-content: flex-end; gap: 4px; }
+.row-more { color: var(--wb-text-secondary); }
+
+.skeleton-row { padding: var(--wb-space-4) 20px; border-bottom: 1px solid var(--wb-border-light); }
+.skeleton-row:last-child { border-bottom: 0; }
 .skeleton-content {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--wb-space-3);
+  display: grid;
+  grid-template-columns: 38px minmax(160px, 1.5fr) repeat(3, minmax(80px, .65fr)) 44px;
+  align-items: center;
+  gap: var(--wb-space-4);
 }
-.skeleton-avatar { width: 40px; height: 40px; }
-.skeleton-name { width: 55%; height: 16px; }
-.skeleton-grade { width: 30%; height: 12px; }
-.skeleton-status { width: 56px; height: 22px; }
-.skeleton-metric { width: 70%; height: 12px; margin-top: var(--wb-space-2); }
+.skeleton-avatar { width: 38px; height: 38px; }
+.skeleton-name { width: 50%; }
+.skeleton-metric { width: 38px; }
+.skeleton-status { width: 64px; height: 24px; }
 
 .error-state {
   display: flex;
@@ -600,16 +555,41 @@ onMounted(loadStudents)
   font-size: var(--wb-fs-meta);
   text-align: center;
 }
-.error-state > .el-icon { color: var(--wb-danger); font-size: var(--wb-fs-stat); }
+.error-state > .el-icon { color: var(--wb-danger); font-size: 30px; }
 .error-state strong { color: var(--wb-text); font-size: var(--wb-fs-body); }
 .error-state__actions { display: flex; gap: var(--wb-space-2); margin-top: var(--wb-space-2); }
 
 @media (min-width: 1521px) {
   .student-workspace :deep(.ds-content-card) { max-width: none; }
 }
+@media (max-width: 1000px) {
+  .table-head { display: none; }
+  .student-row {
+    grid-template-columns: minmax(220px, 1fr) repeat(3, minmax(72px, auto)) auto 40px;
+    gap: var(--wb-space-3);
+    padding: 14px 16px;
+  }
+  .metric-cell small {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--wb-text-secondary);
+    font-size: 10px;
+  }
+}
+@media (max-width: 720px) {
+  .student-search { width: 100%; }
+  .filter-tabs { overflow-x: auto; width: 100%; }
+  .filter-tabs button { flex: 0 0 auto; }
+  .student-row { grid-template-columns: 1fr repeat(3, auto) 40px; }
+  .status-cell { grid-column: 1 / -1; padding-left: 50px; }
+}
+@media (max-width: 520px) {
+  .student-row { grid-template-columns: 1fr auto auto 40px; }
+  .metric-cell:nth-of-type(2) { display: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .student-card, .row-more, .skip-link, .filter-tabs button { transition: none !important; }
+  .student-row, .row-more, .skip-link, .filter-tabs button { transition: none !important; }
   .el-skeleton.is-animated .el-skeleton__item { animation: none !important; }
 }
 </style>

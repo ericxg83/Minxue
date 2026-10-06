@@ -12,25 +12,25 @@
   --wb-page-padding-x: clamp(24px, 3vw, 40px);
   --wb-page-padding-y: 30px;
   --wb-radius-panel: 10px;
-  /* 主色 → 暖陶土（amber-700）· 2026-10 从 Indigo-500 迁移，去 AI 紫蓝味 */
-  --el-color-primary: #B4530A;
-  --el-color-primary-light-3: #D99A66;
-  --el-color-primary-light-5: #E8BE99;
-  --el-color-primary-light-7: #F3DAC2;
-  --el-color-primary-light-8: #F7E7D6;
-  --el-color-primary-light-9: #FBF1E7;
-  --el-color-primary-dark-2: #92400E;
+  /* 主色 → 与移动端一致 (#6366F1 = Indigo-500) */
+  --el-color-primary: #6366F1;
+  --el-color-primary-light-3: #A5B4FC;
+  --el-color-primary-light-5: #C7D2FE;
+  --el-color-primary-light-7: #E0E7FF;
+  --el-color-primary-light-8: #EEF2FF;
+  --el-color-primary-light-9: #F5F6FF;
+  --el-color-primary-dark-2: #6366f1;
 
   /* 成功/警告/危险 与移动端语义色一致 */
   --el-color-success: #16A34A;
   --el-color-warning: #D97706;
   --el-color-danger: #DC2626;
-  --el-color-info: #57534E;
+  --el-color-info: #6366F1;
 
   /* 边框 */
-  --el-border-color: #E7E5E4;
-  --el-border-color-light: #F5F4F2;
-  --el-border-color-lighter: #FAF9F7;
+  --el-border-color: #E2E8F0;
+  --el-border-color-light: #F1F5F9;
+  --el-border-color-lighter: #F8FAFC;
   --el-border-radius-base: 10px;
   --el-border-radius-small: 8px;
   --el-border-radius-round: 20px;
@@ -45,25 +45,25 @@
   --el-font-weight-primary: 500;
 
   /* 背景 */
-  --el-bg-color: #FAF9F7;
+  --el-bg-color: #F8FAFC;
   --el-bg-color-overlay: #FFFFFF;
-  --el-bg-color-page: #F5F4F2;
-  --el-fill-color: #F5F4F2;
-  --el-fill-color-light: #FAF9F7;
-  --el-fill-color-lighter: #FCFBFA;
+  --el-bg-color-page: #F1F5F9;
+  --el-fill-color: #F1F5F9;
+  --el-fill-color-light: #F8FAFC;
+  --el-fill-color-lighter: #FCFCFD;
 
   /* 文字 */
-  --el-text-color-primary: #1C1917;
-  --el-text-color-regular: #292524;
-  --el-text-color-secondary: #57534E;
-  --el-text-color-placeholder: #A8A29E;
-  --el-text-color-disabled: #D6D3D1;
+  --el-text-color-primary: #1E293B;
+  --el-text-color-regular: #334155;
+  --el-text-color-secondary: #64748B;
+  --el-text-color-placeholder: #94A3B8;
+  --el-text-color-disabled: #CBD5E1;
 
   /* 阴影 */
-  --el-box-shadow: 0 1px 3px rgba(28, 25, 23, 0.06);
-  --el-box-shadow-light: 0 1px 2px rgba(28, 25, 23, 0.04);
-  --el-box-shadow-lighter: 0 0 1px rgba(28, 25, 23, 0.02);
-  --el-box-shadow-dark: 0 3px 10px rgba(28, 25, 23, 0.08);
+  --el-box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --el-box-shadow-light: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --el-box-shadow-lighter: 0 0 1px rgba(0, 0, 0, 0.02);
+  --el-box-shadow-dark: 0 3px 10px rgba(0, 0, 0, 0.08);
 }
 
 /* ═══════════════════════════════════════════
@@ -77,9 +77,9 @@
      Workspace 任务工作台 · 批改/学生/数据/对比
      两者统一为 1520px，让整个工作台所有内容页共享同一容器档位与居中留白。
      Wide      复杂双/三栏/表格/对比/编辑 */
-  --wb-container-standard: 1280px;
-  --wb-container-workspace: 1440px;
-  --wb-container-wide: 1600px;
+  --wb-container-standard: 1520px;
+  --wb-container-workspace: 1520px;
+  --wb-container-wide: 1680px;
   /* 旧 token 兼容：--wb-content-max 与 --wb-container-standard 同值 */
   --wb-content-max: var(--wb-container-standard);
 
@@ -138,10 +138,10 @@
   --wb-radius-full: var(--wb-radius-pill);
 
   /* ── Border ── */
-  --wb-border: #E7E5E4;         /* stone-200 暖边 */
-  --wb-border-light: #F5F4F2;   /* stone-100 浅暖边 */
-  --wb-border-strong: #D6D3D1;  /* stone-300 */
-  --wb-border-subtle: #FAF9F7;  /* 几乎不可见 */
+  --wb-border: #E2E8F0;         /* 默认 1px */
+  --wb-border-light: #F1F5F9;   /* 行内分隔、更弱 */
+  --wb-border-strong: #CBD5E1;  /* 强调、强分隔 */
+  --wb-border-subtle: #F8FAFC;  /* 几乎不可见 */
   /* Border radius hairline（移动端用 0.5px） */
   --wb-border-hairline: 1px;
 
@@ -149,27 +149,27 @@
      核心原则：PC 工作台默认无阴影，靠 border 分层。
      只有浮层（popover / dialog / drawer）才使用阴影。 */
   --wb-elev-flat: none;
-  --wb-elev-card: 0 1px 2px rgba(28, 25, 23, 0.04);     /* 几乎不可见 · 仅可浮起的 KPI 卡 */
-  --wb-elev-overlay: 0 8px 24px rgba(28, 25, 23, 0.10);  /* 下拉、tooltip、popover */
-  --wb-elev-modal: 0 16px 40px rgba(28, 25, 23, 0.14);   /* dialog、drawer */
+  --wb-elev-card: 0 1px 2px rgba(15, 23, 42, 0.04);     /* 几乎不可见 · 仅可浮起的 KPI 卡 */
+  --wb-elev-overlay: 0 8px 24px rgba(15, 23, 42, 0.10);  /* 下拉、tooltip、popover */
+  --wb-elev-modal: 0 16px 40px rgba(15, 23, 42, 0.14);   /* dialog、drawer */
   /* 旧 token 兼容 */
   --wb-shadow-sm: var(--wb-elev-card);
   --wb-shadow-md: var(--wb-elev-overlay);
   --wb-shadow-lg: var(--wb-elev-modal);
 
-  /* ── Status（5 档标准状态 · 唯一权威）· 2026-10 降饱和暖调淡底 */
-  --wb-status-success-fg: #15803D;
-  --wb-status-success-bg: #E8F5EC;
-  --wb-status-info-fg: #57534E;
-  --wb-status-info-bg: #F0EDEA;
-  --wb-status-warning-fg: #B4530A;
-  --wb-status-warning-bg: #FBF0DF;
-  --wb-status-danger-fg: #B91C1C;
-  --wb-status-danger-bg: #FAE9E7;
-  --wb-status-processing-fg: #9A3412;
-  --wb-status-processing-bg: #F6E3D7;
-  --wb-status-neutral-fg: #57534E;
-  --wb-status-neutral-bg: #F5F4F2;
+  /* ── Status（5 档标准状态 · 唯一权威） ── */
+  --wb-status-success-fg: #16A34A;
+  --wb-status-success-bg: #DCFCE7;
+  --wb-status-info-fg: #6366F1;
+  --wb-status-info-bg: #EEF2FF;
+  --wb-status-warning-fg: #D97706;
+  --wb-status-warning-bg: #FEF3C7;
+  --wb-status-danger-fg: #DC2626;
+  --wb-status-danger-bg: #FEE2E2;
+  --wb-status-processing-fg: #7C3AED;
+  --wb-status-processing-bg: #F5E8FF;
+  --wb-status-neutral-fg: #64748B;
+  --wb-status-neutral-bg: #F1F5F9;
 
   /* Status tag 统一尺寸（StatusTag 组件遵守） */
   --wb-tag-height: 22px;
@@ -181,24 +181,24 @@
   --wb-tag-gap: 5px;
 
   /* ── Color · 已有 token 保留并对齐 ── */
-  --wb-bg: #FAF9F7;          /* 暖纸白 */
+  --wb-bg: #F5F6F8;
   --wb-bg-card: #FFFFFF;
-  --wb-bg-hover: #F5F4F2;    /* stone-100 */
-  --wb-bg-elevated: #F8F7F5;
-  --wb-bg-subtle: #F8F7F5;
-  --wb-bg-mist: #F8F7F5;
+  --wb-bg-hover: #F1F5F9;
+  --wb-bg-elevated: #F8FAFC;
+  --wb-bg-subtle: #F8FAFC;
+  --wb-bg-mist: #F8FAFC;
 
-  --wb-primary: #B4530A;
-  --wb-primary-hover: #92400E;
-  --wb-primary-soft: #FDF3E3;
-  --wb-primary-mist: #FBF5EB;
-  --wb-primary-light-7: #F3DAC2;
-  --wb-primary-light-8: #F7E7D6;
-  --wb-primary-light-9: #FBF1E7;
+  --wb-primary: #6366F1;
+  --wb-primary-hover: #6366f1;
+  --wb-primary-soft: #E0E7FF;
+  --wb-primary-mist: #EEF2FF;
+  --wb-primary-light-7: #E0E7FF;
+  --wb-primary-light-8: #EEF2FF;
+  --wb-primary-light-9: #F5F6FF;
 
-  --wb-accent: #9A3412;
-  --wb-accent-hover: #7C2D12;
-  --wb-accent-soft: #F6E3D7;
+  --wb-accent: #8B5CF6;
+  --wb-accent-hover: #7C3AED;
+  --wb-accent-soft: #EDE9FE;
 
   /* 语义色（兼容旧名） */
   --wb-success: var(--wb-status-success-fg);
@@ -213,10 +213,10 @@
   --wb-processing-soft: var(--wb-status-processing-bg);
 
   /* Text 层级 */
-  --wb-text: #1C1917;
-  --wb-text-secondary: #57534E;
-  --wb-text-tertiary: #A8A29E;
-  --wb-text-disabled: #D6D3D1;
+  --wb-text: #1E293B;
+  --wb-text-secondary: #64748B;
+  --wb-text-tertiary: #94A3B8;
+  --wb-text-disabled: #CBD5E1;
   --wb-text-inverse: #FFFFFF;
 
   /* ── Motion · 动效统一 ── */
@@ -247,7 +247,7 @@
   --wb-sparkline-width: 88px;
 
   /* ── Hover elevation · Phase 5 临时引入（覆盖 DS 3.5.7） ── */
-  --wb-elev-hover: 0 2px 6px rgba(28, 25, 23, 0.06);
+  --wb-elev-hover: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
 /* ── 全局样式重置 ── */
@@ -289,7 +289,7 @@ body {
 
 /* Element Plus 组件样式覆盖（在 workbench-content 容器内生效） */
 .workbench-content .el-card { border-color: var(--wb-border); border-radius: var(--wb-radius-panel); box-shadow: none; }
-.workbench-content .el-table { --el-table-header-bg-color: var(--wb-bg-elevated); --el-table-row-hover-bg-color: #f8f6f3; --el-table-border-color: var(--wb-border-light); }
+.workbench-content .el-table { --el-table-header-bg-color: var(--wb-bg-elevated); --el-table-row-hover-bg-color: #f8faff; --el-table-border-color: var(--wb-border-light); }
 .workbench-content .el-table th.el-table__cell { color: var(--wb-text-tertiary); font-size: 11px; font-weight: 600; }
 .workbench-content .el-table td.el-table__cell { color: var(--wb-text-secondary); font-size: 12px; }
 
@@ -317,7 +317,7 @@ body {
 }
 
 .wb-card:hover {
-  border-color: #D8D3D0;
+  border-color: #D8DEE8;
   box-shadow: none;
 }
 
@@ -378,11 +378,11 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #D6D3D1;
+  background: #CBD5E1;
   border-radius: var(--wb-radius-xs);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #A8A29E;
+  background: #94A3B8;
 }
 
 /* ????? Design System */
