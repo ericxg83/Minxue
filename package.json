@@ -14,7 +14,7 @@
     "android:run": "npm run android:build && npx cap run android",
     "postinstall": "patch-package",
     "build:app": "node scripts/build-app.mjs",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\" server/tests/aiParseSelfCheck.test.mjs server/tests/figureBboxSemantics.test.mjs server/tests/judgeChoiceAnswer.test.mjs server/tests/normalizeBlockBoxSemantics.test.mjs server/tests/repairAIJson.test.mjs server/tests/uploadValidatorHeic.test.mjs server/utils/aiParseSelfCheck.test.js server/utils/answerConsensus.test.js"
   },
   "dependencies": {
     "@capacitor-mlkit/barcode-scanning": "^8.1.0",
