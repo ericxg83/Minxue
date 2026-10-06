@@ -164,4 +164,4 @@ if (JSON_ONLY) {
   else console.log(`结论：${bad} 项需要处理（红色），建议先看红色那几条。`)
   console.log('─'.repeat(56))
 }
-process.exit(results.some((r) => r.status === 'bad') ? 1 : 0)
+process.exitCode = results.some((r) => r.status === 'bad') ? 1 : 0
