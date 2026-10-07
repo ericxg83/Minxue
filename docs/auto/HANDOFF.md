@@ -895,3 +895,11 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 
 六项体检全 ✅；daemon R28–R31 全绿；生产 commit 仍停 5a6eb5a（㊼）。
 下轮 r227：待拍板 ㉘/㊸/㊴+㉚/⑲/㊽/㊾；今晚收工窗口确认备份落盘。
+
+## 第 227 轮（2026-10-07）· 脚本层死码盘点清白 + 提案㊿（无代码改动）
+
+- 197 脚本盘点：server/scripts ~150 个一次性件 = 刻意存档不动；build-app（npm build:app）与
+  loopGuard（锁工具）排除嫌疑；gate/patrol/backup 全在岗。⭐ caller 扫描必须含 package.json。
+- 提案㊿（B）：开工/收工协议换用 loopGuard acquire/release——工具已落地（10-02 双开工事故产物），
+  协议文本却仍手写 JSON；换用即防并发从纪律变机制（status 只读已验证）。
+- 快闸 2029/0 fail、0e/110w。下轮 r228：待拍板八件套；今晚收工确认备份。

@@ -3341,3 +3341,18 @@ npm test 1854/1854｜lint 0e/126w｜生产 36df281 ok（uptime 493s，disk 69GB�
   六项体检全 ✅（本地 :4000 uptime 140min、21 学生、队列 0/0/51、磁盘 47994MB）；
   daemon R28–R31 tests=2026/0 lint=0 server=ok dirty=0；生产 commit 仍停 `5a6eb5a`（㊼/㉒ 继续）。
   **下次触发接 r227**：待拍板 ㉘/㊸/㊴+㉚/⑲/㊽/㊾；今晚 21:30 收工窗口务必确认备份落盘（r225 提案㊾）。
+
+- **r227（2026-10-07 11:23–11:40，可开工轮）：脚本层死码盘点清白 + 提案㊿（协议接线 loopGuard，无代码改动）**
+  - 开工判据：锁 finished/226；树干净。取活：产品哲学③（删除/合并）——r219 死端点门禁的 scripts 层续篇。
+  - **盘点结论（全库 197 个脚本，caller 计数 + package.json/.agents 补扫）**：
+    ① `server/scripts/` ~150 个一次性 backfill/fix/diag 是 9 月事故的**刻意存档**（文件名带日期），
+    零调用方属预期，**不动**；
+    ② 两个嫌疑均排除——`build-app.mjs` 挂在 `npm run build:app`（Capacitor APK 管线，⭐教训：
+    caller 扫描必须含 package.json，首轮只扫代码目录差点误报）；`loopGuard.mjs` 是 flow-audit 提案12 落地的锁工具；
+    ③ gate 六件 + patrol 三件 + backup 二件全部在岗（r219–r225 已逐个审计）。
+  - **提案㊿（B，待负责人拍板）**：**开工/收工协议换用 `scripts/loopGuard.mjs acquire/release`**
+    ——工具 10-02 双开工事故后就已落地（原子认领 + 忙拒 + 远端领先检测，status 只读验证过），
+    但任务书文本仍写「手写 state JSON」，r217–r227 各轮实际全是手写 node -e。
+    换用即把「防并发」从纪律变成机制；顺带 acquire 自带「被并发抢走退出码 2」正是多会话接力需要的信号。
+  - 快闸：单测 2029 = 2026+3 skipped / 0 fail｜lint 0e/110w（棘轮不动）。
+  - **下次触发接 r228**：待拍板 ㉘/㊸/㊴+㉚/⑲/㊽/㊾/㊿；今晚 21:30 收工窗口务必确认备份落盘。
