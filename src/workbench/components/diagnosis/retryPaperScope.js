@@ -104,6 +104,23 @@ export function errorTypeTone(errorType = '') {
 }
 
 /**
+ * 候选里还差哪些「在卷的 id」—— 弹窗分页拉取的收敛判据。
+ *
+ * 为什么要它：定向重练的题单是后端按考点算好的，可能落在错题列表的很后面，
+ * 而 `/wrong-questions/student/:id` 默认只返 100 条 ⇒ 一页拉不完就会
+ * 「弹窗里少了几道」，而且**不报错**（静默口径不一致）。所以拉取循环必须
+ * 以「在卷 id 全覆盖」为停止条件，而不是「拉到一页为止」。
+ *
+ * @returns {string[]} 还没拿到的 id（空数组 = 可以停了）
+ */
+export function missingScopeIds(items = [], scope) {
+  if (scope?.kind !== 'weak-point') return []
+  const got = new Set((items || []).map((it) => it?.questionId).filter(Boolean))
+  const want = [...new Set([...(scope.questionIds || []), ...(scope.prerequisiteQuestionIds || [])].filter(Boolean))]
+  return want.filter((id) => !got.has(id))
+}
+
+/**
  * 组卷题单：剔除不可用项（question_id 为空的练习册自包含错题）。
  * @returns {{ questionIds: string[], dropped: number }}
  */

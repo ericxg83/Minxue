@@ -8,7 +8,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeWrongItems, inScope, pickDefaults, toExamQuestionIds, errorTypeTone, groupOf } from '../src/workbench/components/diagnosis/retryPaperScope.js'
+import { normalizeWrongItems, inScope, pickDefaults, toExamQuestionIds, errorTypeTone, groupOf, missingScopeIds } from '../src/workbench/components/diagnosis/retryPaperScope.js'
 
 /** 造一条错题行，形状与 getWrongQuestionsByStudent 的返回一致 */
 const wq = (over = {}) => ({
@@ -154,6 +154,20 @@ test('groupOf：主料优先，同一题同时挂两处时按主料算；非 wea
   assert.equal(groupOf({ questionId: 'q8' }, scope), 'prerequisite')
   assert.equal(groupOf({ questionId: 'q9' }, scope), '')
   assert.equal(groupOf({ questionId: 'q1' }, { kind: 'repeat' }), '', 'r142 三种 scope 不该被分组逻辑影响')
+})
+
+test('missingScopeIds：分页收敛判据 —— 在卷 id 没拉全就不能停', () => {
+  const scope = { kind: 'weak-point', questionIds: ['q1', 'q2'], prerequisiteQuestionIds: ['q8'] }
+  const page1 = normalizeWrongItems([wq({ wqId: 'a', question_id: 'q1' })])
+  assert.deepEqual(missingScopeIds(page1, scope), ['q2', 'q8'], '还差两道却说拉完了 ⇒ 卷子会悄悄少题')
+  const page2 = normalizeWrongItems([
+    wq({ wqId: 'a', question_id: 'q1' }),
+    wq({ wqId: 'b', question_id: 'q2' }),
+    wq({ wqId: 'c', question_id: 'q8' })
+  ])
+  assert.deepEqual(missingScopeIds(page2, scope), [], '全覆盖后必须给出空数组（否则循环停不下来）')
+  // 非 weak-point scope 不参与该判据
+  assert.deepEqual(missingScopeIds(page1, { kind: 'repeat' }), [])
 })
 
 test('回归：新增 weak-point 不得改变 r142 三种 scope 的预筛与默认勾选', () => {

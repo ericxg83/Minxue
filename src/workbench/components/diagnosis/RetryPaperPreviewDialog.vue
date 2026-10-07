@@ -82,6 +82,10 @@
         命中的 {{ scopedItems.length }} 道里有 <b>{{ droppedCount }} 道</b>是练习册自包含错题，尚未关联到题库题目，
         进不了重练批改链路 —— 已自动排除，实际组出 <b>{{ examIds.length }}</b> 道。
       </p>
+      <p v-if="truncated" class="rp-note">
+        该学生错题太多，本次只读到最近一批 —— <b>还有在卷的题没列出来</b>，
+        请先按考点分次组卷，别当成「就这些题」。
+      </p>
     </template>
 
     <template #footer>
@@ -119,11 +123,11 @@
  */
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getWrongQuestionsByStudent, createGeneratedExam, getGeneratedExamsByStudent, getStudentById } from '../../../services/apiService'
+import { getWrongQuestionsByStudent, fetchWrongQuestionsPage, createGeneratedExam, getGeneratedExamsByStudent, getStudentById } from '../../../services/apiService'
 import { exportWrongBookPDF } from '../../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../../utils/retryTaskUrl'
 import { buildExamBaseName, buildExamNameWithSeq } from '../../../domain/examNaming'
-import { normalizeWrongItems, inScope, pickDefaults, errorTypeTone, toExamQuestionIds, groupOf } from './retryPaperScope'
+import { normalizeWrongItems, inScope, pickDefaults, errorTypeTone, toExamQuestionIds, groupOf, missingScopeIds } from './retryPaperScope'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -144,6 +148,8 @@ const creating = ref(false)
 const studentName = ref('')
 const picked = ref([]) // 归一化后的候选题目
 const selectedKeys = ref([])
+// 定向重练题单没拉全（超过安全上限）时为 true —— 必须让老师看见，不能让卷子悄悄少题
+const truncated = ref(false)
 
 /** 组卷引擎与周报再测卷同口径（RETRY_CAP 30）；只提示不拦 —— 老师明确勾的就是要练的 */
 const overCap = computed(() => examIds.value.length > 30)
@@ -209,9 +215,11 @@ async function load() {
   }
   loading.value = true
   loadError.value = ''
+  truncated.value = false
   try {
-    const list = await getWrongQuestionsByStudent(props.studentId, false)
+    const { list, truncated: cut } = await loadCandidates(props.studentId, props.scope)
     picked.value = normalizeWrongItems(list)
+    truncated.value = cut
     selectedKeys.value = pickDefaults(picked.value, props.scope)
     // 学生名用于卷面标题与 PDF 文件名；取不到不阻断（回落到「学生」）
     if (!studentName.value) {
@@ -224,6 +232,34 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/**
+ * 拉候选错题。
+ * ⛔ 定向重练（weak-point）必须分页拉到「在卷 id 全覆盖」为止：
+ *    `/wrong-questions/student/:id` 默认只返 100 条，而定向题单是后端按考点算好的，
+ *    可能落在很后面 ⇒ 一页拉不完就会出现「弹窗里少了几道」的静默口径不一致。
+ *    其余三种 scope 的预筛靠字段（错因/次数/生命周期），按原样一次拉 100 条即可。
+ */
+async function loadCandidates(studentId, scope) {
+  if (scope?.kind !== 'weak-point') {
+    return { list: await getWrongQuestionsByStudent(studentId, false), truncated: false }
+  }
+  const PAGE = 200
+  const CAP = 2000 // 安全上限：单生错题不可能到这个量级（现在最大 84 条）
+  const out = []
+  while (out.length < CAP) {
+    const page = await fetchWrongQuestionsPage(studentId, { limit: PAGE, offset: out.length })
+    const batch = page.wrongQuestions || []
+    out.push(...batch)
+    const total = Number(page.total) || 0
+    const done = batch.length === 0
+      || (total > 0 && out.length >= total)
+      || missingScopeIds(normalizeWrongItems(out), scope).length === 0
+    if (done) break
+  }
+  // 真拉不完（超过安全上限）时**明说**，不让老师以为卷子就这些题
+  return { list: out, truncated: missingScopeIds(normalizeWrongItems(out), scope).length > 0 }
 }
 
 function toggleAll(e) {
