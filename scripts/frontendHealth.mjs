@@ -224,6 +224,9 @@ async function main() {
 
   const record = {
     t: new Date(now).toISOString(),
+    // ⛔ r239：这个文件和 healthcheck.mjs 默认都往 tmp/health.jsonl 追加，但结构不同。
+    //    打上 kind，读的那边才分得清哪条是后端体检、哪条是前端体检（实测会印 [object Object]）。
+    kind: 'frontend',
     base: BASE, entry: ENTRY,
     modulesOk: result.ok.length,
     badCount: result.bad.length,

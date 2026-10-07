@@ -13,7 +13,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -128,6 +128,137 @@ test('连续运行时间回落时只说「中途重启过一次」，不许说�
     assert.ok(!out.includes('因为'), '只说发生了什么，不猜原因（重启原因有一堆，r218 教训）')
   } finally {
     rmSync(join(dropped, '..'), { recursive: true, force: true })
+  }
+})
+
+// ══ r239 追加：同一个采样文件有**两拨写入方**，必须分得清 ══════════════════
+// 背景（实测，不是推理）：`scripts/healthcheck.mjs` 与 `scripts/frontendHealth.mjs`
+// 的 `--log` 默认值**都是 tmp/health.jsonl**，但两行结构不同 —— 后端那行 `bad` 装的是
+// **灯名字符串**，前端那行 `bad` 装的是**坏掉模块的对象**。旧版把它们一起摊平当灯名 ⇒
+// Map 的键成了对象 ⇒ 终端上印出 `[object Object]`，还被算进「几次需要处理（红色）」。
+// 实测 6 条带坏模块的前端采样 ⇒ 6 行 `[object Object]` + 顶部「6 次需要处理（红色）」。
+
+/** 造一条前端体检采样（结构照抄 frontendHealth.mjs 真实写入的那一行）。 */
+const front = (i, opts = {}) => ({
+  kind: 'frontend',
+  t: new Date(Date.UTC(2026, 9, 7, 13, 0) + i * 30 * 60 * 1000).toISOString(),
+  base: 'http://127.0.0.1:3000',
+  entry: '/index.html',
+  modulesOk: 53,
+  badCount: opts.bad ? opts.bad.length : 0,
+  bad: opts.bad || [],
+  dom: opts.dom || { blank: false, rootHTMLLen: 900, textLen: 120, consoleErrors: 0, badResp: [] },
+  status: opts.status || 'healthy',
+  elapsedMs: 1200,
+})
+
+test('元判据：r239 新加的三句人话确实写在脚本里（改文案必须同步改这里）', () => {
+  for (const s of [
+    '前端体检（首页白屏 / 模块链）跑过', // 前端那一路的标题
+    '白屏这一项等于没盯', // 没启动浏览器时的结论
+    '这段时间一条后端体检的采样都没有', // 只有一拨人写 ⇒ 不许当成正常
+    '首页是白屏', // 白屏那层的结论
+  ]) {
+    assert.ok(SRC.includes(s), `脚本里应有这句（改文案要同步改这里）：${s}`)
+  }
+  // ⛔ 元判据本身也要能被验：FRONTEND_STATUS_TEXT 的每个状态值都必须真的出现在文案表里，
+  //    漏一个就是「有状态没翻译」，输出会直接把英文状态码甩给负责人。
+  for (const s of ['healthy', 'dom-not-checked', 'persistent', 'transient-edit']) {
+    assert.ok(new RegExp(`['"]?${s}['"]?:`).test(SRC), `FRONTEND_STATUS_TEXT 应含状态 ${s}`)
+  }
+})
+
+test('两拨写入方混在一个文件里：不许印 [object Object]，前端那一路单独成段', () => {
+  const back = Array.from({ length: 6 }, (_, i) => {
+    const s = base(i); if (i < 3) s.warn = ['代码版本']; return s
+  })
+  const mixed = [...back, front(0, { bad: [{ url: 'http://127.0.0.1:3000/assets/a.js', status: 'FETCH_FAIL' }], status: 'persistent' })]
+  const file = buildFile(mixed)
+  let out
+  try {
+    out = run(['--file', file, '--n', '6'])
+  } finally {
+    rmSync(join(file, '..'), { recursive: true, force: true })
+  }
+  assert.ok(!out.includes('[object Object]'), '旧版在这里会印 [object Object]（详情见 r239 报告）')
+  assert.ok(out.includes('前端体检（首页白屏 / 模块链）跑过'), '前端那一路应单独成段')
+  assert.ok(out.includes('坏 1 个'), '应报出坏掉的模块数')
+  assert.ok(out.includes('assets/a.js（连不上）'), '应报出是哪个模块连不上（说人话，不甩完整 URL）')
+  assert.ok(out.includes('前端体检 1 条'), '标题里应把两拨各多少条报出来')
+  // 红色条数只数后端那一路的灯名，前端的坏模块不该混进来虚高
+  assert.ok(!out.includes('6 次需要处理'), '前端体检的坏模块不该被算成后端体检的红色条数')
+})
+
+test('分桶只看 kind：同一份数据去掉 kind 就退回后端那一路（不许靠结构猜）', () => {
+  const raw = front(0, { bad: [{ url: 'http://127.0.0.1:3000/assets/a.js', status: 'FETCH_FAIL' }] })
+  delete raw.kind // r239 之前写的旧前端行，本来就没有 kind
+  const file = buildFile([base(0), raw])
+  let out
+  try {
+    out = run(['--file', file, '--n', '2'])
+  } finally {
+    rmSync(join(file, '..'), { recursive: true, force: true })
+  }
+  assert.ok(!out.includes('前端体检（首页白屏 / 模块链）跑过'), '旧行没有 kind，应归后端那一路')
+  assert.ok(out.includes('共 2 条采样'), '旧行不能被当成"读不出来的坏行"丢掉')
+})
+
+test('只有前端体检、一点后端体检都没有：明说没盯过，不许说「没有红色」', () => {
+  const file = buildFile([front(0), front(1)])
+  let out
+  let jsonOut
+  try {
+    out = run(['--file', file, '--n', '2'])
+    jsonOut = run(['--file', file, '--n', '2', '--json'])
+  } finally {
+    rmSync(join(file, '..'), { recursive: true, force: true })
+  }
+  assert.ok(out.includes('这段时间一条后端体检的采样都没有'), '没盯过后端必须明说')
+  assert.ok(!out.includes('条里没有红色（要处理的）'), '没盯过就说不出「没有红色」')
+  assert.ok(!out.includes('一切正常'), '不查就说正常，是假绿')
+  assert.equal(JSON.parse(jsonOut).ok, false, '--json 也要把「没有后端采样」报出来')
+  assert.equal(JSON.parse(jsonOut).reason, 'no-backend-sample')
+})
+
+test('--json 里前端那一路的字段真读到（坏模块数/首页那层/结论）', () => {
+  const file = buildFile([
+    base(0),
+    front(0, {
+      bad: [{ url: 'http://127.0.0.1:3000/assets/a.js', status: 'FETCH_FAIL' }],
+      dom: { skipped: true },
+      status: 'dom-not-checked',
+    }),
+  ])
+  try {
+    const j = JSON.parse(run(['--file', file, '--n', '2', '--json']))
+    assert.equal(j.frontendSamples, 1)
+    assert.equal(j.frontend.count, 1)
+    assert.equal(j.frontend.badCount, 1)
+    assert.ok(j.frontend.bad[0].includes('assets/a.js'))
+    assert.equal(j.frontend.domLayer, '没启动浏览器（白屏那层等于没盯）')
+    assert.equal(j.frontend.verdict, 'dom-not-checked')
+    assert.ok(j.frontend.verdictText.includes('等于没盯'))
+  } finally {
+    rmSync(join(file, '..'), { recursive: true, force: true })
+  }
+})
+
+// ── 写入方真的打上 kind（真跑，不靠读源码字面猜）───────────────────────────
+test('healthcheck 真跑一遍写出的那一行，必须带 kind:"backend"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'healthtrend-writer-'))
+  const log = join(dir, 'health.jsonl')
+  try {
+    const r = spawnSync(process.execPath,
+      [resolve(ROOT, 'scripts/healthcheck.mjs'), '--api', 'http://127.0.0.1:5999', '--log', log],
+      { encoding: 'utf8' })
+    assert.equal(r.status, 1, `打不通的接口应退出 1（这里故意打死端口），实际 ${r.status}：${r.stderr}`)
+    const lines = readFileSync(log, 'utf8').split('\n').filter((l) => l.trim())
+    assert.ok(lines.length >= 1, '打不通也要照样写采样行（否则采样会整段消失）')
+    const rec = JSON.parse(lines[lines.length - 1])
+    assert.equal(rec.kind, 'backend', '后端体检那一路必须打 kind:"backend"，读的那边才分得清')
+    assert.equal(rec.api, 'http://127.0.0.1:5999')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

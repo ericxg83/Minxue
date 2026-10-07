@@ -265,6 +265,10 @@ if (health) {
 if (LOG) {
   const line = JSON.stringify({
     t: new Date().toISOString(),
+    // ⛔ r239：这个文件和 scripts/frontendHealth.mjs 写的是**同一个** tmp/health.jsonl
+    //    （后者的 --log 默认值就是它），但两行结构完全不同。打上 kind 让读的那边能分清，
+    //    否则前端体检的「坏模块清单」会被当成体检查出的一盏灯（实测会印出 [object Object]）。
+    kind: 'backend',
     api: API,
     upMin: health && typeof health.uptimeSec === 'number' ? Math.round(health.uptimeSec / 60) : null,
     rtMs: health ? health.rt : null,
