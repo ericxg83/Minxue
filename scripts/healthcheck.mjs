@@ -88,6 +88,17 @@ const missingFieldDetail = (label) =>
   `接口没回「${label}」，这一项等于没盯（体检会一直显示正常，其实是空转）。` +
   `多半是接口结构变了，得有个人去核一下，别当它一直是好的。`
 
+// ── 「该比的另一半没比上」也得明说（2026-10-07 r235 补 ㊮）────────────────
+// 「代码版本」这一项要判断线上有没有换代码，得**两边都有号**才能比：线上 `commit`
+// 有了、本机 HEAD 却读不出来（脚本被复制到别处跑 / 没有 git 信息）时，
+// 旧的写法 `comparable && local && local !== short` 里 `local` 为 null ⇒ behind 恒假 ⇒
+// 印 ✅ 判合格，看着在盯，其实**一次都没比过**。r221 补的「字段没真读到必须明说」
+// 只堵住了线上那一半，这条分支是它的漏网。
+// ⛔ 措辞只说后果和下一步，不甩「git 目录结构」这类词 —— 夸大的告警比没告警更糟（r198）。
+const noLocalVersionDetail = (short) =>
+  `读不出你本地跑的是哪一版（线上是 ${short}，体检脚本旁边没有 git 信息，多半是被复制到别处跑了），` +
+  `这一项等于没盯（体检会一直显示正常，其实是空转）。把脚本放回仓库里再跑一次，别当它一直是好的。`
+
 // ── 1. 后端在不在 ────────────────────────────────────────────────────────
 let health = null
 try {
@@ -236,9 +247,14 @@ if (health) {
       //    硬比会天天挂黄灯（r198 教训：恒定黄灯会淹掉真告警）⇒ 只照实印，不判。
       const comparable = /^[0-9a-f]{7,40}$/i.test(String(health.commit))
       const local = comparable ? readLocalHeadShort() : null
-      const behind = comparable && local && local !== short
-      record('代码版本', behind ? 'warn' : 'ok',
-        `${behind ? `线上还是 ${short}，你本地已经是 ${local} ⇒ 这段新代码没上线，去 Render 面板手动部署或确认自动部署` : `线上 commit ${short}`}（${boot} 启动的）`)
+      // ⛔ r235：本机版本号读不出来时不许悄悄判合格（上面那条 missingFieldDetail 只管线上那一半）
+      if (comparable && local === null) {
+        record('代码版本', 'warn', noLocalVersionDetail(short))
+      } else {
+        const behind = comparable && local && local !== short
+        record('代码版本', behind ? 'warn' : 'ok',
+          `${behind ? `线上还是 ${short}，你本地已经是 ${local} ⇒ 这段新代码没上线，去 Render 面板手动部署或确认自动部署` : `线上 commit ${short}`}（${boot} 启动的）`)
+      }
     }
   } catch (e) {
     record('代码版本', 'warn', `查不了：${e.message}`)
