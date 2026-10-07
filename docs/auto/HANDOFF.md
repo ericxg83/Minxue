@@ -871,3 +871,14 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - 修法一行：跑前 `rmSync` 旧报告，或校验报告 mtime ≥ 本 tick 起点。daemon 正被并行会话活跃使用 ⇒ 只读不代修。
 - 快闸：2029 = 2026 pass + 3 skipped / 0 fail｜lint 0 error。六项体检全 ✅（本地 :4000）。生产 commit 仍停 `5a6eb5a`（㊼）。
 - 下轮 r224：㉘/㊸/㊴+㉚/⑲ 待拍板；观察 ㊼。
+
+## 第 224 轮（2026-10-07）· cert_probe 外联判据进退出码（`ef2137f` 已推送）
+
+- 假绿：cert_probe 退出码只看 requestfailed，外部 origin 只打印不判——烤入生产 base 的产物
+  外联请求会成功 ⇒ exit 0 假绿（r152「有脏即非零退出」漏了这一闸）。
+- 反向自检同场景双跑：旧版 exit 0 假绿 / 新版 exit 1 判红点名。⭐ gate 脚本探针须导到同目录
+  （相对导入 `./base.mjs`），放 scripts/ 下会 ERR_MODULE_NOT_FOUND。
+- 修：origin 严格相等判外联（避开 :54410 startsWith :5441 端口边界），与 failures 一并定退出码。
+- 四道闸：2029/0 fail｜0e/110w｜dist_nightly_20261007r224 33.40s｜render_smoke 8/8 + 修复版
+  cert_probe 绿路 exit 0（无假红）。六闸脚本全部扫毕，假绿唯一即本次所修。
+- 下轮 r225：㉘/㊸/㊴+㉚/⑲ 待拍板；观察 ㊼。

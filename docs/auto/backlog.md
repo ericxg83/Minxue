@@ -3295,3 +3295,22 @@ npm test 1854/1854｜lint 0e/126w｜生产 36df281 ok（uptime 493s，disk 69GB�
     磁盘 48017MB——磁盘遥测本地重启后也生效）。生产探针：commit 仍停 `5a6eb5a` ⇒ **㊼/㉒ 继续**
     （r220–r222 三笔均为测试/脚本文件，零运行时影响）。
   - **下次触发接 r224**：待拍板四件套 ㉘/㊸/㊴+㉚/⑲；观察 ㊼；daemon 会话若采纳㊽可复核一行修复。
+
+- **r224（2026-10-07 10:57–11:25，可开工轮）：推送闸④ cert_probe 外联判据进退出码（commit `ef2137f`，已推送）**
+  - 开工判据：锁 finished/223；树干净。取活：四闸脚本（scripts/gate/）假绿家族全审计。
+  - **假绿（A 级，反向自检实测）：cert_probe 退出码只看 requestfailed，外部 origin 只打印不判** ——
+    烤入生产 base 的产物外联请求会**成功**（生产在线）⇒ 零 requestfailed ⇒ exit 0 假绿，
+    而历轮报告恰以「cert_probe exit 0」为准（r152「有脏即非零退出」漏了这一闸；
+    route_sweep/text_audit/overflow_audit 都有 r152 口径，cert_probe 没有）。
+  - **反向自检（同场景双跑，非推理）**：本机 5442 页面服务 + 5999 外联目标（CORS 放行）——
+    旧版（`git show HEAD:` 导出）外联 5999 只打印、零失败 ⇒ **exit 0 假绿**；新版同场景 ⇒ **exit 1 判红点名**。
+    ⭐ 姿势坑：**带相对导入的 gate 脚本探针必须导到同目录**（`scripts/gate/_r224_old…`）——
+    放 `scripts/` 下 `./base.mjs` 解析不到直接崩（r218 健康检查探针无相对导入才没踩这坑）。
+  - 修：`external = origins − BASE(origin)`，`exit(external + failures === 0 ? 0 : 1)`；
+    判据用 **origin 严格相等**而非 startsWith（`:54410`.startsWith(`:5441`) 端口边界假同源）。
+  - 四道闸：单测 2029 = 2026+3 skipped / 0 fail｜lint 改动文件零输出、全仓 0e/110w（棘轮不动）｜
+    `dist_nightly_20261007r224` 33.40s｜preview 5443 + render_smoke **8/8** + 修复版 cert_probe
+    对真隔离产物 **exit 0、外联（无）**（绿路无假红），端口杀清。
+  - 审计余项：render_smoke 的 goto 无 catch = fail-loud 诚实设计（死端口整脚本抛错退出≠0），无需动；
+    base.mjs 只是解析器。⇒ **六闸脚本全部扫毕，假绿唯一即本次所修**。
+  - **下次触发接 r225**：待拍板四件套 ㉘/㊸/㊴+㉚/⑲；观察 ㊼。
