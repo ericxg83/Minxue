@@ -432,3 +432,10 @@
 ⚠️ 发现异常：mobile-dev 非 ok；脏文件 2 个（ M scripts/patrol/daemon.mjs, ?? scripts/dev/start_patrol_daemon.vbs…）（需 agent 深修时下轮处理）
     -  M scripts/patrol/daemon.mjs
     - ?? scripts/dev/start_patrol_daemon.vbs
+| 59 | 2026-10-07T16:09:40 | tests=2097/0 | lint=0 | build=skipped | server=ok | dirty=0 |
+
+### R59 — 2026/10/8 00:09:40（daemon 自动报告）
+
+**体检**：tests **2097/0** | lint 0 | build skipped | server=ok  mobile-dev=DOWN(ECONNREFUSED) | 冒烟 n/a | 脏 0
+
+⚠️ 发现异常：mobile-dev 非 ok（需 agent 深修时下轮处理）
