@@ -1,18 +1,20 @@
 <template>
   <div class="type-library wb-page"><div class="wb-page__inner">
-    <PageHeader eyebrow="教学资源 / 数学周末课" title="我的考法库" description="按考点挑题 → 直接进周末班课件；系统顺手帮你把高频错题归成考法。"><template #actions><ActionButton :loading="organizing" @click="runOrganize"><el-icon><Refresh /></el-icon>整理本周考法</ActionButton></template></PageHeader>
+    <PageHeader eyebrow="教学资源 / 数学周末课" title="我的考法库" description="找题讲课去「考点工作台」；系统归纳的讲法建议在「考法库」，确认后才收录。"><template #actions><ActionButton v-if="activeLine==='kaofa'" :loading="organizing" @click="runOrganize"><el-icon><Refresh /></el-icon>整理本周考法</ActionButton></template></PageHeader>
 
     <!-- 两条业务线，不是四个平级视图（r218）：
          ① 考点工作台 = 选题线（选考点 → 看共现 → 拉题 → 进课件）
          ② 考法库     = 沉淀线（待确认 / 已确认），是上一条线的「结果」不是并列入口 -->
     <nav class="line-switch" aria-label="业务线切换">
-      <button type="button" :class="['line-tab',{active:activeLine==='kp'}]" @click="setLine('kp')"><el-icon><Share /></el-icon>考点工作台</button>
-      <button type="button" :class="['line-tab',{active:activeLine==='kaofa'}]" @click="setLine('kaofa')"><el-icon><Collection /></el-icon>考法库<template v-if="summary.recommendation_count"> · {{ summary.recommendation_count }} 待确认</template></button>
+      <button type="button" title="备课找题、拉题、送进周末班课件（日常走这条线）" :class="['line-tab',{active:activeLine==='kp'}]" @click="setLine('kp')"><el-icon><Share /></el-icon>考点工作台</button>
+      <button type="button" title="系统从错题归纳的讲法建议，确认后长期复用（不着急，有空再挑）" :class="['line-tab',{active:activeLine==='kaofa'}]" @click="setLine('kaofa')"><el-icon><Collection /></el-icon>考法库<template v-if="summary.recommendation_count"> · {{ summary.recommendation_count }} 待确认</template></button>
     </nav>
+    <!-- r222 体验优化：两条线各配一句人话说明 —— 老师不需要记「考点 vs 考法」的概念，只要知道自己要干什么 → 走哪条线 -->
+    <p class="line-hint"><template v-if="activeLine==='kp'">备课找题就走这条线：选一个考点 → 看它和谁常一起考 → 把题送进周末班课件。</template><template v-else>系统从错题里归纳的「讲法」——一批题都在考同一个动作。认可就点「确认收录」，不急，有空再挑。</template></p>
 
     <!-- 统计条：只在真有数据时给数字，0 写「暂无」，不摆三个孤零零的 0（r218） -->
     <section v-if="activeLine==='kaofa'" class="library-stats">
-      <button type="button" class="library-stat" :class="{primary:subMode==='recommended'}" @click="setSubMode('recommended')"><span>待你确认</span><strong>{{ summary.recommendation_count || '暂无' }}</strong><small>系统按近期错题整理 · 点此处理</small></button>
+      <button type="button" class="library-stat" :class="{primary:subMode==='recommended'}" @click="setSubMode('recommended')"><span>待你确认</span><strong>{{ summary.recommendation_count || '暂无' }}</strong><small>系统按近期错题整理 · 点此查看</small></button>
       <button type="button" class="library-stat" :class="{primary:subMode==='library'}" @click="setSubMode('library')"><span>已沉淀考法</span><strong>{{ summary.type_count || '暂无' }}</strong><small>覆盖 {{ summary.knowledge_count || 0 }} 个知识点</small></button>
       <div class="library-stat"><span>本周维护</span><strong>{{ summary.updated_this_week || '暂无' }}</strong><small>本周确认或更新的考法</small></div>
     </section>
@@ -312,8 +314,9 @@ onMounted(async()=>{
 
 <style scoped>
 .type-library{min-height:100%;background:var(--wb-bg)}
-/* 两条业务线切换（r218：4 个平级模式 → 2 条线） */
-.line-switch{display:flex;gap:8px;margin-bottom:16px}
+/* 两条业务线切换（r218：4 个平级模式 → 2 条线；r222 每条线配一句人话说明） */
+.line-switch{display:flex;gap:8px;margin-bottom:8px}
+.line-hint{margin:0 0 16px;color:var(--wb-text-tertiary);font-size:12px;line-height:1.6}
 .line-tab{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--wb-border);border-radius:8px;background:var(--wb-bg-card);color:var(--wb-text-secondary);font-size:13px;cursor:pointer}
 .line-tab:hover{border-color:var(--wb-primary);color:var(--wb-primary)}
 .line-tab.active{border-color:var(--wb-primary);background:var(--wb-primary-soft);color:var(--wb-primary);font-weight:600}
