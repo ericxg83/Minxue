@@ -61,7 +61,12 @@ function buildFakeApi({ omit = [] } = {}) {
     }
     if (req.url === '/api/tasks/summary') {
       if (gone('summary')) return send({ success: true })
-      return send({ success: true, summary: { pendingTasks: [], failedTasks: 0 } })
+      // r233：子字段也能单独消失（真接口 `server/index.js:713-753` 两个都在，
+      // 这里模拟「哪天改名/拆结构」），判据必须分得出「真没失败」和「字段没了」。
+      const summary = { pendingTasks: [], failedTasks: 0 }
+      if (gone('pendingTasks')) delete summary.pendingTasks
+      if (gone('failedTasks')) delete summary.failedTasks
+      return send({ success: true, summary })
     }
     if (req.url === '/api/queue/stats') {
       // 真接口只有一层 stats，这里**整层都不给**来模拟「接口结构变了」
@@ -184,6 +189,28 @@ test('学生名单字段没回 ⇒ 「数据库可读」判提醒，且文案要
   }
 })
 
+// ── 4b. 子字段没了（r233）：整层 summary 在、只是 pendingTasks/failedTasks 没了 ─────
+// ⛔ 这条最容易被「看起来没问题」骗过去：整层都在 ⇒ 旧判据的 `s === undefined` 不触发，
+//    `(pendingTasks || []).length` 变 0、`failedTasks || 0` 变 0 ⇒ 印「没有失败也没有卡住的任务」判合格。
+//    于是改名/拆结构这种事体检一次都不会吭声，采样里也永远没有痕迹。
+test('任务汇总的子字段没回（整层在、只是数量没了）⇒ 必须判提醒，不能说「没有失败也没有卡住」', async () => {
+  for (const gone of ['pendingTasks', 'failedTasks']) {
+    const { server, port } = await startFakeApi({ omit: [gone] })
+    try {
+      const { stdout } = await runHealthcheck(port)
+      const item = itemOf(stdout, '批改失败任务')
+      assert.ok(item, `体检没输出「批改失败任务」这一项（漏掉 ${gone}）`)
+      assert.equal(item.status, 'warn', `子字段 ${gone} 没了却判合格：${item.line}`)
+      assert.match(item.detail, new RegExp(SELF_MISSING),
+        `没说清「这一项等于没盯」（${item.detail}）—— 老师会以为真的没有失败作业`)
+      assert.doesNotMatch(item.detail, /没有失败也没有卡住的任务/,
+        `还是那句听不出毛病的话（${item.detail}）—— 明明是字段没了，却说成「没有失败」`)
+    } finally {
+      server.close()
+    }
+  }
+})
+
 // ── 5. 不能误报：字段真的就是 0 ⇒ 必须照旧判合格（r198「恒定黄灯淹掉真告警」）─────
 test('字段真的返回 0（不是没回）⇒ 队列/批改这两项必须照旧判合格，不许假报警', async () => {
   const { server, port } = await startFakeApi()
@@ -200,6 +227,31 @@ test('字段真的返回 0（不是没回）⇒ 队列/批改这两项必须照�
   } finally {
     server.close()
   }
+})
+
+// ── 5b. 反向自检（r233 新洞）：套**本轮改动前**的基线脚本 ────────────────────────
+// 基线钉死到 0557805（本轮动手前那个提交，脚本内容 = r221+r229 版，正好没有子字段判据），
+// ⛔ 不能用 HEAD：本轮一提交 HEAD 就变新代码 ⇒ 反向自检永远空转（r214 教训）。
+// 期望：旧版在「整层 summary 在、只是子字段没了」这个场景下**判合格**并印那句听不出毛病的话。
+const OLD_SCRIPT_R233 = resolve(ROOT, 'scripts/_r233_old_healthcheck.mjs')
+
+test('反向自检（r233）：改动前的基线脚本在子字段消失时判合格（洞确实存在，不是我编的）', async (t) => {
+  if (!existsSync(OLD_SCRIPT_R233)) {
+    t.skip('反向自检探针未就位：先跑 git show 0557805:scripts/healthcheck.mjs > scripts/_r233_old_healthcheck.mjs')
+    return
+  }
+  const { server, port } = await startFakeApi({ omit: ['pendingTasks'] })
+  let stdout = ''
+  try {
+    stdout = (await runHealthcheck(port, OLD_SCRIPT_R233)).stdout
+  } finally {
+    server.close()
+  }
+  const got = itemOf(stdout, '批改失败任务')
+  assert.ok(got, '基线脚本没输出「批改失败任务」这一项')
+  assert.equal(got.status, 'ok', `基线脚本竟然也判提醒（${got.line}）⇒ 反向自检失效`)
+  assert.match(got.detail, /没有失败也没有卡住的任务/,
+    `基线脚本的场景对不上（${got.detail}）⇒ 这条反检验的不是那个洞`)
 })
 
 // ── 6. 反向自检：套 r220 的旧脚本，同样三个漏字段场景必须**判合格**（洞是真的）─────

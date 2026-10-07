@@ -159,9 +159,17 @@ if (health) {
     if (s === undefined) {
       record('批改失败任务', 'warn', missingFieldDetail('有没有失败/卡住的作业'))
     } else {
+      // ⛔ r233：pendingTasks / failedTasks 是 summary 的**子字段**，r221 只堵了整层 summary 在不在。
+      // 真接口两个字段都在（`server/index.js:713-753` 的 SELECT 明列），但哪天改名或拆结构，
+      // `(pendingTasks || []).length` 会变 0、`failedTasks || 0` 会变 0 ⇒ 照旧印
+      // 「没有失败也没有卡住的任务」判合格 —— 跟 r221 想堵的假绿同款，只是往下挪了一层。
+      // ⇒ 判必须在补默认值**之前**做，才分得出「真没失败」和「字段没了」。
+      const tasksMissing = s.pendingTasks === undefined || s.failedTasks === undefined
       const stuck = (s.pendingTasks || []).length
       const failed = s.failedTasks || 0
-      if (failed > 0) {
+      if (tasksMissing) {
+        record('批改失败任务', 'warn', missingFieldDetail('有几份批改失败 / 哪些作业卡住了'))
+      } else if (failed > 0) {
         record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
       } else if (stuck > 0) {
         record('批改失败任务', 'warn', `${stuck} 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`)
