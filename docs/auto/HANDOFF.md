@@ -852,3 +852,14 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - **下次触发接 r222**：首选 ㉘（141 题 is_complete 口径拍板）、㊸（export-retry-pdf 留/删/接线）、
   ㊴（两条渲染路径 60s 超时阈值）、⑲（备份脚本挂不挂定时任务）；
   另需负责人处理 running/206 的 stale 锁与 Render 部署链路（㉒）。
+
+## 第 222 轮（2026-10-07）· 反向自检探针缺失显式 t.skip（提案㊻ 落地，`4f60b3c` 已推送）
+
+- 三处修（全测试文件，零产品码）：① speed 锁静默 `return` ⇒ `t.skip`（实测本机探针从不存在，
+  该锁一直空转假通过）；② queue 锁 skip 提示 `HEAD` ⇒ 钉死 `25b4386~1`（基线漂移假红）；
+  ③ 三把锁 skip 后补 `return`（实测 `t.skip`+抛错 = fail 假红，`t.skip`+return = skipped）。
+- 真基线验证：三探针按钉死提交导出 ⇒ 18/18 全绿；删探针复跑 ⇒ 15 pass + 3 skipped + 0 fail。
+- 四道闸：2029 = 2026 pass + 3 skipped / 0 fail｜lint 全仓 0 error｜`dist_nightly_20261007r222` 33.33s｜
+  preview 5441 + render_smoke 8/8 + cert_probe 零外联。
+- 线上 commit 仍停 `5a6eb5a`（㊼ 第三次，本轮零运行时影响，待负责人面板确认）。
+- 下轮 r223：待拍板 ㉘/㊸/㊴+㉚/⑲；观察 ㊼ 继续。
