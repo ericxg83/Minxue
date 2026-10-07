@@ -20,10 +20,18 @@
  *   node scripts/nightlyAudit.mjs              跑全量巡检并写报告
  *   node scripts/nightlyAudit.mjs --json       只输出机器可读结果
  *   node scripts/nightlyAudit.mjs --no-build   跳过构建校验（更快）
+ *
+ * ⛔ 退出码（r240 起，供定时任务判定当晚成败；改动时与 nightlyAuditVerdict.mjs 同步）：
+ *   0 = 当晚通过；1 = lint 棘轮回退（不得合并）；2 = 巡检中止（lint 报告都拿不到）；
+ *   3 = 单元测试失败，或一条测试都没跑（不许报成功）。
+ * r240 修正了「单测整晚挂掉退出码仍是 0」这个假绿，详见 nightlyAuditVerdict.mjs 头部。
  */
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
+
+import { toLocalYmd } from '../server/utils/period.js'
+import { resolveNightlyVerdict, readTestsRun } from './nightlyAuditVerdict.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const AUTO_DIR = path.join(ROOT, 'docs', 'auto')
@@ -78,7 +86,11 @@ function run(cmd, argv, opts = {}) {
   }
 }
 
-const today = new Date().toISOString().slice(0, 10)
+// ⛔ r240：`toISOString().slice(0,10)` 印的是 UTC 日。这份脚本叫「夜间巡检」，
+//   凌晨跑的时候本地已经是新的一天、UTC 还停在昨天 ⇒ 报告会写进昨天的文件、
+//   baseline 的 updatedAt / history 也记昨天，backlog 标记同样对不上。
+//   复用 r157 收敛的本地日历日唯一实现（与 dailyBackup / backupKit 同一口径）。
+const today = toLocalYmd(new Date())
 
 // ── 1. ESLint ─────────────────────────────────────────────────────────────
 function collectLint() {
@@ -229,6 +241,14 @@ const SEVERITY = {
 const tierOf = (rule) => SEVERITY[rule] || 'P2'
 
 // ── 7. 报告 ────────────────────────────────────────────────────────────────
+/** 单元测试那一行的三态人话（r240）：真跑过且全绿 / 真跑过但有失败 / 压根没验过。 */
+function testSummary(tests) {
+  const counts = `（pass ${tests.counters.pass ?? '?'} / fail ${tests.counters.fail ?? '?'} / 共 ${tests.counters.tests ?? '?'}）`
+  const check = readTestsRun(tests.counters)
+  if (!check.ok) return `没验过：${check.reason} ${counts}`
+  return tests.ok ? `全绿 ${counts}` : `有失败 ${counts}`
+}
+
 function writeReport({ lint, tests, build, repo, ratchet }) {
   fs.mkdirSync(REPORT_DIR, { recursive: true })
   const grouped = new Map()
@@ -244,7 +264,9 @@ function writeReport({ lint, tests, build, repo, ratchet }) {
   L.push(`| Git 基线 | \`${repo.branch}\` @ \`${repo.head}\` |`)
   L.push(`| ESLint error | ${lint.total}（P0 ${grouped.get('P0')?.length || 0} / P1 ${grouped.get('P1')?.length || 0} / P2 ${grouped.get('P2')?.length || 0}） |`)
   L.push(`| 棘轮 | ${ratchet.status}${ratchet.regressions?.length ? ` — 回退 ${ratchet.regressions.length} 项` : ''} |`)
-  L.push(`| 单元测试 | ${tests.ok ? '全绿' : '有失败'}（pass ${tests.counters.pass ?? '?'} / fail ${tests.counters.fail ?? '?'} / 共 ${tests.counters.tests ?? '?'}） |`)
+  // ⛔ r240：一条测试都没跑（或压根没读到条数）也是有结论的 —— 那就是「这一轮没验过」，
+  //    不许印「全绿」。与体检脚本 r221 的口径一致（字段没真读到必须明说）。
+  L.push(`| 单元测试 | ${testSummary(tests)} |`)
   L.push(`| 构建 | ${build ? (build.ok ? `通过 → ${rel(build.outDir)}（${(build.bytes / 1048576).toFixed(1)} MB）` : '失败') : '跳过'} |`)
   L.push(`| 工作区 | ${repo.dirty.length ? `脏 ${repo.dirty.length} 项` : '干净'} |`)
   L.push('')
@@ -369,13 +391,23 @@ const ratchet = applyRatchet(lint)
 const report = writeReport({ lint, tests, build, repo, ratchet })
 const backlog = appendBacklog(lint)
 
+// ⛔ r240：当晚结论统一由 nightlyAuditVerdict 判，主流程不再自己算退出码。
+//   修复前这里对「单测挂掉 / 一条测试都没跑」都返回 0 ⇒ 定时任务挂上去会永远报成功。
+const runCheck = readTestsRun(tests.counters)
+const verdict = resolveNightlyVerdict({
+  testsExitCode: tests.exitCode,
+  testsRun: runCheck.ok ? Number(tests.counters.tests) : null,
+  ratchetStatus: ratchet.status
+})
+
 if (jsonOnly) {
   console.log(JSON.stringify({
     date: today,
     lintTotal: lint.total,
     byRule: Object.fromEntries(lint.byRule),
     ratchet,
-    tests: { ok: tests.ok, pass: tests.counters.pass, fail: tests.counters.fail },
+    tests: { ok: tests.ok, pass: tests.counters.pass, fail: tests.counters.fail, run: runCheck.ok ? Number(tests.counters.tests) : null },
+    verdict: { status: verdict.status, exitCode: verdict.exitCode, reason: verdict.reason },
     build: build && { ok: build.ok, bytes: build.bytes },
     report: rel(report.file)
   }, null, 2))
@@ -383,6 +415,7 @@ if (jsonOnly) {
   console.log(report.text)
 }
 console.log(`\n机器结果：${rel(report.file)}\n分析提案：${rel(report.proposalFile)}${backlog ? `\n待办池：${rel(backlog)}` : ''}`)
-
-// 棘轮回退 = 当晚失败，退出码 1，供上层定时任务判定是否禁止合并
-process.exit(ratchet.status === 'REGRESSED' ? 1 : 0)
+// ⛔ r240：退出码由 resolveNightlyVerdict 统一给（0 过 / 1 棘轮回退 / 2 巡检中止 / 3 单测没验过），
+//   供上层定时任务判定当晚成败 —— 修复前「单测整晚挂掉」这里会返回 0。
+if (verdict.reason) console.log(`${verdict.exitCode === 0 ? '' : '⛔ '}${verdict.reason}`)
+process.exit(verdict.exitCode)
