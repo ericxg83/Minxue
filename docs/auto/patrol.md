@@ -407,3 +407,10 @@
     -  M docs/auto/HANDOFF.md
     -  M docs/auto/backlog.md
     - ?? server/scripts/applyKnowledgeMerge.mjs
+| 56 | 2026-10-07T15:57:19 | tests=2097/0 | lint=0 | build=skipped | server=ok | dirty=0 |
+
+### R56 — 2026/10/7 23:57:19（daemon 自动报告）
+
+**体检**：tests **2097/0** | lint 0 | build skipped | server=ok  mobile-dev=DOWN(ECONNREFUSED) | 冒烟 n/a | 脏 0
+
+⚠️ 发现异常：mobile-dev 非 ok（需 agent 深修时下轮处理）
