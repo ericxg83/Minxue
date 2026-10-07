@@ -29,6 +29,31 @@ const ENGINE = path.join(ROOT, 'scripts', 'patrol', 'patrol.mjs')
 
 function log(...a) { console.log(`[${new Date().toISOString()}]`, ...a) }
 
+// ── 单实例锁：防止开机自启 + 手动启动叠加成双 daemon（双写 patrol.md 会互相覆盖/冲突）──
+const LOCK = path.join(ROOT, 'logs', 'patrol_daemon.pid')
+function acquireLock() {
+  try {
+    fs.mkdirSync(path.dirname(LOCK), { recursive: true })
+    if (fs.existsSync(LOCK)) {
+      const pid = Number(fs.readFileSync(LOCK, 'utf8').trim())
+      if (pid && Number.isFinite(pid)) {
+        try { process.kill(pid, 0); return false } // 已有存活实例，拒绝启动
+        catch { /* PID 已死，锁过期，可以接管 */ }
+      }
+    }
+    fs.writeFileSync(LOCK, String(process.pid))
+    return true
+  } catch (e) {
+    log('⚠ 单实例锁检查失败（继续启动）：' + e.message)
+    return true
+  }
+}
+function releaseLock() {
+  try {
+    if (fs.existsSync(LOCK) && fs.readFileSync(LOCK, 'utf8').trim() === String(process.pid)) fs.unlinkSync(LOCK)
+  } catch { /* 忽略 */ }
+}
+
 // ── 从本轮体检 entry 生成人类可读报告段落（agent 缺席也能产出）──
 function renderReport(round, l) {
   const zh = (t) => new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
@@ -100,9 +125,16 @@ async function runRound() {
   }
 }
 
+if (!acquireLock()) {
+  console.log(`[${new Date().toISOString()}] ⛔ 已有 daemon 实例在运行（锁 ${LOCK}），本进程退出`)
+  process.exit(0)
+}
+process.on('exit', releaseLock)
+
 log(`巡查守护进程启动 — 每 ${Math.round(INTERVAL / 1000)}s 一轮，引擎 ${ENGINE}`)
 await runRound() // 启动立即跑第一轮
 
 setInterval(runRound, INTERVAL)
 // 防止进程静默挂掉：Windows 下 setInterval 无阻塞问题
 process.on('SIGINT', () => { log('收到 SIGINT，退出'); process.exit(0) })
+process.on('SIGTERM', () => { log('收到 SIGTERM，退出'); process.exit(0) })
