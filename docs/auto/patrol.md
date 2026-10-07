@@ -188,3 +188,13 @@
 **体检**：tests **2029/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 0
 
 ✅ 全绿：无异常，无需人工介入
+| 28 | 2026-10-07T02:41:37 | tests=2026/0 | lint=0 | build=skipped | server=ok | dirty=3 |
+
+### R28 — 2026/10/7 10:41:37（daemon 自动报告）
+
+**体检**：tests **2026/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
+
+⚠️ 发现异常：脏文件 3 个（ M test/healthcheckMissingField.test.mjs,  M test/healthcheckQueueStats.test.mjs,  M test/healthcheckSpeed.test.mjs…）（需 agent 深修时下轮处理）
+    -  M test/healthcheckMissingField.test.mjs
+    -  M test/healthcheckQueueStats.test.mjs
+    -  M test/healthcheckSpeed.test.mjs
