@@ -18,8 +18,42 @@
  */
 
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 
 import { resolveDiskState } from './healthDiskState.mjs'
+
+// ── 两把小工具（r229 新增「代码版本」这一项要用）────────────────────────
+/** ISO 时刻 → 人话「10-07 11:29」，负责人不看 UTC 的启动时刻。 */
+function localTimeText(iso) {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '启动时刻读不出来'
+  const p = (n) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+/** 本机 .git 的 HEAD 短号；读不到就返回 null（不猜、不报错，后面只印线上号）。 */
+function readLocalHeadShort() {
+  try {
+    const root = path.resolve(path.dirname(path.resolve(process.argv[1])), '..')
+    const head = readFileSync(path.join(root, '.git', 'HEAD'), 'utf8').trim()
+    if (/^[0-9a-f]{7,40}$/i.test(head)) return head.slice(0, 7)
+    const m = head.match(/^ref:\s*(.+)$/i)
+    if (!m) return null
+    const ref = m[1].trim()
+    let sha = ''
+    try {
+      sha = readFileSync(path.join(root, '.git', ref), 'utf8').trim()
+    } catch {
+      // 分支指针进了 packed-refs（克隆仓库常见），再从那儿找
+      const packed = readFileSync(path.join(root, '.git', 'packed-refs'), 'utf8')
+      const hit = packed.split('\n').find((l) => l.trim().endsWith(' ' + ref))
+      sha = hit ? hit.trim().split(/\s+/)[0] : ''
+    }
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 7) : null
+  } catch {
+    return null
+  }
+}
 
 const argv = process.argv.slice(2)
 const JSON_ONLY = argv.includes('--json')
@@ -176,6 +210,31 @@ if (health) {
 if (health) {
   const diskState = resolveDiskState(health.disk)
   record('服务器磁盘', diskState.status, diskState.detail)
+}
+
+// ── 7. 线上跑的是哪一版代码（㊼：推了没上线，体检必须看得出来）──────────
+// ⛔ 2026-10-07 r229 实测：/api/health 一直回 commit / bootAt 两个字段，体检却从不印，
+//    ⇒ 「我刚推的新代码到底上没上线」这件事只能人肉 curl 才知道。r220~r228 连着好几轮
+//    都是靠人工 curl 才发现线上还停在旧提交（本轮实测：落后 31 个提交、12 小时零重启）。
+//    沿用 r221 口径：字段没真读到就必须明说，不许悄悄判合格。
+if (health) {
+  try {
+    if (!health.commit) {
+      record('代码版本', 'warn', missingFieldDetail('代码版本号（线上跑的是哪一版）'))
+    } else {
+      const short = String(health.commit).slice(0, 7)
+      const boot = localTimeText(health.bootAt)
+      // ⚠️ 本机后端常把 commit 写成 non-sha 占位（实测 'local'），那种号没法跟本地比，
+      //    硬比会天天挂黄灯（r198 教训：恒定黄灯会淹掉真告警）⇒ 只照实印，不判。
+      const comparable = /^[0-9a-f]{7,40}$/i.test(String(health.commit))
+      const local = comparable ? readLocalHeadShort() : null
+      const behind = comparable && local && local !== short
+      record('代码版本', behind ? 'warn' : 'ok',
+        `${behind ? `线上还是 ${short}，你本地已经是 ${local} ⇒ 这段新代码没上线，去 Render 面板手动部署或确认自动部署` : `线上 commit ${short}`}（${boot} 启动的）`)
+    }
+  } catch (e) {
+    record('代码版本', 'warn', `查不了：${e.message}`)
+  }
 }
 
 // ── 追加采样日志（一行一条，便于事后按时间窗口分析）────────────────────
