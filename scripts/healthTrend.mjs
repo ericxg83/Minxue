@@ -48,13 +48,6 @@ function localTimeText(iso) {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** 一天的中文说法，用来描述「这事发生在哪天」。 */
-function dayText(iso) {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '日期读不出来'
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
-
 // ── 读采样 ───────────────────────────────────────────────────────────────
 let raw
 try {
@@ -102,7 +95,6 @@ if (samples.length === 0) {
 }
 
 const window_ = samples.slice(-WINDOW)
-const older = samples.slice(0, Math.max(0, samples.length - WINDOW))
 
 // ── 逐项统计 ─────────────────────────────────────────────────────────────
 /** 把每条的 bad/warn 摊平：{ 项名: [该条的下标...] } */
