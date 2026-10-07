@@ -386,3 +386,37 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 - geometry_image 资产共 **501 个**：completed（已矢量/tikz 重绘）**384（77%）**｜none（从未过 tikz 管线）**117（23%）**。
 - 117 个 none 中：**~23 个是闸门正确拒绝**（文字图/流程图/统计图/多子图，不适用几何重绘，保留原卷裁片 = 设计行为）+ 2 个重绘不符回退；**剩余 ~94 个 last_error 为空 = 从未尝试 tikz 的真实目标池**。
 - **方向二的可执行提案（等确认）**：把 ~94 个从未尝试的 geometry_image 资产跑一遍既有确定性构造管线（重绘级 199/229 的成熟链路）。成本 = 批量付费视觉接口（预算需负责人批准，≤94 次）；预期 = 图片清晰度整体提升。涉几何管线 = 负责人自建领域，实施方式由负责人定。
+
+## 二十四、判定面地图：体检/门禁/巡查「谁盯着什么」（2026-10-07 第 231 轮整理）
+
+> 目的：r198–r230 连挖八枚「假绿」（判据取不到数据 ⇒ 悄悄判合格/失败），每轮都在重推上下文。
+> 这里集中登记所有判定面：位置、盯什么、守它的锁、踩过的雷。**后续轮次加新判定面前先来登记；
+> 修判定面后同步本表。**
+
+| 判定面 | 位置 | 盯什么 | 守它的锁 / 判据 | 踩过的雷（轮次） |
+|---|---|---|---|---|
+| 后端在线 | `scripts/healthcheck.mjs` | uptimeSec + 响应 | 字段缺失 ⇒ 明说没盯 | 恒绿（r221 修） |
+| 接口速度 | 同上 | 冷启动最慢值 | `test/healthcheckSpeed.test.mjs`（反向基线 `7828fe2~1`） | 漏首采（r218）；探针静默 return（r222 修） |
+| 数据库可读 | 同上 | students 行数 | 字段缺失 ⇒ 明说 | 「读到 0 名学生」假话（r221 修） |
+| 批改失败任务 | 同上 | summary | 字段缺失 ⇒ 明说 | 吞字段（r221 修） |
+| 任务队列 | 同上 | `stats.{waiting,active,failed}`+available | `test/healthcheckQueueStats.test.mjs`（反向基线 `25b4386~1`） | 读错嵌套恒 0（r220）；漏字段（r221） |
+| 服务器磁盘 | `healthDiskState` + 体检 | `health.disk` 可用 MB | `test/healthDiskGuard.test.mjs` | 磁盘字段假绿（r198 修） |
+| 代码版本 | 体检（r229 新增） | 线上 commit vs 推送 | 体检直读 | ——（新） |
+| 外联探针 | `scripts/gate/cert_probe.mjs` | 产物零外联 + 零失败 | exit 码含 external（r224 修） | 外联只打印不判 ⇒ 假绿（r224 实测修） |
+| 渲染冒烟 | `scripts/gate/render_smoke.mjs` | 移动端/工作台真渲染 | 8 项 PASS 才 exit 0 | ——（goto 无 catch = fail-loud，诚实） |
+| 路由巡扫 | `scripts/gate/route_sweep.mjs` | 16 路由 console/HTTP | r152 有脏即非零 | r111 旧版恒 0（r152 修） |
+| 文本审计 | `scripts/gate/text_audit.mjs` | 专业度痕迹/破图/空按钮 | r152 有脏即非零 | 同上 |
+| 布局审计 | `scripts/gate/overflow_audit.mjs` | 横向溢出 | r152 有脏即非零 | 同上 |
+| daemon 巡查 | `scripts/patrol/patrol.mjs` | tests/lint/健康/脏文件 | fetch 4s 超时、DOWN 如实、parse 失败显 `?` | **lint 陈旧报告假绿（提案㊽待采纳）** |
+| daemon 冒烟 | `scripts/patrol/smoke.mjs` | 8 导航 + 移动端 | 失败路径全喂 ok(false) | ——（诚实） |
+| 每日备份 | `scripts/dailyBackup.mjs`+`backupKit.mjs` | 五核心表非零 + manifest.ok | exit 0/1 + `test/dailyBackupResult.test.mjs` | 谎报平安（r159 修）；**断档三晚=没人调用（r225 P0，提案㊾待采纳）** |
+| 测试锁语义 | `test/healthcheck*.test.mjs` | 反向自检探针缺失 | `t.skip`+`return`（缺一不可） | 静默 return 假通过 + HEAD 漂移基线 + skip 后抛错假红（r222 实测修） |
+| 轮次锁 | `scripts/loopGuard.mjs` | 开工/收工原子认领 | acquire 忙拒/被抢 exit 2 | 手写 JSON 双开工事故（10-02）；协议仍未接线（提案㊿，r228 实机三场景验证） |
+
+**假绿家族八枚档案**（共同根因：**判定面在数据缺席时的默认分支是「合格」**。新写判据第一问：数据没来时它判什么？）：
+磁盘（r198）→ 接口速度（r218）→ 队列读错路径（r220）→ 漏字段×4（r221）→ skip 语义（r222）→
+lint 陈旧报告（r223 提案）→ 外联不判（r224）。
+
+**断档家族**（东西在但没人调用）：dailyBackup 零调用（提案⑲/㊾）、nightlyAudit（r217）、
+export-retry-pdf 等 7 死端点（r219 门禁拦新）。共同根因：**「有没有人跑」没有判定面**——
+r219 的 apiDeadEndpoint 门禁只管 API，脚本层靠本表人工盯。
