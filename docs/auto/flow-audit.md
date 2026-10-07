@@ -403,6 +403,7 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 | 服务器磁盘 | `healthDiskState` + 体检 | `health.disk` 可用 MB | `test/healthDiskGuard.test.mjs` | 磁盘字段假绿（r198 修） |
 | 代码版本 | 体检（r229 新增） | 线上 commit vs 推送 | 体检直读 | ——（新） |
 | 外联探针 | `scripts/gate/cert_probe.mjs` | 产物零外联 + 零失败 | exit 码含 external（r224 修） | 外联只打印不判 ⇒ 假绿（r224 实测修） |
+| 死端点门禁 | `test/apiCallerAuditKit.mjs` + `test/apiDeadEndpoint.test.mjs` | 每条后端路由要么有调用方、要么登记决定 | 登记册 `test/apiDeadEndpoints.json` + 反向自检 | **调用方语料含注释 ⇒ 注释里的路径被当「有人调」**（r234 修，假绿家族第九枚） |
 | 渲染冒烟 | `scripts/gate/render_smoke.mjs` | 移动端/工作台真渲染 | 8 项 PASS 才 exit 0 | ——（goto 无 catch = fail-loud，诚实） |
 | 路由巡扫 | `scripts/gate/route_sweep.mjs` | 16 路由 console/HTTP | r152 有脏即非零 | r111 旧版恒 0（r152 修） |
 | 文本审计 | `scripts/gate/text_audit.mjs` | 专业度痕迹/破图/空按钮 | r152 有脏即非零 | 同上 |
@@ -416,6 +417,14 @@ error 22 → 15，全部逐处读过，无一放宽规则：
 **假绿家族八枚档案**（共同根因：**判定面在数据缺席时的默认分支是「合格」**。新写判据第一问：数据没来时它判什么？）：
 磁盘（r198）→ 接口速度（r218）→ 队列读错路径（r220）→ 漏字段×4（r221）→ skip 语义（r222）→
 lint 陈旧报告（r223 提案）→ 外联不判（r224）。
+
+**第九枚（r234，不同根因：不是「数据缺席判合格」，而是「判据取错了语料」）**：
+`apiCallerAuditKit` 的调用方语料原为**原始全文**，注释里提到端点路径也算「有人调」⇒
+一条 `// 旧接口 /api/x 已废弃` 就能把零调用方的新端点洗成有调用方，门禁假绿。
+实测：`test/adminStatsSince.test.mjs` 里一句 JSDoc 提到 `GET /api/admin/judgements/misjudge-stats`，
+旧 kit 判「有人调」、去注释后判「零调用方」（该端点是运维前缀，允许零调用方，故业务清单不变）。
+修：`stripComments()`（去块注释 + `//` 前面不是 `:` 的行注释），语料先过它；业务死端点仍 7 条、登记册不变。
+⇒ 新增判定面时要问的第二问：**「这份语料里有没有『提到』而不是『调用』的东西？」**
 
 **断档家族**（东西在但没人调用）：dailyBackup 零调用（提案⑲/㊾）、nightlyAudit（r217）、
 export-retry-pdf 等 7 死端点（r219 门禁拦新）。共同根因：**「有没有人跑」没有判定面**——

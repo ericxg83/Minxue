@@ -13,6 +13,7 @@
  *   - 合成坏样本：把登记册的 reason 删空 ⇒ 必须判红。
  *   - 合成坏样本：登记册里留一条仓库里根本不存在的端点（stale）⇒ 必须判红。
  *   - 元判据自证：先断言「探针里的判据字面量与本测试文件逐字一致」，再跑，防判据写错字的假通过。
+ *   - r234：语料必须**去注释** —— 注释里提到端点路径不算「有人调」（假绿家族第九枚）。
  */
 
 import assert from 'node:assert/strict'
@@ -22,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 import {
   scanServerEndpoints,
   buildCallerCorpus,
+  stripComments,
   isReferenced,
   findUnreferencedEndpoints,
   classifyDead,
@@ -38,6 +40,7 @@ const registry = JSON.parse(fs.readFileSync(REGISTRY_PATH, 'utf8'))
 const SELF_PROBE = {
   scanFn: 'scanServerEndpoints',
   corpusFn: 'buildCallerCorpus',
+  stripFn: 'stripComments',
   unreferencedFn: 'findUnreferencedEndpoints',
   classifyFn: 'classifyDead',
   auditFn: 'auditRegistry',
@@ -160,6 +163,43 @@ function makeFakeTree(indexJs, appJsx) {
 {
   const { stale } = auditRegistry([], { endpoints: { 'POST /api/r219/gone-forever': { reason: '这条确实已经没人用了' } } })
   assert.deepEqual(stale, ['POST /api/r219/gone-forever'], '反向自检失效：stale 未判红')
+}
+
+// ── 7. r234：注释不算调用方（假绿家族第九枚：判据取错了语料）──────────────────
+// 语料原来是**原始全文** ⇒ 一条 `// 旧接口 /api/x 已废弃` 就能把零调用方的新端点洗成
+// 「有人调」，门禁于是假绿。去注释后注释不再顶替调用方；真调用照旧判「有人调」。
+{
+  const route = 'POST /api/r234/comment-only'
+  const commentOnly = '// 已下线：POST /api/r234/comment-only，改走别的通道\nconst a = 1\n'
+  const realCall = `apiRequest('/api/r234/comment-only')\n`
+
+  // ① 旧口径（不去注释）会把注释里的路径当调用方 —— 这正是洞
+  assert.equal(
+    isReferenced(commentOnly, route), true,
+    '反向自检失效：旧口径对「只有注释提到」的路径应当判「有人调」（这正是被堵的缺陷）'
+  )
+  // ② 新口径（去注释）必须判「零调用方」
+  assert.equal(
+    isReferenced(stripComments(commentOnly), route), false,
+    '反向自检失效：去注释后仍把注释当调用方 ⇒ 门禁假绿'
+  )
+  // ③ 去注释不许误伤真调用（否则会造出假红）
+  assert.equal(
+    isReferenced(stripComments(realCall), route), true,
+    '反向自检失效：真调用被去注释误伤成零调用方（假红）'
+  )
+  // ④ 去注释不许碰字符串里的 `//`（URL 等）
+  assert.ok(
+    stripComments(`const u = 'https://example.com/x'\n`).includes('https://example.com/x'),
+    '反向自检失效：去注释把字符串里的 https:// 也剥了（会误伤真调用）'
+  )
+  // ⑤ 无注释的源码逐字不变（去注释是恒等变换的一部分）
+  assert.equal(stripComments(realCall), realCall, '反向自检失效：无注释源码被改动了')
+  // ⑥ 块注释同样要剥
+  assert.ok(
+    !stripComments(`/* 说明：POST /api/r234/comment-only */\nconst b = 2\n`).includes('/api/r234/comment-only'),
+    '反向自检失效：块注释里的路径没被剥掉'
+  )
 }
 
 console.log(`      · 死端点门禁：扫描 ${endpoints.length} 条端点，业务死端点 ${business.length} 条全部已登记`)

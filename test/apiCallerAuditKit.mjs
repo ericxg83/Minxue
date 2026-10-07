@@ -47,6 +47,26 @@ export const OPS_PREFIXES = [
   '/api/paper'
 ]
 
+/**
+ * 剥掉源码里的注释 —— 调用方语料必须先过这一关（r234）。
+ *
+ * ⛔ 为什么必须去注释（r234 实测，假绿家族第九枚：判据取错了语料）：
+ *   语料原来直接读**原始全文**，于是「注释里提到某个端点路径」也被算成「有人调」——
+ *   而注释不是调用方。一条 `// 旧接口 /api/x 已废弃，改走 /api/y` 就能把一条零调用方的
+ *   新死端点洗成「有调用方」，门禁于是**假绿**（这正是 r219 想拦的那类无声腐烂）。
+ *   实测证据：去掉注释后 `GET /api/admin/judgements/misjudge-stats` 从「有人调」翻成
+ *   「零调用方」——它是运维前缀端点（允许零调用方），所以业务清单不变，但这坐实了语料被注释污染。
+ *
+ * 只剥注释、不碰字符串：`//` 前面是 `:` 的（`http://`、`https://`）不当注释处理。
+ * 去注释只会让「有调用方」判定**更严**；万一误伤到字符串里的 `//`（把活端点判死），
+ * 那是**判红**（当场可见），不会退化成假绿。
+ */
+export function stripComments(src) {
+  return String(src)
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ')
+}
+
 const toPosix = (p) => String(p).replace(/\\/g, '/')
 const rel = (root, p) => toPosix(path.relative(root, p))
 
@@ -129,11 +149,11 @@ export function scanServerEndpoints(root) {
   return [...new Set(out)]
 }
 
-/** 调用方语料：`src/**` + `scripts/**` + `test/**` + `server/scripts/**` 的可匹配源码全文。 */
+/** 调用方语料：`src/**` + `scripts/**` + `test/**` + `server/scripts/**` 的可匹配源码全文（**已去注释**）。 */
 export function buildCallerCorpus(root) {
   const dirs = ['src', 'scripts', 'test', 'server/scripts']
   const files = dirs.flatMap((d) => collect(path.join(root, d), root, CORPUS_ACCEPT))
-  return files.map((f) => fs.readFileSync(path.join(root, f), 'utf8')).join('\n')
+  return files.map((f) => stripComments(fs.readFileSync(path.join(root, f), 'utf8'))).join('\n')
 }
 
 /** 一个端点是否「有人调」——四种字面形态任一命中即算。 */
