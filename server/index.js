@@ -13,6 +13,7 @@ import {
 // 默认统计窗口起点必须按「本地日历日」算，⛔ 不许 toISOString（UTC 日）——见 localDaysAgoYmd 注释
 import { localDaysAgoYmd } from './utils/period.js'
 import { measureDiskUsage } from './utils/diskUsage.js'
+import { probeCjkFontAsset } from './utils/cjkFontState.js'
 import { runMigrations } from './migrations/migrationLedger.js'
 import { migrateGeometryImageUrl } from './migrations/addGeometryImageUrl.js'
 import { migrateLifecycleStatus } from './migrations/007_add_lifecycle_status.js'
@@ -279,7 +280,10 @@ app.get('/api/health', async (req, res) => {
     bootAt: BOOT_AT,
     uptimeSec: Math.round(process.uptime()),
     visionTimeoutMs: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
-    disk
+    disk,
+    // ⛔ r241：家长拿到的分享卡/重练卷要是没有中文字形会整张变成方框（r134 那次），
+    //    /api/health 一直能说清磁盘、代码版本，唯独说不清这件事 ⇒ 体检那七项里没一项管「家长看到的东西」。
+    cjkFont: probeCjkFontAsset()
   })
 })
 

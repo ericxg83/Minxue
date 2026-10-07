@@ -21,6 +21,10 @@ import path from 'node:path'
 import { readFileSync } from 'node:fs'
 
 import { resolveDiskState } from './healthDiskState.mjs'
+// ⛔ 字体那盏灯的判定只有 server/utils/cjkFontState.js 一个出处（r221：同一件事只准一个实现）。
+//    scripts/ 复用 server/utils/ 不是新规矩 —— scripts/backupKit.mjs、scripts/nightlyAudit.mjs
+//    早就 import '../server/utils/period.js' 的 toLocalYmd。
+import { resolveCjkFontState } from '../server/utils/cjkFontState.js'
 
 // ── 两把小工具（r229 新增「代码版本」这一项要用）────────────────────────
 /** ISO 时刻 → 人话「10-07 11:29」，负责人不看 UTC 的启动时刻。 */
@@ -259,6 +263,19 @@ if (health) {
   } catch (e) {
     record('代码版本', 'warn', `查不了：${e.message}`)
   }
+}
+
+// ── 8. 发给家长的那张图，中文还有没有字形（r241 新增，补 r134 之后的监控缺口）──
+// ⛔ 2026-10-05 r134 实测：服务端容器里一个中文字体都没有，家长拿到的分享卡整张卡中文全是方框，
+//    修完用了 woff2 兜底，但**此后没有任何一处会再问一次「字体还在不在」** ——
+//    文件被误删 / 部署资产没带上 ⇒ renderFontFace 只在渲染那一瞬间 console.error 一句，
+//    之后永远输出方框，体检照旧七项全绿。和 r221「字段没真读到就明说」完全同款：
+//    有一件事看着在盯，其实一次都没盯过。
+//    这一项是体检里**唯一管「家长实际看到的东西」**的一项（其余七项都只盯服务器自己）。
+// ⛔ 文案必须说后果（家长收到的是看不懂的图）和下一步（补回字体文件重启），不许只甩字段名。
+if (health) {
+  const fontState = resolveCjkFontState(health.cjkFont)
+  record('家长卡片中文字', fontState.status, fontState.detail)
 }
 
 // ── 追加采样日志（一行一条，便于事后按时间窗口分析）────────────────────

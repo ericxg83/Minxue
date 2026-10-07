@@ -27,7 +27,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, cpSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, cpSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -106,7 +106,18 @@ function itemOf(stdout, name) {
  */
 function makeGitlessProbeDir() {
   const dir = mkdtempSync(join(tmpdir(), 'minxue-r235-'))
-  cpSync(resolve(ROOT, 'scripts'), dir, { recursive: true })
+  // ⛔ r241 踩坑：`fs.cpSync(srcDir, 还不存在的 dest, {recursive:true})` 是把 **src 的内容倒进 dest**，
+  //    不是 dest/<src名>/ —— 实测拷完 `dir/scripts/` 根本不存在，`dir/` 里直接躺着 healthcheck.mjs。
+  //    ⇒ 脚本的 `..` 会跑到临时目录的**上一级**，相对导入全歪（本轮第一次跑全量单测就是红在这：
+  //      healthcheck 新版 import `../server/utils/cjkFontState.js`，解析成 Temp/server/utils，模块找不到）。
+  //    ⇒ 要造出「脚本在 <root>/scripts/ 下」的仓库布局，必须先 mkdir 出子目录再拷。
+  mkdirSync(resolve(dir, 'scripts'), { recursive: true })
+  cpSync(resolve(ROOT, 'scripts'), resolve(dir, 'scripts'), { recursive: true })
+  // ⛔ 同一条理由：healthcheck 现在还 import `../server/utils/cjkFontState.js`（字体那盏灯的判定
+  //    只有这一个出处；scripts/ 复用 server/utils 早有先例 —— backupKit.mjs / nightlyAudit.mjs
+  //    import '../server/utils/period.js'）。server/utils 一并按同样层级拷过去。
+  //    ⇒ 摆法和仓库一致 ⇒ root = 这个临时目录 ⇒ 照样没有 .git ⇒ 场景一点没变。
+  cpSync(resolve(ROOT, 'server', 'utils'), resolve(dir, 'server', 'utils'), { recursive: true })
   return dir
 }
 
@@ -125,7 +136,7 @@ test('本机读不出版本号（脚本旁边没有 git 信息）⇒ 明说没�
   const probeDir = makeGitlessProbeDir()
   const { server, port } = await startFakeApi({ commit: '0deadbe' })
   try {
-    const { stdout, code } = await runHealthcheck(resolve(probeDir, 'healthcheck.mjs'), port)
+    const { stdout, code } = await runHealthcheck(resolve(probeDir, 'scripts', 'healthcheck.mjs'), port)
     assert.equal(code, 0, `体检非正常退出：${stdout}`)
     const item = itemOf(stdout, SELF_PROBE)
     assert.ok(item, `体检没输出「${SELF_PROBE}」这一项：${stdout.slice(0, 300)}`)
@@ -169,10 +180,10 @@ test(`反向自检：基线 ${BASELINE_COMMIT} 的旧脚本在"没 .git"场景�
   const probeDir = makeGitlessProbeDir()
   try {
     // 把旧脚本顶替到探针目录的 healthcheck.mjs 上（相对导入还在，模块解析照常）
-    writeFileSync(resolve(probeDir, 'healthcheck.mjs'), readFileSync(OLD_SCRIPT))
+    writeFileSync(resolve(probeDir, 'scripts', 'healthcheck.mjs'), readFileSync(OLD_SCRIPT))
     const { server, port } = await startFakeApi({ commit: '0deadbe' })
     try {
-      const { stdout } = await runHealthcheck(resolve(probeDir, 'healthcheck.mjs'), port)
+      const { stdout } = await runHealthcheck(resolve(probeDir, 'scripts', 'healthcheck.mjs'), port)
       const item = itemOf(stdout, SELF_PROBE)
       assert.ok(item, `旧版没输出「${SELF_PROBE}」这一项`)
       assert.equal(item.status, 'ok',

@@ -24,8 +24,10 @@
  *    缺一个静态资产不该让转发给家长的卡片接口 500。
  */
 import { readFileSync } from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+
+// ⛔ 字体资产的路径只有 cjkFontState.js 一个出处（r241）：那边的 probeCjkFontAsset()
+//    还要给 /api/health 报状态，两边各算一次路径，改了一处忘另一处就是「同一事实两个写法」。
+import { CJK_FONT_ASSET_PATH } from '../utils/cjkFontState.js'
 
 const FONT_FILE = 'NotoSansSC-Common.woff2'
 const FONT_FAMILY = 'MinxueCJK'
@@ -36,8 +38,6 @@ const FONT_FAMILY = 'MinxueCJK'
  */
 const INJECT_MARKER = "@font-face{font-family:'MinxueCJK'"
 
-const ASSET_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts')
-
 /** 字体只首次读取，base64 只算一次（卡片一次渲染 ≈ 0.7MB 字符串，别每请求重算） */
 let cachedCss = null
 let cachedMissing = false
@@ -47,7 +47,7 @@ function buildFontFaceCss() {
   if (cachedMissing) return null
   let bytes
   try {
-    bytes = readFileSync(path.join(ASSET_DIR, FONT_FILE))
+    bytes = readFileSync(CJK_FONT_ASSET_PATH)
   } catch {
     cachedMissing = true
     console.error(`[renderFontFace] 缺字体资产 ${FONT_FILE}，服务端中文将渲染成方框（退化到 r134 之前的行为）`)
