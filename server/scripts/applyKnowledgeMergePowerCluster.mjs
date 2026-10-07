@@ -1,26 +1,27 @@
 /**
- * 知识树残留近义节点合并（批次 2）
+ * 知识树 · 幂/指数簇合并（批次 3）
  * ═══════════════════════════════════════════════════════════════
- * 背景（2026-10-07 取证，见交接文档 §9.6 遗留②）：上一轮去重只去了**同名**节点，
- * 还剩「不同名但同技能」的：
- *   · 合并同类项(50 题 / 12 掌握度行) ← 同类项合并(17 题 / 5 行)     重叠 2 题
- *   · 分数加减法(49 题 / 5 行) ← 分数的加减运算(4 题 / 3 行)         重叠 1 题
- *   · 小数与分数的互化(16 题 / 7 行) ← 分数与小数的互化(13 题 / 7 行) 重叠 0 题
+ * 背景：批次 2 曾以「取证看到挂的题是混的（幂的运算下面挂二次根式加减）」为由**不合并**这一簇。
+ *   ⚠️ 那个结论是**只看 3 条最新样本**得出的，站不住。当晚复查 48 条样本 + 掌握度分布后推翻：
  *
- * ⛔ 幂的运算 / 指数运算 / 指数法则 / 指数与根式的运算 **本轮不合并**：
- *    取证看到它们挂的题是混的（「幂的运算」下面挂二次根式加减、「指数运算」下面挂整式除法），
- *    问题是打标噪声而不是节点重复；合并只会造出一个更大的筐，把噪声藏得更深。
+ *   1) 内容上：`指数运算`(46 题) 全是同底数幂乘除/幂的乘除混合题、`指数法则`(14 题) 同理
+ *      —— 与「幂的运算」(44 题) 是**同一个技能**（沪教版七上第 9 章「幂的运算」）。
+ *      AI 打标的措辞不同（指数运算 / 指数幂的运算 / 指数法则 / 指数的运算性质…），
+ *      被匹配器分散挂到三个节点上。
+ *   2) 掌握度上（决定性）：13 个学生里 **10 个**在同一技能上被拆成 2~3 条掌握度行 ⇒
+ *      掌握度被稀释、薄弱点列表里同一技能重复出现。实例：毛辰绮
+ *      「幂的运算 59%(21 题) + 指数运算 56%(18 题) + 指数法则 67%(6 题)」
+ *      —— 同一技能 45 道题拆成三份，三条都进了薄弱列表。
+ *   3) 所谓「噪声」确实存在，但它是**题目 ai_tags 层面**的（个别根式题也带了「指数幂的运算」标签），
+ *      合并不制造噪声、也不消掉它；留着三个节点只会让噪声分散在三处。
+ *
+ * ⛔ 不并入的：`指数与根式的运算`（3 题，挂的是根式化简题）—— 那是**根式**不是幂，
+ *    并进来反而把根式题塞进「幂的运算」。它的边更像打标噪声，留待人工核对。
  *
  * ⛔ 默认 dry-run。`--apply` 前自动备份，失败整体回滚。
- * ⛔ 动到的表（比批次 1 多 3 张，批次 1 时代还没有 kp_relations / 考法表）：
- *    question_knowledge / knowledge_mastery / kp_relations（from+to）
- *    / teaching_question_type_kps / teaching_question_types / variant_questions
- *    / knowledge_points(parent_id + synonyms)
- * ⛔ 被合并节点的名字会写进保留节点的 synonyms，保证以后打标仍能命中。
- *
  * 用法：
- *   node server/scripts/applyKnowledgeMergeResidual.mjs           # 演练
- *   node server/scripts/applyKnowledgeMergeResidual.mjs --apply    # 落库
+ *   node server/scripts/applyKnowledgeMergePowerCluster.mjs           # 演练
+ *   node server/scripts/applyKnowledgeMergePowerCluster.mjs --apply    # 落库
  */
 import '../loadEnv.js'
 for (const k of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) delete process.env[k]
@@ -36,16 +37,14 @@ const { default: pg } = await import('pg')
 if (!process.env.NEON_DATABASE_URL) { console.error('数据库未配置：缺少 NEON_DATABASE_URL'); process.exit(1) }
 const pool = new pg.Pool({ connectionString: process.env.NEON_DATABASE_URL, ssl: { rejectUnauthorized: false } })
 
-/** 合并计划：drop 全部并入 keep（keep 选取口径 = 挂载题多的那个） */
+/** 合并计划：保留教材用名「幂的运算」，把两个同技能节点并进来 */
 const PLAN = [
-  { keep: '合并同类项', drops: ['同类项合并'] },
-  { keep: '分数加减法', drops: ['分数的加减运算'] },
-  { keep: '小数与分数的互化', drops: ['分数与小数的互化'] },
+  { keep: '幂的运算', drops: ['指数运算', '指数法则'] },
 ]
 
 const out = []
 const say = (...a) => { const s = a.join(' '); out.push(s); console.log(s) }
-const dump = () => fs.writeFileSync(path.join(ROOT, '_tmp_kp_merge_residual_report.txt'), out.join('\n'), 'utf8')
+const dump = () => fs.writeFileSync(path.join(ROOT, '_tmp_kp_merge_power_cluster_report.txt'), out.join('\n'), 'utf8')
 
 // ═══ 0. 解析节点 ═══
 const { rows: kps } = await pool.query(
@@ -126,7 +125,7 @@ if (!APPLY) {
 
 // ═══ 2. 备份 ═══
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
-const bakPath = path.join(ROOT, 'server', `_backup_kp_merge_residual_${stamp}.json`)
+const bakPath = path.join(ROOT, 'server', `_backup_kp_merge_power_cluster_${stamp}.json`)
 fs.writeFileSync(bakPath, JSON.stringify({
   at: new Date().toISOString(),
   plan: PLAN,
@@ -174,8 +173,8 @@ try {
     say(`  题目关联：去重删 ${qkDel.rowCount} ｜ 重指向 ${qkUp.rowCount}`)
 
     // 3.4 knowledge_mastery：同 (student,kp) 冲突时按数值合并（沿用批次 1 口径）
-    // ⛔ 2026-10-07 事故复盘：写本脚本时漏抄了这条 UPDATE，只删不并 ⇒ 13 行掌握度的
-    //    total/correct/wrong/mastery 直接丢了（当晚用备份修回，见 _repair_merge_mastery.mjs）。
+    // ⛔ 2026-10-07 事故复盘：本脚本首版漏抄这条 UPDATE（只删不并），15 行掌握度的
+    //    total/correct/wrong/mastery 丢了；当晚用备份修回（_repair_merge_mastery.mjs）。
     //    **先并数值，再删冲突行**，顺序不能反。
     const kmMerge = await client.query(`
       UPDATE knowledge_mastery k SET
