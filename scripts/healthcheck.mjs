@@ -114,11 +114,23 @@ if (health) {
 if (health) {
   try {
     const r = await fetch(`${API}/api/queue/stats`, { signal: AbortSignal.timeout(20000) })
-    const q = await r.json()
+    // ⛔ 2026-10-07 r220 实测抓到的漏判（与 r218「接口速度」、r198「磁盘」同一枚雷：
+    //   判据取不到字段 ⇒ **永远合格**，而这类告警一次都不会出现在 tmp/health.jsonl 里）。
+    //   真接口 `GET /api/queue/stats` 返回的是 **{ success, stats:{ waiting,active,failed,... } }**
+    //   （server/index.js:1711-1719），旧代码直接读根级 q.waiting ⇒ undefined || 0 ⇒ 恒 0。
+    //   实测取证：生产真值 stats.failed=50、stats.waiting=0，体检却印「历史上失败 0 个」；
+    //   等待数刚好是 0 才蒙对，**真积压时（>20）照样报「排队 0 个」然后判合格** ——
+    //   恰好漏在最该被叫醒的时刻。
+    const queueBody = await r.json()
+    const q = queueBody.stats || queueBody || {}
     const w = q.waiting || 0
     const a = q.active || 0
     const f = q.failed || 0
-    if (w > 20) record('任务队列', 'warn', `排队 ${w} 个（积压偏多，可能是 AI 额度紧张导致重试堆积）`)
+    // ⚠️ failed 只印不判：本机实测 historical failed=~50，一旦加判就天天黄灯，
+    //    会重演 r198「恒定黄灯淹掉真告警」。要看趋势看绝对值，靠人工看这行数字即可。
+    // ⚠️ 至于 available：Redis 掉线时 waiting/active 可能还是 0，那就等于没盯，必须单独叫醒。
+    if (q.available === false) record('任务队列', 'warn', '队列服务连不上（多半是 Redis 掉了）：作业堆在进程里进不了队列，这张表会一直显示 0，建议重启后端')
+    else if (w > 20) record('任务队列', 'warn', `排队 ${w} 个（积压偏多，可能是 AI 额度紧张导致重试堆积）`)
     else record('任务队列', 'ok', `排队 ${w} 个、进行中 ${a} 个、历史上失败 ${f} 个（失败数会定期清理，看趋势不看绝对值）`)
   } catch (e) {
     record('任务队列', 'warn', `查不了：${e.message}`)

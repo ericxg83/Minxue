@@ -46,7 +46,11 @@ function buildFakeApi({ healthDelayMs = 0, recheckDelayMs = 0 } = {}) {
     }
     if (req.url === '/api/students') return send({ students: [{ id: '1', name: '学生A' }] })
     if (req.url === '/api/tasks/summary') return send({ summary: { pendingTasks: [], failedTasks: 0 } })
-    if (req.url === '/api/queue/stats') return send({ waiting: 0, active: 0, failed: 0 })
+    // ⛔ r220：这里必须是真接口那种**嵌套**契约 `{ success, stats:{...} }`（server/index.js:1711-1719）。
+    //    本文件第一版（r218）写的是根级 `{ waiting, active, failed }` —— 照抄了体检脚本当时读错的样子，
+    //    ⇒ 假后端把错误契约**固化下来**，从此那把锁验的是一个不存在的接口，队列判据的洞一直没被发现。
+    //    ⛔ 以后改这里，先 curl 一次真接口再抄结构。
+    if (req.url === '/api/queue/stats') return send({ success: true, stats: { waiting: 0, active: 0, failed: 0 } })
     res.writeHead(404).end('{}')
   })
   return server
@@ -169,4 +173,24 @@ test('反向自检：修复前的旧脚本在「冷启动慢」场景下判 ok�
     /✅/,
     `旧脚本竟然也判提醒（${speed.line}）⇒ 反向自检失效，这条测守不住判据`
   )
+})
+
+// ── 5. 元判据自证：假后端的队列契约必须和**真接口**长得一样 ───────────────────────
+// 为什么值得单独锁一条：r220 实测发现 healthcheck 把 /api/queue/stats 的 `stats` 那一层漏了，
+// 而这里的假后端当初照抄了它的错误读法 ⇒ 假后端把错误契约固化，谁也测不出来。
+// 元判据自己也得能被验红：把 send({...}) 改回根级，这条就该挂。
+test('元判据自证：假后端的 /api/queue/stats 必须是 { success, stats } 嵌套（与真接口同构）', async () => {
+  const { server, port } = await startFakeApi()
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/queue/stats`)
+    const body = await res.json()
+    // ⛔ 断言点名具体字段，不用 `assert.ok(body)` 那种恒真写法（r215 教训：恒真断言 = 假绿）
+    assert.ok(body && body.stats && typeof body.stats === 'object',
+      `假后端队列契约漂了：顶层没有 stats，实际键=${JSON.stringify(Object.keys(body || {}))}`)
+    assert.equal(body.stats.waiting, 0)
+    assert.equal(body.stats.active, 0)
+    assert.equal(body.stats.failed, 0)
+  } finally {
+    server.close() // ⛔ 不关会让测试进程挂住（r218 实测）
+  }
 })
