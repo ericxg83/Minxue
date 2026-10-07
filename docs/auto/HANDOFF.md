@@ -903,3 +903,11 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - 提案㊿（B）：开工/收工协议换用 loopGuard acquire/release——工具已落地（10-02 双开工事故产物），
   协议文本却仍手写 JSON；换用即防并发从纪律变机制（status 只读已验证）。
 - 快闸 2029/0 fail、0e/110w。下轮 r228：待拍板八件套；今晚收工确认备份。
+
+## 第 228 轮（2026-10-07）· loopGuard 三场景实机验证全过 + 备份快照核验（无代码改动）
+
+- 本圈首次用 loopGuard acquire/release 走完整轮锁（提案㊿ 实机验证）：认领/忙拒/release 三场景全过，
+  锁格式与协议一致 ⇒ ㊿ 采纳零风险。
+- 备份快照 2026-10-07 JSON 级核验 ALL_MATCH=true（五表行数与 manifest 全符），恢复点可靠。
+- 快闸 2029/0 fail、0e/110w；生产 commit 仍停 5a6eb5a（㊼）。
+- 下轮 r229：待拍板八件套（㊿ 已验证）；今晚收工确认备份落盘。
