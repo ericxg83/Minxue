@@ -1117,3 +1117,49 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
   - **下一轮接 r241**：首选 ㉘（141 题 is_complete 口径拍板）、㊸（export-retry-pdf）、
     ㊴+㉚（180s 超时，一次改两条渲染路径）、r239-②、⑲/㊲/㊵（定每天自动体检 or 备份定时任务）；
     另需负责人处理 Render 面板部署（㉒/㊼）与 running/206 的 stale 锁。
+
+## 第 241 轮（2026-10-08 00:21–00:52，可开工轮）：体检补第 8 项「家长卡片中文字」—— 转发给家长的图出事，此前一次都没盯过
+
+- 开工锁 `finished / 240`；工作区只有他人 in-flight 的 `src/workbench/views/QuestionBankWorkbench.vue`，全程没碰、没带进 commit。
+- 交付 `9a7e34e`（6 文件 +228/−11）+ `50afeb1`（文案，1 文件）。零产品行为改动（只给 `/api/health` 加一个字段）。
+
+- 缺陷（A 级，与 r221「字段没真读到就明说」同款，在**家长可见产物**这一侧的第一枚）：
+  r134 修掉服务端容器没中文字形（家长拿到的分享卡整张中文全是方框）之后，**没有任何一处会再问一次「字体还在不在」**。
+  文件被误删 / 部署资产没带上 / 有人换成别的格式 ⇒ `renderFontFace.js` 只在渲染那一瞬间 `console.error` 一句，
+  之后永远输出方框，而体检七项（在线/速度/数据库/任务/队列/磁盘/代码版本）**没一项管「家长实际看到的东西」**。
+  实测取证：造「字体文件丢了」的假后端，旧版体检照旧只报 2 项黄灯、家长那张图是看不懂的，体检完全没说话。
+
+- 修法（一处根因三处消费）：
+  - 新增 `server/utils/cjkFontState.js` 作为**唯一实现**：`probeCjkFontAsset()` 读资产、验 woff2 头、缓存（`renderFontFace.js` 早就这么缓存 968KB）；`resolveCjkFontState(value)` 是纯判定，吃 `/api/health` 的值。
+  - `renderFontFace.js` 改用它的单一路径常量 ⇒ 同一个资产路径不再两边各算一遍（红线：同一事实的多个表达字段要一次对齐）。
+  - `/api/health` 回 `cjkFont`；`healthcheck.mjs` 第 8 项「家长卡片中文字」只有 `ok` 合格，字段没回明说「这一项等于没盯」。
+  - 锁 `test/cjkFontHealth.test.mjs` 9 条（含自证钩子：源码里确实是新写法、renderFontFace 不再自己拼目录）。
+
+- 反向自检（基线钉 `0c76689` 的旧脚本，不调 git）：假后端回 `cjkFont:'missing'`，**旧版 0 次出现这一项**（洞坐实）
+  ⇒ 新版点名「发给家长的卡片/重练卷上的中文会全变成方框…补回字体文件重启后端就行」，`结论` 从 2 项变 3 项。跑完删探针。
+
+- ⭐ 自己踩的三个坑（高复用）：
+  ① **自己新锁当场判红**：`ok` 那段文案里还写着「不会是方框」，而断言写的是「ok 不许提方框」—— 判据和文案互相打架。改文案，没改判据。
+  ② **既有锁被我的新项挤红**：`test/healthcheckLocalVersion.test.mjs` 的老问题（r235）—— 它把整个 `scripts/` 拷到临时目录造「没 .git 的脚本目录」，
+     而 `fs.cpSync(srcDir, 还不存在的 dest, {recursive:true})` **是把 src 的内容倒进 dest，不是 `dest/<src名>/`** ⇒
+     脚本实际落在临时目录根，`healthcheck` 新 import 的 `../server/utils/cjkFontState.js` 被解析到 `Temp/server/utils` ⇒ MODULE_NOT_FOUND ⇒ 那条锁假红。
+     修法是先 mkdir 出 `dir/scripts` 再拷，并按同样层级拷 `server/utils`。⛔ **以后「只拷 scripts/ 造探针」的锁，只要脚本开始 import `server/`，就必须一起拷。**
+  ③ **告警文案只写一个成因**：字段没回那句原本写「多半是接口结构变了」，而实测最常见的成因是「后端还没重启到新代码 ⇒ 本机/线上跑的旧代码」。
+     写死一个成因会把人往错的方向带（r198 教训）⇒ 改成两个成因都点到。写完复测生产，确认新灯如实亮、没多出别的假告警。
+
+- 四道闸：单测 **2115 / 2106 过 / 0 fail**（9 skipped；基线 2102 + 本轮 9 + 他人 4）｜lint 5 文件 0e/0w｜
+  `dist_nightly_20261008r241` **43.23s**（main chunk `main-CO0NAGlB.js`：与 r213–r240 的 `main-Dg_0tVgF.js` 同名期结束了，
+  中间进了他人前端提交，本轮仍零前端产品码改动）｜preview `5490` + cert_probe 零外联 + render_smoke **8/8**（0 控制台错误 / 0 个 4xx-5xx）
+  + route_sweep **0/16** + text_audit **0/14**，预览按端口杀清。
+
+- 健康两次采样：00:21 uptime **61 分钟**（886/340ms）→ 00:47 **7 分钟**（1991/885ms）—— **uptime 回退 = 期间重启过**
+  （`bootAt 10-08 00:27`，与本次推送前后重合：Render 推代码即重启，不是故障；单次观测不下因果结论）。
+  生产改后复测：唯一新增黄灯就是第 8 项本身（线上还是 `5f7d3ec`、没回这个字段）⇒ **灯亮是它应该在亮，部署到新代码后自动转绿**。
+
+- 提案 **r241-①**（A，很小）：`test/healthcheckLocalVersion.test.mjs` 的反向自检基线探针 `_r235_old_healthcheck.mjs` 早就不在，
+  那条 `t.skip` 已经空转好几轮 —— 要么重新导出一次基线，要么删掉这条空转的自检，别让它一直显示「跳过=已验过」。
+- 提案 **r241-②**（B，观察）：体检第 8 项只说明「这次盯上了」，但**字体资产到底会不会随部署带上**没人验过（Render 的构建/发布是否 include `server/assets/fonts/`）。
+
+- **下一轮接 r242**：首选 ㉘（141 题 is_complete 口径拍板，家长「批改题量」少 141 题）、㊸（export-retry-pdf 留/删/接线）、
+  ㊴+㉚（两条渲染路径超时，r229 实测阈值 **180s**）、r239-②、r241-①、⑲/㊲/㊵（定每天自动体检 or 备份定时任务）；
+  另需负责人处理 Render 面板部署（㉒/㊼）与 running/206 的 stale 锁。
