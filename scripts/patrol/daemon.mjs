@@ -14,7 +14,8 @@
  * 跑法：node scripts/patrol/daemon.mjs [间隔毫秒]
  * 停止：Ctrl+C；Windows 下 taskkill /F /PID <pid>（或 taskkill /F /T /PID <pid>）
  */
-import { spawn, spawnSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { spawnLocal } from '../../server/utils/localSpawn.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -76,9 +77,11 @@ async function runRound() {
         fs.appendFileSync(TIMELINE, report)
         log('  已追加自动报告到 docs/auto/patrol.md')
         // 自动提交（只 add patrol.md，不抢并行会话的文件）
-        const git = spawnSync('git', ['add', 'docs/auto/patrol.md'], { cwd: ROOT, encoding: 'utf8' })
+        // ⛔ 走共享入口：默认 stdio 在本机必 EBUSY ⇒ git.status 恒为 null，自动提交会**静默不执行**
+        //    （日志还会说成「跳过（无新内容或冲突）」，把环境故障伪装成正常跳过）
+        const git = spawnLocal('git', ['add', 'docs/auto/patrol.md'], { cwd: ROOT })
         if (git.status === 0) {
-          const cm = spawnSync('git', ['commit', '-m', `docs(patrol): R${state.round} 自动报告（daemon 自足轮次）`], { cwd: ROOT, encoding: 'utf8' })
+          const cm = spawnLocal('git', ['commit', '-m', `docs(patrol): R${state.round} 自动报告（daemon 自足轮次）`], { cwd: ROOT })
           if (cm.status === 0) log(`  已提交 R${state.round} 报告`)
           else log('  ⚠ 自动提交跳过（无新内容或冲突：' + (cm.stderr || '').trim().slice(0, 120) + '）')
         }

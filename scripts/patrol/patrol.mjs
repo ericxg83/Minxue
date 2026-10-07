@@ -18,7 +18,7 @@
  * 跑法：node scripts/patrol/patrol.mjs [--build]
  *   --build：本轮强制跑 vite build（默认只在 src/** 有改动或显式要求时跑）
  */
-import { spawnSync } from 'node:child_process'
+import { spawnLocal } from '../../server/utils/localSpawn.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,8 +31,10 @@ const STATE = path.join(ROOT, '_patrol_state.json')
 const TIMELINE = path.join(ROOT, 'docs', 'auto', 'patrol.md')
 const FORCE_BUILD = process.argv.includes('--build')
 
-const run = (cmd, args, opts = {}) => spawnSync(cmd, args, {
-  cwd: ROOT, encoding: 'utf8', timeout: opts.timeout ?? 300000,
+// ⛔ 走共享入口：本机 spawnSync 默认 stdio（stdin 是管道）必 EBUSY ⇒ 非 silent 分支的巡检引擎
+//    会「起不来但 status=null」，看着像跑完没输出。原因与对照实验见 server/utils/localSpawn.js
+const run = (cmd, args, opts = {}) => spawnLocal(cmd, args, {
+  cwd: ROOT, timeout: opts.timeout ?? 300000,
   env: { ...process.env, ...(opts.env || {}) },
   ...(opts.silent ? { stdio: ['ignore', 'pipe', 'pipe'] } : {}),
 })

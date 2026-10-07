@@ -14,7 +14,8 @@
  * 日志：server/scripts/logs/keep_backend.log（追加，带时间戳）
  * 停止：任务管理器找 node（keep_backend）结束，或 `taskkill /F /IM node.exe`（慎，会连后端一起杀）。
  */
-import { spawn, execFileSync } from 'node:child_process'
+import { spawn } from 'node:child_process'
+import { spawnLocal } from '../../server/utils/localSpawn.js'
 import { appendFile, mkdir } from 'node:fs/promises'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,18 +42,20 @@ async function healthy() {
   } catch { return false }
 }
 
-/** 返回占用 4000 端口的 PID 列表（netstat 解析；无监听返回空数组） */
+/** 返回占用 4000 端口的 PID 列表；⛔ 探测失败返回 null（「不知道」≠「没有」，混起来会拉出双份后端） */
 function listeners() {
-  try {
-    const out = execFileSync('netstat', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true })
-    const pids = new Set()
-    for (const line of out.split('\n')) {
-      if (!line.includes(':4000') || !/LISTENING/i.test(line)) continue
-      const pid = line.trim().split(/\s+/).pop()
-      if (/^\d+$/.test(pid)) pids.add(pid)
-    }
-    return [...pids]
-  } catch { return [] }
+  // ⛔ 必须走共享入口：execFileSync 的默认 stdio 在本机必 EBUSY ⇒ 这里恒抛错 → 恒返回空
+  //    ⇒ taskkill 那段僵尸清理成了死代码，而 tick 会以为「端口空着」再拉一个后端抢端口。
+  //    原因与对照实验见 server/utils/localSpawn.js
+  const r = spawnLocal('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true })
+  if (r.status !== 0) return null
+  const pids = new Set()
+  for (const line of String(r.stdout || '').split('\n')) {
+    if (!line.includes(':4000') || !/LISTENING/i.test(line)) continue
+    const pid = line.trim().split(/\s+/).pop()
+    if (/^\d+$/.test(pid)) pids.add(pid)
+  }
+  return [...pids]
 }
 
 let ticking = false
@@ -62,10 +65,13 @@ async function tick() {
   try {
     if (await healthy()) return
     const pids = listeners()
+    // ⛔ null = netstat 起不来：**既不能清理也不能拉起** —— 分不清「端口空着」还是「有僵尸占着」，
+    //    这时候拉起只会多一个抢端口的后端（这正是修之前的行为）
+    if (pids === null) { await log('netstat 探测失败 → 本轮不清理也不拉起（避免与在跑的后端抢端口）'); return }
     if (pids.length) {
       await log(`健康失败且端口被占（PID ${pids.join(',')}）→ taskkill 后下轮拉起`)
       for (const pid of pids) {
-        try { execFileSync('taskkill', ['/F', '/PID', pid], { windowsHide: true }) } catch { /* 已死 */ }
+        spawnLocal('taskkill', ['/F', '/PID', pid], { windowsHide: true, stdio: 'ignore' })
       }
       return
     }

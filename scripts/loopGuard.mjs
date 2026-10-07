@@ -17,7 +17,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { execSync } from 'node:child_process'
+import { spawnLocal } from '../server/utils/localSpawn.js'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const LOCK = path.join(ROOT, '_loop_state.json')
@@ -35,9 +35,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function remoteAhead() {
   try {
-    execSync('git fetch origin --quiet', { cwd: ROOT, stdio: 'ignore' })
-    const out = execSync('git rev-list --count HEAD..origin/main', { cwd: ROOT, encoding: 'utf8' })
-    return Number(out.trim()) || 0
+    // ⛔ 走共享入口：execSync 默认 stdio 在本机必 EBUSY（抛错被下面的 catch 吞掉）
+    //    ⇒ 这里会**恒返回 -1**，看着像「没网络」，实际是环境故障被伪装成了正常结论。
+    spawnLocal('git', ['fetch', 'origin', '--quiet'], { cwd: ROOT, stdio: 'ignore' })
+    const r = spawnLocal('git', ['rev-list', '--count', 'HEAD..origin/main'], { cwd: ROOT })
+    if (r.status !== 0) return -1 // 起不来/无远端：都按「查不到」报，别假装是 0
+    return Number(String(r.stdout).trim()) || 0
   } catch {
     return -1 // 无网络/无远端时不阻断开工，只报告
   }

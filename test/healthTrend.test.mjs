@@ -12,18 +12,18 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { runNodeScript } from '../server/utils/localSpawn.js'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const SCRIPT = resolve(ROOT, 'scripts/healthTrend.mjs')
 const SRC = (await import('node:fs')).readFileSync(SCRIPT, 'utf8')
 
-/** 真跑脚本（只读文件，不联网），返回 stdout。 */
+/** 真跑脚本（只读文件，不联网），返回 stdout。⛔ 起子进程必须走 nodeRunKit（本机 spawnSync + stdin 管道必 EBUSY） */
 function run(args) {
-  const r = spawnSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8' })
+  const r = runNodeScript([SCRIPT, ...args])
   assert.equal(r.status, 0, `healthTrend 退出码应为 0（纯查看），实际 ${r.status}：${r.stderr}`)
   return r.stdout
 }
@@ -248,9 +248,8 @@ test('healthcheck 真跑一遍写出的那一行，必须带 kind:"backend"', ()
   const dir = mkdtempSync(join(tmpdir(), 'healthtrend-writer-'))
   const log = join(dir, 'health.jsonl')
   try {
-    const r = spawnSync(process.execPath,
-      [resolve(ROOT, 'scripts/healthcheck.mjs'), '--api', 'http://127.0.0.1:5999', '--log', log],
-      { encoding: 'utf8' })
+    const r = runNodeScript(
+      [resolve(ROOT, 'scripts/healthcheck.mjs'), '--api', 'http://127.0.0.1:5999', '--log', log])
     assert.equal(r.status, 1, `打不通的接口应退出 1（这里故意打死端口），实际 ${r.status}：${r.stderr}`)
     const lines = readFileSync(log, 'utf8').split('\n').filter((l) => l.trim())
     assert.ok(lines.length >= 1, '打不通也要照样写采样行（否则采样会整段消失）')

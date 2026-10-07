@@ -17,11 +17,11 @@
  * 源码 grep 抓不住。纯文件系统扫描、无浏览器，约 0.3s，可安全进常驻套件。
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { runNodeScript } from '../server/utils/localSpawn.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SCRIPT = join(ROOT, 'scripts/auditStoreContract.mjs')
@@ -47,9 +47,9 @@ function writeFixture(viewSrc) {
   writeFileSync(join(base, 'views', 'Demo.vue'), viewSrc, 'utf8')
 }
 
-/** 真跑审计脚本（cwd 指向夹具树），返回退出码与输出 */
+/** 真跑审计脚本（cwd 指向夹具树），返回退出码与输出。⛔ 起子进程必须走 nodeRunKit（本机 spawnSync + stdin 管道必 EBUSY） */
 function runAudit() {
-  const r = spawnSync(process.execPath, [SCRIPT], { cwd: FIXTURE, encoding: 'utf8' })
+  const r = runNodeScript([SCRIPT], { cwd: FIXTURE })
   return { code: r.status, out: `${r.stdout || ''}${r.stderr || ''}` }
 }
 

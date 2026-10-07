@@ -22,7 +22,7 @@
  *   node scripts/pruneDeadDeclarations.mjs --apply --only src/
  *   node scripts/pruneDeadDeclarations.mjs --apply --limit=8
  */
-import { execFileSync } from 'node:child_process'
+import { spawnLocal, spawnFailed } from '../server/utils/localSpawn.js'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -54,11 +54,18 @@ fs.mkdirSync(path.dirname(JSON_PATH), { recursive: true })
 try {
   // 不用 `npx`：Windows 下 spawn 不解析 .cmd，会静默不产出报告文件
   fs.rmSync(JSON_PATH, { force: true })
-  execFileSync(process.execPath,
+  // ⛔ 原来写的是 execFileSync(..., { stdio: 'pipe' })：本机 spawnSync + stdin 管道必 EBUSY
+  //    ⇒ 这里恒抛错、报告文件永远不产出 ⇒ 脚本恒「未产出报告」退出 1。原因见 server/utils/localSpawn.js
+  const lint = spawnLocal(process.execPath,
     [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'],
-    { cwd: ROOT, stdio: 'pipe' })
+    { cwd: ROOT })
+  if (spawnFailed(lint)) {
+    console.error(`❌ eslint 起不来（${lint.error ? lint.error.code : 'status=null'}），中止，不改任何文件`)
+    process.exit(1)
+  }
 } catch {
-  // eslint 退出码非 0 只代表有 error（本仓库存量 14 条），报告文件已写出，继续往下读
+  // 走到这里只可能是 rmSync 清理旧报告失败；eslint 退非 0 不再抛错（存量十几条 error 是正常的），
+  // 报告文件照样写出，继续往下读即可
 }
 if (!fs.existsSync(JSON_PATH)) {
   console.error('❌ eslint 未产出报告（tmp/prune-lint.json 缺失），中止，不改任何文件')
