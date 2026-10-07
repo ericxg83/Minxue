@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R66 — 2026/10/8 01:07:27（✅ 全绿）**
+> ⏱ **最近心跳：R67 — 2026/10/8 01:17:51（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -499,6 +500,14 @@
 | 66 | 2026-10-07T17:07:27 | tests=2109/0 | lint=0 | build=skipped | server=ok | dirty=1 |
 
 ### R66 — 2026/10/8 01:07:27（daemon 自动报告）
+
+**体检**：tests **2109/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 1
+
+⚠️ 发现异常：脏文件 1 个（ M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M scripts/patrol/daemon.mjs
+| 67 | 2026-10-07T17:17:51 | tests=2109/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+
+### R67 — 2026/10/8 01:17:51（daemon 自动报告）
 
 **体检**：tests **2109/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 1
 
