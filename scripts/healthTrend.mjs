@@ -249,7 +249,7 @@ if (JSON_ONLY) {
     : '时间段读不出来'
   const head = `体检趋势（共 ${samples.length} 条采样${badLines ? `，另 ${badLines} 行读不出来` : ''}` +
     `；后端体检 ${backendSamples.length} 条${frontendSamples.length ? `、前端体检 ${frontendSamples.length} 条` : ''}` +
-    `；只看最近 ${window_.length} 条）`
+    `；${spanText}，只看最近 ${window_.length} 条）`
   console.log(head)
   console.log('─'.repeat(52))
 
