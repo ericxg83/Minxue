@@ -911,3 +911,32 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - 备份快照 2026-10-07 JSON 级核验 ALL_MATCH=true（五表行数与 manifest 全符），恢复点可靠。
 - 快闸 2029/0 fail、0e/110w；生产 commit 仍停 5a6eb5a（㊼）。
 - 下轮 r229：待拍板八件套（㊿ 已验证）；今晚收工确认备份落盘。
+
+## 第 229 轮（2026-10-07 11:29–11:42）· 只读转可开工：体检新增「代码版本」项（f269fbc 已推送）
+
+- 开工经过：11:29 读锁 = `running / r227` ⇒ 转**只读审计**，只做只读取证（不改码、不提交、不写锁）；
+  11:34 对侧释放 `finished / 228`、树干净 ⇒ `loopGuard.mjs acquire` 接手 r229。
+  只读段只取了一次健康样 + 一次 `/api/health` + 若干只读 grep，**没动任何文件**。
+- **主缺陷（A 级，可观测性）**：`/api/health` 一直回 `commit` / `bootAt`（curl 实测生产
+  `commit=5a6eb5a`、`bootAt 2026-10-06T23:29` 本地），体检**从不印** ⇒ 「刚推的新代码上没上线」
+  只能人肉 curl。r220~r228 **八轮**都是这样靠人工发现才会写进报告。
+- 交付 `f269fbc`：`scripts/healthcheck.mjs` 加第 7 项「代码版本」（+59 行）+ 新锁
+  `test/healthcheckCommit.test.mjs`（+195 行）。判黄并同时点名两边版本号 + 说清去哪手动部署；
+  `commit` 没回沿用 r221 的「这一项等于没盯」措辞；non-sha 占位（本机 `commit="local"`）只照实印不判黄。
+- ⭐ 自踩坑：第一版照抄判黄 ⇒ 本机天天黄灯（r198 同病）⇒ 收紧为「非 hex 不比」。
+  **写告警先自问「会不会天天亮」。**
+- ⭐ 反向自检：基线钉死 `9809c30` 旧脚本，同场景**压根没有这一项**、也无「没上线」字样；
+  新锁 6 条全绿；探针按 r215/r222 纪律 `t.skip` + 文案内附导出命令，跑完已删。
+- ⭐ 只读段清白盘点（⛔ 下轮别再翻）：五个 `scripts/gate/*.mjs` 全有调用方（gateBase + gateExitCode 罩住、
+  退出码齐全）；7 处进程内 `setInterval` sweep 全有 try/catch 兜底。
+- ⭐ 既有提案修正：㊴/㉚ 建议的「渲染超时 60s」与仓库既有口径不符 ——
+  `server/config/ai.js:1788/1813` 的 `BACKUP_VISION_TIMEOUT_MS` / `VISION_TIMEOUT_MS`
+  默认都是 **180000**，实测出图 36~37s ⇒ **建议阈值改 180s**，别两处各定一套。
+- 四道闸：单测 **2035/2035 fail 0**（2032 pass + 3 skipped）｜lint 2 文件 0e/0w｜
+  `dist_nightly_20261007r229` **38.85s**（`main-Dg_0tVgF.js` 与 r213–r221 同名 = 零前端产品码改动）｜
+  preview `5445` + cert_probe 零外联 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**，预览已杀清。
+- 健康：11:30 采样 uptime **721 分钟**、首响 1370ms / 复查 398ms；r221 的 658min → 单调上升，无重启。
+- 生产：commit 仍 `5a6eb5a`（落后 31 个提交、12h 零重启）⇒ ㊼ 未闭环，但**现在体检会直接判黄点名**。
+- 提案 ㊶ / ㊷ 见 backlog 第 229 轮节。
+- **下次触发接 r230**：首选 ㊶（先去 Render 面板确认自动部署，再看这条黄灯是不是真信号）、
+  ㊴+㉚（阈值改 180s，一次改两条渲染路径）、㉘（141 题口径拍板）、㊸（export-retry-pdf）、⑲（备份定时任务）。
