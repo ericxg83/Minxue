@@ -18,7 +18,8 @@
  *   4) 追加一行 JSON 到 --log（默认 tmp/health.jsonl）。
  *
  * 退出码（给 CI / 巡检循环用）：
- *   0 = 健康        1 = 持续性缺陷（该修）    2 = 编辑中间态（刷新即可）    3 = 探针自身失败
+ *   0 = 健康        1 = 持续性缺陷（该修）    2 = 编辑中间态（刷新即可）
+ *   3 = 探针自身失败  4 = 白屏这一项等于没盯（没启动浏览器）⛔ 不等于健康
  *
  * 用法：
  *   node scripts/frontendHealth.mjs
@@ -167,6 +168,37 @@ async function domSmoke() {
   }
 }
 
+/**
+ * 白屏这一层到底查没查？（2026-10-07 r237）
+ *
+ * ⛔ 旧判据写的是 `result.bad.length === 0 && !dom.blank`：
+ * dom 只有在**真启动了浏览器**时才带 `blank`；跑 `--no-dom` 时它是 `{skipped:true}`
+ * ⇒ `dom.blank === undefined` ⇒ `!undefined === true` ⇒ **真白屏也判「首页正常」并 exit 0**，
+ * 结论还替没查的那半边背书写「DOM 有内容」。
+ * 这与 healthcheck.mjs 的 missingFieldDetail 是同一枚雷（r221/r233）：**没查 ≠ 正常**。
+ *
+ * @param {Array<{verdict:string}>} bad 非 200 的模块
+ * @param {{skipped?:boolean,error?:string,blank?:boolean}} dom 白屏层结果；该层没跑就没有 blank
+ */
+export function decideFrontendVerdict(bad, dom) {
+  const domChecked = !dom.skipped && !dom.error && typeof dom.blank === 'boolean';
+  if (!domChecked) {
+    return {
+      status: 'dom-not-checked',
+      exitCode: 4,
+      headline: '白屏这一项等于没盯：没启动浏览器（用了 --no-dom，或浏览器启动失败），这一轮没验证过首页，不算健康。',
+    };
+  }
+  const verdicts = new Set(bad.map((b) => b.verdict));
+  if (bad.length === 0 && !dom.blank) {
+    return { status: 'healthy', exitCode: 0, headline: '首页正常：模块链全 200，DOM 有内容。' };
+  }
+  if (verdicts.has('persistent') || dom.blank) {
+    return { status: 'persistent', exitCode: 1, headline: '持续性缺陷：刷新无用，需要修代码。' };
+  }
+  return { status: 'transient-edit', exitCode: 2, headline: '编辑中间态：刷新页面即可，等这次改动写完。' };
+}
+
 async function main() {
   const started = Date.now();
   const now = started;
@@ -188,15 +220,7 @@ async function main() {
 
   const dom = USE_DOM ? await domSmoke().catch((e) => ({ error: String(e).slice(0, 200) })) : { skipped: true };
 
-  const verdicts = new Set(result.bad.map((b) => b.verdict));
-  let status, exitCode, headline;
-  if (result.bad.length === 0 && !dom.blank) {
-    status = 'healthy'; exitCode = 0; headline = '首页正常：模块链全 200，DOM 有内容。';
-  } else if (verdicts.has('persistent') || dom.blank) {
-    status = 'persistent'; exitCode = 1; headline = '持续性缺陷：刷新无用，需要修代码。';
-  } else {
-    status = 'transient-edit'; exitCode = 2; headline = '编辑中间态：刷新页面即可，等这次改动写完。';
-  }
+  const { status, exitCode, headline } = decideFrontendVerdict(result.bad, dom);
 
   const record = {
     t: new Date(now).toISOString(),
