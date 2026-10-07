@@ -23,6 +23,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { collectLintReport, lintReportReasonText } from './lintReportKit.mjs'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '../..')
 const STATE = path.join(ROOT, '_patrol_state.json')
@@ -110,16 +112,25 @@ if ((FORCE_BUILD || srcChanged) && buildOk === 'ok') {
 
 /* ── E. lint + 死声明 ── */
 section('E. lint + 死声明')
-run('node', [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'], { timeout: 180000, silent: true })
-let errCount = 0, unusedVars = 0
-try {
-  const report = JSON.parse(fs.readFileSync(path.join(ROOT, 'tmp', 'prune-lint.json'), 'utf8'))
-  for (const f of report) for (const m of f.messages || []) {
-    if (m.severity === 2) errCount++
-    if (m.ruleId === 'no-unused-vars') unusedVars++
-  }
-} catch { errCount = -1 }
-console.log(`  eslint errors=${errCount >= 0 ? errCount : '无法读取报告 (eslint 需先跑通)'}  no-unused-vars=${unusedVars}`)
+// ⛔ r236（落地提案㊽）：旧写法把 eslint 的退出码/超时整个丢掉，唯一兜底是「parse 失败 ⇒ -1」，
+//    而 tmp/prune-lint.json **跨 tick 持久**（实测 mtime 随每次成功 tick 覆盖）⇒
+//    一旦本 tick eslint 没写出报告（180s 超时被 kill / 配置错 exit 2 / 二进制缺失），
+//    上一 tick 的陈旧报告还在原地 ⇒ 本 tick 照读 ⇒ 报 lint=0 判「全绿」（r198/r218/r220/r221 同族）。
+//    修法两道闸：① 跑前先删旧报告；② 只认 mtime ≥ 本轮 started 的那份（见 lintReportKit.mjs）。
+const LINT_REPORT = path.join(ROOT, 'tmp', 'prune-lint.json')
+fs.rmSync(LINT_REPORT, { force: true }) // ① 跑前删：旧报告不许冒充本轮结果（fail-closed 主闸）
+const lintRun = run('node', [path.join(ROOT, 'node_modules', 'eslint', 'bin', 'eslint.js'), '.', '-f', 'json', '-o', 'tmp/prune-lint.json'], { timeout: 180000, silent: true })
+const lint = collectLintReport(LINT_REPORT, Date.parse(started)) // ② 只认本轮写出的报告
+const errCount = lint.errCount
+const unusedVars = lint.unusedVars
+if (lint.reason !== 'ok') {
+  const cause = lintRun.error
+    ? `，eslint 自身：${lintRun.error.code || lintRun.error.message}`
+    : `（eslint exit=${lintRun.status}）`
+  console.log(`  eslint errors=无法读取报告（${lintReportReasonText(lint.reason)}${cause}）—— 别拿旧报告充数  no-unused-vars=${unusedVars}`)
+} else {
+  console.log(`  eslint errors=${errCount}  no-unused-vars=${unusedVars}`)
+}
 
 /* ── 汇总写入 ── */
 const entry = {
