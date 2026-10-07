@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { decideFrontendVerdict } from '../scripts/frontendHealth.mjs';
 
 const OLD_SNIPPET = process.env.R237_OLD_SNIPPET || '';
