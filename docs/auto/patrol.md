@@ -387,3 +387,13 @@
 ⚠️ 发现异常：脏文件 2 个（ M docs/auto/HANDOFF.md,  M docs/auto/backlog.md…）（需 agent 深修时下轮处理）
     -  M docs/auto/HANDOFF.md
     -  M docs/auto/backlog.md
+| 54 | 2026-10-07T07:01:31 | tests=2032/0 | lint=0 | build=skipped | server=ok | dirty=3 |
+
+### R54 — 2026/10/7 15:01:31（daemon 自动报告）
+
+**体检**：tests **2032/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
+
+⚠️ 发现异常：脏文件 3 个（ M docs/auto/HANDOFF.md,  M docs/auto/backlog.md, ?? server/scripts/applyKnowledgeMerge.mjs…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M docs/auto/backlog.md
+    - ?? server/scripts/applyKnowledgeMerge.mjs
