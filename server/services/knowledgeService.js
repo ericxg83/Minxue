@@ -19,6 +19,14 @@ const _kpCache = new Map()
 
 /**
  * 加载某学科的全部知识点节点（含 synonyms），带进程内缓存。
+ *
+ * ⛔ 2026-10-07 起排除 archived=true 的节点：
+ *   知识树里混着 8 个高中/超范围节点（数列、数学归纳法、二项式定理、极限概念…），
+ *   它们会被初中题目误挂上（如"找规律"题被标成"数列"）。archived 是唯一过滤开关，
+ *   由 `server/scripts/applyKnowledgeStage.mjs` 维护。
+ *   ⚠️ 排除只影响「打标匹配」与「前端树」；question_knowledge 里指向它们的存量边
+ *     需要跑 recomputeQuestionKnowledge.mjs 重算才会消失。
+ *
  * @param {string} subject
  * @returns {Promise<Array<{id, parent_id, name, subject, level, sort_order, synonyms}>>}
  */
@@ -28,7 +36,7 @@ export async function loadKnowledgePoints(subject = '数学') {
   const { rows } = await query(
     `SELECT id, parent_id, name, subject, level, sort_order, synonyms
      FROM ${TABLES.KNOWLEDGE_POINTS}
-     WHERE subject = $1
+     WHERE subject = $1 AND archived = false
      ORDER BY level ASC, sort_order ASC, name ASC`,
     [key]
   )
@@ -44,8 +52,16 @@ export function clearKnowledgeCache() {
   _kpCache.clear()
 }
 
+// ── 标签归一化 ──
+// ⛔ 2026-10-07 打标粒度根治（第一刀）：
+//   原来只去空格。实测 AI 标签与树节点名**大量只差一个「的」**——
+//   "平行线性质" vs "平行线的性质"、"相似三角形性质" vs "相似三角形的性质"。
+//   不去虚词 ⇒ 精确匹配失败 ⇒ 只能靠子串兜底（60+长度）⇒ 落到更粗的节点上。
+//   ⚠️ 只去结构助词「的/之」，**不要再去尾缀**（运算/性质/…）：
+//      实测再去尾缀会把「二次根式的运算」抢到更长的「二次根式的性质」上（赢错了）。
 const normalizeText = (s) => String(s || '')
   .replace(/[\s　]+/g, '')
+  .replace(/[的之]/g, '')
   .toLowerCase()
 
 // ── 标签 → 知识树节点匹配 ──
@@ -56,9 +72,40 @@ const normalizeText = (s) => String(s || '')
 // 相同 name 的父/子节点同时命中时都保留，role 由 score 排序后决定。
 const SCORE_NAME_EXACT = 100
 const SCORE_SYNONYM_EXACT = 95
+// 宽松归一化精确命中（去「的/之」+ 去尾缀后完全相同）。
+// ⛔ 必须严格小于 95：否则「精确命中」会被宽松命中抢走（如 tag="分式" 抢到"分式化简"）。
+//    + 节点名长度做微调，让更具体的节点在同分时胜出（"实数的运算" > "实数"）。
+const SCORE_LOOSE_EXACT = 84
+
+/**
+ * 算单个「标签 → 节点」的匹配置信度。0 表示不命中。
+ * 抽成纯函数是为了让 matchKnowledgePoints 能分两遍跑（先算每个标签的最高分，再筛节点）。
+ */
+const scoreTagAgainstNode = (tag, name, synonyms) => {
+  if (name && name === tag) return SCORE_NAME_EXACT
+  if (synonyms.includes(tag)) return SCORE_SYNONYM_EXACT
+  let best = 0
+  // 单向子串匹配：仅当「标签包含节点名/同义词」时命中（如 tag="相似三角形" → 节点"三角形"）。
+  // 不反向匹配（tag="函数" 不会因此命中"一次函数"），防止通用标签污染全部子节点掌握度。
+  for (const n of [name, ...synonyms]) {
+    if (!n) continue
+    if (n.length >= 2 && tag.includes(n)) best = Math.max(best, 60 + n.length)
+  }
+  return best
+}
 
 /**
  * 把一组扁平标签匹配到知识树节点。
+ *
+ * ⛔ 2026-10-07 打标粒度根治（第二刀，也是真正的主因）：
+ *   旧实现把**所有** score>0 的节点都返回。于是标签「平方差公式」同时命中
+ *   「平方差公式」(精确 100) 和「平方」(子串 62)，两个都被挂上 ——
+ *   泛化节点（平方 454、实数 475、函数 431）的边数就是这么被灌出来的，
+ *   实测占全部关联边的 28%。
+ *   现在改为：**每个标签只保留得分最高的节点**（同分并列都留，如
+ *   「相似三角形的判定与性质」同时精确命中判定和性质）。
+ *   父节点不再因为「子节点名里含它」而被顺带挂上。
+ *
  * @param {string[]} tags 扁平标签（如 ['相似三角形', '勾股定理']）
  * @param {string} subject 学科（决定用哪棵知识树）
  * @returns {Promise<Array<{id, parent_id, name, level, subject, score}>>} 按 score 降序
@@ -70,34 +117,31 @@ export async function matchKnowledgePoints(tags, subject = '数学') {
   const tagList = tags.map(t => normalizeText(t)).filter(Boolean)
   if (tagList.length === 0) return []
 
+  // 第一遍：每个标签的最高分（用于第二遍筛「只保留最高分节点」）
+  const bestPerTag = new Map()
+  for (const kp of list) {
+    const name = normalizeText(kp.name)
+    const synonyms = (kp.synonyms || []).map(normalizeText).filter(Boolean)
+    for (const t of tagList) {
+      const s = scoreTagAgainstNode(t, name, synonyms)
+      if (s > 0 && s > (bestPerTag.get(t) || 0)) bestPerTag.set(t, s)
+    }
+  }
+
+  // 第二遍：只收「在某个标签上拿到最高分」的节点
   const matched = []
   for (const kp of list) {
     const name = normalizeText(kp.name)
     const synonyms = (kp.synonyms || []).map(normalizeText).filter(Boolean)
-    let bestScore = 0
-
+    let nodeBest = 0
+    let isTopForSomeTag = false
     for (const t of tagList) {
-      if (name && name === t) {
-        bestScore = Math.max(bestScore, SCORE_NAME_EXACT)
-        continue
-      }
-      if (synonyms.includes(t)) {
-        bestScore = Math.max(bestScore, SCORE_SYNONYM_EXACT)
-        continue
-      }
-      // 单向子串匹配：仅当「标签包含节点名/同义词」时命中（如 tag="相似三角形" → 节点"三角形"）。
-      // 不反向匹配（tag="函数" 不会因此命中"一次函数"），防止通用标签污染全部子节点掌握度。
-      for (const n of [name, ...synonyms]) {
-        if (!n) continue
-        if (n.length >= 2 && t.includes(n)) {
-          bestScore = Math.max(bestScore, 60 + n.length)
-        }
-      }
+      const s = scoreTagAgainstNode(t, name, synonyms)
+      if (s <= 0) continue
+      nodeBest = Math.max(nodeBest, s)
+      if (s === bestPerTag.get(t)) isTopForSomeTag = true
     }
-
-    if (bestScore > 0) {
-      matched.push({ ...kp, score: bestScore })
-    }
+    if (isTopForSomeTag) matched.push({ ...kp, score: nodeBest })
   }
 
   // 优先级：更具体（level 更高）的节点优先 → 其次匹配置信度 → 其次 sort_order。

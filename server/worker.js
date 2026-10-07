@@ -1713,11 +1713,20 @@ export function parseTaggingResponse(text) {
 /**
  * 单条 AI 打标。**任何异常都吞掉并返回 null**，绝不抛出 ——
  * 调用方必须在此基础上回落 classifyQuestionLocally（铁律 11：核心写入不静默失败）。
+ *
+ * ⛔ 2026-10-07：新增 candidates（可选考点清单）。
+ *   传了清单就走「闭集选择」——模型只能从清单里逐字挑，清单外的自造词一律丢弃。
+ *   这是打标粒度根治的关键：旧版自由发挥产出的「平方」「实数」对不上树，
+ *   只能靠子串兜底匹配，落到最粗的节点上。
+ * @param {string} fullContent
+ * @param {string|null} subject
+ * @param {Array<{name,parent}>|null} candidates
  * @returns {Promise<{tags: string[], difficulty: number}|null>}
  */
-async function tagOneByAi(fullContent, subject) {
-  const { buildTaggingPrompt, callTextCompletion } = await import('./config/ai.js')
-  const systemContent = buildTaggingPrompt(subject)
+async function tagOneByAi(fullContent, subject, candidates = null) {
+  const { buildTaggingPrompt, callTextCompletion, filterTagsToCandidates } = await import('./config/ai.js')
+  const useList = Array.isArray(candidates) && candidates.length > 0
+  const systemContent = buildTaggingPrompt(subject, useList ? candidates : null)
   for (const vendor of AI_TAGGING_VENDOR_CHAIN) {
     try {
       const res = await callTextCompletion({
@@ -1730,12 +1739,35 @@ async function tagOneByAi(fullContent, subject) {
       })
       if (!res || !res.content) continue
       const parsed = parseTaggingResponse(res.content)
-      if (parsed) return parsed
+      if (!parsed) continue
+      // 闭集模式：清单外的自造词丢弃；丢空了返回 null → 回落本地规则
+      const final = useList ? filterTagsToCandidates(parsed, candidates) : parsed
+      if (final) return final
     } catch (e) {
       console.warn(`   ⚠️ [打标] ${vendor} 失败: ${String(e.message || e).slice(0, 80)}`)
     }
   }
   return null
+}
+
+// 可选考点清单缓存（subject → [{name, parent}]）。进程内复用，避免每道题都查库。
+const _tagCandidateCache = new Map()
+/**
+ * 取某学科的「可选考点清单」= 知识树里**非领域根**的节点。
+ * ⛔ 必须排除 level 0 的领域根（数与式/几何基础/函数…）：它们不是考点，
+ *   放进清单模型就会选它们，等于没标。实测不排除时模型会输出「数与式」「几何基础」。
+ */
+async function loadTaggingCandidates(subject) {
+  const key = subject || '数学'
+  if (_tagCandidateCache.has(key)) return _tagCandidateCache.get(key)
+  const { loadKnowledgePoints } = await import('./services/knowledgeService.js')
+  const list = await loadKnowledgePoints(key)
+  const byId = new Map(list.map(k => [k.id, k]))
+  const cands = list
+    .filter(k => k.level > 0)
+    .map(k => ({ name: k.name, parent: byId.get(k.parent_id)?.name || null }))
+  _tagCandidateCache.set(key, cands)
+  return cands
 }
 
 // 保留导出签名兼容旧调用方；难度统一 3，留待每日回填任务用 LLM 修正。
@@ -1744,7 +1776,8 @@ export const generateTagsForQuestion = async (questionContent, subject = null) =
     return { success: true, tags: ['未分类'], difficulty: null }
   }
   if (AI_TAGGING_ENABLED) {
-    const ai = await tagOneByAi(questionContent, subject)
+    const cands = await loadTaggingCandidates(subject)
+    const ai = await tagOneByAi(questionContent, subject, cands)
     if (ai) return { success: true, tags: ai.tags, difficulty: ai.difficulty, source: 'ai' }
   }
   const { tags, difficulty } = classifyQuestionLocally(questionContent, subject)
@@ -1785,7 +1818,8 @@ const generateTagsForQuestions = async (questions) => {
       let difficulty = 3
       let source = 'local'
       if (fullContent && fullContent.trim()) {
-        const ai = await tagOneByAi(fullContent, q.subject)
+        const cands = await loadTaggingCandidates(q.subject)
+        const ai = await tagOneByAi(fullContent, q.subject, cands)
         if (ai) { tags = ai.tags; difficulty = ai.difficulty; source = 'ai'; aiOk++ }
       }
       if (!tags) {

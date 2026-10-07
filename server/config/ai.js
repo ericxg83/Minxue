@@ -2380,7 +2380,26 @@ export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解
 - "最简分数" vs "真分数"：约到最简 ≠ 一定小于 1。
 - 求"取值范围"/"参数范围"时，注意分母不为 0、根号内非负、对数真数大于 0 等隐含约束。`
 
-export const buildTaggingPrompt = (subject = null) => `你是一个 K12 题目知识点分类助手。请根据题目内容输出知识点和难度，只返回 JSON。
+/**
+ * 打标提示词。
+ *
+ * ⛔ 2026-10-07 改造（打标粒度根治）：
+ *   旧版**不给模型看知识树**，只说「tags 使用具体知识点名称」——
+ *   模型自由发挥产出「平方」「实数」「函数」这类大词，而它们往往**逐字对不上树**，
+ *   于是归一化链路只能靠子串兜底匹配，落到最粗的节点上。
+ *   实测：500+ 题里泛化考点占比 23%，平均每题 4.1 个标签。
+ *
+ *   新版把「可选知识点清单」直接给模型，并加三条硬约束：
+ *   ① 逐字取自清单（不得自造）② 禁止输出板块名 ③ 最多 3 个。
+ *   实测同一批题：泛化占比 23% → 0%，平均标签 4.1 → 2.45。
+ *
+ * @param {string|null} subject
+ * @param {Array<{name: string, parent?: string}>|null} candidates
+ *   可选考点清单。传 null 时退回旧版自由发挥（仅为兼容旧调用方，不要在新代码里用）。
+ */
+export const buildTaggingPrompt = (subject = null, candidates = null) => {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return `你是一个 K12 题目知识点分类助手。请根据题目内容输出知识点和难度，只返回 JSON。
 ${subject ? `已知学科：${subject}\n` : ''}
 返回格式：
 {
@@ -2392,6 +2411,52 @@ ${subject ? `已知学科：${subject}\n` : ''}
 1. tags 使用具体知识点名称，不要只写学科名。
 2. difficulty 必须是 1-5 的整数。
 3. 无法准确判断时，difficulty 默认 3。`
+  }
+
+  // 按所属板块分组，让模型看到上下文（但明确禁止输出板块名本身）
+  const byParent = new Map()
+  for (const c of candidates) {
+    const p = c.parent || '其他'
+    if (!byParent.has(p)) byParent.set(p, [])
+    byParent.get(p).push(c.name)
+  }
+  const listText = [...byParent.entries()]
+    .map(([p, names]) => `${p}：${names.join('、')}`)
+    .join('\n')
+
+  return `你是 K12 数学题目的知识点标注助手。只返回 JSON，不要解释、不要写算式。
+
+下面是本题**唯一可选**的知识点清单（按板块分组，「板块：」后面的词才是可选考点）：
+
+${listText}
+
+返回格式：{"tags": ["考点1","考点2"],"difficulty": 3}
+
+铁律（违反则本条作废）：
+1. tags 必须**逐字**取自清单，不得改写、不得自造、不得输出清单外的词。
+2. 禁止输出板块名本身。
+3. **最多 3 个**，按主次排列，第一个是主考点。宁少勿滥。
+4. 清单里同时有粗考点和细考点时（如「二次根式」与「二次根式的乘法」），题目在做什么动作就选哪个。
+5. difficulty 为 1-5 整数，拿不准填 3。`
+}
+
+/**
+ * 把 AI 返回的标签收窄到候选清单内（逐字匹配），并截到最多 3 个。
+ * 自造词直接丢弃 —— 丢弃后为空则返回 null，调用方回落本地规则。
+ * @returns {{tags: string[], difficulty: number}|null}
+ */
+export const filterTagsToCandidates = (parsed, candidates, maxTags = 3) => {
+  if (!parsed || !Array.isArray(parsed.tags)) return null
+  const valid = new Set((candidates || []).map(c => c.name))
+  const kept = []
+  for (const t of parsed.tags) {
+    const s = String(t == null ? '' : t).trim()
+    if (valid.has(s) && !kept.includes(s)) kept.push(s)
+    if (kept.length >= maxTags) break
+  }
+  if (kept.length === 0) return null
+  return { tags: kept, difficulty: parsed.difficulty }
+}
 
 export const buildGeometryExtractionPrompt = () => `你是一个几何图提取助手。请识别图片中的纯几何元素并输出 TikZ 代码，只返回完整 tikzpicture 代码，不要解释。`
 

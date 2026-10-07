@@ -65,6 +65,7 @@ import { migrateWrongQuestionsLastWrongTaskId } from './migrations/058_add_wrong
 import { migrateWrongQuestionsIdentitySplit } from './migrations/059_wrongbook_identity_split.js'
 import { migrateTeachingMarks } from './migrations/060_teaching_marks.js'
 import { migrateKaofaMultiKp } from './migrations/061_kaofa_multi_kp.js'
+import { migrateKpRelations } from './migrations/062_kp_relations.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -130,6 +131,13 @@ import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
 import { getKnowledgeTree, getQuestionKnowledge, clearKnowledgeCache } from './services/knowledgeService.js'
+import {
+  getPrerequisites,
+  getSuccessors,
+  tracePrerequisites,
+  reviewRelations,
+  getRelationStats
+} from './services/kpRelationService.js'
 import { finalizeRejudgeResult, finalizeGeneratedExamResults } from './services/gradingFinalizer.js'
 import { assertImageUrlAllowed } from './utils/urlGuard.js'
 
@@ -4753,7 +4761,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateWrongQuestionsLastWrongTaskId', migrateWrongQuestionsLastWrongTaskId],
         ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit],
         ['migrateTeachingMarks', migrateTeachingMarks],
-        ['migrateKaofaMultiKp', migrateKaofaMultiKp]
+        ['migrateKaofaMultiKp', migrateKaofaMultiKp],
+        ['migrateKpRelations', migrateKpRelations]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
@@ -4888,6 +4897,59 @@ app.get('/api/knowledge/tree', async (req, res) => {
     res.json({ success: true, subject, tree })
   } catch (error) {
     console.error('获取知识树失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 知识点前置关系（kp_relations）：谁先学谁
+// ─────────────────────────────────────────────
+// 用于错题溯源：学生错在某个考点，往回追它的前置知识。
+// direction=before → 前置（往回追）；after → 后继（往前推）
+app.get('/api/knowledge/relations', async (req, res) => {
+  try {
+    const { kpId, direction = 'before', depth = 1, includeProposed } = req.query
+    if (!kpId) return res.status(400).json({ error: '缺少 kpId' })
+    const statuses = includeProposed === '1' ? ['confirmed', 'proposed'] : undefined
+    const rows = direction === 'after'
+      ? await getSuccessors(kpId, { depth, statuses })
+      : await getPrerequisites(kpId, { depth, statuses })
+    res.json({ success: true, kpId, direction, depth: Number(depth) || 1, relations: rows })
+  } catch (error) {
+    console.error('获取前置关系失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 错题溯源：给一组错题考点，找出共同的前置知识（建议补练方向）
+app.post('/api/knowledge/trace', async (req, res) => {
+  try {
+    const { kpIds, depth = 1 } = req.body || {}
+    if (!Array.isArray(kpIds) || kpIds.length === 0) return res.status(400).json({ error: '缺少 kpIds' })
+    const rows = await tracePrerequisites(kpIds, { depth })
+    res.json({ success: true, depth: Number(depth) || 1, prerequisites: rows })
+  } catch (error) {
+    console.error('错题溯源失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 人工核对关系（proposed → confirmed / rejected）
+app.post('/api/knowledge/relations/review', async (req, res) => {
+  try {
+    const { ids, status } = req.body || {}
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: '缺少 ids' })
+    const n = await reviewRelations(ids, status)
+    res.json({ success: true, updated: n })
+  } catch (error) {
+    res.status(400).json({ error: error.message })
+  }
+})
+
+// 关系表统计（体检/验收用）
+app.get('/api/knowledge/relations/stats', async (req, res) => {
+  try {
+    res.json({ success: true, ...(await getRelationStats()) })
+  } catch (error) {
     res.status(500).json({ error: error.message })
   }
 })

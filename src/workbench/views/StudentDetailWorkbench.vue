@@ -74,6 +74,12 @@
                 </div>
                 <div class="weak-meta">{{ point.subject }} · 涉及 {{ point.wrongQuestions }} 道错题</div>
                 <div v-if="point.lossPositions" class="weak-loss">失分位置：{{ point.lossPositions }}</div>
+                <!-- 前置考点：错在这里，根子可能在更早的知识上。
+                     数据来自 GET /weakness/student/:id 的 prerequisites 字段（只含已确认的关系）。 -->
+                <div v-if="point.prerequisites && point.prerequisites.length" class="weak-pre">
+                  <span class="weak-pre__label">建议先补</span>
+                  <span v-for="pre in point.prerequisites" :key="pre.id" class="weak-pre__item">{{ pre.name }}</span>
+                </div>
               </div>
               <div class="weak-bar"><i :style="{ width: point.mastery + '%' }" :class="{ low: point.mastery < 30 }"></i></div>
               <div class="weak-mastery">
@@ -586,6 +592,16 @@ const saveStudent = async () => {
 .weak-name { display: flex; align-items: center; gap: var(--wb-space-2); color: var(--wb-text); font-size: var(--wb-fs-body); font-weight: var(--wb-fw-semibold); }
 .weak-meta { margin-top: 4px; color: var(--wb-text-secondary); font-size: var(--wb-fs-meta); }
 .weak-loss { margin-top: 4px; color: var(--wb-danger); font-size: var(--wb-fs-meta); }
+/* 前置考点：错在这里，根子可能在更早的知识上 */
+.weak-pre { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.weak-pre__label { color: var(--wb-text-secondary); font-size: var(--wb-fs-meta); }
+.weak-pre__item {
+  padding: 1px 8px; border-radius: 999px;
+  background: var(--wb-accent-soft);
+  color: var(--wb-accent);
+  font-size: var(--wb-fs-meta);
+  line-height: 1.6;
+}
 .weak-bar { height: 6px; overflow: hidden; background: var(--wb-border-light); border-radius: 999px; }
 .weak-bar i { display: block; height: 100%; background: var(--wb-primary); border-radius: inherit; }
 .weak-bar i.low { background: var(--wb-danger); }

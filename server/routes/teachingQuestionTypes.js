@@ -328,6 +328,7 @@ router.get('/hot-kp', async (req, res) => {
           AND wq.added_at >= now() - ($2::int * interval '1 day')
           AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
         WHERE kp.subject = $1
+          AND kp.archived = false
         GROUP BY kp.id, kp.name
        HAVING COUNT(DISTINCT wq.id) > 0
         ORDER BY wrong_count DESC, question_count DESC
@@ -411,6 +412,7 @@ router.get('/kp-ranking', async (req, res) => {
           AND wq.added_at >= now() - ($2::int * interval '1 day')
           AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
         WHERE kp.subject = $1
+          AND kp.archived = false
         GROUP BY kp.id, kp.name, kp.level, kp.parent_id
         ORDER BY wrong_count DESC, question_count DESC, kp.sort_order
         ${limitClause}`, params)

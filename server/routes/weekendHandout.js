@@ -20,6 +20,7 @@ import { renderWeekendPptx } from '../services/weekendPptxService.js'
 import { buildChapterTree, getCatalogForGrade } from '../config/textbookCatalog.js'
 import { getPool } from '../config/neon.js'
 import { getKnowledgeTree } from '../services/knowledgeService.js'
+import { getPrerequisitesForMany } from '../services/kpRelationService.js'
 
 const router = Router()
 
@@ -68,6 +69,39 @@ router.get('/api/weekend-ppt/knowledge-points', async (req, res) => {
     const tree = await getKnowledgeTree(subject)
     res.json({ success: true, subject, tree: toTreeSelectOptions(tree) })
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message })
+  }
+})
+
+/**
+ * GET /api/weekend-ppt/kp-prerequisites?kpIds=<uuid>,<uuid>
+ *
+ * 给「按考点筛题」加一条前置提示：老师选中某个考点时，如果它的前置考点也有错题，
+ * 讲评时应该先补前置。**只读提示，不自动改筛选条件**——加不加由老师决定。
+ *
+ * ⛔ 只返回 status='confirmed' 的关系（候选里约 1/3 讲不通，见 kpRelationService 注释）。
+ *    查不到前置就返回空数组，前端不显示提示块。
+ */
+router.get('/api/weekend-ppt/kp-prerequisites', async (req, res) => {
+  const ids = String(req.query?.kpIds || '').split(',').map(s => s.trim()).filter(Boolean)
+  if (ids.length === 0) return res.json({ success: true, prerequisites: [] })
+  try {
+    const preMap = await getPrerequisitesForMany(ids)
+    // ⛔ 本文件没有 `query` 辅助函数，一律走 getPool()（与文件内其它查询一致）。
+    const { rows: names } = await getPool().query(
+      `SELECT id, name FROM knowledge_points WHERE id = ANY($1::uuid[])`, [ids])
+    const nameOf = new Map(names.map(r => [r.id, r.name]))
+    // 展平去重：同一个前置可能被多个已选考点依赖，记下它服务于谁
+    const merged = new Map()
+    for (const [kpId, list] of preMap) {
+      for (const p of list) {
+        if (!merged.has(p.id)) merged.set(p.id, { id: p.id, name: p.name, level: p.level, for: [], reason: p.reason })
+        merged.get(p.id).for.push(nameOf.get(kpId) || '')
+      }
+    }
+    res.json({ success: true, prerequisites: [...merged.values()] })
+  } catch (error) {
+    console.error('获取考点前置失败:', error)
     res.status(500).json({ success: false, error: error.message })
   }
 })

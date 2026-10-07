@@ -127,6 +127,12 @@
               style="width: 320px"
               aria-label="按考点筛选"
             />
+            <!-- 前置提示：选中考点若有已确认的前置关系，提示「讲之前先补这个」。
+                 只读提示，不自动改筛选条件（加不加由老师决定）。 -->
+            <div v-if="kpPrerequisites.length" class="kp-prereq-hint">
+              <span class="kp-prereq-hint__label">建议先讲</span>
+              <span v-for="p in kpPrerequisites" :key="p.id" class="kp-prereq-hint__item">{{ p.name }}</span>
+            </div>
           </div>
           <div class="param-field">
             <label>章节</label>
@@ -486,6 +492,8 @@ const chapterOptionsLoading = ref(false)
 // 选中父节点 = 选中整棵子树（后端递归展开），所以勾「函数」就能把一次函数/二次函数…的错题全拉出来。
 const kpTreeOptions = ref([])
 const kpOptionsLoading = ref(false)
+// 选中考点的「前置考点」提示（来源 /api/weekend-ppt/kp-prerequisites，只含已确认的关系）
+const kpPrerequisites = ref([])
 
 async function loadKpTree() {
   kpOptionsLoading.value = true
@@ -499,6 +507,24 @@ async function loadKpTree() {
     kpOptionsLoading.value = false
   }
 }
+
+/**
+ * 拉「已选考点的前置考点」。
+ * ⛔ 纯提示：失败静默（提示块不显示），绝不因为它挡住筛题主流程。
+ */
+async function loadKpPrerequisites() {
+  const ids = (params.value.kpIds || []).filter(Boolean)
+  if (ids.length === 0) { kpPrerequisites.value = []; return }
+  try {
+    const res = await apiRequest(`/weekend-ppt/kp-prerequisites?kpIds=${encodeURIComponent(ids.join(','))}`)
+    kpPrerequisites.value = res?.prerequisites || []
+  } catch (e) {
+    kpPrerequisites.value = []
+  }
+}
+
+// 选中考点变化时刷新前置提示。immediate 不设：挂载时 kpIds 通常为空，白跑一次。
+watch(() => params.value.kpIds, loadKpPrerequisites)
 
 async function loadChapterTree() {
   chapterOptionsLoading.value = true
@@ -885,6 +911,27 @@ function openBoard() {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--wb-text-secondary, #64748b);
+}
+/* 前置考点提示：选中考点若有已确认的前置关系，提示「讲之前先补这个」。
+   与学习诊断页「建议先补」胶囊（.weak-pre）保持同一套视觉，两处指的是同一件事。 */
+.kp-prereq-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+.kp-prereq-hint__label {
+  color: var(--wb-text-secondary, #64748b);
+  font-size: var(--wb-fs-meta, 12px);
+}
+.kp-prereq-hint__item {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--wb-accent-soft, #ede9fe);
+  color: var(--wb-accent, #8b5cf6);
+  font-size: var(--wb-fs-meta, 12px);
+  line-height: 1.6;
 }
 .period-row {
   display: flex;

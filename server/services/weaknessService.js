@@ -1,4 +1,5 @@
 import { query, TABLES } from '../config/neon.js'
+import { getPrerequisitesForMany } from './kpRelationService.js'
 
 // ============================================================
 // 薄弱点推荐服务（weaknessService）
@@ -39,7 +40,7 @@ export async function getStudentWeakness(studentId, opts = {}) {
     [studentId, threshold, limit]
   )
 
-  return rows.map(r => ({
+  const out = rows.map(r => ({
     kpId: r.kp_id,
     name: r.name,
     level: r.level,
@@ -50,7 +51,21 @@ export async function getStudentWeakness(studentId, opts = {}) {
     consecutiveCorrect: r.consecutive_correct,
     lastPracticedAt: r.last_practiced_at,
     isUrgent: r.mastery < URGENT_THRESHOLD,
+    prerequisites: [],
   }))
+
+  // 带上「前置考点」：错在这里，根子可能在更早的知识上。
+  // ⛔ 只取 status='confirmed' 的关系（候选里有约 1/3 讲不通，见 kpRelationService 注释）。
+  //    查不到就是空数组 —— 前端只在非空时显示，不留白块。
+  if (out.length) {
+    try {
+      const preMap = await getPrerequisitesForMany(out.map(r => r.kpId))
+      for (const r of out) r.prerequisites = preMap.get(r.kpId) || []
+    } catch (e) {
+      console.warn('  ⚠️ [weakness] 前置关系查询失败（不影响薄弱点本身）:', e.message)
+    }
+  }
+  return out
 }
 
 /**
