@@ -439,3 +439,11 @@
 **体检**：tests **2097/0** | lint 0 | build skipped | server=ok  mobile-dev=DOWN(ECONNREFUSED) | 冒烟 n/a | 脏 0
 
 ⚠️ 发现异常：mobile-dev 非 ok（需 agent 深修时下轮处理）
+| 60 | 2026-10-07T16:20:38 | tests=2097/0 | lint=0 | build=ok | server=ok | dirty=1 |
+
+### R60 — 2026/10/8 00:20:38（daemon 自动报告）
+
+**体检**：tests **2097/0** | lint 0 | build ok | server=ok  mobile-dev=ok | 冒烟 12/12 | 脏 1
+
+⚠️ 发现异常：脏文件 1 个（ M src/workbench/views/QuestionBankWorkbench.vue…）（需 agent 深修时下轮处理）
+    -  M src/workbench/views/QuestionBankWorkbench.vue
