@@ -1274,6 +1274,23 @@ export const getStudentWeakness = async (studentId, opts = {}) => {
   return data.weakness || []
 }
 
+/**
+ * 定向重练卷组卷口径：按考点（**含子考点**）取该生「待重练」错题的 question_id。
+ *
+ * ⛔ 口径在后端（weaknessService.getRetryQuestionIdsByKp）——「哪道题挂在这个考点下」
+ *    是知识点关联的事，前端不自己按字段猜，避免两端各算一份。
+ *
+ * @param {string} studentId
+ * @param {string[]} kpIds 考点 id（薄弱考点，或它的前置考点）
+ * @returns {Promise<string[]>}
+ */
+export const getRetryQuestionIdsByKp = async (studentId, kpIds = []) => {
+  const ids = (kpIds || []).filter(Boolean)
+  if (!studentId || ids.length === 0) return []
+  const data = await apiRequest(`/weakness/student/${studentId}/retry-questions?kpIds=${encodeURIComponent(ids.join(','))}`)
+  return Array.isArray(data?.questionIds) ? data.questionIds : []
+}
+
 // 第 91 轮：「成长中心」下线后，前端唯一的调用方（GrowthWorkbench）已随页删除，
 // 这里的前端封装一并移除。后端 /weakness/recommend 是共享路由，保留不动。
 

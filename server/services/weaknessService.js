@@ -69,6 +69,58 @@ export async function getStudentWeakness(studentId, opts = {}) {
 }
 
 /**
+ * 定向重练卷组卷口径：按考点（**含子考点**）取该生「待重练」错题的 question_id。
+ *
+ * 为什么要有它（2026-10-07 负责人拍板）：
+ *   卡片按钮写着「生成定向重练卷」，但前端原先只按 `wq.subject === point.subject`
+ *   过滤 —— 组出来的是「该学科全部待重练错题」，跟按钮上那个考点没有关系。
+ *   现在收敛为真·定向：只取该考点**及其子考点**下挂的题。
+ *
+ * ⛔ 口径（与重练卷红线一致）：
+ *   - 只用学生**真实做错**的题（wrong_questions 行）；变式题 / AI 生成题一律不进；
+ *   - question_id 为空的练习册自包含错题取不到（没有 question_knowledge 关联），
+ *     与组卷出口 toExamQuestionIds 的排除口径一致；
+ *   - 排除 lifecycle_status='mastered'（已完全掌握的不再重练）；
+ *   - 子考点展开带 depth 上限，防止脏父子链导致查询不收敛。
+ *   - 同一道题被记多条错题行时按 question_id 去重（否则卷面会出现重复题）。
+ *
+ * @param {string} studentId
+ * @param {string[]} kpIds 考点 id（通常一个薄弱考点；前置考点也走同一口径）
+ * @param {{limit?: number}} [opts]
+ * @returns {Promise<string[]>} question_id 列表（按错题入册时间倒序）
+ */
+export async function getRetryQuestionIdsByKp(studentId, kpIds, opts = {}) {
+  const ids = (kpIds || []).filter(Boolean)
+  if (!studentId || ids.length === 0) return []
+  const limit = Math.min(Math.max(Number(opts.limit) || 300, 1), 500)
+
+  const { rows } = await query(
+    `WITH RECURSIVE sub AS (
+        SELECT id, 1 AS depth FROM ${TABLES.KNOWLEDGE_POINTS} WHERE id = ANY($2::uuid[])
+        UNION ALL
+        SELECT k.id, s.depth + 1
+          FROM ${TABLES.KNOWLEDGE_POINTS} k
+          JOIN sub s ON k.parent_id = s.id
+         WHERE s.depth < 8
+     )
+     SELECT wq.question_id
+       FROM ${TABLES.WRONG_QUESTIONS} wq
+      WHERE wq.student_id = $1
+        AND wq.question_id IS NOT NULL
+        AND COALESCE(wq.lifecycle_status, 'new') <> 'mastered'
+        AND EXISTS (
+          SELECT 1 FROM ${TABLES.QUESTION_KNOWLEDGE} qk
+           WHERE qk.question_id = wq.question_id
+             AND qk.kp_id IN (SELECT id FROM sub)
+        )
+      ORDER BY wq.added_at DESC
+      LIMIT $3`,
+    [studentId, ids, limit]
+  )
+  return [...new Set(rows.map(r => r.question_id))]
+}
+
+/**
  * 获取跨学生维度的薄弱知识点（全班/全年级）。
  * 按掌握度均值升序排列，同时返回涉及学生数。
  *

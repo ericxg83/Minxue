@@ -6,8 +6,9 @@
  * （把 `>= 2` 改成 `> 2` 依然全绿）。这里把三件事提成纯函数：
  *
  *   normalizeWrongItems  错题行 → 候选题（同题去重 + 字段归一）
- *   inScope             预筛判据（错因 / 反复错 / 基本掌握）
+ *   inScope             预筛判据（错因 / 反复错 / 基本掌握 / 定向重练）
  *   pickDefaults        打开弹窗时的默认勾选
+ *   groupOf             定向重练里「主料 / 前置」分组（打标签与计数用）
  *
  * ⚠️ 口径提醒（别当成 bug）：
  *   「重练自动选题只放行 lifecycle='new'」是**系统自动组卷**的规矩；
@@ -50,18 +51,47 @@ export function normalizeWrongItems(list = []) {
   return out
 }
 
-/** 预筛判据。scope = { kind: 'error-cause' | 'repeat' | 'basic', errorType? } */
+/** 预筛判据。scope = { kind: 'error-cause' | 'repeat' | 'basic' | 'weak-point', errorType?, questionIds?, prerequisiteQuestionIds? } */
 export function inScope(item, scope) {
   if (!item) return false
   const kind = scope?.kind
   if (kind === 'error-cause') return !!scope.errorType && item.errorType === scope.errorType
   if (kind === 'repeat') return item.errorCount >= 2
   if (kind === 'basic') return item.lifecycle === LIFECYCLE_STATUS.REVIEW_1 || item.lifecycle === LIFECYCLE_STATUS.REVIEW_2
+  // weak-point（定向重练）：题单由后端按考点**含子考点**算好，前端只认 id 归属，
+  // 不自己按字段猜。两组都进候选列表 —— 前置组默认不勾（见 pickDefaults）。
+  if (kind === 'weak-point') return !!item.questionId && idSet(scope).has(item.questionId)
   return true
 }
 
-/** 打开弹窗时的默认勾选：命中预筛的全部勾上（老师点开看到的就该是诊断页承诺的那 N 道） */
+/**
+ * 题目在「定向重练」里属于哪一组（给列表打标签 / 计数用）：
+ *   'main'         该薄弱考点（含子考点）上的错题 —— 默认勾选，这就是定向卷的主料
+ *   'prerequisite' 前置考点上该生也做错过的题 —— 默认不勾，老师勾了才加入
+ *   ''             不属于本卷（非 weak-point scope 也返回 ''）
+ */
+export function groupOf(item, scope) {
+  if (!item || scope?.kind !== 'weak-point' || !item.questionId) return ''
+  if (new Set((scope.questionIds || []).filter(Boolean)).has(item.questionId)) return 'main'
+  if (new Set((scope.prerequisiteQuestionIds || []).filter(Boolean)).has(item.questionId)) return 'prerequisite'
+  return ''
+}
+
+function idSet(scope) {
+  return new Set([...(scope?.questionIds || []), ...(scope?.prerequisiteQuestionIds || [])].filter(Boolean))
+}
+
+/**
+ * 打开弹窗时的默认勾选。
+ * - 通用口径：命中预筛的全部勾上（老师点开看到的就该是诊断页承诺的那 N 道）
+ * - ⛔ 定向重练（weak-point）例外：**只勾该考点自己的题**，前置考点那组必须老师主动勾 ——
+ *   「前置考点未必是这次要练的」，默认替他决定就把卷子撑大了（2026-10-07 负责人拍板）。
+ */
 export function pickDefaults(items = [], scope) {
+  if (scope?.kind === 'weak-point') {
+    const main = new Set((scope.questionIds || []).filter(Boolean))
+    return items.filter((it) => it?.questionId && main.has(it.questionId)).map((it) => it.key)
+  }
   return items.filter((it) => inScope(it, scope)).map((it) => it.key)
 }
 

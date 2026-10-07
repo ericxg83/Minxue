@@ -189,6 +189,15 @@
         <ActionButton variant="primary" :loading="saving" @click="saveStudent">保存</ActionButton>
       </template>
     </WorkbenchDialog>
+
+    <!-- 定向重练卷确认弹窗（r142 同一套「预筛 + 勾选 + 确认」管线，不另写一份）。
+         只有「该考点有前置、且前置考点上他也真做错过题」时才弹 —— 没得选就一键组卷，不多一步。 -->
+    <RetryPaperPreviewDialog
+      v-model="retryDialogVisible"
+      :student-id="student?.id || ''"
+      :scope="retryScope"
+      @created="onRetryPaperCreated"
+    />
   </div>
 </template>
 
@@ -197,7 +206,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Aim, ArrowLeft, ArrowRight, Loading, Refresh, User, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam } from '../../services/apiService'
+import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam, getRetryQuestionIdsByKp } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import { isRetryPaperTask } from '../utils/retryPaperState'
 import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
@@ -209,6 +218,7 @@ import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WrongBookCenterRedesign from './WrongBookCenterRedesign.vue'
+import RetryPaperPreviewDialog from '../components/diagnosis/RetryPaperPreviewDialog.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -223,6 +233,9 @@ const weakness = ref([])
 const creatingExam = ref(false)
 const creatingPoint = ref(null)
 const editDialogVisible = ref(false)
+// 定向重练卷确认弹窗（只有「前置考点上有他也做错过的题」时才弹，见 createExamFromWeakPoint）
+const retryDialogVisible = ref(false)
+const retryScope = ref(null)
 const saving = ref(false)
 const editFormRef = ref()
 const editForm = ref({ name: '', grade: '' })
@@ -414,26 +427,84 @@ watch(() => route.params.id, (newId) => {
 
 onMounted(loadStudentData)
 
+/** 把 question_id 列表映射回错题行（错题行带着卷名要用的 subject） */
+function itemsOfQuestionIds(ids = []) {
+  const byId = new Map(
+    wrongQuestions.value.filter(wq => wq.question_id).map(wq => [wq.question_id, wq])
+  )
+  return ids.map(id => byId.get(id)).filter(Boolean)
+}
+
+/** 组卷 + 命名 + 落库（与专项重练卷同一套管线，不另写一份） */
+async function createExamFromItems(items, kpName = '') {
+  const questionIds = items.map(wq => wq.question_id)
+  if (!questionIds.length) { ElMessage.warning('该考点下暂无可组卷的待重练错题'); return }
+  const existing = await getGeneratedExamsByStudent(student.value.id, false).catch(() => [])
+  const baseName = buildExamBaseName(items)
+  const examName = buildExamNameWithSeq(baseName, existing, student.value.id)
+  const exam = await createGeneratedExam({ student_id: student.value.id, name: examName, question_ids: questionIds })
+  if (!exam?.id) throw new Error('创建重练卷失败')
+  const who = kpName ? `「${kpName}」` : '该考点'
+  ElMessage.success(`已为${who}生成定向重练卷，共 ${questionIds.length} 题`)
+  exams.value = await getGeneratedExamsByStudent(student.value.id, false)
+}
+
+/**
+ * 「生成定向重练卷」。
+ *
+ * 2026-10-07 负责人拍板两件事：
+ *   ① 定向要名副其实 —— 只组**该考点（含子考点）**下挂的待重练错题。
+ *      原先前端只按 `wq.subject === point.subject` 过滤，组出来的是「该学科全部错题」，
+ *      跟按钮上那个考点没关系。口径现收到后端 getRetryQuestionIdsByKp（含子考点展开）。
+ *   ② 前置考点只做「可选加入」—— 该考点有前置、且前置考点上他也真做错过题时，
+ *      弹确认框列出「建议先练」并让他自己勾；没有可加的就保持一键，不多一步。
+ *
+ * ⛔ 红线不变：进卷的每一道都是学生**真实做错**的题，变式题/AI 生成题不进。
+ */
 async function createExamFromWeakPoint(point) {
   if (!student.value) return
-  const items = wrongQuestions.value.filter(wq => wq.subject === point.subject && wq.lifecycle_status !== 'mastered' && wq.question_id)
-  const questionIds = items.map(wq => wq.question_id)
-  if (!questionIds.length) { ElMessage.warning('该学科暂无可组卷的待重练错题'); return }
   creatingExam.value = true
   creatingPoint.value = point.kpId
   try {
-    const existing = await getGeneratedExamsByStudent(student.value.id, false).catch(() => [])
-    const baseName = buildExamBaseName(items)
-    const examName = buildExamNameWithSeq(baseName, existing, student.value.id)
-    const exam = await createGeneratedExam({ student_id: student.value.id, name: examName, question_ids: questionIds })
-    if (!exam?.id) throw new Error('创建重练卷失败')
-    ElMessage.success(`已为「${point.name}」生成定向重练卷，共 ${questionIds.length} 题`)
-    exams.value = await getGeneratedExamsByStudent(student.value.id, false)
+    const ids = await getRetryQuestionIdsByKp(student.value.id, [point.kpId])
+    const items = itemsOfQuestionIds(ids)
+    if (!items.length) { ElMessage.warning('该考点下暂无可组卷的待重练错题'); return }
+
+    // 前置考点上他也做错过的题（同一条口径算，不另写一份）
+    const preKpIds = (point.prerequisites || []).map(p => p.id).filter(Boolean)
+    const preItems = preKpIds.length
+      ? itemsOfQuestionIds(await getRetryQuestionIdsByKp(student.value.id, preKpIds))
+          .filter(wq => !ids.includes(wq.question_id))
+      : []
+
+    if (preItems.length) {
+      retryScope.value = {
+        kind: 'weak-point',
+        kpId: point.kpId,
+        kpName: point.name,
+        questionIds: items.map(wq => wq.question_id),
+        prerequisiteQuestionIds: preItems.map(wq => wq.question_id),
+        prerequisites: point.prerequisites || [],
+      }
+      retryDialogVisible.value = true
+      return
+    }
+    await createExamFromItems(items, point.name)
   } catch (error) {
     ElMessage.error(error.message || '创建重练卷失败，请稍后重试')
   } finally {
     creatingExam.value = false
     creatingPoint.value = null
+  }
+}
+
+/** 弹窗里确认组卷后：刷新「最近重练」列表 */
+async function onRetryPaperCreated() {
+  if (!student.value) return
+  try {
+    exams.value = await getGeneratedExamsByStudent(student.value.id, false)
+  } catch (e) {
+    console.warn('[StudentDetail] 重练卷已创建，但列表刷新失败:', e?.message || e)
   }
 }
 

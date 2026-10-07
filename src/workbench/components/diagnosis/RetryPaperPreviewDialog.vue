@@ -44,6 +44,16 @@
         </span>
       </div>
 
+      <!-- 定向重练的前置提示：错在这个考点，根子可能在更早的知识上。
+           只提示 + 给可选项，不替老师决定 —— 前置组默认不勾（见 retryPaperScope.pickDefaults）。 -->
+      <p v-if="prereqNames.length" class="rp-pre">
+        <span class="rp-pre__label">建议先练</span>
+        <i v-for="n in prereqNames" :key="n" class="rp-pre__item">{{ n }}</i>
+        <span v-if="prereqCount" class="rp-pre__hint">
+          下面标「前置」的 {{ prereqCount }} 道是这些考点上他也做错过的题，默认不勾 —— 要一起练请勾上
+        </span>
+      </p>
+
       <ul class="rp-list">
         <li v-for="item in scopedItems" :key="item.key" :class="{ 'is-off': !selectedKeySet.has(item.key) }">
           <label class="rp-row">
@@ -61,6 +71,7 @@
             <span class="rp-row__tags">
               <i v-if="item.subject">{{ item.subject }}</i>
               <i v-if="item.errorType" :class="['is-error', errorTypeTone(item.errorType)]">{{ item.errorType }}</i>
+              <i v-if="isPrerequisite(item)" class="is-pre">前置</i>
               <i v-if="!item.questionId" class="is-warn">练习册自包含题</i>
             </span>
           </label>
@@ -112,7 +123,7 @@ import { getWrongQuestionsByStudent, createGeneratedExam, getGeneratedExamsByStu
 import { exportWrongBookPDF } from '../../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../../utils/retryTaskUrl'
 import { buildExamBaseName, buildExamNameWithSeq } from '../../../domain/examNaming'
-import { normalizeWrongItems, inScope, pickDefaults, errorTypeTone, toExamQuestionIds } from './retryPaperScope'
+import { normalizeWrongItems, inScope, pickDefaults, errorTypeTone, toExamQuestionIds, groupOf } from './retryPaperScope'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -141,14 +152,28 @@ const dialogTitle = computed(() => {
   if (props.scope?.kind === 'error-cause') return `专项重练卷 · ${props.scope.errorType || '同类错因'}`
   if (props.scope?.kind === 'repeat') return '专项重练卷 · 反复出错'
   if (props.scope?.kind === 'basic') return '重练卷 · 基本掌握再验证'
+  if (props.scope?.kind === 'weak-point') return `定向重练卷 · ${props.scope.kpName || '薄弱考点'}`
   return '专项重练卷'
 })
 
 const dialogSubtitle = computed(() => {
   const who = studentName.value || '这名学生'
   const n = picked.value.length
-  return n ? `${who} · 命中 ${n} 道，默认全选，可取消不练的` : `${who} · 正在筛题`
+  if (!n) return `${who} · 正在筛题`
+  if (props.scope?.kind === 'weak-point') {
+    const main = mainCount.value
+    const pre = prereqCount.value
+    return `${who} · 该考点（含子考点）命中 ${main} 道${pre ? ` · 前置考点另有 ${pre} 道` : ''}`
+  }
+  return `${who} · 命中 ${n} 道，默认全选，可取消不练的`
 })
+
+/** 前置考点名（定向重练才可能有）—— 空数组时整块提示不渲染 */
+const prereqNames = computed(() => (
+  props.scope?.kind === 'weak-point' ? (props.scope.prerequisites || []).map((p) => p.name).filter(Boolean) : []
+))
+/** 行归属：'main' 该考点自己的题 / 'prerequisite' 前置考点的题 / '' 其它 */
+const isPrerequisite = (item) => groupOf(item, props.scope) === 'prerequisite'
 
 const footHint = computed(() => {
   if (loading.value) return '读取中…'
@@ -169,6 +194,12 @@ const droppedCount = computed(() => toExamQuestionIds(scopedItems.value).dropped
 //    按钮写「49」而卷面只有 41，就是口径失真。
 const examIds = computed(() => toExamQuestionIds(selectedItems.value).questionIds)
 const canSubmit = computed(() => examIds.value.length > 0 && !creating.value)
+
+// 定向重练：把「该考点（主料）」与「前置考点（可选）」分开计数。
+// 数字一律用「真正能组卷的数」，不用条数 —— 自包含错题组不进卷（见上面 examIds 注释）。
+const prereqItems = computed(() => scopedItems.value.filter((it) => isPrerequisite(it)))
+const mainCount = computed(() => toExamQuestionIds(scopedItems.value.filter((it) => groupOf(it, props.scope) === 'main')).questionIds.length)
+const prereqCount = computed(() => toExamQuestionIds(prereqItems.value).questionIds.length)
 
 async function load() {
   if (!props.studentId) {
@@ -246,7 +277,7 @@ async function submit() {
 }
 
 // 换学生/换 scope 时重置勾选，避免把上一位的选中带到这一位
-watch(() => [props.modelValue, props.studentId, props.scope?.kind, props.scope?.errorType], () => {
+watch(() => [props.modelValue, props.studentId, props.scope?.kind, props.scope?.errorType, props.scope?.kpId], () => {
   if (props.modelValue) {
     selectedKeys.value = []
     studentName.value = ''
@@ -283,6 +314,12 @@ watch(() => [props.modelValue, props.studentId, props.scope?.kind, props.scope?.
 .rp-row__tags i.is-primary{background:var(--wb-status-info-bg);color:var(--wb-status-info-fg)}
 .rp-row__tags i.is-warn{background:var(--wb-status-warning-bg);color:var(--wb-status-warning-fg)}
 .rp-note{margin:10px 0 0;padding:8px 12px;border-radius:var(--wb-radius-sm);background:var(--wb-status-warning-bg);color:var(--wb-text-secondary);font-size:11px;line-height:1.6}
+/* 建议先练（前置考点）：与学习诊断页「建议先补」胶囊同一套视觉 —— 两处说的是同一件事 */
+.rp-pre{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:10px 0 0;font-size:11px}
+.rp-pre__label{color:var(--wb-text-secondary)}
+.rp-pre__item{padding:1px 8px;border-radius:var(--wb-radius-pill);background:var(--wb-accent-soft);color:var(--wb-accent);font-size:10px;font-style:normal;line-height:1.6}
+.rp-pre__hint{color:var(--wb-text-tertiary)}
+.rp-row__tags i.is-pre{background:var(--wb-accent-soft);color:var(--wb-accent)}
 .rp-foot{display:flex;align-items:center;gap:10px}
 .rp-foot__hint{margin-right:auto;color:var(--wb-text-tertiary);font-size:11px}
 </style>

@@ -8,7 +8,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeWrongItems, inScope, pickDefaults, toExamQuestionIds, errorTypeTone } from '../src/workbench/components/diagnosis/retryPaperScope.js'
+import { normalizeWrongItems, inScope, pickDefaults, toExamQuestionIds, errorTypeTone, groupOf } from '../src/workbench/components/diagnosis/retryPaperScope.js'
 
 /** 造一条错题行，形状与 getWrongQuestionsByStudent 的返回一致 */
 const wq = (over = {}) => ({
@@ -123,4 +123,46 @@ test('errorTypeTone：错因分三类色（与错题清单同一套）', () => {
   assert.equal(errorTypeTone('概念不清'), 'is-primary')
   assert.equal(errorTypeTone('步骤遗漏'), 'is-primary')
   assert.equal(errorTypeTone('其他'), '')
+})
+
+// ───────────────────────── weak-point（定向重练卷，2026-10-07 负责人拍板） ─────────────────────────
+//
+// 口径：题单由后端按考点**含子考点**算好，前端只认 id 归属；
+//       前置考点那组要列出来（否则老师根本看不到、没法勾），但**默认不勾**。
+
+test('inScope · weak-point：只认后端算好的 id（该考点含子考点 ∪ 前置考点）', () => {
+  const scope = { kind: 'weak-point', questionIds: ['q1', 'q2'], prerequisiteQuestionIds: ['q8'] }
+  assert.equal(inScope({ questionId: 'q1' }, scope), true)
+  assert.equal(inScope({ questionId: 'q8' }, scope), true, '前置考点的题必须进候选列表，否则老师看不到也勾不了')
+  assert.equal(inScope({ questionId: 'q9' }, scope), false, '不在两组里的题不能混进定向卷')
+  assert.equal(inScope({ questionId: '' }, scope), false, '自包含错题没有 question_id，不算命中')
+})
+
+test('pickDefaults · weak-point：只默认勾该考点自己的题，前置考点必须老师主动勾', () => {
+  const items = normalizeWrongItems([
+    wq({ wqId: 'a', question_id: 'q1' }),
+    wq({ wqId: 'b', question_id: 'q2' }),
+    wq({ wqId: 'c', question_id: 'q8' })
+  ])
+  const keys = pickDefaults(items, { kind: 'weak-point', questionIds: ['q1', 'q2'], prerequisiteQuestionIds: ['q8'] })
+  assert.deepEqual(keys, ['a', 'b'], '前置考点被默认勾上了 —— 卷子会莫名其妙变大（负责人拍板：默认不加）')
+})
+
+test('groupOf：主料优先，同一题同时挂两处时按主料算；非 weak-point 不参与分组', () => {
+  const scope = { kind: 'weak-point', questionIds: ['q1'], prerequisiteQuestionIds: ['q1', 'q8'] }
+  assert.equal(groupOf({ questionId: 'q1' }, scope), 'main')
+  assert.equal(groupOf({ questionId: 'q8' }, scope), 'prerequisite')
+  assert.equal(groupOf({ questionId: 'q9' }, scope), '')
+  assert.equal(groupOf({ questionId: 'q1' }, { kind: 'repeat' }), '', 'r142 三种 scope 不该被分组逻辑影响')
+})
+
+test('回归：新增 weak-point 不得改变 r142 三种 scope 的预筛与默认勾选', () => {
+  const items = normalizeWrongItems([
+    wq({ wqId: 'a', question_id: 'q1', error_type: '计算错误', error_count: 3, lifecycle_status: 'new' }),
+    wq({ wqId: 'b', question_id: 'q2', error_type: '审题错误', error_count: 1, lifecycle_status: 'review_1' }),
+    wq({ wqId: 'c', question_id: 'q3', error_type: '计算错误', error_count: 1, lifecycle_status: 'mastered' })
+  ])
+  assert.deepEqual(pickDefaults(items, { kind: 'error-cause', errorType: '计算错误' }), ['a', 'c'])
+  assert.deepEqual(pickDefaults(items, { kind: 'repeat' }), ['a'])
+  assert.deepEqual(pickDefaults(items, { kind: 'basic' }), ['b'])
 })
