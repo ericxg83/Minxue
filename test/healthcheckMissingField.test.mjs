@@ -204,8 +204,10 @@ test('字段真的返回 0（不是没回）⇒ 队列/批改这两项必须照�
 
 // ── 6. 反向自检：套 r220 的旧脚本，同样三个漏字段场景必须**判合格**（洞是真的）─────
 test('反向自检：r220 的旧脚本在「漏字段」场景下全部判合格（洞确实存在，不是我编的）', async (t) => {
+  // ⛔ skip 后必须 return：t.skip 只标记不中断，探针缺失时继续跑会抛错把 skip 变成 fail（r222 实测）。
   if (!existsSync(OLD_SCRIPT)) {
     t.skip('反向自检探针未就位：先跑 git show 25b4386:scripts/healthcheck.mjs > scripts/_r221_old_healthcheck.mjs')
+    return
   }
   // 三个场景逐条验，逐条点名 —— 只统计「红了几条」会张冠李戴（r213 教训）。
   const scenarios = [

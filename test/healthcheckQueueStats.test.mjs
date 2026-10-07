@@ -160,8 +160,11 @@ test('队列服务连不上（available=false）⇒ 必须判提醒，光看排�
 
 // ── 4. 反向自检：套修复前的旧脚本，同样的积压场景必须判红（洞是真的，不是我编的）───────
 test('反向自检：修复前的旧脚本在「积压 30 个」场景下判合格且印 0 个（洞确实存在）', async (t) => {
+  // ⛔ 基线钉死到具体提交（r221 教训）：HEAD 随提交漂移 ⇒ 导出的「旧脚本」其实是新代码，反向自检假红。
+  // ⛔ skip 后必须 return：t.skip 只标记不中断，探针缺失时继续跑会抛错把 skip 变成 fail（r222 实测）。
   if (!existsSync(OLD_SCRIPT)) {
-    t.skip(`反向自检探针未就位：先跑 git show HEAD:scripts/healthcheck.mjs > scripts/_r220_old_healthcheck.mjs`)
+    t.skip('反向自检探针未就位：先跑 git show 25b4386~1:scripts/healthcheck.mjs > scripts/_r220_old_healthcheck.mjs')
+    return
   }
   const { server, port } = await startFakeApi({ queue: { waiting: 30, active: 0, failed: 0, available: true } })
   let stdout = ''

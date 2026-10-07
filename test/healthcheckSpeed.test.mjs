@@ -156,8 +156,14 @@ test('只有复查那一次慢 ⇒ 接口速度仍判提醒（判据是取最慢
 })
 
 // ── 4. 反向自检：套修复前的旧脚本，冷启动慢场景必须判红 ─────────────────────────
-test('反向自检：修复前的旧脚本在「冷启动慢」场景下判 ok（洞是真的，不是我编的）', async () => {
-  if (!existsSync(OLD_SCRIPT)) return // 探针由 shell 先导出，跑完即删
+test('反向自检：修复前的旧脚本在「冷启动慢」场景下判 ok（洞是真的，不是我编的）', async (t) => {
+  // ⛔ 探针缺失必须显式 skip（r215：skip 不是 return）—— 静默 return 等于「没验过的锁也判通过」。
+  // ⛔ skip 后必须 return：t.skip 只标记不中断，继续跑会抛错把 skip 变成 fail（r222 实测）。
+  // ⛔ 基线钉死到具体提交而不是 HEAD：HEAD 会随提交漂移，导出的「旧脚本」会变成新代码（r221 教训）。
+  if (!existsSync(OLD_SCRIPT)) {
+    t.skip('反向自检探针未就位：先跑 git show 7828fe2~1:scripts/healthcheck.mjs > scripts/_r218_old_healthcheck.mjs')
+    return
+  }
   const { server, port } = await startFakeApi({ healthDelayMs: 800 })
   let stdout = ''
   try {
