@@ -41,6 +41,19 @@ function record(name, status, detail) {
   if (!JSON_ONLY) console.log(`${status === 'ok' ? C.ok : status === 'warn' ? C.warn : C.bad} ${name}：${detail}`)
 }
 
+// ── ⛔ 「字段没真读到」必须明说（2026-10-07 r221）────────────────────────────────
+// 体检脚本在同一个雷上连栽三次：
+//   r198 磁盘：判据拿不到用量就永远挂「读不到」；
+//   r218 接口速度：只取第二次耗时 ⇒ 冷启动 2211ms 也判合格；
+//   r220 任务队列：读错嵌套字段 ⇒ 真积压 30 个印「排队 0 个」还判合格。
+// 共同点是 `x.y || 0` 式写法 —— **字段取不到时值变成 0/null，判据照常判合格**，
+// 而体检的 bad/warn 会记进 tmp/health.jsonl ⇒ 这类「假绿」一次告警都不会出。
+// ⇒ 每一项先确认字段**真的在**，再谈合格；没读到就说「这一项等于没盯」。
+// ⛔ 文案别写「available 为 undefined」这种词，负责人不看这种；只说后果 + 下一步。
+const missingFieldDetail = (label) =>
+  `接口没回「${label}」，这一项等于没盯（体检会一直显示正常，其实是空转）。` +
+  `多半是接口结构变了，得有个人去核一下，别当它一直是好的。`
+
 // ── 1. 后端在不在 ────────────────────────────────────────────────────────
 let health = null
 try {
@@ -49,7 +62,12 @@ try {
   const j = await r.json()
   health = { ...j, rt: Date.now() - t0 }
   const up = typeof health.uptimeSec === 'number' ? Math.round(health.uptimeSec / 60) : null
-  record('后端在线', 'ok', `已运行 ${up === null ? '?' : up} 分钟，响应 ${health.rt}ms`)
+  if (up === null) {
+    // ⛔ 旧版只是把分钟数印成「?」然后照样判合格 —— 看着像在盯，其实没盯（r221）。
+    record('后端在线', 'warn', missingFieldDetail('运行了多少分钟'))
+  } else {
+    record('后端在线', 'ok', `已运行 ${up} 分钟，响应 ${health.rt}ms`)
+  }
 } catch (e) {
   record('后端在线', 'bad', `连不上（${e.message}）。本地跑 ${API} 启动；线上请看 Render 后台日志`)
 }
@@ -83,9 +101,15 @@ if (health) {
     const t0 = Date.now()
     const r = await fetch(`${API}/api/students`, { signal: AbortSignal.timeout(20000) })
     const j = await r.json()
-    students = j.students || []
-    record('数据库可读', students.length ? 'ok' : 'warn',
-      `读到 ${students.length} 名学生，用时 ${Date.now() - t0}ms`)
+    // ⛔ 旧版 `j.students || []` 把「字段没回」和「一个学生都没有」混成同一句「读到 0 名学生」，
+    //    真出问题的信号被一句听不出毛病的话盖住了（r221）。
+    if (j.students === undefined) {
+      record('数据库可读', 'warn', missingFieldDetail('学生名单'))
+    } else {
+      students = j.students || []
+      record('数据库可读', students.length ? 'ok' : 'warn',
+        `读到 ${students.length} 名学生，用时 ${Date.now() - t0}ms`)
+    }
   } catch (e) {
     record('数据库可读', 'bad', `读不到：${e.message}`)
   }
@@ -95,15 +119,21 @@ if (health) {
 if (health) {
   try {
     const r = await fetch(`${API}/api/tasks/summary`, { signal: AbortSignal.timeout(20000) })
-    const s = (await r.json()).summary || {}
-    const stuck = (s.pendingTasks || []).length
-    const failed = s.failedTasks || 0
-    if (failed > 0) {
-      record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
-    } else if (stuck > 0) {
-      record('批改失败任务', 'warn', `${stuck} 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`)
+    const s = (await r.json()).summary
+    // ⛔ 旧版 `.summary || {}`：接口哪天不回 summary，就退化成「没有失败也没有卡住的任务」⇒ 判合格。
+    //    老师看到全绿，实际这一项一次都没在盯（r221，与 r220 队列同款）。
+    if (s === undefined) {
+      record('批改失败任务', 'warn', missingFieldDetail('有没有失败/卡住的作业'))
     } else {
-      record('批改失败任务', 'ok', '没有失败也没有卡住的任务')
+      const stuck = (s.pendingTasks || []).length
+      const failed = s.failedTasks || 0
+      if (failed > 0) {
+        record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
+      } else if (stuck > 0) {
+        record('批改失败任务', 'warn', `${stuck} 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`)
+      } else {
+        record('批改失败任务', 'ok', '没有失败也没有卡住的任务')
+      }
     }
   } catch (e) {
     record('批改失败任务', 'warn', `查不了：${e.message}`)
@@ -123,6 +153,8 @@ if (health) {
     //   恰好漏在最该被叫醒的时刻。
     const queueBody = await r.json()
     const q = queueBody.stats || queueBody || {}
+    // ⛔ 要在**补默认值之前**判定：q.waiting 一 `|| 0` 就再也分不出「真 0」和「字段没回」（r221）。
+    const queueMissing = q.waiting === undefined || q.active === undefined || q.failed === undefined
     const w = q.waiting || 0
     const a = q.active || 0
     const f = q.failed || 0
@@ -130,6 +162,7 @@ if (health) {
     //    会重演 r198「恒定黄灯淹掉真告警」。要看趋势看绝对值，靠人工看这行数字即可。
     // ⚠️ 至于 available：Redis 掉线时 waiting/active 可能还是 0，那就等于没盯，必须单独叫醒。
     if (q.available === false) record('任务队列', 'warn', '队列服务连不上（多半是 Redis 掉了）：作业堆在进程里进不了队列，这张表会一直显示 0，建议重启后端')
+    else if (queueMissing) record('任务队列', 'warn', missingFieldDetail('排队/进行中/失败的数量'))
     else if (w > 20) record('任务队列', 'warn', `排队 ${w} 个（积压偏多，可能是 AI 额度紧张导致重试堆积）`)
     else record('任务队列', 'ok', `排队 ${w} 个、进行中 ${a} 个、历史上失败 ${f} 个（失败数会定期清理，看趋势不看绝对值）`)
   } catch (e) {
