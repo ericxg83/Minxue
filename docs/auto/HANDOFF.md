@@ -804,3 +804,18 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
   `test/apiCallerAuditKit.mjs` 里的 `GATE_SELF_FILES` 就是为这个存在的，别删。
 - 四道闸全绿：单测 2015/2015｜lint 零输出｜`dist_nightly_20261006r219` 37.32s｜
   preview 5405 + cert_probe + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
+
+## 第 220 轮（2026-10-07）· 体检「任务队列」读错 /api/queue/stats 嵌套字段
+
+- 缺陷：`scripts/healthcheck.mjs:117` 读根级 `q.waiting/q.active/q.failed`，真接口是
+  `{ success, stats:{...} }`（`server/index.js:1711-1719`）⇒ 三数恒 0。生产 `stats.failed=50`
+  体检印「历史上失败 0 个」；真积压（>20）照样印 0 判合格。体检的 warn 记进 `tmp/health.jsonl`
+  ⇒ 这类告警一次都不会出（r198 磁盘 / r218 接口速度 同一枚雷的第三处）。
+- 修 `25b4386` + 文档；新锁 `test/healthcheckQueueStats.test.mjs`（5 条，含反向自检）。
+- ⭐ 顺带发现：r218 那份**假后端把错误契约固化下来了**（返回根级），所以那把锁从第一天起
+  验的就是一个不存在的接口。已改回 `{ stats }` 并加元判据锁住契约不漂移。
+  ⛔ 以后写假后端，**先 curl 一次真接口再抄结构**。
+- ⭐ 六项判据现已逐项实测（下轮别再翻 ①②③④⑤⑥）。
+- 四道闸：单测 2022/2022｜lint 0 error 0 warning｜`dist_nightly_20261007r220` 86s｜
+  preview 5410 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
+- 提案 ㊺（B）：体检六项统一加「字段没真读到就明说」自检。

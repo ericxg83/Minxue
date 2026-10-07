@@ -3196,3 +3196,41 @@ npm test 1854/1854｜lint 0e/126w｜生产 36df281 ok（uptime 493s，disk 69GB�
 - 提案 ㊸（B，本轮最大）/ ㊹（观察）入册；19、r217 那两枚归入同一病，本轮用门禁统一拦住。
 - **下次触发接 r220**：首选 ㊸（拍板 export-retry-pdf 留/删/接线）、㉘（141 题口径）、㊴（两条渲染路径零超时阈值）、
   ⑲（备份脚本挂不挂定时任务）；另需负责人处理 running/206 的 stale 锁与 Render 部署链路。
+
+- **r220（2026-10-07 09:03–09:35，可开工轮）：体检「任务队列」判据读错嵌套字段 —— 数字恒 0、永远判合格（两个 commit，已推送）**
+  - 开工锁 `finished / 219`；`git status --porcelain` 干净（无他人 in-flight）。
+  - ⭐ **主发现（A 级，与 r198「磁盘」、r218「接口速度」同一枚雷的第三处）**：体检第 5 项
+    `scripts/healthcheck.mjs:117` 从 `GET /api/queue/stats` 取 `waiting/active/failed`，
+    但真接口返回的是 **`{ success, stats:{...} }`**（`server/index.js:1711-1719`），
+    旧代码直接读根级 `q.waiting` ⇒ `undefined || 0` ⇒ 三个数**恒为 0**。
+    取证（生产 curl）：真值 `stats.failed=50` ⇒ 体检印「历史上失败 **0** 个」；本机真值 51 印 0。
+    `waiting` 恰好是 0 才蒙对 —— **真积压（>20）时照样印 0 并判合格**，恰好漏在老师最该被叫醒的时刻。
+    后果链：healthcheck 的 bad/warn 会记进 `tmp/health.jsonl` ⇒ 这类告警**一次都不会出**。
+  - 修 `25b4386`：`queueBody.stats || queueBody`；另加 `available === false` 单独提醒
+    （Redis 掉线时 waiting 也可能还是 0，只看数字等于没盯）。
+    ⛔ **failed 只印不判**：实测历史失败 ~50，一加判就天天黄灯，会重演 r198「恒定黄灯淹掉真告警」。
+  - ⭐ **本轮第二条（假后端固化错误契约）**：`test/healthcheckSpeed.test.mjs:49`（r218 写的那份假后端）
+    返回的是**根级** `{ waiting, active, failed }` —— 照抄了体检脚本当时的错误读法，
+    ⇒ 那把锁从写下的第一天起就在验一个**不存在的接口契约**，队列的洞因此一直没被发现。
+    已改回真接口嵌套契约，并加一条元判据（真起假后端 → fetch → 断言 `body.stats.waiting` 等）
+    把「假后端契约漂移」本身锁住。
+  - 新锁 `test/healthcheckQueueStats.test.mjs` 5 条：积压 30 ⇒ 判提醒且印 30 / 平时印真值
+    「历史上失败 7 个」/ `available:false` ⇒ 提醒且说人话 / 元判据（探针解析三种状态符号，
+    ⚠️ 后是**两**个空格）/ 反向自检（套 HEAD 旧脚本，积压 30 场景**必须**印「排队 0 个」且判合格）。
+  - ⭐ **反向自检实测**（不看条数看颜色）：旧脚本 `排队 0 个 ✅` vs 新版 `排队 30 个 ⚠️`、
+    历史上失败 `0 → 51`。本轮自己还踩了一个：元判据里的 `SELF_PROBE/SELF_LITERAL` 声明了没用
+    ⇒ lint 报 no-unused-vars，等于**元判据自己变成假自证**，已改成用常量拼出样例行。
+  - ⭐ **六项判据已逐项实测过一遍**（下轮别再翻）：
+    ① 后端在线 `uptimeSec` ✓ ② 接口速度（r218 修）✓ ③ 数据库可读 `j.students` ✓
+    ④ 批改失败任务 `s.failedTasks` ✓ ⑤ 任务队列（**本轮修**）✓ ⑥ 磁盘 `health.disk`（r198 修）✓。
+  - 四道闸：单测 **2022/2022 fail 0**（基线 2016 + 本轮 6）｜lint 3 文件 **0 error 0 warning**｜
+    `dist_nightly_20261007r220` **86s**（main chunk `main-Dg_0tVgF.js` 与 r213–r219 同名 ⇒ 零前端产品码改动）｜
+    preview `5410` + cert_probe 零外联 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+  - 健康：09:05 采样 uptime **575 分钟**、首次 1135ms / 复查 420ms、DB 1112ms、队列 0、磁盘 69210MB。
+    `bootAt 2026-10-06T15:29:23Z` = 北京时间 23:29（r219 收尾推送 `2dbed43`/`5a6eb5a` 的时刻）
+    ⇒ 期间重启过，但**是推代码触发的自动部署，不是故障**（与 r213/r218 同一模式）。
+  - 提案 ㊺（B，本轮最大未做）：体检「判据取不到字段 = 恒绿」已第三命中，建议在六项里统一加
+    「字段没真读到就明说」的自检，别再靠每轮人工逐项 curl 核字段。
+  - **下次触发接 r221**：首选 ㊺（若负责人点头，本赛道可直接做）、㉘（141 题 is_complete 口径拍板）、
+    ㊸（export-retry-pdf 留/删/接线）、㊴（两条渲染路径 60s 超时阈值）、⑲（备份脚本挂不挂定时任务）。
+    另需负责人处理 running/206 的 stale 锁与 Render 部署链路（㉒）。
