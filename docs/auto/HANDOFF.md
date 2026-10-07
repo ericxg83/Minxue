@@ -863,3 +863,11 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
   preview 5441 + render_smoke 8/8 + cert_probe 零外联。
 - 线上 commit 仍停 `5a6eb5a`（㊼ 第三次，本轮零运行时影响，待负责人面板确认）。
 - 下轮 r223：待拍板 ㉘/㊸/㊴+㉚/⑲；观察 ㊼ 继续。
+
+## 第 223 轮（2026-10-07）· 只读巡检：patrol daemon lint 判据陈旧报告假绿（提案㊽，无代码改动）
+
+- `scripts/patrol/patrol.mjs` lint 判据跑 eslint 前不删 `tmp/prune-lint.json`、不查退出码：eslint 没写出报告时
+  会读上一轮旧报告冒充本轮 `lint=0`（假绿家族第八枚候选）。实测文件跨 tick 持久、无人删除。
+- 修法一行：跑前 `rmSync` 旧报告，或校验报告 mtime ≥ 本 tick 起点。daemon 正被并行会话活跃使用 ⇒ 只读不代修。
+- 快闸：2029 = 2026 pass + 3 skipped / 0 fail｜lint 0 error。六项体检全 ✅（本地 :4000）。生产 commit 仍停 `5a6eb5a`（㊼）。
+- 下轮 r224：㉘/㊸/㊴+㉚/⑲ 待拍板；观察 ㊼。
