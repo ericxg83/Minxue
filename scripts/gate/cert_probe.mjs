@@ -1,9 +1,13 @@
 /**
- * 闸门④外联探针（常驻版，r96 收编自 r95 轮临时件）。
+ * 闸门④外联探针（常驻版，r96 收编自 r95 轮临时件；r224 外联判据进退出码）。
  *
  * 逐个访问工作台全部路由 + 移动端首页，收集 requestfailed（含失败原因）与访问过的外部 origin。
  * 用途：① 验隔离产物没有烤入生产 API base（出现 minxue-api.onrender.com = 构建没带
  * VITE_API_URL=/api，r95 实证）；② 验「证书噪声」（ERR_CERT_COMMON_NAME_INVALID 等）的元凶请求。
+ *
+ * ⛔ r224 修的假绿：此前外部 origin 只打印不判，退出码只看 requestfailed —— 烤入生产 base
+ * 的产物外联请求会**成功**（生产在线），零 requestfailed ⇒ exit 0 假绿（r152「有脏即非零退出」
+ * 漏了这一闸）。现在外联 origin 也算脏，与请求失败一并决定退出码。
  *
  * 前置：本机后端已起；BASE 指向带 --outDir 的隔离产物预览。
  * 跑法：node scripts/gate/cert_probe.mjs [BASE]   （默认见 base.mjs 的统一默认端口）
@@ -45,9 +49,15 @@ for (const route of ROUTES) {
 }
 await browser.close()
 
-console.log('════ 访问过的外部 origin（期望为空；若见 minxue-api.onrender.com = 产物烤入了生产 base）════')
-for (const o of origins) if (!o.startsWith(BASE)) console.log('  ' + o)
+// ⛔ 判据用 origin 严格相等而非 startsWith：:54410 会 startsWith(:5441) 假同源（端口边界）。
+const BASE_ORIGIN = new URL(BASE).origin
+const external = [...origins].filter((o) => o !== BASE_ORIGIN)
+
+console.log('════ 访问过的外部 origin（判据：必须为空；若见 minxue-api.onrender.com = 产物烤入了生产 base）════')
+if (!external.length) console.log('  （无）')
+for (const o of external) console.log('  ' + o)
 console.log('\n════ requestfailed 明细 ════')
 if (!failures.length) console.log('  （无失败请求）')
 for (const f of failures) console.log(`  [${f.tag}] ${f.err}\n      ${f.url.slice(0, 140)}`)
-process.exit(failures.length === 0 ? 0 : 1)
+// r152 家族口径：有脏即非零退出。外联 origin 与请求失败都算脏。
+process.exit(external.length === 0 && failures.length === 0 ? 0 : 1)
