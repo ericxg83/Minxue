@@ -275,7 +275,11 @@ if (LOG) {
     const { appendFileSync, mkdirSync } = await import('node:fs')
     mkdirSync(path.dirname(LOG), { recursive: true })
     appendFileSync(LOG, line + '\n', 'utf8')
-    if (!JSON_ONLY) console.log(`\n${C.info} 已记到 ${LOG}`)
+    if (!JSON_ONLY) {
+      console.log(`\n${C.info} 已记到 ${LOG}`)
+      // 采样攒了没人看等于白攒（提案 ㊱）：直接把趋势命令推到负责人眼前，不必等人翻文件。
+      console.log(`${C.info} 想看最近这段是变好还是变差：node scripts/healthTrend.mjs`)
+    }
   } catch (e) {
     console.error(`${C.warn} 写日志失败（不影响体检结果）：${e.message}`)
   }
