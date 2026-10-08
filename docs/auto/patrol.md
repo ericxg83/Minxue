@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R100 — 2026/10/8 15:18:31（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R101 — 2026/10/8 15:28:59（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -832,6 +833,18 @@
 **体检**：tests **2132/0** | lint 0 | build skipped | server=DOWN(ECONNREFUSED)  mobile-dev=DOWN(TimeoutError) | 冒烟 n/a | 脏 3
 
 ⚠️ 发现异常：server 非 ok；mobile-dev 非 ok；脏文件 3 个（ M docs/auto/HANDOFF.md,  M docs/auto/backlog.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M docs/auto/backlog.md
+    -  M scripts/patrol/daemon.mjs
+| 101 | 2026-10-08T07:28:59 | tests=2132/0 | lint=0 | build=skipped | server=ok | dirty=5 |
+
+### R101 — 2026/10/8 15:28:59（daemon 自动报告）
+
+**体检**：tests **2132/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 5
+
+⚠️ 发现异常：脏文件 5 个（ M android/app/build.gradle,  M android/gradle.properties,  M docs/auto/HANDOFF.md…）（需 agent 深修时下轮处理）
+    -  M android/app/build.gradle
+    -  M android/gradle.properties
     -  M docs/auto/HANDOFF.md
     -  M docs/auto/backlog.md
     -  M scripts/patrol/daemon.mjs
