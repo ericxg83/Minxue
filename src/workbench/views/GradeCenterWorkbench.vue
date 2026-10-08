@@ -108,6 +108,7 @@
                 task.pendingCount,
                 task.retryStats?.text,
                 task.statusLabel,
+                task.imageUrl,
                 selectedTask?.key === task.key
               ]"
               :key="task.key"
@@ -123,7 +124,26 @@
               @keydown.up.prevent="focusTaskPrev(task)"
               @keydown.down.prevent="focusTaskNext(task)"
             >
-              <el-avatar :size="38" :src="task.studentAvatar">{{ task.studentName.slice(0, 1) }}</el-avatar>
+              <!-- 试卷小图（2026-10-08，负责人需求「处理任务时能认出卷子」）：
+                   任务名多为「未命名作业 / 日常作业」，同一学生一周几份就撞脸，只能靠时间戳分辨。
+                   小图只做**识别**，点击行为不变（仍走 selectTask → 右侧摘要 → 进复核）。
+                   ⛔ 必须走 ossThumbUrl 出缩略图，不得直接引 imageUrl 原图：
+                      真实上传图 0.4~1.3MB 一张，一屏几十行会把列表拖垮
+                      （本仓 docs/workbench-week3-optimization.md 记过同类教训）。
+                   ⛔ 只取首页一张，不做多页轮播 —— 列表要的是"认得出"，不是"看得完"。
+                   加载失败时给 img 打 is-broken，由 CSS 隐掉它、露出底下的学生头像兜底。 -->
+              <span class="task-lead">
+                <el-avatar class="task-lead__avatar" :size="34" :src="task.studentAvatar">{{ task.studentName.slice(0, 1) }}</el-avatar>
+                <img
+                  v-if="task.imageUrl"
+                  class="task-lead__thumb"
+                  :src="ossThumbUrl(task.imageUrl)"
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  @error="onThumbError"
+                />
+              </span>
               <div class="task-copy">
                 <div class="task-primary">
                   <strong>{{ task.studentName }}</strong>
@@ -290,6 +310,7 @@ import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import { autoRetryState, isSelfHealing } from '../../domain/taskAutoRetry'
+import { ossThumbUrl } from '../../utils/ossThumb'
 import {
   RETRY_PAPER_STATE,
   resolveRetryPaperState,
@@ -310,6 +331,14 @@ const loadError = ref('')
 const selectedTask = ref(null)
 const confirmToast = ref('')
 let toastTimer = null
+
+// 列表小图加载失败（OSS 404 / 网络抖动 / 已删图）→ 直接给 <img> 打类名隐掉它，
+// 露出下面垫着的学生头像。⛔ 刻意不走响应式状态：li 上有 v-memo，新增响应式依赖
+// 若忘了同步进 memo 数组，失败态就不会触发重渲染 —— DOM 级标记不会踩这个坑。
+const onThumbError = (event) => {
+  const el = event?.target
+  if (el && el.classList) el.classList.add('is-broken')
+}
 
 const allowedSource = ['homework', 'retry']
 const allowedStatus = ['active', 'issued', 'failed', 'all', 'completed']
@@ -1032,7 +1061,7 @@ onMounted(loadData)
 }
 .task-item {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--wb-space-3);
   min-height: 60px;
@@ -1055,6 +1084,33 @@ onMounted(loadData)
   font-weight: var(--wb-fw-semibold);
   background: var(--wb-primary-soft);
 }
+
+/* 任务行左侧：试卷首页小图（底下垫学生头像做兜底）。
+   盒子按 A4 竖版比例，object-position 取顶部 —— 卷头（标题/姓名）比卷尾更好认。 */
+.task-lead {
+  position: relative;
+  display: block;
+  width: 42px;
+  height: 56px;
+}
+.task-lead__avatar {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.task-lead__thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+  border: 0.5px solid var(--wb-border-light);
+  border-radius: 6px;
+  background: var(--wb-bg-elevated);
+}
+.task-lead__thumb.is-broken { display: none; }
 
 .task-copy { min-width: 0; }
 .task-primary { display: flex; align-items: center; gap: var(--wb-space-2); }
@@ -1264,8 +1320,12 @@ onMounted(loadData)
   .workspace-grid { display: block; }
   .task-inspector { margin-top: var(--wb-space-3); }
   .task-item {
-    grid-template-columns: 34px minmax(0, 1fr);
+    grid-template-columns: 38px minmax(0, 1fr);
     min-height: 64px;
+  }
+  .task-lead {
+    width: 38px;
+    height: 50px;
   }
   .task-state {
     grid-column: 2;
