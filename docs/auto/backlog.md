@@ -3683,3 +3683,46 @@ npm test 1854/1854｜lint 0e/126w｜生产 36df281 ok（uptime 493s，disk 69GB�
 - **r241-③（B，观察，沿用 r239-②）**：`scripts/frontendHealth.mjs` 与 `scripts/healthcheck.mjs`
   的 `--log` 默认值仍是同一个 `tmp/health.jsonl`（r239 已按 `kind` 分节，不炸了，只是两拨人写一份文件）。
 - 本轮零代码提案（㉘ 141 题口径 / ㊸ export-retry-pdf / ㊴+㉚ 渲染超时 / ⑲ 备份定时任务）保持待拍板，未动。
+
+## 第 242 轮（2026-10-08 09:58–10:14，可开工轮）：反向自检基线「跑完即删」反噬 —— 六条锁空转、全仓 skip 归零（两个 commit，已推送）
+
+- 开工锁 `finished / 241`；`git status` 只有他人 in-flight 的 `scripts/patrol/daemon.mjs`，全程没碰、没带进 commit。
+  本轮零产品代码改动（只动 `test/**`）。
+
+- **系统性缺陷（假绿家族，本轮最贵的一枚）**：体检类回归锁的反向自检都用
+  「`git show <提交>:scripts/healthcheck.mjs > scripts/_rNNN_old_healthcheck.mjs`，跑完即删」当基线。
+  ⛔ 那个「跑完即删」已经反噬 —— **六份探针文件全都不在磁盘上**，对应用例永远走 `t.skip`，
+  而 skip 会被当成"验过"（r215 教训）⇒ 六条反向自检连续多轮空转，一个真洞都验不出来。
+  实测：`npm test` 此前 **8 skipped**；这六条分别是 healthcheckCommit(1) / healthcheckMissingField(2) /
+  frontendHealthVerdict(3) / healthcheckQueueStats(1，其中 healthcheckSpeed 那条算第 6 条，实际 6 处)。
+
+- 交付 `9a47015`（r241-① 收尾）+ `f85e8c6`（主体）：
+  - `test/fixtures/healthcheck-baseline-{9809c30,0557805,25b4386,25b4386-parent,7828fe2-parent}.mjs`
+    与 `frontendhealth-baseline-r237.mjs` = 基线快照作为**正式测试资产**入库；
+  - `test/baselineScriptKit.mjs` 把基线 stage 成能跑的临时目录；
+  - 五个测试文件的 `t.skip` 分支删掉，改为每次真跑；
+  - `healthcheckLocalVersion` 那条另走「字符串手术」路线（不依赖任何基线文件）。
+
+- ⛔ **为什么基线不能用 `_` 前缀存**：eslint 的 `**/_*` 会整段忽略它，且会被下轮巡检当成
+  "一次性排障产物"顺手删掉 ⇒ 又回到 skip。所以必须走 `test/fixtures/`。
+
+- ⭐ **两条自己踩的坑（高复用）**：
+  ① **手术锚点多带一行就把脚本写坏了** —— 把 `if` 收尾 + `else` 收尾 + `try` 收尾一起切掉，
+  语法断掉、stdout 全空，而断言只说「旧版没输出这一项」⇒ 看不出病因。**改完必须让断言把完整 stdout 打出来**；
+  ② **只拷快照不拷相对依赖 ⇒ MODULE_NOT_FOUND** —— 基线 `import './healthDiskState.mjs'`，
+  只把快照放 fixtures 里跑不起来（同样的"没输出这一项"假象）。必须连兄弟文件一起 stage。
+
+- ⭐ **反向自检现在真跑、且洞全部坐实**：9809c30 压根没有「代码版本」这一项；0557805 在子字段消失时
+  印「没有失败也没有卡住的任务」判合格；25b4386 系列在漏字段三场景下全判合格；
+  7828fe2-parent 在冷启动 800ms 时也印 ✅；r237 基线的 `--no-dom + 真白屏` 判「首页正常」exit 0。
+
+- 四道闸：单测 **2118 / 2118 过 / fail 0 / skipped 0**（此前 2110 过 / 8 skipped）｜
+  lint 12 个改动文件零输出（含 fixtures；顺手清掉基线里四处死声明）｜
+  `dist_nightly_20261008r242` **40.08s**（`main-CO0NAGlB.js` 与 r241 同名 = 零前端产品码）｜
+  preview `5495` + cert_probe 零外联 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**，按端口杀清。
+
+- 健康 09:58：uptime **564 分钟**、首响 1396ms / 复查 1039ms（r241 是 61 分钟 ⇒ 中间重启过一次，
+  与推送时刻重合，按 ㉒ 结论是推代码触发的部署）。
+
+- 提案 **r242-①**（B，流程约定）：以后体检类反向自检的基线一律往 `test/fixtures/` 放、随仓库入库，
+  禁止「`git show` 导出 + 跑完即删」；**r242-②**（B，观察）：本轮两个提交未上线，生产仍 `50afeb1`。

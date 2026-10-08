@@ -1163,3 +1163,40 @@ HOURLY 不是 21:30；`scripts/nightlyAudit.mjs`（夜间巡检引擎）**零调
 - **下一轮接 r242**：首选 ㉘（141 题 is_complete 口径拍板，家长「批改题量」少 141 题）、㊸（export-retry-pdf 留/删/接线）、
   ㊴+㉚（两条渲染路径超时，r229 实测阈值 **180s**）、r239-②、r241-①、⑲/㊲/㊵（定每天自动体检 or 备份定时任务）；
   另需负责人处理 Render 面板部署（㉒/㊼）与 running/206 的 stale 锁。
+
+### 第 242 轮（2026-10-08 09:58–10:14，可开工轮）：体检反向自检「跑完即删」反噬，六条锁空转 → 全仓 skip 归零
+
+**做了什么**：体检类回归锁（healthcheckCommit / MissingField / QueueStats / Speed / frontendHealthVerdict）
+的反向自检原本靠「`git show <提交>:scripts/healthcheck.mjs > scripts/_rNNN_old_healthcheck.mjs`、跑完即删」
+当基线。六份探针文件**全部早已不在磁盘上** ⇒ 对应用例永远 `t.skip`，而 skip 会被当成"验过"
+（r215 教训）⇒ 六条自检连续多轮空转 ⇒ 修过的洞有没有真修好，全靠这些锁的时候，它们什么也没验。
+
+**交付**（两个 commit，已推送，零产品代码）：
+- `9a47015` —— r241-① 收尾：`healthcheckLocalVersion` 的反向自检不再依赖 git 导出探针，
+  改成**每次对当前脚本做字符串手术**（把 r235 加的那道本机守卫换回旧写法
+  `behind = comparable && local && local !== short`，local 为 null 时恒假 ⇒ 印 ✅）。
+- `f85e8c6` —— 主体：基线快照作为**正式测试资产**进 `test/fixtures/`（`healthcheck-baseline-*.mjs` 五份 +
+  `frontendhealth-baseline-r237.mjs` 一份），新增 `test/baselineScriptKit.mjs` 负责 stage 成可跑目录，
+  五个测试文件的 `t.skip` 分支删掉改真跑。
+
+**六条洞现在都被真跑复现出来了**（不是推理）：9809c30 压根没有「代码版本」这一项；0557805 在子字段
+消失时判「没有失败也没有卡住的任务」合格；25b4386 系列在漏字段三场景全判合格；7828fe2-parent 在
+冷启动 800ms 时仍印 ✅；r237 基线在 `--no-dom + 真白屏` 下判「首页正常」exit 0。
+
+**四道闸**：单测 **2118 / 2118 过 / fail 0 / skipped 0**（此前 2110 过 + 8 skipped）｜
+lint 12 文件零输出｜`dist_nightly_20261008r242` **40.08s**（main chunk 与 r241 同名 = 零前端产品码）｜
+preview `5495` + cert_probe 零外联 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+
+**下一轮接手请先看这里**：
+
+1. ⛔ **以后给这类锁加基线，一律往 `test/fixtures/` 放、随仓库提交**，别再用「`git show` 导出 + 跑完即删」。
+   也**不要**用 `_` 前缀存：eslint 的 `**/_*` 会整段忽略它，而且会被下轮巡检当成"一次性排障产物"再删一次
+   ⇒ 又会回到 skip。
+2. ⛔ **基线要 stage 成临时目录，连兄弟文件一起带**：基线 `import './healthDiskState.mjs'`，
+   只放快照会 MODULE_NOT_FOUND（红在"旧脚本没输出这一项"，实际是脚本压根没起来）。`stageBaselineScript()` 已经处理。
+3. ⛔ **断言失败时把完整 stdout 打出来**：第一版脚本被手术写坏时 stdout 全空，"没输出这一项"五个字
+   完全看不出病因，靠这行才定位到。
+4. 生产健康 09:58：uptime 564 分钟、首响 1396ms / 复查 1039ms，唯一黄灯仍是「代码版本」（线上 `50afeb1`
+   vs 本地 `57ac8f0`）⇒ ㊼/㉒ 继续未闭环，需负责人去 Render 面板确认两条部署链路。
+5. 下次首选：㉘（141 题 is_complete 口径拍板）、㊸（export-retry-pdf 留/删/接线）、㊴+㉚（渲染超时
+   **r229 实测阈值 180s**，一次改两条渲染路径）、r239-②、⑲/㊲/㊵（定每天自动体检 or 备份定时任务）。
