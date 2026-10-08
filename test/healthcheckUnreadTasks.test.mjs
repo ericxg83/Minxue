@@ -43,7 +43,6 @@ const MUST_NOT_SAY_3 = '等一会儿再看'
 
 /** 造一份「N 份已批完、老师还没看」的 summary（契约抄自真接口 `server/index.js:713-806`）。 */
 function fakeSummary({ unread = 0, failed = 0, inProgress = 0, omit = [] } = {}) {
-  const gone = (k) => omit.includes(k)
   const summary = {
     pendingReview: unread,
     failedTasks: failed,
