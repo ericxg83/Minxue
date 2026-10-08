@@ -16,13 +16,33 @@
 // ⛔ 也**不能**把基线与 `scripts/` 里的相对依赖放成 `_` 前缀文件：eslint 的 `**/_*` 会整段忽略它，
 // 而且下轮巡检会把它当成"一次性排障产物"顺手删掉 ⇒ 又回到 skip。所以基线走 test/fixtures/。
 
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
-/** 基线脚本会 import 的同目录相对依赖（当前基线只有这一个；以后新增基线若换了依赖，这里补） */
-const BASELINE_SIBLINGS = ['healthDiskState.mjs']
+/**
+ * 基线脚本的暂存布局（r248 定）：
+ *   <tmp>/probe/healthcheck.mjs          ← 快照本身
+ *   <tmp>/probe/healthDiskState.mjs      ← `./healthDiskState.mjs`
+ *   <tmp>/server/utils/cjkFontState.js   ← `../server/utils/cjkFontState.js`（**上一级**，不是同级）
+ *
+ * ⛔ r248 实测踩到：只把同目录那一个兄弟文件带进来不够 —— 2026-10-08 之后的基线还
+ *   `import '../server/utils/cjkFontState.js'`，而它是**上一级**路径。
+ *   若照「同级」摆法（<tmp>/server/...）⇒ 解析到 `<tmp>/../server` = 临时目录的父目录 ⇒
+ *   MODULE_NOT_FOUND，现象是「旧脚本什么都没输出」，真病因完全看不出来（与 r242 那条同款）。
+ *   ⇒ 脚本放进 `probe/` 子目录，让「上一级」正好落到临时目录根部，两份依赖各归各位。
+ */
+const SCRIPT_DIRNAME = 'probe'
+
+/**
+ * 基线脚本会 import 的相对依赖（[仓库内路径, stage 后相对路径]）。
+ * 现有那几份旧基线不 import 第二个，多拷一个文件进临时目录无副作用。
+ */
+const BASELINE_SIBLINGS = [
+  ['scripts/healthDiskState.mjs', 'probe/healthDiskState.mjs'],
+  ['server/utils/cjkFontState.js', 'server/utils/cjkFontState.js']
+]
 
 /**
  * 把一份基线快照 stage 成可执行的脚本路径。
@@ -31,12 +51,15 @@ const BASELINE_SIBLINGS = ['healthDiskState.mjs']
  */
 export function stageBaselineScript(fixturePath) {
   const dir = mkdtempSync(join(tmpdir(), 'minxue-baseline-'))
-  for (const name of BASELINE_SIBLINGS) {
-    cpSync(resolve(ROOT, 'scripts', name), join(dir, name))
+  for (const [from, to] of BASELINE_SIBLINGS) {
+    const dest = join(dir, to)
+    mkdirSync(resolve(dest, '..'), { recursive: true })
+    cpSync(resolve(ROOT, from), dest)
   }
-  writeFileSync(join(dir, 'healthcheck.mjs'), readFileSync(fixturePath))
+  const scriptPath = join(dir, SCRIPT_DIRNAME, 'healthcheck.mjs')
+  writeFileSync(scriptPath, readFileSync(fixturePath))
   return {
-    scriptPath: join(dir, 'healthcheck.mjs'),
+    scriptPath,
     cleanup: () => rmSync(dir, { recursive: true, force: true })
   }
 }

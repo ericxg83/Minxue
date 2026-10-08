@@ -35,15 +35,6 @@ function localTimeText(iso) {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** 「多久之前」→ 人话。体检里所有跟时间有关的文案都走这里，别各处自己拼。 */
-function ageText(min) {
-  if (!Number.isFinite(min) || min < 1) return '不到 1 分钟前'
-  if (min < 60) return `${min} 分钟前`
-  const h = Math.floor(min / 60)
-  const m = min % 60
-  return m ? `${h} 小时 ${m} 分钟前` : `${h} 小时前`
-}
-
 /** 本机 .git 的 HEAD 短号；读不到就返回 null（不猜、不报错，后面只印线上号）。 */
 function readLocalHeadShort() {
   try {
@@ -189,38 +180,16 @@ if (health) {
       // 「没有失败也没有卡住的任务」判合格 —— 跟 r221 想堵的假绿同款，只是往下挪了一层。
       // ⇒ 判必须在补默认值**之前**做，才分得出「真没失败」和「字段没了」。
       const tasksMissing = s.pendingTasks === undefined || s.failedTasks === undefined
-      // ⛔ r248（r249-①）：`pendingTasks` **不是**「卡在处理中」的作业，它是**已经批完、
-      //   老师还没点开看**的作业 —— `server/index.js:723` 那句 SQL 写死了
-      //   `status=DONE AND deleted_at IS NULL AND notification_read_at IS NULL`、只取最近 5 份。
-      //   旧版把它当「卡住」并劝「持续卡住就重启后端」⇒ 老师照着重启生产后端，
-      //   真正正在跑的那几份批改（同接口的 `inProgressCount`）会被直接打断，
-      //   而正确动作是去 App 点开看新批完的作业。两个语义被拿反了。
-      //   真·正在批改的份数是 `inProgressCount`（`server/index.js:736` 的 `in_progress_count`）。
-      const unreadDone = typeof s.pendingReview === 'number'
-        ? s.pendingReview
-        : (Array.isArray(s.pendingTasks) ? s.pendingTasks.length : 0)
+      const stuck = (s.pendingTasks || []).length
       const failed = s.failedTasks || 0
       if (tasksMissing) {
-        record('批改失败任务', 'warn', missingFieldDetail('有几份批改失败 / 哪些作业还没点开看'))
+        record('批改失败任务', 'warn', missingFieldDetail('有几份批改失败 / 哪些作业卡住了'))
       } else if (failed > 0) {
         record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
-      } else if (unreadDone > 0) {
-        // 清单只用来算「最早那一份是多久之前批的」（好判断是不是刚到的新作业，不是故障）；
-        // 报数用 `pendingReview`（手机里铃铛那个数字，同一口径），不用被 LIMIT 5 截过的清单长度。
-        const stamps = (s.pendingTasks || [])
-          .map((t) => (t && t.createdAt ? Date.parse(t.createdAt) : NaN))
-          .filter((n) => Number.isFinite(n))
-        const oldest = stamps.length ? ageText(Math.round((Date.now() - Math.min(...stamps)) / 60000)) : null
-        record('批改失败任务', 'warn',
-          `${unreadDone} 份作业已经批完了，你还没点开看${oldest ? `（最早那一份是 ${oldest}批的）` : ''}；` +
-          `这不是卡住，去 App 里点开看就行，不用重启后端`)
+      } else if (stuck > 0) {
+        record('批改失败任务', 'warn', `${stuck} 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`)
       } else {
-        // ⛔ `inProgressCount` 只作补充信息、不参与判定：它在真接口里稳定返回，缺了也只会少一句
-        //   解释，不可能把结论说反 —— 而 r221 那条纪律针对的是「拿不到就永远合格」的判据字段。
-        const running = typeof s.inProgressCount === 'number' && s.inProgressCount > 0
-          ? `；另外现在有 ${s.inProgressCount} 份正在批改（那才是真的在跑，正常）`
-          : ''
-        record('批改失败任务', 'ok', `没有批改失败，也没有没看的新作业${running}`)
+        record('批改失败任务', 'ok', '没有失败也没有卡住的任务')
       }
     }
   } catch (e) {

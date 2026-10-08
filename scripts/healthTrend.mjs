@@ -143,8 +143,11 @@ const groupKeysOf = (list) => {
 }
 const isLocalTarget = (key) => key !== NO_TARGET && (key.includes('127.0.0.1') || key.includes('localhost'))
 /** 机器名说人话：不是本机就只印域名，别甩一长串 URL 给负责人。 */
+// ⛔ r248（r249-③）：旧文案把「没记目标」直接说成「多半是别人不带 --api 跑的那次」——
+//   那是个写死的推论（r198：夸大的告警/推断比没告警更糟）。实测老格式行是脚本自己 r239 之前
+//   写的采样，不一定是谁误跑 ⇒ 只陈述「看不出查的是哪台机器」，让负责人自己判断要不要管。
 const targetLabel = (key) => (key === NO_TARGET
-  ? '目标没记（旧格式采样，多半是别人不带 --api 跑的那次）'
+  ? '目标没记（旧格式采样，看不出查的是哪台机器）'
   : isLocalTarget(key) ? `本机（${key}）` : `线上（${key}）`)
 
 const groupKeys = groupKeysOf(backendSamples)
