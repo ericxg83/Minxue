@@ -19,8 +19,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { stageBaselineScript } from './baselineScriptKit.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
@@ -29,7 +29,10 @@ const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
 // 探针文件由 shell 导出（本机保留，.gitignore 的 `_*` 兜住，不进版本库），
 // 换机器/清过临时树时它会不在 ⇒ 那条**显式 skip 而不是静默 return**（r215 教训），
 // 免得「没验过的锁」被当成通过。
-const OLD_SCRIPT = resolve(ROOT, 'scripts/_r221_old_healthcheck.mjs')
+// ⛔ r242：基线快照随仓库入库（test/fixtures/healthcheck-baseline-<提交>.mjs），
+//    不再 `git show` 现导、跑完即删 —— 那样探针早就被删了，两条反向自检一直 t.skip
+//    （skip 会被当成"验过"，r215 教训）。⛔ 也不存 `_` 前缀：会被当一次性产物再删一次。
+const OLD_SCRIPT = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-25b4386.mjs')
 
 /**
  * 起一个「会故意漏字段」的假后端。
@@ -233,18 +236,17 @@ test('字段真的返回 0（不是没回）⇒ 队列/批改这两项必须照�
 // 基线钉死到 0557805（本轮动手前那个提交，脚本内容 = r221+r229 版，正好没有子字段判据），
 // ⛔ 不能用 HEAD：本轮一提交 HEAD 就变新代码 ⇒ 反向自检永远空转（r214 教训）。
 // 期望：旧版在「整层 summary 在、只是子字段没了」这个场景下**判合格**并印那句听不出毛病的话。
-const OLD_SCRIPT_R233 = resolve(ROOT, 'scripts/_r233_old_healthcheck.mjs')
+const OLD_SCRIPT_R233 = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-0557805.mjs')
 
-test('反向自检（r233）：改动前的基线脚本在子字段消失时判合格（洞确实存在，不是我编的）', async (t) => {
-  if (!existsSync(OLD_SCRIPT_R233)) {
-    t.skip('反向自检探针未就位：先跑 git show 0557805:scripts/healthcheck.mjs > scripts/_r233_old_healthcheck.mjs')
-    return
-  }
+test('反向自检（r233）：改动前的基线脚本在子字段消失时判合格（洞确实存在，不是我编的）', async () => {
+  // ⛔ r242：基线已入库、每次真跑，不再 skip（此前因探针被删一直空转）
   const { server, port } = await startFakeApi({ omit: ['pendingTasks'] })
   let stdout = ''
+  const staged = stageBaselineScript(OLD_SCRIPT_R233)
   try {
-    stdout = (await runHealthcheck(port, OLD_SCRIPT_R233)).stdout
+    stdout = (await runHealthcheck(port, staged.scriptPath)).stdout
   } finally {
+    staged.cleanup()
     server.close()
   }
   const got = itemOf(stdout, '批改失败任务')
@@ -255,30 +257,32 @@ test('反向自检（r233）：改动前的基线脚本在子字段消失时判�
 })
 
 // ── 6. 反向自检：套 r220 的旧脚本，同样三个漏字段场景必须**判合格**（洞是真的）─────
-test('反向自检：r220 的旧脚本在「漏字段」场景下全部判合格（洞确实存在，不是我编的）', async (t) => {
-  // ⛔ skip 后必须 return：t.skip 只标记不中断，探针缺失时继续跑会抛错把 skip 变成 fail（r222 实测）。
-  if (!existsSync(OLD_SCRIPT)) {
-    t.skip('反向自检探针未就位：先跑 git show 25b4386:scripts/healthcheck.mjs > scripts/_r221_old_healthcheck.mjs')
-    return
-  }
+test('反向自检：r220 的旧脚本在「漏字段」场景下全部判合格（洞确实存在，不是我编的）', async () => {
+  // ⛔ r242：基线已入库，每次真跑，不再 skip（同上，此前因探针被删一直空转）
   // 三个场景逐条验，逐条点名 —— 只统计「红了几条」会张冠李戴（r213 教训）。
   const scenarios = [
     { omit: ['queueStats'], item: SELF_PROBE, mustMatch: /排队 0 个/ },
     { omit: ['summary'], item: '批改失败任务', mustMatch: /没有失败也没有卡住的任务/ },
     { omit: ['uptimeSec'], item: '后端在线', mustMatch: /已运行 \? 分钟/ }
   ]
-  for (const { omit, item, mustMatch } of scenarios) {
-    const { server, port } = await startFakeApi({ omit })
-    let stdout = ''
-    try {
-      stdout = (await runHealthcheck(port, OLD_SCRIPT)).stdout
-    } finally {
-      server.close()
+  const staged = stageBaselineScript(OLD_SCRIPT)
+  try {
+    for (const { omit, item, mustMatch } of scenarios) {
+      const { server, port } = await startFakeApi({ omit })
+      let stdout = ''
+      try {
+        stdout = (await runHealthcheck(port, staged.scriptPath)).stdout
+      } finally {
+        server.close()
+      }
+      const got = itemOf(stdout, item)
+      // ⛔ r242：打完整输出 —— 旧脚本因缺相对依赖而没起来时 stdout 全空，光说「没输出这一项」看不出病因
+      assert.ok(got, `旧脚本没输出「${item}」，完整输出：${stdout || '(stdout 为空，旧脚本没跑起来)'}`)
+      assert.equal(got.status, 'ok', `旧版「${item}」竟然也判提醒（${got.line}）⇒ 反向自检失效`)
+      assert.match(got.detail, mustMatch,
+        `旧版「${item}」的场景对不上（${got.detail}）⇒ 这条反向自检验的不是那个洞`)
     }
-    const got = itemOf(stdout, item)
-    assert.ok(got, `旧脚本没输出「${item}」`)
-    assert.equal(got.status, 'ok', `旧版「${item}」竟然也判提醒（${got.line}）⇒ 反向自检失效`)
-    assert.match(got.detail, mustMatch,
-      `旧版「${item}」的场景对不上（${got.detail}）⇒ 这条反向自检验的不是那个洞`)
+  } finally {
+    staged.cleanup()
   }
 })

@@ -19,12 +19,16 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { stageBaselineScript } from './baselineScriptKit.mjs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
-const OLD_SCRIPT = resolve(ROOT, 'scripts/_r218_old_healthcheck.mjs')
+// ⛔ r242：基线快照随仓库入库（test/fixtures/healthcheck-baseline-7828fe2-parent.mjs = 7828fe2~1），
+//    不再 `git show` 现导、跑完即删 —— 探针早被删了 ⇒ 这条反向自检一直 t.skip，
+//    而 skip 会被当成"验过"（r215 教训）。⛔ 也不存 `_` 前缀：会被下轮巡检当一次性产物再删一次。
+const OLD_SCRIPT = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-7828fe2-parent.mjs')
 
 /** 起一个假后端：/api/health 只在**第一次**命中时延迟（模拟冷启动），其余秒回。 */
 function buildFakeApi({ healthDelayMs = 0, recheckDelayMs = 0 } = {}) {
@@ -156,19 +160,16 @@ test('只有复查那一次慢 ⇒ 接口速度仍判提醒（判据是取最慢
 })
 
 // ── 4. 反向自检：套修复前的旧脚本，冷启动慢场景必须判红 ─────────────────────────
-test('反向自检：修复前的旧脚本在「冷启动慢」场景下判 ok（洞是真的，不是我编的）', async (t) => {
-  // ⛔ 探针缺失必须显式 skip（r215：skip 不是 return）—— 静默 return 等于「没验过的锁也判通过」。
-  // ⛔ skip 后必须 return：t.skip 只标记不中断，继续跑会抛错把 skip 变成 fail（r222 实测）。
+test('反向自检：修复前的旧脚本在「冷启动慢」场景下判 ok（洞是真的，不是我编的）', async () => {
+  // ⛔ r242：基线已入库、每次真跑，不再 skip（此前因探针被删一直空转）。
   // ⛔ 基线钉死到具体提交而不是 HEAD：HEAD 会随提交漂移，导出的「旧脚本」会变成新代码（r221 教训）。
-  if (!existsSync(OLD_SCRIPT)) {
-    t.skip('反向自检探针未就位：先跑 git show 7828fe2~1:scripts/healthcheck.mjs > scripts/_r218_old_healthcheck.mjs')
-    return
-  }
   const { server, port } = await startFakeApi({ healthDelayMs: 800 })
   let stdout = ''
+  const staged = stageBaselineScript(OLD_SCRIPT)
   try {
-    stdout = (await runHealthcheck(port, OLD_SCRIPT)).stdout
+    stdout = (await runHealthcheck(port, staged.scriptPath)).stdout
   } finally {
+    staged.cleanup()
     server.close() // ⛔ 必须关：端口/句柄不关会让测试进程一直挂着不退出（r218 实测）
   }
   const speed = itemOf(stdout, SELF_PROBE)

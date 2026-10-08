@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
-import { existsSync } from 'node:fs'
+import { stageBaselineScript } from './baselineScriptKit.mjs'
 
 /**
  * 反向自检探针（⛔ 不能 spawnSync 调 git，Windows 上EBUSY，r220 前的既有套路）：
@@ -29,7 +29,11 @@ import { existsSync } from 'node:fs'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
-const OLD_SCRIPT = resolve(ROOT, 'scripts/_r220_old_healthcheck.mjs') // 由 shell 从 HEAD 导出，跑完即删
+// ⛔ r242：基线快照随仓库入库（test/fixtures/healthcheck-baseline-25b4386-parent.mjs = 25b4386~1），
+//    不再「由 shell 从 HEAD 导出、跑完即删」—— 那次导出的文件早被删了，这条自检一直 t.skip，
+//    而 skip 会被当成"验过"（r215 教训）⇒ 那枚队列假绿灯因此一直没人发现。
+//    ⛔ 也不存 `_` 前缀：eslint 的 `**/_*` 会整段忽略它，还会被下轮巡检当一次性产物删掉。
+const OLD_SCRIPT = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-25b4386-parent.mjs')
 
 const ITEM = '任务队列'
 
@@ -159,18 +163,16 @@ test('队列服务连不上（available=false）⇒ 必须判提醒，光看排�
 })
 
 // ── 4. 反向自检：套修复前的旧脚本，同样的积压场景必须判红（洞是真的，不是我编的）───────
-test('反向自检：修复前的旧脚本在「积压 30 个」场景下判合格且印 0 个（洞确实存在）', async (t) => {
+test('反向自检：修复前的旧脚本在「积压 30 个」场景下判合格且印 0 个（洞确实存在）', async () => {
   // ⛔ 基线钉死到具体提交（r221 教训）：HEAD 随提交漂移 ⇒ 导出的「旧脚本」其实是新代码，反向自检假红。
-  // ⛔ skip 后必须 return：t.skip 只标记不中断，探针缺失时继续跑会抛错把 skip 变成 fail（r222 实测）。
-  if (!existsSync(OLD_SCRIPT)) {
-    t.skip('反向自检探针未就位：先跑 git show 25b4386~1:scripts/healthcheck.mjs > scripts/_r220_old_healthcheck.mjs')
-    return
-  }
+  // ⛔ r242：基线随仓库入库，每次真跑、不再 skip（此前因探针被删一直空转）。
   const { server, port } = await startFakeApi({ queue: { waiting: 30, active: 0, failed: 0, available: true } })
   let stdout = ''
+  const staged = stageBaselineScript(OLD_SCRIPT)
   try {
-    stdout = (await runHealthcheck(port, OLD_SCRIPT)).stdout
+    stdout = (await runHealthcheck(port, staged.scriptPath)).stdout
   } finally {
+    staged.cleanup()
     server.close()
   }
   const item = queueItem(stdout)

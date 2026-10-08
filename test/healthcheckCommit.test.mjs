@@ -21,12 +21,18 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const ROOT = resolve(import.meta.dirname, '..')
 const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
-const OLD_SCRIPT = resolve(ROOT, 'scripts/_r229_old_healthcheck.mjs')
+// ⛔ r242：基线快照改为**随仓库提交的测试资产**（test/fixtures/healthcheck-baseline-*.mjs），
+//    不再用 `git show 9809c30:... > scripts/_r229_old_healthcheck.mjs` 现导、跑完即删。
+//    那个做法的后果已经发生：探针文件早就被删了 ⇒ 这条反向自检一直 `t.skip`，
+//    而 skip 会被当成"验过"（r215 教训）⇒ 连续多轮空转（假绿家族）。
+//    ⛔ 也**不能**用 `_` 前缀存：eslint 的 `**/_*` 会整段忽略它，还会被下轮巡检当成
+//    "一次性排障产物"顺手删掉 ⇒ 又回到 skip。所以这里用正经的 fixtures 目录。
+const OLD_SCRIPT = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-9809c30.mjs')
 const BASELINE_COMMIT = '9809c30'
 
 const SELF_PROBE = '代码版本'
@@ -175,12 +181,9 @@ test('本机后端那种 non-sha 占位（实测 commit="local"）⇒ 照实印�
 })
 
 // ── 反向自检：旧版（基线提交 9809c30）在「线上比本地旧」的场景下，根本没有这一项 ──
-test(`反向自检：r228 旧脚本（基线 ${BASELINE_COMMIT}）压根不报这件事`, async (t) => {
-  if (!existsSync(OLD_SCRIPT)) {
-    // ⛔ 探针不在就显式 skip，不是静默 return（r215 教训：没验过的锁被当成通过）
-    t.skip(`基线探针 ${OLD_SCRIPT} 不在（导出命令：git show ${BASELINE_COMMIT}:scripts/healthcheck.mjs > scripts/_r229_old_healthcheck.mjs）`)
-    return
-  }
+test(`反向自检：r228 旧脚本（基线 ${BASELINE_COMMIT}）压根不报这件事`, async () => {
+  // ⛔ r242：基线快照已随仓库入库（test/fixtures/），这条自检每次都真跑 —— 不再 skip
+  //    （skip 会被当成"验过"，r215 教训；此前一直 skip 是基线文件被当成一次性产物删掉的后果）。
   const { server, port } = await startFakeApi({ commit: '0deadbe', bootAt: '2026-10-06T15:29:23.693Z' })
   try {
     const { stdout } = await runHealthcheck(port, OLD_SCRIPT)

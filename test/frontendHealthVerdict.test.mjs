@@ -11,12 +11,17 @@
 // ⛔ 不用 spawnSync 调 git（Windows 稳定 EBUSY）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { decideFrontendVerdict } from '../scripts/frontendHealth.mjs';
 
-const OLD_SNIPPET = process.env.R237_OLD_SNIPPET || '';
-const hasBaseline = Boolean(OLD_SNIPPET) && existsSync(OLD_SNIPPET);
+// ⛔ r242：基线改成**随仓库入库**的测试资产（test/fixtures/frontendhealth-baseline-r237.mjs）。
+//    旧做法要先用探针脚本把它导出到一个临时文件、再用环境变量 R237_OLD_SNIPPET 指过去 ——
+//    那个文件早就被删了 ⇒ 下面三条反向自检一直 t.skip，skip 会被当成"验过"（r215 教训），
+//    连续多轮空转（假绿家族）。⛔ 也**不能**用 `_` 前缀存：会被下轮巡检当一次性产物再删一次。
+const OLD_SNIPPET = resolve(import.meta.dirname, 'fixtures', 'frontendhealth-baseline-r237.mjs');
+const hasBaseline = true;
 
 const BLANK_TRUE = { blank: true, rootChildren: 0, rootHTMLLen: 0, textLen: 0 };
 const BLANK_FALSE = { blank: false, rootChildren: 12, rootHTMLLen: 9000, textLen: 300 };
