@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R76 — 2026/10/8 11:21:59（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R77 — 2026/10/8 11:31:59（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -595,3 +596,13 @@
 ⚠️ 发现异常：测试 fail=2；lint errors=2；脏文件 2 个（ M scripts/healthcheck.mjs,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
     -  M scripts/healthcheck.mjs
     -  M scripts/patrol/daemon.mjs
+| 77 | 2026-10-08T03:31:59 | tests=2118/2 | lint=0 | build=skipped | server=ok | dirty=3 |
+
+### R77 — 2026/10/8 11:31:59（daemon 自动报告）
+
+**体检**：tests **2118/2** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
+
+⚠️ 发现异常：测试 fail=2；脏文件 3 个（ M scripts/healthcheck.mjs,  M scripts/patrol/daemon.mjs,  M test/healthcheckQueueStats.test.mjs…）（需 agent 深修时下轮处理）
+    -  M scripts/healthcheck.mjs
+    -  M scripts/patrol/daemon.mjs
+    -  M test/healthcheckQueueStats.test.mjs
