@@ -15,7 +15,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import {
@@ -205,6 +205,9 @@ test('备份核心表覆盖面没被偷偷缩小（至少含学生/作业/错题
   for (const t of ['students', 'tasks', 'wrong_questions', 'questions', 'knowledge_mastery']) {
     assert.ok(TABLES.includes(t), `核心表漏备份：${t}`)
   }
-  assert.ok(existsSync(resolve(ROOT, BACKUP_ROOT)) || true, 'BACKUP_ROOT 常量必须存在')
+  // r246：原写法是 `assert.ok(existsSync(resolve(ROOT, BACKUP_ROOT)) || true, ...)` ——
+  //   `|| true` 让整条断言恒真 ⇒ 一次都没查过（目录不存在时它照样绿）。
+  //   判据改成真正会失败的那种：常量本身必须是非空字符串（下一行再管它的形状）。
+  assert.ok(typeof BACKUP_ROOT === 'string' && BACKUP_ROOT.length > 0, 'BACKUP_ROOT 必须是非空字符串常量')
   assert.ok(BACKUP_ROOT.startsWith('D:/'), '备份根目录必须是本地磁盘常量（当前常量 changed）')
 })

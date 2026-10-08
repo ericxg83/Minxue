@@ -16,7 +16,7 @@ const ofType = (cs, type) => cs.filter(c => c.type === type)
 test('用户截图题：BD⊥AC 于点 D + DE⊥AB 于点 E，且结论式 BD·DE=BE·CD 不被抽成等长', () => {
   const content = '（2021·江干区模拟）如图，在△ABC中，BD⊥AC于点D，DE⊥AB于点E，BD·DE=BE·CD。（1）求证：△BCD∽△BDE；（2）若BC=10，AD=6，求AE的长。'
   const s = structureWith(['A', 'B', 'C', 'D', 'E'], [['A','B'],['B','C'],['C','A'],['B','D'],['D','E']])
-  const { constraints, dropped } = extractConstraints(content, s)
+  const { constraints } = extractConstraints(content, s)
 
   const perps = ofType(constraints, 'perpendicular')
   assert.equal(perps.length, 2, '应抽出两条垂直')
@@ -24,9 +24,12 @@ test('用户截图题：BD⊥AC 于点 D + DE⊥AB 于点 E，且结论式 BD·D
   assert.equal(feet.length, 2, '应抽出两个垂足')
   // 关键：结论式不能变成 equal_length，否则图会被拧成"已证"的样子
   assert.equal(hasType(constraints, 'equal_length'), false, 'BD·DE=BE·CD 是结论不是条件')
-  // 同时确认它也没被误读成别的硬约束
-  const eqDropped = dropped.some(d => d.raw.includes('BD·DE'))
-  assert.ok(!eqDropped || true, '结论式可被丢弃或忽略，但不能进约束集')
+  // 同时确认它也没被误读成别的硬约束：
+  // r246：原写法 `assert.ok(!eqDropped || true, ...)` 恒真 ⇒ 这一句一次都没查过。
+  //   丢进 dropped（放弃抽取）是可以的，**进 constraints（当成硬约束）才是缺陷**，
+  //   所以判据直接盯 constraints 的 raw，而不是去问 dropped 里有没有它。
+  const leaked = constraints.filter((c) => String(c.raw || '').includes('BD·DE'))
+  assert.equal(leaked.length, 0, `结论式 BD·DE=BE·CD 不得进任何硬约束，实际漏进 ${leaked.length} 条`)
 })
 
 test('DE∥BC 比例题：平行被抽出，但无配图指代时由 figureGate 拦（这里只测抽取）', () => {

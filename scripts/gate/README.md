@@ -37,6 +37,10 @@ BASE=http://127.0.0.1:5227 node scripts/gate/render_smoke.mjs  # 再跑：双端
 ```
 
 - `cert_probe` 若发现 `minxue-api.onrender.com` ⇒ 产物烤入了生产 base，重建（步骤 2）。
+  ⚠️ 判据自 r246 起按**资源类型**分流（判据在 `scripts/certProbeKit.mjs`，刻意与 `gate/` 同级）：只有 `fetch/xhr/script…` 这类
+  **数据/脚本外联**才算脏；**图片/字体/媒体**（学生作业图存 OSS，前端 `<img>` 直拉）算正常业务，
+  照旧打印但不判红。r244 加了批改中心 OSS 小图后，旧口径（外部 origin 必须为空）会让探针**恒定 exit 1**
+  —— 恒红的闸和恒绿的闸一样没人看（r198「常量黄灯」同族）。类型读不出来仍算脏（fail-closed）。
 - 服务对象验明：curl 新产物 main chunk 应回 `Content-Type: text/javascript`；
   不存在的路径回 200 + `text/html` 是 SPA fallback（假 200，别被骗）。
 - Windows 杀不净的 preview 子进程：`netstat -ano | grep :PORT` 找 PID → `taskkill //F //PID`。

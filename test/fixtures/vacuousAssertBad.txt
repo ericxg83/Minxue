@@ -1,0 +1,12 @@
+assert.ok(existsSync(resolve(ROOT, BACKUP_ROOT)) || true, 'BACKUP_ROOT 常量必须存在')
+assert.ok(!eqDropped || true, '结论式可被丢弃或忽略，但不能进约束集')
+assert.ok(result.total || 1, '总数兜底成 1')
+assert.ok(true)
+assert(true, '裸 assert 的恒真形态')
+assert.ok(list.length === 0 || [])
+assert.ok(name || '未命名')
+assert.ok(
+  rows.every((r) => r.ok)
+  || true,
+  '跨行写法同样要抓到'
+)

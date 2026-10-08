@@ -1,0 +1,8 @@
+assert.ok(result.length > 0, '必须有结果')
+assert.equal(a, b, '用 equal 的恒真形态各不相同，本判据刻意不碰')
+assert.ok(items.some((i) => i.flag) || items.length === 0, '空集合也算通过')
+assert.ok(count || fallbackVar, '兜底的是变量，不是恒真字面量')
+assert.ok(src.includes("|| true"), '文案里出现这个写法不算违规')
+assert.ok(count >= 1 && !err, '普通条件')
+assert.ok(typeof name === 'string' && name.length > 0)
+assert.ok(!dropped.some((d) => d.raw.includes('BD')), '结论式不得进约束集（改成真正会失败的写法）')
