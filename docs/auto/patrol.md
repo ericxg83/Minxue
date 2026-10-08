@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R110 — 2026/10/8 19:52:36（✅ 全绿）**
+> ⏱ **最近心跳：R111 — 2026/10/8 20:02:42（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -974,3 +975,20 @@
     - ?? test/fixtures/vacuousAssertGood.txt
     - ?? "\345\217\252\347\225\231\347\264\242\345\274\225+\347\241\254\350\247\204\345\210\231\343\200\202\347\273\206\350\212\202\345\244\226\351\223\276"
     - ?? "\346\226\207\346\234\254\351\223\276\351\207\215\350\267\221"
+| 111 | 2026-10-08T12:02:42 | tests=2153/1 | lint=0 | build=skipped | server=ok | dirty=18 |
+
+### R111 — 2026/10/8 20:02:42（daemon 自动报告）
+
+**体检**：tests **2153/1** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 18
+
+⚠️ 发现异常：测试 fail=1；脏文件 18 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M docs/auto/backlog.md…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M docs/auto/backlog.md
+    -  M scripts/gate/README.md
+    -  M scripts/gate/cert_probe.mjs
+    -  M scripts/patrol/daemon.mjs
+    -  M test/dailyBackupResult.test.mjs
+    -  M test/geomConstraintExtract.test.mjs
+    - ?? scripts/gate/certProbeKit.mjs
+    - ?? test/assertionVacuity.test.mjs
