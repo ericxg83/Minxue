@@ -7,12 +7,13 @@
  *
  * 方案：图片存在阿里云 OSS（`OSS_CDN_DOMAIN=https://minxue-app-oss.oss-cn-shanghai.aliyuncs.com`），
  * 直接给 URL 追加 `?x-oss-process=image/resize,w_240` 让 OSS 端出小图 —— **零后端改动、零额外存储**。
- * 实测（`server/_probe_oss_thumb.mjs`，2026-10-08，真实任务图，完整 GET 比对字节数）：
+ * 实测（`server/scripts/probeOssThumb.mjs`，2026-10-08，真实任务图，完整 GET 比对字节数）：
  *   1284KB → 15.0KB（85.9x）｜1112KB → 10.4KB（106.5x）｜392KB → 15.7KB（25.6x），三张均 200 + JPEG magic。
  *
  * ⛔ 踩过的坑：**判定「参数生不生效」不能用 HEAD 请求** —— OSS 对 HEAD 不应用 x-oss-process，
  * 会返回原图 content-length，据此会得出「参数没生效」的错误结论（探针第一版就这么误判过）。
- * 必须完整 GET 比字节数。回归测试 `test/ossThumbUrl.test.mjs` 锁这条判定纪律。
+ * 必须完整 GET 比字节数。换桶 / 换域名 / 怀疑小图没生效时跑 `node scripts/probeOssThumb.mjs` 定性。
+ * 回归测试 `test/ossThumbUrl.test.mjs` 锁纯函数判据边界。
  *
  * 设计取舍：
  * - **只对 OSS 域名 + 图片扩展名生效**，其余 URL（其他 CDN、data:/blob:、PDF）原样返回。
