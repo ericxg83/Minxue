@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R92 — 2026/10/8 14:02:01（✅ 全绿）**
+> ⏱ **最近心跳：R93 — 2026/10/8 14:12:36（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -748,3 +749,17 @@
 ⚠️ 发现异常：脏文件 2 个（ M docs/auto/backlog.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
     -  M docs/auto/backlog.md
     -  M scripts/patrol/daemon.mjs
+| 93 | 2026-10-08T06:12:36 | tests=2132/0 | lint=0 | build=FAIL | server=ok | dirty=7 |
+
+### R93 — 2026/10/8 14:12:36（daemon 自动报告）
+
+**体检**：tests **2132/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 7
+
+⚠️ 发现异常：build=FAIL；脏文件 7 个（ M docs/auto/backlog.md,  M scripts/patrol/daemon.mjs,  M src/workbench/views/GradeCenterWorkbench.vue…）（需 agent 深修时下轮处理）
+    -  M docs/auto/backlog.md
+    -  M scripts/patrol/daemon.mjs
+    -  M src/workbench/views/GradeCenterWorkbench.vue
+    - ?? src/utils/ossThumb.js
+    - ?? test/ossThumbUrl.test.mjs
+    - ?? test/workbenchTaskThumb.test.mjs
+    - ?? test/workbenchTaskThumbKit.mjs
