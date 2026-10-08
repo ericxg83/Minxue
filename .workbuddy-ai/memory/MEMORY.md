@@ -26,6 +26,10 @@
 - ⛔ 批改/识别唯一在服务端（worker processSlimGrading）；前端禁直调 AI（noClientDirectAI 锁）；QuotaBanner 的 modelscope 是标签键不是调用。
 - ⛔ 冒烟双闸门：构建 `MSYS_NO_PATHCONV=1 VITE_API_URL=/api vite build --outDir …`（防烤入生产 base/MSYS 改写）；preview 必带 --outDir 并 curl 验对象。→ frontend-verify-discipline
 - ⛔ 门禁/体检脚本读「固定产物文件」（如 `tmp/prune-lint.json`）必须先删旧 + 只认本轮（mtime ≥ 本轮 startedAt）——这类文件跨 tick 持久，命令没写出报告（超时/配置错/二进制缺失）时旧报告会顶替 ⇒ 假 `lint=0`；⛔ 别拿退出码判「跑成了没」（eslint 有错误本来就 exit 1），能分出来的是「有没有写出新报告」。实现见 `scripts/patrol/lintReportKit.mjs` + 锁 `test/patrolLintFreshness.test.mjs`。
+- ⛔ 任务/答卷图的列表缩略图唯一入口 `src/utils/ossThumb.js`（给 OSS URL 追加 `?x-oss-process=image/resize,w_240`，实测 0.4~1.3MB → 10~16KB，**零后端改动**）；列表行⛔ 禁引 `imageUrl` 原图。判「OSS 参数生不生效」**禁用 HEAD**（HEAD 不应用处理参数、返回原图长度 ⇒ 会误判「没生效」），必须完整 GET 比字节数；换桶/换域名跑 `server/scripts/probeOssThumb.mjs`。
+- ⛔ `v-memo` 行上新增任何响应式依赖，必须同步进 memo 数组（漏了 = 静默不更新，不报错）；需要「失败即改样式」时用 DOM 级 `classList.add`，别引入响应式状态。
+- ⛔ 本机 `esbuild` 偶发崩（`fatal error: winmm.dll not found`，**`--version` 即崩**）⇒ `vite build`/`vite dev` 全废，与 diff 无关。`npm rebuild esbuild`/换目录/跳出沙箱/改 TEMP 均无效。此时闸 3/闸 4 走替代路径（`node _check_sfc.mjs` 真编译 / `@vue/compiler-sfc` 编译后渲染函数断言 `$setup.xxx` 绑定 / 真浏览器单点验证），且**提交说明里必须写明闸 3/闸 4 未执行**。
+- ⛔ Playwright `page.setContent()` 的页面 origin 是 `null` ⇒ 跨域 `fetch()` 必被 CORS 拦（验「图能否从 OSS 拉到」会全红假结论）。图片用 `<img>`+`naturalWidth`；字节数在 Node 侧量。
 
 ## 2. 前端验证纪律
 - ⛔ 源码级回归锁必须反向自检（旧版上判红；新锁可删除前先跑，无需导出旧版）。
