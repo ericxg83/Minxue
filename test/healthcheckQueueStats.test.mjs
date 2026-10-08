@@ -16,7 +16,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { resolve } from 'node:path'
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { stageBaselineScript } from './baselineScriptKit.mjs'
 
 /**
@@ -36,6 +38,57 @@ const SCRIPT = resolve(ROOT, 'scripts/healthcheck.mjs')
 const OLD_SCRIPT = resolve(ROOT, 'test', 'fixtures', 'healthcheck-baseline-25b4386-parent.mjs')
 
 const ITEM = '任务队列'
+
+// ── r243 反向自检的「手术刀」：把真话措辞手术回旧版那句假安慰（⛔ 不调 git，不依赖基线文件）──
+/** 真话措辞（体检脚本里的唯一实现） */
+const FAILED_HONEST_TAIL = '（这几个不会自己重判、也不会自己消掉，会一直留在这个数里）'
+/**
+ * ⛔ 手术锚点必须是**整行 ternary**，光换尾巴不够（r243 实测踩到）：
+ *    新措辞 = `、判不出来且不会再重试的 ${f} 个` + 尾巴，
+ *    只把尾巴换成旧那句的话，前缀「、判不出来且不会再重试的 7 个」还留着
+ *    ⇒ 换完的输出**同时**含新措辞和「会定期清理」，反向自检打红的是前缀那一句，
+ *    看着像「手术无效」，其实根本原因是**锚点选短了**，白白再绕一轮。
+ */
+const NEW_FAILED_TERNARY_LINE = '      ? `、判不出来且不会再重试的 ${f} 个` + FAILED_HONEST_TAIL'
+/** 旧措辞：换上去之后，上面那几条断言必须立刻判红 —— 那才是这个洞真实存在过的证据 */
+const OLD_FAILED_TERNARY_LINE = '      ? `、历史上失败 ${f} 个（失败数会定期清理，看趋势不看绝对值）`'
+
+/**
+ * 造一份「旧措辞」的体检脚本。
+ * ⛔ 替换片段用常量承载（含反引号 / `${f}`），不手工往长字面量里塞 —— 一塞就拼错，而断言看不出来。
+ */
+function buildOldQuadrantText() {
+  const src = readFileSync(SCRIPT, 'utf8')
+  // ⛔ 先自证锚点还在：措辞被改过的话，这条反向自检就是跟空气打（永远判红，看不出是锁坏了还是洞还在）
+  assert.ok(src.includes(NEW_FAILED_TERNARY_LINE), `手术锚点不在体检脚本里 ⇒ 措辞被改过，这条锁是空转`)
+  const out = src.replace(NEW_FAILED_TERNARY_LINE, OLD_FAILED_TERNARY_LINE)
+  assert.ok(out !== src, '手术后的脚本与原文一模一样 ⇒ 手术根本没生效，这条反向自检是假验')
+  assert.ok(out.includes(OLD_FAILED_TERNARY_LINE), '旧措辞没换进去 ⇒ 反向自检验了个假目标')
+  assert.ok(!out.includes(NEW_FAILED_TERNARY_LINE), '锚点只换掉一半（新措辞还留着）⇒ 换完的输出不是旧版')
+  return out
+}
+
+/**
+ * 把任意脚本源码 stage 成能独立跑的临时目录。
+ * ⛔ 相对依赖必须一起带（r241 踩过）：现在 healthcheck 除了 `./healthDiskState.mjs`，
+ * 还 import `../server/utils/cjkFontState.js` —— 只拷一个文件会 MODULE_NOT_FOUND，
+ * 表现和「旧脚本没输出这一项」一模一样，看不出真病因。
+ */
+function stageScriptVariant(sourceText) {
+  const dir = mkdtempSync(join(tmpdir(), 'minxue-r243-'))
+  // ⛔ 布局必须和仓库一致：`scripts/healthcheck.mjs` 在 `<dir>/scripts/` 下 ——
+  //    脚本里 `../server/utils/cjkFontState.js` 是按 `dirname(script)/..` 解析的，
+  //    直接把文件平铺在 `<dir>/` 会让 `..` 跳到 Temp 上一级 ⇒ MODULE_NOT_FOUND（r241/r243 实测）。
+  mkdirSync(resolve(dir, 'scripts'), { recursive: true })
+  cpSync(resolve(ROOT, 'scripts', 'healthDiskState.mjs'), resolve(dir, 'scripts', 'healthDiskState.mjs'))
+  mkdirSync(resolve(dir, 'server', 'utils'), { recursive: true })
+  cpSync(resolve(ROOT, 'server', 'utils'), resolve(dir, 'server', 'utils'), { recursive: true })
+  writeFileSync(resolve(dir, 'scripts', 'healthcheck.mjs'), sourceText)
+  return {
+    scriptPath: resolve(dir, 'scripts', 'healthcheck.mjs'),
+    cleanup: () => rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 /**
  * 起一个假后端。/api/queue/stats 的返回结构与**真接口保持一致**的根键 `stats`
@@ -132,18 +185,69 @@ test('队列真的积压 30 个 ⇒ 「任务队列」必须判提醒，且数�
 })
 
 // ── 2. 平时 ⇒ 合格，但数字必须是真值（旧版把 failed 印成 0，这条专抓它）────────────
-test('平时队列空闲 ⇒ 判合格，并且「历史上失败」那条必须印真值而不是恒 0', async () => {
+test('平时队列空闲 ⇒ 判合格，并且失败那条必须印真值、不许再拿「会定期清理」哄人', async () => {
   const { server, port } = await startFakeApi({ queue: { waiting: 0, active: 0, failed: 7, available: true } })
   try {
     const { stdout } = await runHealthcheck(port)
     const item = queueItem(stdout)
     assert.ok(item, `体检没输出「${ITEM}」这一项`)
     assert.equal(item.status, 'ok', `平时被测成告警：${item.line}`)
-    assert.match(item.detail, /历史上失败 7 个/,
-      `数字丢了（${item.detail}）—— 旧版因为读不到 stats 会印「历史上失败 0 个」`)
+    assert.match(item.detail, /判不出来且不会再重试的 7 个/,
+      `数字丢了（${item.detail}）—— 旧版因为读不到 stats 会印成 0 个`)
+    // ⛔ 假话必须消失：这 7 个系统既不会重判也不会消掉（全仓没有任何清理 failed 任务的实现），
+    //    说「会定期清理」就是哄人（r198：夸大的提示比没提示更糟）。
+    assert.ok(!item.detail.includes('会定期清理'), `还在说会自己清理（${item.detail}）`)
+    assert.ok(!item.detail.includes('看趋势不看绝对值'),
+      `「看趋势不看绝对值」这句话在这一行兑现不了（${item.detail}），趋势要去跑 healthTrend.mjs`)
+    assert.ok(item.detail.includes('不会自己重判'), `没说清不会自己重判（${item.detail}）`)
+    assert.ok(item.detail.includes('不会自己消掉'), `没说清不会自己消掉（${item.detail}）`)
   } finally {
     server.close()
   }
+})
+
+// ⛔ r243 反向自检（不调 git、不依赖基线文件 —— r242 定下的规矩）：
+//    把上面那句真话**手术回旧措辞**（换上「（失败数会定期清理，看趋势不看绝对值）」），
+//    同一场景必须立刻判红 ⇒ 证明这几条断言咬得住，不是摆设。
+test('反向自检：换回旧措辞（会说「会定期清理」）⇒ 上面那几条必须判红', async () => {
+  const { server, port } = await startFakeApi({ queue: { waiting: 0, active: 0, failed: 7, available: true } })
+  let staged = null
+  try {
+    staged = stageScriptVariant(buildOldQuadrantText())
+    const { stdout } = await runHealthcheck(port, staged.scriptPath)
+    const item = queueItem(stdout)
+    // ⛔ 先自证：旧措辞真换上去了、真话真没了。否则下面几条是在跟空气打（空转判绿）
+    assert.ok(item, '旧措辞那版没输出「任务队列」这一项')
+    assert.match(item.detail, /历史上失败 7 个（失败数会定期清理，看趋势不看绝对值）/,
+      `没换回旧措辞（${item.detail}）⇒ 手术无效，这条反向自检是空转`)
+    assert.ok(!item.detail.includes('不会自己重判'), '旧措辞居然也在说真话 ⇒ 手术没生效')
+    // ⛔ 再逐条对账：新版那三条断言，每一条都会被旧措辞打红（不是数红条数，是看颜色）
+    assert.ok(!/判不出来且不会再重试的 7 个/.test(item.detail),
+      `旧措辞版居然也印了新措辞（${item.detail}）⇒ 第 2 条锁不住`)
+    assert.ok(item.detail.includes('看趋势不看绝对值'),
+      '旧措辞必须还带着「看趋势不看绝对值」，这样才证明上面那条也是被它打红的，而不是被别的话打红')
+  } finally {
+    if (staged) staged.cleanup()
+    server.close()
+  }
+})
+
+// ⛔ 元判据自证（r198/r229 同款）：判据自己写错字会造成假通过 ⇒ 先自证手术刀的两端都还在。
+test('元判据自证：新措辞在脚本里、旧措辞在本文件里、替换片段唯一', () => {
+  const src = readFileSync(SCRIPT, 'utf8')
+  const s = readFileSync(import.meta.filename, 'utf8')
+  assert.ok(src.includes(FAILED_HONEST_TAIL),
+    `体检脚本里没有真话括号「${FAILED_HONEST_TAIL}」⇒ 判据盯的东西被改掉了，这条锁是空转`)
+  assert.ok(src.includes('${failedText}'), '体检脚本那句 record 没在用 failedText ⇒ 措辞接不上去')
+  assert.ok(s.includes('FAILED_HONEST_TAIL'), '本文件里没有手术起点常量 ⇒ 手术目标不在')
+  assert.ok(s.includes(NEW_FAILED_TERNARY_LINE), '本文件里没有新的真话措辞（手术起点）⇒ 手术目标不在')
+  assert.ok(s.includes(OLD_FAILED_TERNARY_LINE), '本文件里没有旧的假话措辞（手术终点）⇒ 手术目标不在')
+  assert.equal(src.split(NEW_FAILED_TERNARY_LINE).length - 1, 1,
+    `手术锚点在体检脚本里出现了不止一次 ⇒ replace 只能换第一处，手术会换错位置`)
+  assert.equal(src.split(FAILED_HONEST_TAIL).length - 1, 1,
+    `真话括号在体检脚本里出现了不止一次 ⇒ replace 只能换第一处，手术会换错位置`)
+  assert.equal(src.split(FAILED_HONEST_TAIL).length - 1, 1,
+    `真话括号在体检脚本里出现了不止一次 ⇒ replace 只能换第一处，手术会换错位置`)
 })
 
 // ── 3. 队列服务掉线（available=false）⇒ 必须叫醒 ─────────────────────────────────────

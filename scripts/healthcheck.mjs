@@ -198,6 +198,18 @@ if (health) {
 }
 
 // ── 5. 队列积压（偶尔堆积正常，持续堆积要管）─────────────────────────────
+/**
+ * 「判不出来、也不会再重试」这批作业的真实处境（r243 改）：系统**既不会重判、也不会自己消掉**，
+ * ⇒ 必须原话讲清楚。旧版那句「（失败数会定期清理，看趋势不看绝对值）」是假安慰：
+ * 全仓唯一会「删除 tasks 表记录」的语句只出现在删学生数据的运维脚本
+ * （`server/scripts/cleanup-student-data.mjs`）里，**那不是清理判不出来的作业**：
+ * ⇒ 没有任何一处定时清理它们。**注释里故意不写这条 SQL 的字面量**：
+ * `test/healthcheckSafety.test.mjs` 那条安全锁是全文扫一个「删表」关键字（不分注释代码），
+ * 原样写进去会把「体检脚本不得写库」这条锁打红（r243 实测踩到）。改注释前先想这句会不会被那条锁扫到。
+ * 而这句话只有 f>0 时才接在数字后面，所以单独抽成一个常量、方便锁住它的措辞（见 healthcheckQueueStats）。
+ */
+const FAILED_HONEST_TAIL = '（这几个不会自己重判、也不会自己消掉，会一直留在这个数里）'
+
 if (health) {
   try {
     const r = await fetch(`${API}/api/queue/stats`, { signal: AbortSignal.timeout(20000) })
@@ -215,13 +227,26 @@ if (health) {
     const w = q.waiting || 0
     const a = q.active || 0
     const f = q.failed || 0
-    // ⚠️ failed 只印不判：本机实测 historical failed=~50，一旦加判就天天黄灯，
-    //    会重演 r198「恒定黄灯淹掉真告警」。要看趋势看绝对值，靠人工看这行数字即可。
+    // ⚠️ failed 只印不判：本机实测 failed=~50，一旦加判就天天黄灯，
+    //    会重演 r198「恒定黄灯淹掉真告警」。
+    // ⛔ r243：这个数**必须说真话**。旧版印「失败数会定期清理」是假话 ——
+    //    全仓没有任何一处定时清理判不出来的作业（那条「删除 tasks 表记录」的语句在删学生数据的
+    //    运维脚本里，不是清理这些作业；⛔ 注释里不写这条 SQL 字面量，安全锁全文扫会打红；
+    //    详见 FAILED_HONEST_TAIL 的说明）。
+    //    而这里统计的是 `describeAutoRetry(...) === false` 的那一批（不会再重试），
+    //    ⇒ 它们既不会自己重判、也不会自己消掉，会永远留在这个数里。安慰一句「会自己清理」
+    //    只会让老师以为不用管（r198：夸大的提示比没提示更糟）。
+    //    「看趋势不看绝对值」这句同样兑现不了：这一行只印一个数，趋势得去跑 healthTrend.mjs。
+    // ⛔ 用 `+` 拼接而不是把 FAILED_HONEST_TAIL 塞进模板串：常量里带中文括号，
+    //    塞进模板串后反向自检的「字符串手术」没法安全地换回旧措辞（r243 实测踩到）。
+    const failedText = f > 0
+      ? `、判不出来且不会再重试的 ${f} 个` + FAILED_HONEST_TAIL
+      : '、判不出来且不会再重试的 0 个'
     // ⚠️ 至于 available：Redis 掉线时 waiting/active 可能还是 0，那就等于没盯，必须单独叫醒。
     if (q.available === false) record('任务队列', 'warn', '队列服务连不上（多半是 Redis 掉了）：作业堆在进程里进不了队列，这张表会一直显示 0，建议重启后端')
     else if (queueMissing) record('任务队列', 'warn', missingFieldDetail('排队/进行中/失败的数量'))
     else if (w > 20) record('任务队列', 'warn', `排队 ${w} 个（积压偏多，可能是 AI 额度紧张导致重试堆积）`)
-    else record('任务队列', 'ok', `排队 ${w} 个、进行中 ${a} 个、历史上失败 ${f} 个（失败数会定期清理，看趋势不看绝对值）`)
+    else record('任务队列', 'ok', `排队 ${w} 个、进行中 ${a} 个${failedText}`)
   } catch (e) {
     record('任务队列', 'warn', `查不了：${e.message}`)
   }
