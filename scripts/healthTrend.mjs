@@ -244,7 +244,7 @@ function checkedView(list, win) {
   if (latest.checked < max || shorts.length > 0) {
     const ref = withChecked.reduce((a, b) => (b.checked > a.checked ? b : a))
     // ⛔ 方向：要的是「那次跑过的项里，这次没跑的有哪几个」= 拿参照那次的名单去减，
-    //    反过来减（拿这次的名单去参参照那个名单）会得到空数组 ⇒ 一句「少了 0 项」的假话（r248 实测踩到）。
+    //    反过来减（拿这次的名单去减参照那个名单）会得到空数组 ⇒ 一句「少了 0 项」的假话（r245 实测踩到）。
     const refNames = (ref.checkedNames || []).map(String)
     const latestNames = new Set((latest.checkedNames || []).map(String))
     missing = latestNames.size ? refNames.filter((n) => !latestNames.has(n)) : ['（没记名字）']
@@ -360,7 +360,7 @@ if (JSON_ONLY) {
   const breakdown = groups.length > 1
     ? groups.map((g) => `${targetLabel(g.key).replace(/（.*/, '')} ${g.count} 条`).join('、')
     : `后端体检 ${backendSamples.length} 条`
-  // ⚠️ 用数组拼，别省那几个分号：早先的模板串在某一截为空时印出 `；；`（r248 顺手看的）。
+  // ⚠️ 用数组拼，别省那几个分号：早先的模板串在某一截为空时印出 `；；`（r245 顺手看的）。
   const headParts = [
     `共 ${samples.length} 条采样${badLines ? `，另 ${badLines} 行读不出来` : ''}`,
     breakdown,
@@ -400,7 +400,7 @@ if (JSON_ONLY) {
       const n = g.checked.latest.checked
       const gap = n < g.checked.max
       if (gap) {
-        // ⛔ 一整句拼完再打：拆成两行会印出「少了 \n7 项」，断开了就没法回看（r248 实测）。
+        // ⛔ 一整句拼完再打：拆成两行会印出「少了 \n7 项」，断开了就没法回看（r245 实测）。
         console.log(`${C.warn} 这次只盯了 ${n} 项（这段时间最多那次盯了 ${g.checked.max} 项），` +
           `少了 ${g.checked.missing.length} 项：${g.checked.missing.map(String).join('、')}`)
         console.log(`${C.warn}   少跑的这几项这次等于没查 ⇒ 别把它们当成「一直是好的」，` +
