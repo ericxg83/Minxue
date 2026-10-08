@@ -7,9 +7,11 @@
  * 从来没人看过。于是 r233 那套「拿采样当裁判」的结论（磁盘 18 次告警全在 r198 之前、
  * 接口速度只亮过 1 次 = 真冷启动）只有写分析的那一轮自己知道，下一轮又得重新翻一遍。
  *
- * 这个脚本把「最近这一段是变好了还是变差了」用大白话讲出来，回答两件事：
+ * 这个脚本把「最近这一段是变好了还是变差了」用大白话讲出来，回答四件事：
  *   ① 哪几盏灯**最近一直亮** ⇒ 多半是真问题，值得管；
- *   ② 哪几盏灯**以前亮过、后来不亮了** ⇒ 说明那次修是对的，不是瞎亮的灯。
+ *   ② 哪几盏灯**以前亮过、后来不亮了** ⇒ 说明那次修是对的，不是瞎亮的灯；
+ *   ③ 每次体检**到底盯了几项** —— 某项压根没跑，和某项全绿，在日志里长得一模一样（r246-①）；
+ *   ④ 这些采样**是在看哪台机器** —— 本机和线上混成一条趋势会把两码事算成一件事（r247-①）。
  *
  * 用法：
  *   node scripts/healthTrend.mjs            # 看最近 20 条
@@ -29,7 +31,7 @@
  *
  * 设计约束（勿破坏）：
  *   1) **只读**：只 process 已有的采样文件，不发请求、不写文件、不碰数据库。
- *   2) 读不到就说读不到（文件不存在 / 一行都没有 / 全是坏行 / 只有一拨人写的），
+ *   2) 读不到就说读不到（文件不存在 / 一行都没有 / 全是坏行 / 只有一拨人写的 / 某台机器没采到），
  *      **不许静默判"一切正常"**。
  *   3) 文案只讲后果和下一步，不甩字段名。
  */
@@ -120,10 +122,34 @@ if (samples.length === 0) {
 // ⛔ 趋势只能看后端体检那一路：前端体检的行结构不同，混进来会把窗口算歪（r239）。
 //    一段采样里**一条后端体检都没有** ⇒ 这等于没盯，绝不能说「没有红色」。
 const backendGap = backendSamples.length === 0
-const window_ = backendSamples.slice(-WINDOW)
 
-// ── 逐项统计 ─────────────────────────────────────────────────────────────
-/** 把每条的 bad/warn 摊平：{ 项名: [该条的下标...] } */
+// ══ r247-①：后端那一路再按「在看哪台机器」分组 ══════════════════════════════
+// 实测现网 60 条里已经混了 1 条本机行（127.0.0.1:4000），而旧版从头没读过 `api` 字段 ⇒
+// 「查本机」和「查线上」算成同一条趋势：本机 5 条磁盘黄灯被讲成「线上最近连续 5 条在亮」（线上一条没亮），
+// 「连续 1300 分钟 → 23 分钟，中途重启过一次」其实是**两台机器**。
+// ⛔ ⛔ 关键：healthcheck.mjs 的 `--api` **默认值就是本机**，谁不带 --api 跑一次写进同一个文件，
+//    这条趋势立刻变脏而且一点提示都没有。旧版 `--api` 默认本机（127.0.0.1:4000）。
+//    ⇒ 这里只分组、不丢行（旧行没 api ⇒ 归「没记目标」，照样能用）。
+const stripTrailingSlash = (s) => String(s || '').replace(/\/+$/, '')
+const NO_TARGET = '__no_target__'
+const groupKeysOf = (list) => {
+  const m = new Map()
+  for (const s of list) {
+    const key = stripTrailingSlash(s.api) || NO_TARGET
+    if (!m.has(key)) m.set(key, [])
+    m.get(key).push(s)
+  }
+  return m
+}
+const isLocalTarget = (key) => key !== NO_TARGET && (key.includes('127.0.0.1') || key.includes('localhost'))
+/** 机器名说人话：不是本机就只印域名，别甩一长串 URL 给负责人。 */
+const targetLabel = (key) => (key === NO_TARGET
+  ? '目标没记（旧格式采样，多半是别人不带 --api 跑的那次）'
+  : isLocalTarget(key) ? `本机（${key}）` : `线上（${key}）`)
+
+const groupKeys = groupKeysOf(backendSamples)
+
+/** 逐项统计（r239 那套判据保持原样，只是从「全体」换成「这一组」）。 */
 function collect(items) {
   const map = new Map()
   items.forEach((s, idx) => {
@@ -137,10 +163,7 @@ function collect(items) {
   })
   return map
 }
-const winMap = collect(window_)
-const allMap = collect(samples)
-
-/** 最长连续出现段（按窗口内的下标算）。 */
+/** 最长连续出现段（按传入那个数组的下标算）。 */
 function longestRun(indices) {
   let best = 0
   let cur = 0
@@ -153,36 +176,99 @@ function longestRun(indices) {
   return best
 }
 
-const names = [...allMap.keys()].sort((a, b) => (winMap.get(b)?.length || 0) - (winMap.get(a)?.length || 0))
+/**
+ * 一组采样 → 逐项结论。
+ * `list` 是这一组的全部（含更早的），`win` 是这一组最近 WINDOW 条。
+ */
+function buildView(list, win) {
+  const winMap = collect(win)
+  const allMap = collect(list)
+  const names = [...allMap.keys()].sort((a, b) => (winMap.get(b)?.length || 0) - (winMap.get(a)?.length || 0))
 
-const items = names.map((name) => {
-  const idxAll = allMap.get(name)
-  const idxWin = winMap.get(name) || []
-  const olderHits = idxAll.length - idxWin.length
-  const alwaysLit = idxWin.length === window_.length && window_.length >= 3
-  // 「已经好了」：更早亮过不少、最近一段一条都不亮。要 olderHits>=2 才敢这么说，
-  // 1 次样本说明不了「修好了」（r198：不许凭单次观测下结论）。
-  const settled = olderHits >= 2 && idxWin.length === 0
-  const lastSample = samples[idxAll[idxAll.length - 1]]
-  const firstSample = samples[idxAll[0]]
-  return {
-    name,
-    total: idxAll.length,
-    inWindow: idxWin.length,
-    windowSize: window_.length,
-    olderHits,
-    longestRun: longestRun(idxWin),
-    alwaysLit,
-    settled,
-    firstAt: firstSample.t || null,
-    lastAt: lastSample.t || null,
-    lastDetail: lastSample.bad && lastSample.bad.includes(name) ? 'bad' : 'warn',
+  const items = names.map((name) => {
+    const idxAll = allMap.get(name)
+    const idxWin = winMap.get(name) || []
+    const olderHits = idxAll.length - idxWin.length
+    const alwaysLit = idxWin.length === win.length && win.length >= 3
+    // 「已经好了」：更早亮过不少、最近一段一条都不亮。要 olderHits>=2 才敢这么说，
+    // 1 次样本说明不了「修好了」（r198：不许凭单次观测下结论）。
+    const settled = olderHits >= 2 && idxWin.length === 0
+    const lastSample = list[idxAll[idxAll.length - 1]]
+    const firstSample = list[idxAll[0]]
+    // ⛔ r245-①：只记灯名的话，事后只知「亮过」，不知道当时到底什么情形
+    //    （57 条采样 44 次亮灯，无一带数字）。这里取这组里最近一次亮的那句人话。
+    let lastLitDetail = null
+    for (const s of [...win].reverse()) {
+      const d = s.lit && s.lit[name]
+      if (typeof d === 'string' && d) { lastLitDetail = d; break }
+    }
+    return {
+      name,
+      total: idxAll.length,
+      inWindow: idxWin.length,
+      windowSize: win.length,
+      olderHits,
+      longestRun: longestRun(idxWin),
+      alwaysLit,
+      settled,
+      firstAt: firstSample.t || null,
+      lastAt: lastSample.t || null,
+      lastDetail: lastSample.bad && lastSample.bad.includes(name) ? 'bad' : 'warn',
+      lastLitDetail,
+    }
+  })
+
+  // ⛔ 只数**灯名字符串**：前端体检那一路 `bad` 是「坏模块」对象，数它们会把红色条数虚高
+  //    （实测一条带 1 个坏模块的前端采样就被算成 1 次红色）。
+  const badCount = win.reduce((n, s) => n + (s.bad || []).filter((x) => typeof x === 'string').length, 0)
+  return { items, badCount }
+}
+
+/**
+ * 「这次到底盯了几项」（r246-①）：
+ *   healthcheck 的采样以前只写 bad/warn 两个灯名 ⇒ 「某项压根没执行」和「某项全绿」
+ *   在日志里逐字相同。实测后端连不上时只跑了 1 项，采样照样是 `{"bad":["后端在线"]}`。
+ * ⛔ 拿 checked 当「红/绿」条件会重演 r198 的恒定黄灯（老格式采样永远没这个字段），
+ *    ⇒ 只当事实记录报出来：这次查了几项、比这段时间最多的那次少了几项。
+ */
+function checkedView(list, win) {
+  const withChecked = list.filter((s) => s && typeof s.checked === 'number')
+  if (withChecked.length === 0) {
+    return { known: false, latest: null, max: null, shortCount: 0, min: null, missing: [] }
   }
-})
+  const latest = withChecked[withChecked.length - 1]
+  const max = Math.max(...withChecked.map((s) => s.checked))
+  const winChecked = win.filter((s) => s && typeof s.checked === 'number')
+  const shorts = winChecked.filter((s) => s.checked < max)
+  let missing = []
+  if (latest.checked < max || shorts.length > 0) {
+    const ref = withChecked.reduce((a, b) => (b.checked > a.checked ? b : a))
+    // ⛔ 方向：要的是「那次跑过的项里，这次没跑的有哪几个」= 拿参照那次的名单去减，
+    //    反过来减（拿这次的名单去参参照那个名单）会得到空数组 ⇒ 一句「少了 0 项」的假话（r248 实测踩到）。
+    const refNames = (ref.checkedNames || []).map(String)
+    const latestNames = new Set((latest.checkedNames || []).map(String))
+    missing = latestNames.size ? refNames.filter((n) => !latestNames.has(n)) : ['（没记名字）']
+  }
+  return {
+    known: true,
+    latest,
+    max,
+    shortCount: shorts.length,
+    min: winChecked.length ? Math.min(...winChecked.map((s) => s.checked)) : null,
+    missing,
+  }
+}
 
-// ⛔ 只数**灯名字符串**：前端体检那一路 `bad` 是「坏模块」对象，数它们会把红色条数虚高
-//    （实测一条带 1 个坏模块的前端采样就被算成 1 次红色）。
-const badCount = window_.reduce((n, s) => n + (s.bad || []).filter((x) => typeof x === 'string').length, 0)
+// ── 分组视图 ─────────────────────────────────────────────────────────────
+const groups = [...groupKeys.entries()].map(([key, list]) => {
+  const win = list.slice(-WINDOW)
+  return { key, label: targetLabel(key), count: list.length, window: win, ...buildView(list, win), checked: checkedView(list, win) }
+}).sort((a, b) => b.count - a.count)
+
+// ⛔ 一拨采样都没有时 first/last 是 null，直接读 .t 会崩（r239 的锁当场抓到这个）。
+const last = backendSamples[backendSamples.length - 1] || null
+const first = backendSamples[0] || null
+const primary = groups[0] || null
 
 // ── 前端体检那一路（r239）：结构跟后端体检不同，单独一节讲人话 ──────────────
 // 它的 `bad` 装的是「坏掉的模块」对象、整体结论在 `status` 上 —— 旧版一律当灯名摊平，
@@ -219,26 +305,50 @@ const frontendSummary = frontendSamples.length
   })()
   : null
 
-// 趋势只认后端那一路，所以时间跨度、速度这些也只看后端那一路的采样。
-const last = backendSamples[backendSamples.length - 1] || null
-const first = backendSamples[0] || null
+/**
+ * 一组里「连续运行时间 / 响应速度」的走势（r247-①：按机器算，别把两台机器拼成一条）。
+ * 返回 null 表示这条线数据不足（只采过一次 / 字段没回），由调用方说人话。
+ */
+function trailsOf(list) {
+  const upTrail = list.map((s) => s.upMin).filter((v) => typeof v === 'number')
+  const rtTrail = list.map((s) => s.rtMs).filter((v) => typeof v === 'number')
+  return { upTrail, rtTrail }
+}
 
 // ── 输出 ─────────────────────────────────────────────────────────────────
 if (JSON_ONLY) {
   console.log(JSON.stringify({
-    ok: true,
+    ok: !backendGap,
+    reason: backendGap ? 'no-backend-sample' : undefined,
     file: FILE,
     parsed: samples.length,
     badLines,
-    window: window_.length,
+    window: primary ? primary.window.length : 0,
     range: { first: first ? first.t || null : null, last: last ? last.t || null : null },
     latest: { upMin: last ? last.upMin ?? null : null, rtMs: last ? last.rtMs ?? null : null },
-    items,
-    windowBadCount: badCount,
+    groups: groups.map((g) => ({
+      key: g.key === NO_TARGET ? null : g.key,
+      label: g.label,
+      targetIsLocal: isLocalTarget(g.key),
+      count: g.count,
+      window: g.window.length,
+      windowBadCount: g.badCount,
+      checked: {
+        known: g.checked.known,
+        checked: g.checked.latest ? g.checked.latest.checked : null,
+        maxInWindow: g.checked.max,
+        shortCount: g.checked.shortCount,
+        minInWindow: g.checked.min,
+        missingNames: g.checked.missing,
+      },
+      items: g.items,
+    })),
+    items: groups.flatMap((g) => g.items.map((it) => ({ ...it, target: g.key === NO_TARGET ? null : g.key }))),
+    windowBadCount: groups.reduce((n, g) => n + g.badCount, 0),
     backendSamples: backendSamples.length,
+    backendGroups: groups.map((g) => ({ key: g.key === NO_TARGET ? null : g.key, count: g.count })),
     frontendSamples: frontendSamples.length,
     frontend: frontendSummary,
-    ...(backendGap ? { ok: false, reason: 'no-backend-sample' } : {}),
   }, null, 2))
 } else {
   // ⛔ 时间跨度读不出来就明说：拿 `new Date()` 兜底会把「哪段时间」印成当前时刻，
@@ -247,9 +357,18 @@ if (JSON_ONLY) {
   const spanText = first && last && first.t && last.t
     ? `${localTimeText(first.t)} ~ ${localTimeText(last.t)}`
     : '时间段读不出来'
-  const head = `体检趋势（共 ${samples.length} 条采样${badLines ? `，另 ${badLines} 行读不出来` : ''}` +
-    `；后端体检 ${backendSamples.length} 条${frontendSamples.length ? `、前端体检 ${frontendSamples.length} 条` : ''}` +
-    `；${spanText}，只看最近 ${window_.length} 条）`
+  const breakdown = groups.length > 1
+    ? groups.map((g) => `${targetLabel(g.key).replace(/（.*/, '')} ${g.count} 条`).join('、')
+    : `后端体检 ${backendSamples.length} 条`
+  // ⚠️ 用数组拼，别省那几个分号：早先的模板串在某一截为空时印出 `；；`（r248 顺手看的）。
+  const headParts = [
+    `共 ${samples.length} 条采样${badLines ? `，另 ${badLines} 行读不出来` : ''}`,
+    breakdown,
+    frontendSamples.length ? `前端体检 ${frontendSamples.length} 条` : '',
+    spanText,
+    `只看最近 ${primary ? primary.window.length : 0} 条`,
+  ].filter((x) => x)
+  const head = `体检趋势（${headParts.join('；')}）`
   console.log(head)
   console.log('─'.repeat(52))
 
@@ -258,56 +377,95 @@ if (JSON_ONLY) {
     console.log(`${C.warn} 这段时间一条后端体检的采样都没有 ⇒ 后端那边等于没盯。`)
     console.log(`${C.warn} 「没有红色」只说明这次没查过，不说明后端这段时间没问题。`)
     console.log(`${C.info} 跑一次就有了：node scripts/healthcheck.mjs --api https://minxue-api.onrender.com --log tmp/health.jsonl`)
-  } else if (badCount > 0) console.log(`${C.bad} 最近 ${window_.length} 条里有 ${badCount} 次需要处理（红色）`)
-  else console.log(`${C.ok} 最近 ${window_.length} 条里没有红色（要处理的）`)
+  } else if (groups.length > 1) {
+    // ⛔ 多机器这条必须有提示：默认不带 --api 跑的就是本机，混进去之后「线上趋势」是假的，
+    //    而旧版一句提示都没有（r247-①）。只说发生了什么，不猜是谁跑的。
+    console.log(`${C.warn} 这 ${backendSamples.length} 条后端采样里混着 ${groups.length} 台机器：` +
+      groups.map((g) => `${g.label} ${g.count} 条`).join('、'))
+    console.log(`${C.warn} 下面按机器分开讲 —— 混着看会把本机那几次当成线上在连着出事，也会把两台机器的` +
+      `连续运行时间当成同一台的。`)
+  }
 
-  for (const it of items) {
-    const pct = it.inWindow ? `最近 ${it.inWindow}/${it.windowSize} 条` : '最近一条都不亮'
-    let tail
-    if (it.alwaysLit && it.inWindow > 0) {
-      // 天天亮 = 要么这件事一直没解决、要么这盏灯本身坏了。⛔ 绝不替他断定是哪一种 ——
-      // r198 教训：写死的推论（比如「多半是灯坏了」）在真实例子上就是误判（实测线上
-      // 「代码版本」条条都亮是因为推了没部署，不是灯坏），夸大的提示比没提示更糟。
-      tail = `这段时间条条都亮（连续 ${it.longestRun} 条）⇒ 要么这件事一直没解决，要么这盏灯本身坏了；` +
-        `两种都得看一眼再信它，别让这盏一直亮的灯挡着真出事的那条`
-    } else if (it.settled) {
-      tail = `更早亮过 ${it.olderHits} 条、最近一条都不亮 ⇒ 那次修是对的，这盏灯不是瞎亮的`
-    } else if (it.inWindow > 0) {
-      const recent = it.lastAt ? `最近一次 ${localTimeText(it.lastAt)}` : '最近就在这几条里'
-      tail = `亮过 ${it.inWindow} 条（共 ${it.total} 条），${recent}；` +
-        (it.longestRun > 1 ? `连续 ${it.longestRun} 条 ⇒ 大概率是同一件事在连着发生` : '零散出现，多半是自愈一次的偶发')
-    } else {
-      tail = `全 ${samples.length} 条里就没亮过`
+  for (const g of groups) {
+    console.log(`\n${C.info} ${g.label}：${g.count} 条，只看最近 ${g.window.length} 条`)
+    if (g.window.length === 0) {
+      console.log(`${C.warn} 这段时间这一台一条都没采到，等于没盯。`)
+      continue
     }
-    console.log(`${it.inWindow > 0 ? C.warn : C.ok} ${it.name}：${pct} ⇒ ${tail}`)
+
+    // 这次盯了几项（r246-①）
+    if (!g.checked.known) {
+      console.log(`${C.info} 这批采样没记「这次盯了几项」（老格式），所以只能看出哪几盏灯亮过。`)
+    } else {
+      const n = g.checked.latest.checked
+      const gap = n < g.checked.max
+      if (gap) {
+        // ⛔ 一整句拼完再打：拆成两行会印出「少了 \n7 项」，断开了就没法回看（r248 实测）。
+        console.log(`${C.warn} 这次只盯了 ${n} 项（这段时间最多那次盯了 ${g.checked.max} 项），` +
+          `少了 ${g.checked.missing.length} 项：${g.checked.missing.map(String).join('、')}`)
+        console.log(`${C.warn}   少跑的这几项这次等于没查 ⇒ 别把它们当成「一直是好的」，` +
+          `先看是不是后端没连上把整趟体检带塌了`)
+      } else {
+        console.log(`${C.ok} 这次盯了几项：${n} 项全跑了`)
+      }
+      // ⛔ 最近这一次盯全了、但窗口里**前面**有几次没盯全 —— 那几次日志长得跟全绿一样，
+      //    不报出来的话「没盯全」这件事还是会被当成没事（r246-① 的原话就是这两行一模一样）。
+      if (!gap && g.checked.shortCount > 0) {
+        console.log(`${C.warn} 最近 ${g.window.length} 条里有 ${g.checked.shortCount} 次没盯全（最少那次只跑了 ` +
+          `${g.checked.min} 项）⇒ 那几次等于只查了一样，别当成这段时间整体都没问题`)
+      }
+    }
+
+    if (g.badCount > 0) console.log(`${C.bad} 最近 ${g.window.length} 条里有 ${g.badCount} 次需要处理（红色）`)
+    else console.log(`${C.ok} 最近 ${g.window.length} 条里没有红色（要处理的）`)
+
+    for (const it of g.items) {
+      const pct = it.inWindow ? `最近 ${it.inWindow}/${it.windowSize} 条` : '最近一条都不亮'
+      let tail
+      if (it.alwaysLit && it.inWindow > 0) {
+        // 天天亮 = 要么这件事一直没解决、要么这盏灯本身坏了。⛔ 绝不替他断定是哪一种 ——
+        // r198 教训：写死的推论（比如「多半是灯坏了」）在真实例子上就是误判（实测线上
+        // 「代码版本」条条都亮是因为推了没部署，不是灯坏），夸大的提示比没提示更糟。
+        tail = `这段时间条条都亮（连续 ${it.longestRun} 条）⇒ 要么这件事一直没解决，要么这盏灯本身坏了；` +
+          `两种都得看一眼再信它，别让这盏一直亮的灯挡着真出事的那条`
+      } else if (it.settled) {
+        tail = `更早亮过 ${it.olderHits} 条、最近一条都不亮 ⇒ 那次修是对的，这盏灯不是瞎亮的`
+      } else if (it.inWindow > 0) {
+        const recent = it.lastAt ? `最近一次 ${localTimeText(it.lastAt)}` : '最近就在这几条里'
+        tail = `亮过 ${it.inWindow} 条（共 ${it.total} 条），${recent}；` +
+          (it.longestRun > 1 ? `连续 ${it.longestRun} 条 ⇒ 大概率是同一件事在连着发生` : '零散出现，多半是自愈一次的偶发')
+      } else {
+        tail = `全 ${g.count} 条里就没亮过`
+      }
+      const litNote = it.lastLitDetail ? `；亮的时候那句是「${it.lastLitDetail}」` : ''
+      console.log(`${it.inWindow > 0 ? C.warn : C.ok} ${it.name}：${pct} ⇒ ${tail}${litNote}`)
+    }
+
+    const { upTrail, rtTrail } = trailsOf(g.window)
+    if (upTrail.length >= 2) {
+      // ⛔ 只说「涨/落」，不下因果结论 —— 重启的原因有一堆（r218 教训）。
+      const drop = upTrail[upTrail.length - 1] < upTrail[0]
+      const trend = drop ? '中途回落过（中间重启过一次，正常；要看是不是老重启得看前面几十条）' : '一路在涨（这段时间内没重启过）'
+      console.log(`${C.info} 连续运行时间：${upTrail[0]} 分钟 → ${upTrail[upTrail.length - 1]} 分钟，${trend}`)
+    }
+    if (rtTrail.length >= 2) {
+      const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length)
+      console.log(`${C.info} 响应速度：最近 ${g.window.length} 条平均 ${avg(rtTrail)}ms` +
+        `（最早 ${rtTrail[0]}ms，最快 ${Math.min(...rtTrail)}ms，最慢 ${Math.max(...rtTrail)}ms）`)
+    }
   }
 
   if (frontendSummary) {
     const f = frontendSummary
     const at = f.lastAt ? localTimeText(f.lastAt) : '时刻读不出来'
-    console.log(`${C.info} 前端体检（首页白屏 / 模块链）跑过 ${f.count} 次，最近一次 ${at}：`)
+    console.log(`\n${C.info} 前端体检（首页白屏 / 模块链）跑过 ${f.count} 次，最近一次 ${at}：`)
     const mods = f.badCount ? `，坏 ${f.badCount} 个 —— ${f.bad.join('、')}` : ''
     console.log(`${C.info}   · 模块链：${f.modulesOk ?? '?'} 个是 200${mods}`)
     console.log(`${C.info}   · 首页那层：${f.domLayer}`)
     console.log(`${f.verdict === 'healthy' ? C.ok : C.warn}   · 结论：${f.verdictText}`)
   }
 
-  const upTrail = backendSamples.map((s) => s.upMin).filter((v) => typeof v === 'number')
-  if (upTrail.length >= 2) {
-    // ⛔ 只说「涨/落」，不下因果结论 —— 重启的原因有一堆（r218 教训）。
-    const drop = upTrail[upTrail.length - 1] < upTrail[0]
-    const trend = drop ? '中途回落过（中间重启过一次，正常；要看是不是老重启得看前面几十条）' : '一路在涨（这段时间内没重启过）'
-    console.log(`${C.info} 连续运行时间：${upTrail[0]} 分钟 → ${upTrail[upTrail.length - 1]} 分钟，${trend}`)
-  }
-  const rtTrail = backendSamples.map((s) => s.rtMs).filter((v) => typeof v === 'number')
-  if (rtTrail.length >= 2) {
-    const avg = (a) => Math.round(a.reduce((x, y) => x + y, 0) / a.length)
-    const win = rtTrail.slice(-WINDOW)
-    console.log(`${C.info} 响应速度：最近 ${window_.length} 条平均 ${avg(win)}ms` +
-      `（最早 ${rtTrail[0]}ms，最快 ${Math.min(...rtTrail)}ms，最慢 ${Math.max(...rtTrail)}ms）`)
-  }
-
-  console.log('─'.repeat(52))
+  console.log('\n' + '─'.repeat(52))
   console.log(`${C.info} 想看更多：node scripts/healthTrend.mjs --n 50`)
 }
 

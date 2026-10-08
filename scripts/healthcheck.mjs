@@ -305,6 +305,10 @@ if (health) {
 
 // ── 追加采样日志（一行一条，便于事后按时间窗口分析）────────────────────
 if (LOG) {
+  // 「哪几盏灯亮、亮的时候说了句什么」原样记进采样（r246-①）：只有灯名的话，
+  // 事后只知「亮过」，不知道当时 199MB 还是 1GB —— 57 条采样 44 次亮灯无一带数字。
+  const lit = {}
+  for (const r of results) if (r.status !== 'ok') lit[r.name] = r.detail
   const line = JSON.stringify({
     t: new Date().toISOString(),
     // ⛔ r239：这个文件和 scripts/frontendHealth.mjs 写的是**同一个** tmp/health.jsonl
@@ -312,6 +316,14 @@ if (LOG) {
     //    否则前端体检的「坏模块清单」会被当成体检查出的一盏灯（实测会印出 [object Object]）。
     kind: 'backend',
     api: API,
+    // ⛔ r246-①：早先这一行只记 bad/warn 两个灯名数组 ⇒ 「某项压根没执行」和「某项全绿」
+    //    在日志里**逐字相同**（实测：后端连不上时只跑了 1 项，采样同样是 `bad:["后端在线"]`，
+    //    跟「盯满 8 项、7 绿 1 红」长得一模一样）⇒ 事后分不出这次到底盯了几项。
+    //    checked / checkedNames = 这次真跑了哪几项；lit = 亮的时候那句人话原样记下来。
+    //    ⛔ 别拿 checked 当判红条件（r221：字段真的只返回 0 不算没读到），只当事实记录。
+    checked: results.length,
+    checkedNames: results.map((r) => r.name),
+    lit,
     upMin: health && typeof health.uptimeSec === 'number' ? Math.round(health.uptimeSec / 60) : null,
     rtMs: health ? health.rt : null,
     bad: results.filter((r) => r.status === 'bad').map((r) => r.name),
