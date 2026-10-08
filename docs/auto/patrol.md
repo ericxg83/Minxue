@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R86 — 2026/10/8 13:01:59（✅ 全绿）**
+> ⏱ **最近心跳：R87 — 2026/10/8 13:11:57（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -682,6 +683,15 @@
 | 86 | 2026-10-08T05:01:59 | tests=2120/0 | lint=0 | build=skipped | server=ok | dirty=2 |
 
 ### R86 — 2026/10/8 13:01:59（daemon 自动报告）
+
+**体检**：tests **2120/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 2
+
+⚠️ 发现异常：脏文件 2 个（ M docs/auto/backlog.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M docs/auto/backlog.md
+    -  M scripts/patrol/daemon.mjs
+| 87 | 2026-10-08T05:11:57 | tests=2120/0 | lint=0 | build=skipped | server=ok | dirty=2 |
+
+### R87 — 2026/10/8 13:11:57（daemon 自动报告）
 
 **体检**：tests **2120/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 2
 
