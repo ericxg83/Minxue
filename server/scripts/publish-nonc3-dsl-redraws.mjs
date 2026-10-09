@@ -145,6 +145,18 @@ const FORCE = new Set(
   (process.argv.find((a) => a.startsWith('--force='))?.split('=')[1] || '')
     .split(',').map((s) => s.trim()).filter(Boolean),
 )
+// ── --only=id8,id8,…：点名只发布指定题（2026-10-09 加）──
+// 背景：候选池是 progress.json 里全部 ok 且未发布的记录，直接跑会把历史欠发布的一起带出来；
+// 补跑个别题后只想发这几张时用它。只过滤基础候选，--force 显式点名不受其拦。
+const ONLY = new Set(
+  (process.argv.find((a) => a.startsWith('--only='))?.split('=')[1] || '')
+    .split(',').map((s) => s.trim().replace(/-/g, '')).filter(Boolean),
+)
+if (ONLY.size) {
+  rows = rows.filter(([id]) => ONLY.has(String(id).replace(/-/g, '').slice(0, 8)))
+  console.log(`--only 生效：候选限定为 ${[...ONLY].join(', ')}`)
+}
+
 for (const t of FORCE) {
   const hit = Object.entries(done).find(([id]) => id.replace(/-/g, '').startsWith(t))
   if (!hit) { console.log(`--force: 未找到 ${t} 的产物记录，跳过`); continue }
