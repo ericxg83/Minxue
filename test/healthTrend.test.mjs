@@ -69,6 +69,10 @@ test('采样文件里一行都读不出来时明说，不许当成「这段时�
     const out = run(['--file', file])
     assert.ok(out.includes('没有一行读得出来'), '应明说读不出来')
     assert.ok(out.includes('别当这段时间是正常的'), '应明说不许当成正常')
+    // ⛔ r251（r198 纪律）：读不出来时**不许下单一成因结论** —— 旧文案写「多半是格式变了」
+    //   是拿单次观测替负责人下因果结论（r198：单一成因断言比没提示更糟）。必须列两种可能、不替他定死。
+    assert.ok(!out.includes('多半是格式变了'), '读不出任何一行时，不许下「多半是格式变了」这种单一成因结论')
+    assert.ok(out.includes('两种都可能'), '应同时列两种可能（格式变了 / 文件被写坏截断），不替负责人下结论')
   } finally {
     rmSync(join(file, '..'), { recursive: true, force: true })
   }

@@ -111,7 +111,7 @@ const frontendSamples = samples.filter((s) => kindOf(s) === KIND_FRONTEND)
 if (samples.length === 0) {
   if (!JSON_ONLY) {
     console.log(`${C.info} 采样文件里有 ${lines.length} 行，但没有一行读得出来（${FILE}）。`)
-    console.log('多半是格式变了，得有个人核一下，别当这段时间是正常的。')
+    console.log('读不出任何一行，原因有两种可能：要么采样格式变了（比如体检脚本加了新字段、旧解析没跟上），要么这个文件被别的东西写坏或截断了。两种都可能——但不管哪种，都别当这段时间是正常的。')
   } else {
     console.log(JSON.stringify({ ok: false, reason: 'no-parseable-sample', lines: lines.length, file: FILE }))
   }
