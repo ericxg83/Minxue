@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R128 — 2026/10/9 10:10:14（✅ 全绿）**
+> ⏱ **最近心跳：R129 — 2026/10/9 10:20:51（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1254,3 +1255,14 @@
 
 ⚠️ 发现异常：脏文件 1 个（ M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
     -  M scripts/patrol/daemon.mjs
+| 129 | 2026-10-09T02:20:51 | tests=2187/1 | lint=0 | build=FAIL | server=ok | dirty=4 |
+
+### R129 — 2026/10/9 10:20:51（daemon 自动报告）
+
+**体检**：tests **2187/1** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 4
+
+⚠️ 发现异常：测试 fail=1；build=FAIL；脏文件 4 个（ M scripts/patrol/daemon.mjs,  M src/workbench/utils/pendingReviewCaliber.js,  M src/workbench/utils/retryPaperState.js…）（需 agent 深修时下轮处理）
+    -  M scripts/patrol/daemon.mjs
+    -  M src/workbench/utils/pendingReviewCaliber.js
+    -  M src/workbench/utils/retryPaperState.js
+    -  M src/workbench/views/GradeCenterWorkbench.vue
