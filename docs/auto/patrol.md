@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R126 — 2026/10/9 09:50:55（✅ 全绿）**
+> ⏱ **最近心跳：R127 — 2026/10/9 10:00:14（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1236,3 +1237,11 @@
     -  M src/workbench/components/review/PaperViewerPanel.vue
     -  M src/workbench/stores/reviewStore.js
     - ?? test/judgementConfidenceMerge.test.mjs
+| 127 | 2026-10-09T02:00:14 | tests=2187/0 | lint=0 | build=skipped | server=ok | dirty=1 |
+
+### R127 — 2026/10/9 10:00:14（daemon 自动报告）
+
+**体检**：tests **2187/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 1
+
+⚠️ 发现异常：脏文件 1 个（ M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M scripts/patrol/daemon.mjs
