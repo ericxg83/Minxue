@@ -72,10 +72,6 @@ const normalizeText = (s) => String(s || '')
 // 相同 name 的父/子节点同时命中时都保留，role 由 score 排序后决定。
 const SCORE_NAME_EXACT = 100
 const SCORE_SYNONYM_EXACT = 95
-// 宽松归一化精确命中（去「的/之」+ 去尾缀后完全相同）。
-// ⛔ 必须严格小于 95：否则「精确命中」会被宽松命中抢走（如 tag="分式" 抢到"分式化简"）。
-//    + 节点名长度做微调，让更具体的节点在同分时胜出（"实数的运算" > "实数"）。
-const SCORE_LOOSE_EXACT = 84
 
 /**
  * 算单个「标签 → 节点」的匹配置信度。0 表示不命中。

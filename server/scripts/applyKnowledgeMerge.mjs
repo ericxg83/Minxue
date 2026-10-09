@@ -212,7 +212,6 @@ try {
   const synByKeep = new Map()
   for (const p of pairs) {
     const cur = synByKeep.get(p.keepId) || new Set()
-    const add = []
     const raw = p.keepSynonyms
     const list = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : [])
     list.forEach(x => cur.add(x))
