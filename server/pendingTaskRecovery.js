@@ -904,6 +904,65 @@ class PendingTaskRecovery {
           console.log(`[PendingTaskRecovery] ℹ️ ${skippedDup} 个资产已在队列，跳过重复入队`)
         }
       }
+
+      // ── 3. 错题本补偿扫描（2026-10-09，e7d73b27 案）──
+      // 判错题的几何资产停在 'none' 却从未被重绘：批改流 settle 把初判对的资产降级 none，
+      // 之后题被改判错入册（AI 终裁改错 / 答案修订重判 / 错题闸 sweep 补入册），这些自动
+      // 路径此前没有复活钩子 ⇒ 错题本里的题永远显示原卷裁片（retry_count/last_error 全空，
+      // 也不在 failed 重试预算内，成为永久死角）。
+      // 四条判据全中才复活：在错题本 + status='none' + 无已发布产物 + last_error 为空
+      // （确定性「不可重绘」结论都写 last_error 文案，流程图/表格类不会被误捞重烧）。
+      // 2 小时静默窗防与在途链路竞态；COALESCE(retry_count,0)<2 限补偿预算防无限烧额度。
+      const { rows: wrongbookRows } = await query(
+        `SELECT a.id, a.question_id, COALESCE(a.retry_count, 0) AS rc
+         FROM ${TABLES.QUESTION_ASSETS} a
+         JOIN ${TABLES.QUESTIONS} q ON q.id = a.question_id AND q.deleted_at IS NULL
+         WHERE a.asset_type = 'geometry_image'
+           AND a.tikz_status = 'none'
+           AND COALESCE(a.retry_count, 0) < 2
+           AND a.updated_at < NOW() - INTERVAL '2 hours'
+           AND COALESCE(a.last_error, '') = ''
+           AND (q.clean_geometry_image_url IS NULL OR q.clean_geometry_image_url NOT LIKE '%dsl-%')
+           AND EXISTS (SELECT 1 FROM ${TABLES.WRONG_QUESTIONS} w WHERE w.question_id = q.id)
+         ORDER BY a.updated_at ASC
+         LIMIT 5`
+      )
+      if (wrongbookRows.length > 0) {
+        const compensateQueued = new Set()
+        for (const st of ['waiting', 'delayed', 'active']) {
+          try {
+            const queued = await geometryQueue.getJobs([st], 0, -1)
+            for (const j of queued) if (j?.data?.assetId) compensateQueued.add(j.data.assetId)
+          } catch (err) {
+            console.warn(`[PendingTaskRecovery] ⚠️ 补偿查重读取 ${st} 失败（按无重复处理）: ${err.message}`)
+          }
+        }
+        let compensated = 0
+        for (const asset of wrongbookRows) {
+          try {
+            if (compensateQueued.has(asset.id)) continue
+            await geometryQueue.add('reconstruct', {
+              assetId: asset.id,
+              source: 'wrongbook-compensate'
+            }, { attempts: 1 })
+            // 复活为 pending 并递增补偿预算：再失败会走 handleRetry 常规预算（failed→重试→
+            // 耗尽标 none+last_error），任何终态都让本扫描不再命中，闭环收敛。
+            await query(
+              `UPDATE ${TABLES.QUESTION_ASSETS}
+               SET tikz_status = 'pending', retry_count = $2, updated_at = NOW()
+               WHERE id = $1`,
+              [asset.id, (asset.rc || 0) + 1]
+            )
+            console.log(`[PendingTaskRecovery] ✅ 错题本补偿复活: ${asset.question_id?.substring(0, 8)} (补偿第 ${(asset.rc || 0) + 1} 次)`)
+            compensated++
+          } catch (err) {
+            console.error(`[PendingTaskRecovery]  补偿入队失败 ${asset.id?.substring(0, 8)}:`, err.message)
+          }
+        }
+        if (compensated > 0) {
+          console.log(`[PendingTaskRecovery] ✅ 错题本补偿: ${compensated}/${wrongbookRows.length} 个`)
+        }
+      }
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 几何资产扫描失败:', err)
     }

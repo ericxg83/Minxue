@@ -6,6 +6,7 @@ import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './kn
 import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 import { buildWrongQuestionSnapshotSql } from '../utils/wrongQuestionSnapshot.js'
+import { requeueGeometryRedrawOnRejudgeWrong } from '../utils/geometryRequeueOnRejudge.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -278,6 +279,16 @@ export const finalizeRejudgeResult = async ({
         { skipConfidence: manualOverride }
       )
       wrongQuestionAdded = added.length > 0
+      // [P1-几何重绘] 结算为错并入册 → 复活几何资产重绘（2026-10-09 根治 e7d73b27 案）。
+      // 此前只有老师手动 3 端点（review_edit / 强入册 / rejudge）挂钩子；批改流 settle 把
+      // 初判对的资产降级 none 后，AI 终裁改错、答案修订重判等**自动路径**经本函数入册却
+      // 没人复活资产 ⇒ 错题本里的题永远显示原卷裁片。函数幂等：completed/pending 直接跳过，
+      // 与手动端点钩子、批改流入队互不重复花钱。
+      if (wrongQuestionAdded) {
+        requeueGeometryRedrawOnRejudgeWrong(question.id, { logger: console }).catch(e =>
+          console.warn(`[GradingFinalizer] 几何重绘复活异常 q=${String(question.id).slice(0, 8)}: ${e.message}`)
+        )
+      }
     }
   } else if (isCorrect === true) {
     // rejudge 答对 = 误判（AI 判错但学生其实答对了），从错题本移除整行
