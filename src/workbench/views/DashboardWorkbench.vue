@@ -287,7 +287,15 @@ const greeting = computed(() => {
   return '晚上好'
 })
 
-const pendingCount = computed(() => notiStore.summary.pendingReview || 0)
+// 「待复核」= 真正等老师动手的**卷数**，口径与批改中心 chip「待人工复核」同源
+// （服务端 /api/tasks/summary 的 pendingReviewPapers，实现见 utils/pendingReviewCaliber.js）。
+// ⛔ 不要退回 summary.pendingReview —— 那是**未读通知数**，老师点一次通知铃铛
+//    （App.jsx#handleOpenNotifications → markNotificationsRead）就全部标已读、数字塌缩到 0，
+//    于是首页显示 1 份、点进批改中心却是 7 份（2026-10-09 事故）。
+// 老接口/老缓存缺 pendingReviewPapers 时才退回未读数（宁可少报，也不能让卡片空着）。
+const pendingCount = computed(
+  () => notiStore.summary.pendingReviewPapers ?? notiStore.summary.pendingReview ?? 0
+)
 const failedCount = computed(() => notiStore.summary.failedTasks || 0)
 const wrongCount = computed(() => notiStore.summary.todayNewWrongQuestions || 0)
 const undigestedCount = computed(() => retryOverview.value?.undigested || 0)

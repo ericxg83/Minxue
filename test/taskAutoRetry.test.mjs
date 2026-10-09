@@ -48,6 +48,9 @@ const INDEX_SRC = read('server/index.js')
 const PAGE_SRC = read('src/pages/ProcessingPage.jsx')
 const HOME_SRC = read('src/components/HomeDashboardV2.jsx')
 const GRADE_SRC = read('src/workbench/views/GradeCenterWorkbench.vue')
+// 2026-10-09：「tasks.status → workflowStatus」的归一（含自愈失败改判「处理中」）
+// 已从 GRADE_SRC 抽到共享口径模块（首页 KPI / 侧栏徽标 / 服务端计数都读它）。
+const CALIBER_SRC = read('src/workbench/utils/pendingReviewCaliber.js')
 const APP_SRC = read('src/App.jsx')
 
 // ── 时间夹具 ──
@@ -344,12 +347,17 @@ test('手机首页提醒：自愈任务既不算 failed 也不算 stalled ⇒ �
 })
 
 test('PC 批改中心：自愈的失败要归到「处理中」，不显示成「识别异常」', () => {
-  assert.match(GRADE_SRC, /import \{ autoRetryState, isSelfHealing \} from '\.\.\/\.\.\/domain\/taskAutoRetry'/)
-  assert.match(GRADE_SRC, /const normalizeHomeworkStatus = task =>/, '判据要拿到整个 task（auto_retry 挂在任务上）')
-  assert.match(GRADE_SRC, /if \(status === 'failed' && isSelfHealing\(task\)\)/)
+  // 2026-10-09：归一函数搬进共享口径模块，批改中心改为 import 它（唯一实现）。
+  assert.match(GRADE_SRC, /normalizeHomeworkStatus[\s\S]{0,200}?from '\.\.\/utils\/pendingReviewCaliber'/,
+    '批改中心必须 import 共享口径的归一函数，不得再自建一套')
+  assert.match(CALIBER_SRC, /import \{ isSelfHealing, autoRetryState \} from '\.\.\/\.\.\/domain\/taskAutoRetry\.js'/,
+    '自愈判据仍来自 domain/taskAutoRetry（服务端 describeAutoRetry 的翻译层）')
+  assert.match(CALIBER_SRC, /export function normalizeHomeworkStatus\(task\)/,
+    '判据要拿到整个 task（auto_retry 挂在任务上）')
+  assert.match(CALIBER_SRC, /if \(status === 'failed' && isSelfHealing\(task\)\)/)
   assert.match(GRADE_SRC, /const state = normalizeHomeworkStatus\(task\)/,
     '调用点必须传 task，传 task.status 的话自愈判断拿不到 auto_retry')
-  assert.match(GRADE_SRC, /statusLabel: '等待 AI 服务恢复'/)
+  assert.match(CALIBER_SRC, /statusLabel: '等待 AI 服务恢复'/)
 })
 
 test('重试响应文案：服务端说「已在处理」时，前端不能还回一句「已重新提交」', () => {

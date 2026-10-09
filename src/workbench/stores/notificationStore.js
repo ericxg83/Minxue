@@ -4,7 +4,11 @@ import { getTasksSummary, getInProgressTasks } from '../../services/apiService'
 
 export const useNotificationStore = defineStore('notification', () => {
   const summary = ref({
+    // pendingReview = 未读通知数（铃铛/通知中心用，点「全部已读」即归零）
     pendingReview: 0,
+    // pendingReviewPapers = 真正待老师人工复核的卷数（首页 KPI / 侧栏徽标用），
+    // 口径与批改中心 chip「待人工复核」同源，见 src/workbench/utils/pendingReviewCaliber.js
+    pendingReviewPapers: 0,
     failedTasks: 0,
     todayNewWrongQuestions: 0,
     inProgressCount: 0,

@@ -309,7 +309,6 @@ import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
-import { autoRetryState, isSelfHealing } from '../../domain/taskAutoRetry'
 import { ossThumbUrl } from '../../utils/ossThumb'
 import {
   RETRY_PAPER_STATE,
@@ -319,6 +318,12 @@ import {
   RETRY_STATE_TO_WORKFLOW,
   isRetryPaperTask,
 } from '../utils/retryPaperState'
+import {
+  PENDING_REVIEW_WORKFLOW_STATUSES,
+  normalizeHomeworkStatus,
+  isAwaitingStudent,
+  isPendingReviewItem,
+} from '../utils/pendingReviewCaliber'
 import { ElMessage } from 'element-plus'
 import RetryPaperPreview from '../components/review/RetryPaperPreview.vue'
 
@@ -346,22 +351,17 @@ const studentId = ref(route.query.studentId || '')
 const sourceFilter = ref(allowedSource.includes(route.query.source) ? route.query.source : 'all')
 const statusFilter = ref(allowedStatus.includes(route.query.status) ? route.query.status : 'active')
 
-const activeStatuses = new Set(['pending', 'processing', 'review', 'retry'])
+// 待人工复核的 workflowStatus 集合 / 「等学生」排除 / tasks.status 归一 —— 三条判据
+// 全部来自 utils/pendingReviewCaliber.js（唯一实现，服务端算 pendingReviewPapers 也用同一份）。
+// ⛔ 本文件不许再各写一套：首页 KPI 与侧栏徽标读的就是这里数出来的同一个口径。
+const activeStatuses = PENDING_REVIEW_WORKFLOW_STATUSES
 const failedStatuses = new Set(['failed'])
 const completedStatuses = new Set(['completed'])
 
-// 「已布置·待学生作答」的重练卷：学生还没交卷，老师无事可做。
-// 它仍在 activeStatuses 里（卡片照常出现在待处理列表），但**不算「待人工复核」**——
-// 否则就是把「等学生」混进「等我干活」，这正是 2026-09-12 那次事故的认知来源。
-const isAwaitingStudent = item =>
-  item.source === 'retry' && item.retryState === RETRY_PAPER_STATE.ISSUED
-
-const pendingCount = computed(() =>
-  allTasks.value.filter(item => activeStatuses.has(item.workflowStatus) && !isAwaitingStudent(item)).length
-)
+const pendingCount = computed(() => allTasks.value.filter(isPendingReviewItem).length)
 const failedCount = computed(() => allTasks.value.filter(item => failedStatuses.has(item.workflowStatus)).length)
 const retryPendingCount = computed(() =>
-  allTasks.value.filter(item => item.source === 'retry' && activeStatuses.has(item.workflowStatus) && !isAwaitingStudent(item)).length
+  allTasks.value.filter(item => item.source === 'retry' && isPendingReviewItem(item)).length
 )
 // 已布置但学生未交卷的重练卷数。
 // 单列一格是为了让「数量守恒」对老师可见：修复后「重练待验证」会从 24 掉到 1，
@@ -487,25 +487,9 @@ const formatTime = value => {
   return dayDiff > 0 && dayDiff <= 7 ? `${monthDay} ${hm}` : monthDay
 }
 
-const normalizeHomeworkStatus = task => {
-  const status = task?.status
-  // 第 90 轮：系统还会自己救的失败（自动重试排队中 / 等配额跨日重置）**不显示成「识别异常」**。
-  // 自动重试一直在跑（服务端 5 分钟一轮），失败态只存在于两次扫描之间；把它当异常报出来，
-  // 老师就会点「重新处理」—— 既白等，又和服务端的自动重捞撞车（同一份作业处理两遍）。
-  // 判定来自服务端（domain/taskAutoRetry 只做翻译），不在前端自己看 retry_count。
-  if (status === 'failed' && isSelfHealing(task)) {
-    const waitingQuota = autoRetryState(task) === 'quota-wait'
-    return waitingQuota
-      ? { workflowStatus: 'processing', statusLabel: '等待 AI 服务恢复', tone: 'processing', aiStatusLabel: '额度已用满，恢复后自动继续' }
-      : { workflowStatus: 'processing', statusLabel: 'AI 处理中', tone: 'processing', aiStatusLabel: '正在识别与判题' }
-  }
-  if (status === 'failed') return { workflowStatus: 'failed', statusLabel: '识别异常', tone: 'danger', aiStatusLabel: '识别异常' }
-  if (status === 'reviewed') return { workflowStatus: 'completed', statusLabel: '已确认', tone: 'success', aiStatusLabel: '教师已确认' }
-  if (status === 'done') return { workflowStatus: 'review', statusLabel: '待复核', tone: 'warning', aiStatusLabel: 'AI 已完成' }
-  if (['pending', 'processing', 'queued'].includes(status)) return { workflowStatus: 'processing', statusLabel: 'AI 处理中', tone: 'processing', aiStatusLabel: '正在识别与判题' }
-  return { workflowStatus: 'pending', statusLabel: '待处理', tone: 'warning', aiStatusLabel: '等待处理' }
-}
-
+// normalizeHomeworkStatus 已收敛到 utils/pendingReviewCaliber.js（唯一实现）。
+// 第 90 轮口径保留在该文件内：系统还会自己救的失败不显示成「识别异常」，
+// 判据来自服务端 describeAutoRetry（经 auto_retry 字段下发），前端只翻译。
 const homework = (task, student) => {
   const state = normalizeHomeworkStatus(task)
   const questionCount = Number(task.question_count || task.total_questions || task.total_count || task.result?.questionCount || 0)

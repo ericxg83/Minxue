@@ -140,6 +140,7 @@ import {
   getRelationStats
 } from './services/kpRelationService.js'
 import { finalizeRejudgeResult, finalizeGeneratedExamResults } from './services/gradingFinalizer.js'
+import { getPendingReviewPaperCount } from './services/pendingReviewService.js'
 import { assertImageUrlAllowed } from './utils/urlGuard.js'
 
 const app = express()
@@ -794,10 +795,25 @@ app.get('/api/tasks/summary', async (req, res) => {
     const recentTasks = (r.recent_tasks || [])
       .filter((t) => t.status !== 'failed' || !describeAutoRetry(t).willRetry)
       .map(mapTask)
+
+    // 「还有几份卷子等我复核」——与批改中心 chip「待人工复核」同口径，
+    // 唯一实现见 src/workbench/utils/pendingReviewCaliber.js。
+    // ⛔ 不能复用上面的 pending_review：那是**未读通知数**（notification_read_at IS NULL），
+    //    老师点一次通知铃铛就全部标已读、数字立刻塌缩到 0，与"待办工作量"无关。
+    //    这正是「首页 1 份 / 批改中心 7 份」的成因（2026-10-09 事故）。
+    // 计数失败不拖垮铃铛与通知摘要：降级回未读数并留日志（宁可少报，也不能让整块摘要 500）。
+    let pendingReviewPapers = null
+    try {
+      pendingReviewPapers = await getPendingReviewPaperCount()
+    } catch (countErr) {
+      console.error('[summary] 待复核卷数计算失败，降级为未读计数:', countErr.message)
+    }
+
     const data = {
       success: true,
       summary: {
         pendingReview: r.pending_review,
+        pendingReviewPapers: pendingReviewPapers == null ? r.pending_review : pendingReviewPapers,
         failedTasks,
         todayNewWrongQuestions: r.today_new_wrong,
         inProgressCount: r.in_progress_count,
