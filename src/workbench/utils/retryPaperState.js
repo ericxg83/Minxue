@@ -215,7 +215,8 @@ export function getRetryPaperStateMeta(state) {
  * 状态 → 批改中心列表用的 workflowStatus（沿用既有优先级/筛选体系）
  *
  * 映射表（GradeCenterWorkbench）：
- *   issued          → 'retry'      停在「等学生」，仍在 activeStatuses 里，卡片可见但不给复核入口
+ *   issued          → 'retry'      停在「等学生」：不给复核入口，且不进批改中心「待处理」
+ *                                  （2026-10-09 起；只在状态 tab「待学生作答」/「重练已布置」chip 可见）
  *   grading         → 'processing' AI 处理中
  *   failed          → 'failed'     识别异常
  *   pending_review  → 'review'     待复核（主队列）

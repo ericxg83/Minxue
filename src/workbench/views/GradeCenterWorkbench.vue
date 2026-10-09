@@ -203,10 +203,12 @@
 
               <dl class="ds-mini-stat-grid preview-stats">
                 <MiniStat label="题目" :value="selectedTask.questionCount" unit="题" />
+                <!-- 未交卷的重练卷没有本次结果（wrongCount=null）⇒ 显示「—」，
+                     不能拿原作业的旧错题数冒充本次重练成绩。 -->
                 <MiniStat
                   label="错题"
-                  :value="selectedTask.wrongCount"
-                  unit="题"
+                  :value="selectedTask.wrongCount == null ? '—' : selectedTask.wrongCount"
+                  :unit="selectedTask.wrongCount == null ? '' : '题'"
                   :tone="selectedTask.wrongCount > 0 ? 'danger' : 'default'"
                   emphasis
                 />
@@ -319,7 +321,6 @@ import {
   isRetryPaperTask,
 } from '../utils/retryPaperState'
 import {
-  PENDING_REVIEW_WORKFLOW_STATUSES,
   normalizeHomeworkStatus,
   isAwaitingStudent,
   isPendingReviewItem,
@@ -351,10 +352,9 @@ const studentId = ref(route.query.studentId || '')
 const sourceFilter = ref(allowedSource.includes(route.query.source) ? route.query.source : 'all')
 const statusFilter = ref(allowedStatus.includes(route.query.status) ? route.query.status : 'active')
 
-// 待人工复核的 workflowStatus 集合 / 「等学生」排除 / tasks.status 归一 —— 三条判据
-// 全部来自 utils/pendingReviewCaliber.js（唯一实现，服务端算 pendingReviewPapers 也用同一份）。
+// 「待人工复核」/「等学生」排除 / tasks.status 归一 —— 三条判据全部来自
+// utils/pendingReviewCaliber.js（唯一实现，服务端算 pendingReviewPapers 也用同一份）。
 // ⛔ 本文件不许再各写一套：首页 KPI 与侧栏徽标读的就是这里数出来的同一个口径。
-const activeStatuses = PENDING_REVIEW_WORKFLOW_STATUSES
 const failedStatuses = new Set(['failed'])
 const completedStatuses = new Set(['completed'])
 
@@ -379,7 +379,12 @@ const weekCompletedCount = computed(() => {
 // 否则 tab 上的数字（全状态统计）和点进去看到的列表行数（叠加状态筛选）对不上，
 // 老师会以为任务丢了（2026-09-15 反馈：「学生作业 73」下面只列出 4 条）。
 const matchesStatusFilter = item => {
-  if (statusFilter.value === 'active') return activeStatuses.has(item.workflowStatus)
+  // 「待处理」= 现在就该老师动手的，判据与顶部「待人工复核」chip 完全同一个（isPendingReviewItem）。
+  // ⛔ 不能直接拿「待复核家族集合」has 判：那个集合含 'retry'，会把「已布置·待学生作答」的
+  //   重练卷一起列进待处理（2026-10-09 负责人反馈：顶部 chip 写着「重练待验证 0」，
+  //   点进去却列出 10 张点不进批改的卡 —— 自相矛盾）。
+  //   未交卷的重练卷仍可在「待学生作答」tab / 顶部「重练已布置」chip 里看到，不会丢。
+  if (statusFilter.value === 'active') return isPendingReviewItem(item)
   if (statusFilter.value === 'issued') return isAwaitingStudent(item)
   if (statusFilter.value === 'failed') return failedStatuses.has(item.workflowStatus)
   if (statusFilter.value === 'completed') return completedStatuses.has(item.workflowStatus)
@@ -573,7 +578,10 @@ const retry = (exam, student, pages = []) => {
     // 未交卷的卷没有「待处理题」（那批题的正误属于原始作业，不是这次重练的结果）
     pendingCount: pendingConfirm && meta.canEnterReview ? unjudgedCount : 0,
     correctCount,
-    wrongCount,
+    // 未交卷 / AI 处理中的卷：对/错/未判定都还是**原作业的旧判定**（本卷 question_ids 复用原题行，
+    // 题目的 is_correct 是当初那次作业批出来的），不是这次重练的结果 —— 一律不给数字，
+    // 免得老师把「错题 18 题」当成这次重练的成绩（2026-10-09 负责人截图发现的假数字）。
+    wrongCount: resultVisible ? wrongCount : null,
     unjudgedCount,
     retryStats,
     // retryState 是本卡片的权威判据；workflowStatus 只是沿用既有筛选/优先级体系

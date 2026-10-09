@@ -141,11 +141,29 @@ test('孤儿重练答卷（卷被删）降级成独立卡，不凭空消失', ()
   assert.equal(n, 1)
 })
 
-test('activeStatuses 集合是唯一口径（前端 activeStatuses 就是它）', () => {
+test('待复核家族集合 = {pending, processing, review, retry}（retry 只作族内合法态，不直接当列表过滤）', () => {
   assert.deepEqual(
     [...PENDING_REVIEW_WORKFLOW_STATUSES].sort(),
     ['pending', 'processing', 'retry', 'review']
   )
+})
+
+test('源码锁：批改中心「待处理」必须用 isPendingReviewItem，不得退回集合直判', () => {
+  // 2026-10-09 负责人截图：顶部 chip「重练待验证 0」，点进「错题重练」tab 却列出 10 张
+  // 「待学生作答」的卡（点不进批改）。根因就是这里当时写的是
+  // `activeStatuses.has(item.workflowStatus)` —— 集合含 'retry'，把未交卷的卷也列了进来。
+  const src = flatSource(read('src/workbench/views/GradeCenterWorkbench.vue'))
+  assert.doesNotMatch(src, /activeStatuses/, '不得再用 activeStatuses 做列表过滤（会把未交卷重练卷列进待处理）')
+  const fails = []
+  const block = anchoredSlice(
+    src,
+    "if(statusFilter.value==='active')",
+    120,
+    'GradeCenterWorkbench.matchesStatusFilter',
+    fails
+  )
+  assert.deepEqual(fails, [], fails.join('; '))
+  assert.match(block, /isPendingReviewItem\(item\)/, '「待处理」与「待人工复核」必须同一判据')
 })
 
 test('normalizeHomeworkStatus：status → workflowStatus 映射（含自愈失败改判处理中）', () => {

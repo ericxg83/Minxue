@@ -34,9 +34,13 @@ import {
 import { isSelfHealing, autoRetryState } from '../../domain/taskAutoRetry.js'
 
 /**
- * 进「待人工复核」的 workflowStatus 集合（批改中心 activeStatuses）。
- * `retry` = 重练卷·已布置待学生作答：仍在集合里（卡片可见、可筛），
+ * 「待人工复核」家族的 workflowStatus 集合。
+ * `retry` = 重练卷·已布置待学生作答：留在集合里（它是「重练卷」这一族的合法状态），
  * 但被 isAwaitingStudent 排除出「待人工复核」——「等学生」不是「等我干活」。
+ *
+ * ⚠️ 批改中心「待处理」列表用的判据是 `isPendingReviewItem`（**不是**直接 has 本集合）：
+ *    2026-10-09 负责人反馈「顶部 chip 写着重练待验证 0，点进去却列出 10 张不能批改的卡」，
+ *    根因就是列表当时直接用本集合（含 'retry'）过滤，把未交卷的卷也列了进来。
  */
 export const PENDING_REVIEW_WORKFLOW_STATUSES = new Set(['pending', 'processing', 'review', 'retry'])
 
@@ -64,9 +68,9 @@ export function normalizeHomeworkStatus(task) {
 
 /**
  * 「已布置·待学生作答」的重练卷：学生还没交卷，老师无事可做。
- * 它仍在 PENDING_REVIEW_WORKFLOW_STATUSES 里（卡片照常出现在待处理列表），
- * 但**不算「待人工复核」**——否则就是把「等学生」混进「等我干活」
- * （这正是 2026-09-12 那次事故的认知来源）。
+ * 它**不算「待人工复核」**，也**不进批改中心「待处理」列表**（2026-10-09 起）——
+ * 否则就是把「等学生」混进「等我干活」（这正是 2026-09-12 那次事故的认知来源）。
+ * 要看这批卷：批改中心顶部「重练已布置」chip / 状态 tab「待学生作答」。
  */
 export const isAwaitingStudent = (item) =>
   item?.source === 'retry' && item?.retryState === RETRY_PAPER_STATE.ISSUED
