@@ -51,6 +51,14 @@ test('clearDegraded → 立即恢复 ok=true', () => {
   assert.equal(snap.ok, true)
 })
 
+test('clearDegraded 对不存在的事件是零 IO no-op（它挂在 AI 成功高频路径上）', () => {
+  const file = process.env.QUOTA_SENTINEL_STATE_FILE
+  const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
+  clearDegraded('never-degraded-supplier')
+  const after = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''
+  assert.equal(after, before, '无事件时不得触发 persist 写盘')
+})
+
 test('状态持久化到磁盘（重启后横幅不丢的前提）', () => {
   recordDegraded('neon', { detail: 'persist-check' })
   const raw = JSON.parse(fs.readFileSync(process.env.QUOTA_SENTINEL_STATE_FILE, 'utf8'))

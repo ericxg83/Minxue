@@ -32,6 +32,21 @@ test('tpm exhausted 是瞬时限流，绝不能当额度耗尽（本次事故原
   assert.equal(isTransientRateLimit(err429('tpm exhausted')), true)
 })
 
+test('rps exhausted 是瞬时限流（2026-10-09 事故：正则漏 rps 同款复发）', () => {
+  // 事故：SenseNova `rps exhausted` 不在枚举里，撞上额度判据的裸词 exhausted 被判「真·额度耗尽」
+  // → key…iXi447 × deepseek-flash 被拉黑到当日结束 + 白挂 6 小时级降级横幅（RPS 本是秒级瞬时）。
+  assert.equal(isQuotaExhaustedError(err429('rps exhausted')), false)
+  assert.equal(isTransientRateLimit(err429('rps exhausted')), true)
+  assert.equal(isQuotaExhaustedError(err429('rps limit exceeded')), false)
+})
+
+test('源码级：速率缩写枚举必须包含 rps（防止重构时再丢）', () => {
+  assert.ok(
+    AI_SRC.includes('(tpm|rpm|qpm|qps|tps|rps)'),
+    'TRANSIENT_RATE_LIMIT_RE 的速率缩写枚举必须含 rps——每新增一个供应商速率缩写都要成对补 test'
+  )
+})
+
 test('真·额度耗尽仍然要判成额度耗尽', () => {
   assert.equal(isQuotaExhaustedError(err429('quota exceeded')), true)
   assert.equal(isQuotaExhaustedError(err429('insufficient balance')), true)

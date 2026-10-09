@@ -58,10 +58,13 @@ export function recordDegraded(supplier, { kind = 'quota', detail = '' } = {}) {
   return snapshot()
 }
 
-/** 供应商恢复时显式清除（可选——TTL 兜底保证横幅终会消失）。 */
+/** 供应商恢复时显式清除（可选——TTL 兜底保证横幅终会消失）。
+ *  ⚠️ 本函数挂在 AI 成功高频路径上（ai.js 请求成功即调用）：无事件时必须是零 IO 的 no-op。 */
 export function clearDegraded(supplier) {
   try {
-    delete state.events[normalize(supplier)]
+    const key = normalize(supplier)
+    if (!state.events[key]) return snapshot()
+    delete state.events[key]
     persist()
   } catch (e) {
     console.warn('[quotaSentinel] 清除降级事件失败（不影响主流程）:', e?.message)

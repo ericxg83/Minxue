@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { createRateLimiter } from '../utils/aiRateLimiter.js'
-import { recordDegraded } from '../services/quotaSentinel.js'
+import { recordDegraded, clearDegraded } from '../services/quotaSentinel.js'
 
 // 从请求 endpoint 推断供应商名（供配额哨兵归因；未知域名回退为主机名）
 // ⚠️ 2026-10-04 修复：原先读 axios client.defaults.baseURL —— 但 postWith429Retry 复用的是
@@ -119,16 +119,19 @@ export async function withAiLimit(fn) {
 //      ——重试到重置前也没用，唯一出路是换 Key / 换模型
 //   2) 瞬时并发限流（HTTP 429 "Too Many Requests"、裸 "rate limit"、"retry after"）
 //      ——退避重试有效，**绝不能按额度耗尽处理**，否则会把主模型拉黑一整天
-//   3) 按分钟/秒的速率配额打满（`tpm exhausted` / `rpm limit`）—— 同上，属瞬时限流。
+//   3) 按分钟/秒的速率配额打满（`tpm exhausted` / `rpm limit` / `rps exhausted`）—— 同上，属瞬时限流。
 //      SenseNova 官方口径：高峰期出现 429 是正常现象，退避重试即可。
 // 事故复盘（2026-09-04）：旧正则把 `too many requests` 也算额度耗尽，SenseNova
 // 深度并发一次瞬时限流就把 deepseek-v4-pro 按「Key + 模型 + 自然日」拉黑，
 // 全天 12/19 题降级到 glm-5.2 兜底。收紧匹配面，让"是否重试"由错误消息决定。
-// ③ 按分钟/秒的速率配额（TPM/RPM/QPS）。官方口径：高峰期出现 429 属正常现象，
+// ③ 按分钟/秒的速率配额（TPM/RPM/QPS/RPS）。官方口径：高峰期出现 429 属正常现象，
 //    退避重试即可恢复。**必须排除在"额度耗尽"之外** —— 实测 2026-09-16：
 //    SenseNova 返回 `tpm exhausted`，被下面正则里的裸词 `exhausted` 抓成"额度耗尽"，
 //    于是整把 Key 被冷却 5 小时，答案引擎全线降级到弱模型（额度池当时是满的）。
-const TRANSIENT_RATE_LIMIT_RE = /\b(tpm|rpm|qpm|qps|tps)\b[\s\S]{0,24}?(exhausted|exceeded|limit|rate)|too\s*many\s*requests|retry[\s_-]*after/i
+//    ⚠️ 2026-10-09 换缩写复发：`rps exhausted` 不在枚举里（漏了 rps），同款误判——
+//    key…iXi447 × deepseek-flash 被拉黑到当日结束，还白挂了 6 小时级降级横幅。
+//    枚举新增供应商速率缩写时必须成对补回归测试（test/aiQuotaClassify.test.mjs）。
+const TRANSIENT_RATE_LIMIT_RE = /\b(tpm|rpm|qpm|qps|tps|rps)\b[\s\S]{0,24}?(exhausted|exceeded|limit|rate)|too\s*many\s*requests|retry[\s_-]*after/i
 // 明确指向"积分/余额/信用"的字样：出现任一个就不算瞬时限流
 const QUOTA_WORD_RE = /quota|credit|balance|insufficient|out\s+of|no\s+credit/i
 
@@ -264,6 +267,10 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
     try {
       const response = await withAiLimit(() => client.post(endpoint, body, axiosOptions))
       notifyAiSuccess()
+      // 配额哨兵：请求成功即视为该供应商已恢复，显式清除其降级事件 ——
+      // 这是横幅「恢复后自动消失」的实际接线（此前全仓无 clearDegraded 调用点，
+      // 横幅只能靠 6h TTL 惰性过期，恢复后还会白挂数小时）。空事件时为 no-op，无 IO。
+      clearDegraded(supplierFromEndpoint(endpoint))
       return response
     } catch (err) {
       const status = err.response?.status
