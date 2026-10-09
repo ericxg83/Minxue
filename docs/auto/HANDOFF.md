@@ -1527,3 +1527,83 @@ backlog 里 r244/r245/r246 三节是**未提交的工作区内容**，别覆盖�
 - 下轮接第 249 轮（编号以 loopGuard 返回值为准）：首选 **r250-①**、**r248-①**（灯名/拆灯，需拍板）、
   ㉘（141 题 `is_complete` 口径）、㊸（export-retry-pdf）、㊴+㉚（渲染超时 **180s**，r229 实测）；
   另需负责人处理 Render 面板部署（㉒/㊼）与 stale 锁。
+
+## 第 249 轮（2026-10-09 10:27–，交接编号待对齐）：体检那句「没有批改失败」是把「没盯到」说成「没有」
+
+> **编号对齐（重要）**：上一轮 HANDOFF 里写的是「下轮接第 249 轮（编号以 loopGuard 返回值为准）」，
+> 而本轮 `loopGuard.mjs acquire` 实际返回的就是 **round=249** —— 上一轮那批编号（r250-① healthTrend
+> 点名成因 / r250-② 灯名拆灯 / r250-③ 部署）在本文档里统一改记为下方 **r249-①~④**，以 loopGuard 返回值为准。
+> 历史 r244~r248 的 backlog 节是**未提交的工作区内容**，本轮用 python 只读追加，**0 删除**。
+
+- 开工锁 `finished / 248`，`loopGuard.mjs acquire` 得 round=249。他方 in-flight
+  （`.workbuddy-ai/memory/MEMORY.md`、`scripts/patrol/daemon.mjs`、以及中途被 workbench 提交掉的
+  `src/workbench/*` 与 `test/pendingReviewCaliber.test.mjs`）全程没碰、没带进 commit。
+- 交付 `1e24de3`（代码 2 文件 +203/−1，零产品代码、零接口改动、零写库），docs 为纯追加。
+
+### ⭐ 主发现（A 级，假绿家族新一枚，而且这盏灯盯的正是「失败」本身）
+
+`scripts/healthcheck.mjs` 合格那一支写死一句「**没有批改失败**，也没有没看的新作业」；
+而 `/api/tasks/summary` 的 `failedTasks` 只数 `status='failed' AND notification_read_at IS NULL`
+（`server/index.js:733` 的 `failed_detail` 子查询硬带未读条件）。
+
+实测生产 `tasks` 表（`SELECT status, COUNT(*) ... GROUP BY status`）：只有 `reviewed 189` + `done 8` +
+**`failed 1`**。那条失败作业 `35b35c33…`「新闵学校"成长·桥"练习 数学堂堂清01」：
+created 2026-09-02T09:53:31Z、`retry_count=3`、`last_error = invalid input syntax for type json`、
+`notification_read_at = 2026-09-02T10:47:41Z`（**当天就被点开过**）、
+`describeAutoRetry`（`server/pendingTaskRecovery.js`）→ `{willRetry:false, state:'gave-up', reason:'超出 7 天自动恢复窗口'}`。
+
+⇒ 因为被点开过，`failedTasks` 恒 0 ⇒ **体检和铃铛一次都没提醒过这份作业**；而它会一直卡在那儿：
+不会自己重判，`server/` 里也没有任何一处定时清掉它。10-09 10:27 那次体检照旧印「没有批改失败」。
+
+**这类假绿比假红危险**：灯名承诺「盯失败」，实际漏的就是失败本身（与 r221 同族 ——
+r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开过**的失败」）。
+
+- 修（A，零接口改动零写库）：合格那一支改成「**没看到新的批改失败**」+ 一句交代本项只看什么 +
+  一直没批成的上哪儿翻：`没看到新的批改失败，也没有没看的新作业｜（这一项只看「新冒出来、你还没点开过的失败」；` +
+  `点开过的不再提醒 —— 真有几份一直没批成的，得去作业列表里翻出来手动重试，它们不会自己重判、也不会自己消掉）`。
+  判红那一支（真·3 份作业批改失败，需在 App 里点重试）**一字未动**，行为保持。
+- 新锁 `test/healthcheckFailedCaliber.test.mjs` **5 条**：① 元判据自证（探针认得这行、认得两种状态）；
+  ② 什么都没有 ⇒ 仍判 `ok`，但 **不许再出现「没有批改失败」**，且必须说清「没看到新的 / 只看 / 作业列表 / 不会自己重判」；
+  ③ 行为保持：`failedTasks:3` ⇒ 仍判 `bad` 且印「3 份作业批改失败」；④ **反向自检**：套基线快照
+  `test/fixtures/healthcheck-baseline-8492df9.mjs`（修复前那一版）同场景**必须印出「没有批改失败」**；
+  ⑤ 基线快照自证（fixtures 里若被换掉，第 ④ 条会空转成假绿）。
+
+### ⭐ 本轮自己踩的坑（高复用）
+
+① **禁词断言差点把自己判红**（r237/r241 同款）：新文案里含「没看到新的**批改失败**」，而禁的是
+「**没有批改失败**」—— 五字一差，本来会当场判红。⛔ 写「禁止出现某词」前，先拿自己的新文案去核一遍。
+② **新锁第一版漏了 `import { spawn } from 'node:child_process'`** ⇒ 3 条直接 `ReferenceError: spawn is not defined`
+（不是断言失败）；用 `node --test <单文件>` 一眼能看见，别等全量套件才暴露。
+③ **反向自检的基线必须挑对版本**：本轮的洞在 `8492df9`（r248 那一版）里**还在**；若沿用 r249 这把锁钉的
+`23ef3df` 基线，基线里已是修过的 copy ⇒ 自检会永远空转（r214 教训）。故本轮新挑 `8492df9`，并加第 ⑤ 条自证。
+
+### 已验证无问题（下轮别再翻）
+
+- `/api/queue/stats` 的 `failed=50` 与 tasks 表 `failed=1` 差 50 倍：前者是 BullMQ `removeOnFail:{count:50}`
+  上限（永远停在 50，r246 已验），**不是作业失败数**；体检「任务队列」那盏灯只作事实打印、不参与判定（r220 决定），现状不改。
+- `/api/tasks/summary` 的 `pendingReview`（1）= 未读 done 数（铃铛），`pendingReviewPapers`（5）= 待复核卷数（待办工作量），
+  两个口径不同源，非缺陷。
+- 家长分享卡真图复核（成长总览·陆晨曦，258,478 bytes / 36.3s）：中文字形、学习周期 01/01~12/31、
+  三态掌握度（已记住 16 / 还在攻克 54）、周期词（「这段时间」）、老师寄语全部正确，无新问题。
+- `node scripts/pruneDeadDeclarations.mjs --check` 报 2 条可删死声明
+  （`server/scripts/applyKnowledgeMerge.mjs:215`、`server/services/knowledgeService.js:78`）——
+  属「仓库卫生」赛道且未擅自 apply，留作提案/下轮。
+
+### 提案
+
+- **r249-①**（B，本轮最大待拍板）：`/api/tasks/summary` 的 `failedTasks` 只数未读失败 ⇒ 老师点开一次铃铛，
+  那条永远批不成的作业就从**所有**告警里永久消失（本轮实测就是这么消失的）。建议改成
+  「不会自动重捞的失败总数（不管有没有点开）」，铃铛另算；属口径变更且影响铃铛数字，需负责人拍板。
+- **r249-②**（B，沿用 r248-① / 上一轮 r250-②）：灯名「批改失败任务」挂着两件不相干的事（真失败 / 没点开的新作业），
+  本轮只改合格支的措辞，**灯名没动**（改名会动到 `bad`/`warn` 灯名与采样分组）。
+- **r249-③**（B，观察）：队列那 50 个永远停在 50，绿灯会一直这么印；别把它当成「作业失败数」读。
+- **r249-④**（B，沿用上一轮 r250-③）：线上 commit `22852cf`（09:53 由 workbench 推送触发的部署重启，非故障），
+  本地 `1e24de3` ⇒ 本轮改动要等 Render 部署。
+
+- 下轮接第 250 轮（编号以 loopGuard 返回值为准）：首选 **r249-①**（口径变更要发起人点头）、
+  **r249-②**（灯名拆/改名，需拍板）、上一轮留下的 `healthTrend.mjs`「代码版本」连亮时直接点名
+  「刚推了代码没部署」、㉘（141 题 `is_complete` 口径）、㊸（export-retry-pdf）、㊴+㉚（渲染超时 180s，r229 实测）；
+  外加本轮的 `pruneDeadDeclarations` 两条死声明（仓库卫生赛道）。另需负责人处理 Render 面板部署（㉒/㊼）与 stale 锁。
+
+
+**交接状态**：第 249 轮已收尾（本轮已结束，下次触发自动接下一轮）。交接人本轮改动：体检「批改失败任务」合格支不再把「没盯到」说成「没有」；代码已过四道闸并推送。下轮接第 250 轮（编号以 loopGuard 返回值为准），首选 r249-①（口径变更需负责人拍板）与 r249-②（灯名拆分/改名）。
