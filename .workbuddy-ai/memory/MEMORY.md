@@ -41,6 +41,8 @@
   极端兜底：闸 3/闸 4 走替代路径（`node _check_sfc.mjs` 真编译 / `@vue/compiler-sfc` 编译后渲染函数断言 / 真浏览器单点验证），且提交说明里写明闸 3/闸 4 未执行。
 - ⛔ APK 打包链：`export ESBUILD_BINARY_PATH=<仓库外 esbuild>` → `node scripts/build-app.mjs`（`BUILD_TARGET=app`→`dist-app`）→ `CODEBUDDY_SAFE_DELETE_ENABLED=0 npx cap sync android` → `cd android && ./gradlew assembleDebug`。`android/` 在 `.gitignore` 里但**关键文件仍被跟踪** ⇒ 改 `android/app/build.gradle`、`android/gradle.properties` 要 `git add -f`。⛔ `android/gradle.properties` 里**不得**写死 `-javaagent`（曾指向已归档的 `agent/pipefix-agent.jar`，会让 gradle 启动直接失败；该 Windows 绝对路径在 CI(ubuntu) 上必崩）。CI `.github/workflows/build-apk.yml` 跑的是 `npm run build`（输出 `dist/`）而 `webDir=dist-app` ⇒ **CI 打 APK 一直是坏的**，别指望它。
 - ⛔ Playwright `page.setContent()` 的页面 origin 是 `null` ⇒ 跨域 `fetch()` 必被 CORS 拦（验「图能否从 OSS 拉到」会全红假结论）。图片用 `<img>`+`naturalWidth`；字节数在 Node 侧量。
+- ⛔ 重练卷（paper）复核页定位框 = 答卷图**按题切段实测**（`refine-boxes` 带 `questionIds`；重练卷题目挂在原作业 task 上，按 `task_id` 查必然为空）。`task.result.retryAlign` 只是**兜底**（它存的是答卷 OCR 答案行坐标，选择题答案在题干括号里 ⇒ 整体偏移）。
+  ⛔ **喂给量框模型的题号必须用「重练卷卷面编号」**（`questionLabels`，与 `questionIds` 同序），不能用题目自带的原作业题号 —— 实测该卷原题号 4,1,3,7,5,5,7,9,4,11,10 vs 卷面 1,2,3,4(2),5(5)…，喂原题号会让模型按原题号找行、**切段整体错位**（同页两次调用 y 差 30~180，一次准一次不准）；换卷面编号后连测两次差值 ≤8。锁：`test/retryPaperRefineBoxes.test.mjs`。
 
 ## 2. 前端验证纪律
 - ⛔ 源码级回归锁必须反向自检（旧版上判红；新锁可删除前先跑，无需导出旧版）。
