@@ -327,9 +327,14 @@ import {
 } from '../utils/pendingReviewCaliber'
 import { ElMessage } from 'element-plus'
 import RetryPaperPreview from '../components/review/RetryPaperPreview.vue'
+import { useNotificationStore } from '../stores/notificationStore'
 
 const route = useRoute()
 const router = useRouter()
+// 侧栏徽标与页内 chip 同口径（pendingReviewPapers）但不同步刷新：徽标靠 45s 轮询。
+// 本页每次重拉列表（含从批改工作区返回的 remount、重试、转换后）顺带刷一次摘要，
+// 让「处理完回到列表」的瞬间侧栏立刻归零，而不是最长等 45 秒（2026-10-09 负责人反馈「页面 0 / 徽标 3」）。
+const noti = useNotificationStore()
 const students = ref([])
 const allTasks = ref([])
 const loading = ref(true)
@@ -700,6 +705,8 @@ async function loadData({ force = false } = {}) {
         if (statusOrder) return statusOrder
         return new Date(right.createdAt || 0) - new Date(left.createdAt || 0)
       })
+      // 不 await：摘要刷慢/失败不拖列表渲染；服务端 summaryCache 10s TTL 兜住频率。
+      noti.fetchSummary()
     } catch (error) {
       if (generation !== gradeLoadGeneration) return
       loadError.value = humanizeError(error?.message, { entity: '任务列表' })

@@ -72,14 +72,15 @@ const isActive = (path) => (path === '/' ? route.path === '/' : route.path.start
 const go = (path) => { if (route.path !== path) router.push(path) }
 
 // 活数据徽标（r16x+2）：直接复用全局 notificationStore 轮询（AppHeader 已启动），不新增请求。
-// 批改中心=待人工复核卷数，学习诊断=今日新增错题数；其余入口暂无现成计数，不加。
+// 批改中心=待人工复核卷数；其余入口暂无现成计数，不加。
 // ⛔ 批改中心徽标必须用 pendingReviewPapers（口径与页内 chip 同源）；
 //    用 pendingReview（未读通知数）会出现「徽标 1 / 页面 7」（2026-10-09 事故）。
+// r25x（负责人裁决，2026-10-09）：学习诊断「今日新增错题」角标下线——纯信息性计数，
+//    进页面不清零、也不代表有待办（「这个 1 是什么」），违反小而美原则。
 const badgeFor = (path) => {
   if (path === '/grade') {
     return noti.summary?.pendingReviewPapers ?? noti.summary?.pendingReview ?? 0
   }
-  if (path === '/weekly-report') return noti.summary?.todayNewWrongQuestions || 0
   return 0
 }
 </script>
