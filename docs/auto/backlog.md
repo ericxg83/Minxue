@@ -4018,3 +4018,238 @@ r245 记作「`/api/health` 返 500 ⇒ 只盯 1 项」——**本轮实测不�
   实测一条 stale 锁就这么卡了 5 轮（本轮 346 分钟才越线）；建议降到 60 分钟或给锁加心跳。
 - **r248-③**（B，观察）：`test/fixtures/` 现在存了多份基线脚本，脚本改口径时得同步更新基线，
   否则反自检会一直拿旧基线跑「假红」。建议基线文件名带提交号、并在文件头写清「取自哪个提交、为什么要这份」。
+
+## 第 249 轮（2026-10-08 19:49–20:0x，只读审计轮）：体检把「老师还没看的新作业」报成「作业卡住了」
+
+> 性质：开工读到 `_loop_state.json = running/246`（`startedAt 11:42:09Z` = 19:42，就在 7 分钟前）
+> ⇒ 按纪律转**只读审计**：不改业务码、不提交、不推送、**不写 finished**（留给在跑方）。
+> 他方 in-flight：`.workbuddy-ai/memory/MEMORY.md`、`scripts/patrol/daemon.mjs`、根目录 4 个未跟踪文档，全程没碰。
+> 本轮唯一写入 = `docs/auto/backlog.md` + `docs/auto/HANDOFF.md` 纯追加（0 删除，与 r244~r248 同法）。
+
+### 健康采样（19:49，一次）
+`已运行 325 分钟 / 首次 1064ms / 复查 766ms / 21 名学生 / 磁盘剩 76776MB（共约 396139MB）/
+判不出来且不会再重试 50 个 / 家长卡片中文字 OK`。
+- uptime 曲线：r242≈590 → r244 739 → r245 802 →（14:24 部署重启）→ r246 39 → r247 52 → 本轮 325，
+  重启那次与 `51beacd`（14:23:23）重合 ⇒ 推代码触发的部署，不是故障（⛔ 单次观测不下因果结论）。
+- 线上 `commit 51beacd` vs 本地 `48de07e` ⇒ ㊼/㉒（Render 部署）本轮仍未闭环。
+
+### 复核：在跑方 r246 的落地已生效（只读实跑，不是读代码）
+`07cb5e1` 已把 r246-①（采样记 `checked`/`checkedNames`/`lit`）+ r247-①（趋势按机器分组）合在一起：
+- 本轮采样行实测 `checked:8`、`checkedNames:[后端在线,接口速度,数据库可读,批改失败任务,任务队列,服务器磁盘,代码版本,家长卡片中文字]`、
+  `lit:{"批改失败任务":"1 份作业卡在处理中，…","代码版本":"线上还是 51beacd…"}` ⇒ **生效了**。
+- `node scripts/healthTrend.mjs` 只读实跑输出：`64 条采样里混着 3 台机器：线上 59 / 目标没记 4 / 本机 1`，
+  并按三台分开讲、老格式明说「没记盯了几项」；`✅ 这次盯了几项：8 项全跑了`。
+
+### ⭐ 主发现 r249-①（A 级，未动手）：「批改失败任务」这一项把两种完全相反的事报成一句
+- 19:49 那趟体检打的是：`⚠️ 批改失败任务：1 份作业卡在处理中，等一会儿再看；持续卡住就重启后端`。
+- `scripts/healthcheck.mjs:183`：`const stuck = (s.pendingTasks || []).length`；`:189-190` 拿它当「卡住的份数」并给上面那句提示。
+- **但 `pendingTasks` 的真身不是「在处理中」**：`server/index.js:749` 那条子查询是
+  `WHERE t.status = $1（= DONE）AND deleted_at IS NULL AND notification_read_at IS NULL`，
+  注释（`:723`）原文写的是「教师未读（notification_read_at IS NULL）的 **done 任务**」，还 `LIMIT 5`。
+  ⇒ 它其实是「**作业已经批完了、老师还没点开看**」，跟卡住没有任何关系。
+- **实测证据**（curl 生产 `/api/tasks/summary`，即 healthcheck 真正请求的那个接口，`:170`）：
+  那一刻 `pendingTasks` 唯一的 1 条是 `status="done"`、`createdAt=2026-10-08T10:58:45.051515+00:00`
+  （到 20:0x 已 52+ 分钟），体检一个「已经这么久」的字都没提；
+  而**真正在批改中的数量 `inProgressCount = 5`**（`status='processing'` 的 COUNT，`server/index.js:759`）
+  **体检一次都没读** —— 两个语义正好拿反了。
+- **真实代价**：老师照那句提示去「重启后端」，会打断当时正在跑的 5 份批改；正确动作是去 App 点开看新批完的作业。
+  反过来，真卡死（processing 长时间不动）反而没有任何一处提示。
+- 修法（A，本赛道可观测性，零接口改动、零写库）：`healthcheck.mjs:182-193` 三分支文案改准——
+  `failed>0` → bad「N 份作业批改失败了，去 App 里点重试」（与现有一致）；
+  `stuck>0` → warn「有 N 份作业已经批好了、你还没打开看（最早那份 X 分钟前交上来的）；去 App 里看一眼就行」；
+  两者都 0 → ok「没有批改失败，也没有没看的新作业」（现文案「没有失败也没有卡住的任务」同样说错）。
+  X 用 `pendingTasks[].createdAt` 算——`mapTask`（`server/index.js:770-786`）**已输出这个字段**（实测 key 列表里在）。
+  ⛔ **别用 `updatedAt`**：`mapTask` 只输出 `id, studentId, originalName, status, createdAt, notificationReadAt,
+  studentName, questionCount, wrongCount, emptyCount, pendingCount, autoRetry`，没有 `updatedAt`。
+
+### 提案
+- **r249-①**（A，下轮首选）：上面那条——把「批改失败任务」这一项的文案/语义改准，零接口改动、零写库。
+- **r249-②**（B，需拍板）：这一项的**灯名**「批改失败任务」实际挂了「批改失败 + 没看的新作业」两件事，
+  建议拆成两盏灯（真在处理中的 `inProgressCount` 也可以补一句话）。拆灯属行为变更，没拍板前不动。
+- **r249-③**（A，很小）：`healthTrend.mjs` 把没有 `api` 的行叫「目标没记（旧格式采样，
+  **多半是别人不带 --api 跑的那次**）」——那 4 条实测是 **10-04 19:57~20:03 写的**、既无 `api` 也无 `kind`，
+  也就是 r239 之前**本脚本自己写的老格式行**（r245-③ 就是这么分类的）。「多半是别人跑的」没有证据，
+  按 r198（夸大的推论比不写更糟）建议改成「旧格式采样（r239 之前写的，没记目标）」。⛔ 别删行，老数据照样能用。
+- **r249-④**（流程，观察）：本轮差点把结论写反——中途 curl `GET /api/health` 看到 `summary` 是空的，
+  差点下「现在 0 份 ⇒ 刚才那句只是正常在途」；但 `healthcheck.mjs:170` 请求的是 `/api/tasks/summary`，
+  两个接口的 `summary` 是两个东西。⛔ **取证前先看脚本请求的是哪个 URL**（与 r245-③「先按字段分类、别猜有人在写」同族）。
+  按正确接口重测后结论翻转，见上面实测证据。
+
+### 采样当裁判（64 条）
+代码版本 28 次（连续 ⇒ 推了没部署，真报）、服务器磁盘 18 次**全在 r198 之前**（那次修是真修好，不是瞎亮的灯）、
+接口速度 4 次、家长卡片中文字 1 次（10-08 00:34，部署到 `51beacd` 后自己转绿，别当新增噪声）、
+批改失败任务 1 次（就是本轮这条语义错报）。
+
+### 四道闸
+**未跑**（只读轮，零代码改动）。
+
+## 第 246 轮（2026-10-08 19:39–20:15，可开工轮 · 接管空闲锁 → 测试里的「恒真断言」＋ cert_probe 的「假红」）
+
+> 章节号以 `scripts/loopGuard.mjs acquire` 的返回值为准（=**246**）。⚠️ 文件里已有一个
+> 「第 246 轮（15:03 只读审计轮）」—— 那是别人未持锁时自编的号，两节按内容区分。
+
+- 开工判据（三级）：锁 = `finished / r245`（`finishedAt` 18:45:30，约 54 分钟前）｜`git status -uall`
+  只有 `.workbuddy-ai/memory/MEMORY.md`(15:29) 与 `scripts/patrol/daemon.mjs`(01:06) 两个**陈旧**在制
+  ｜最近真实代码提交 `a443357`(18:47:02) 已 52 分钟、根目录 4 个乱码未跟踪文件 mtime 全是 18:47:24
+  ⇒ 判定主循环空闲，`loopGuard acquire` 接管 r246（收尾 release 成 `finished/r246`）。
+- 赛道：**仓库卫生与门禁基线**（`scripts/**`、lint 棘轮、`scripts/gate/**`；无活跃认领会话）。
+
+### 交付（两个真缺陷，都是「判据自己不可信」家族）
+
+**① 测试套件里的「恒真断言」（假绿家族，测试层）** —— 全仓实测**恰好 2 处**：
+- `test/dailyBackupResult.test.mjs:208` 的 `assert.ok(existsSync(resolve(ROOT, BACKUP_ROOT)) || true, ...)`
+  与 `test/geomConstraintExtract.test.mjs:29` 的 `assert.ok(!eqDropped || true, ...)`。
+  `|| true` 让整条断言恒为真 ⇒ **它长得像一道门禁，实际一次都没查过**（后者正是几何配图链上
+  「结论式不得进约束集」那句最该盯的话）。比「没有这条断言」更坏：给后来人「这里已经盯住了」的错觉。
+- 修：前者改成 `assert.ok(typeof BACKUP_ROOT === 'string' && BACKUP_ROOT.length > 0, ...)`
+  （下一行本来就管形状，原句实为冗余 + 死断言）；后者改成
+  `assert.equal(constraints.filter((c) => String(c.raw || '').includes('BD·DE')).length, 0, ...)`
+  —— 直接盯 `constraints`（进硬约束才是缺陷），不再去问 `dropped`。
+- 新判据 `test/assertionVacuityKit.mjs`（判据唯一实现）+ 锁 `test/assertionVacuity.test.mjs`（5 条）：
+  坏样本 8 条逐条判红、好样本零误报、注释/字符串里的同款写法不算违规（**因此本判据不用给自己开豁免洞**）、
+  真实测试文件全量扫描 0 处、扫描清单为空时判红（fail-closed）。样本放
+  `test/fixtures/vacuousAssertBad.txt` / `vacuousAssertGood.txt`（**不内联**，否则判据文件会被自己扫到）。
+- **反向自检实测**：同一把判据套 `git show HEAD:` 的两个**真实旧文件** ⇒ 各自命中 1 条、行号正是
+  208 / 29；修复后的树 0 条。
+
+**② 闸门④ `cert_probe` 的「假红」（r224 口径过宽 + r244 新功能撞上）** —— 实测，非推理：
+- 现象：本轮跑闸门，`cert_probe` **exit 1**，而历轮报告全是「零外联 exit 0」。
+  逐路由实测：移动端首页与 7 个工作台路由**零外部请求**，唯一外联来自 `#/grade` ——
+  **7 张 `image` 请求打到 `minxue-app-oss.oss-cn-shanghai.aliyuncs.com`**。
+- 根因：r244（`59d94f3`，10-08 14:16）给批改中心加了「试卷首页小图」（学生作业图存 OSS，前端 `<img>` 直拉），
+  而 r224 的判据是「**外部 origin 必须为空**」⇒ 探针从此**恒定 exit 1**。恒红的闸和恒绿的闸一样坏：
+  没人再看它（r198「常量黄灯」同族）。
+- 修（保留 r224 原意，只把范围收到「数据/脚本外联」）：新增 `scripts/certProbeKit.mjs`
+  （⛔ **刻意放 `scripts/` 根，不放 `gate/`** —— `test/gateBase.test.mjs` 规定 gate 目录下每个 .mjs
+  都要走 base.mjs 的 BASE 解析，纯判据放进去会被那把锁当场判红；仓内同类 kit 也都在 scripts/ 根），
+  `cert_probe.mjs` 按资源类型分流：`fetch/xhr/script…` 算脏；`image/font/media` 算正常静态资源
+  （**仍然打印出来，不藏**，并注明「学生作业图等存 OSS，前端 `<img>` 直拉是正常业务」）；
+  类型读不出来 / 没见过 ⇒ 算脏（fail-closed）。
+- 锁 `test/certProbeExternalOrigin.test.mjs`（6 条）：只有 OSS 图片不算脏（**并断言老口径在这份样本上会判红**
+  ⇒ 证明修的是真事）、fetch 到生产 API 算脏（r224 的防线没被削）、同一 origin 既拉图又发 fetch 算脏、
+  同源与端口边界、未知类型 fail-closed、源码契约（必须走 kit + 退出码必须基于 apiLike）。
+- **端到端正反双向实测**（本地，零外网）：真产物 → `exit 0`（OSS 标注为「仅图片/字体/媒体」）；
+  另起一个本地假页面做**成功**的跨域 fetch（带 CORS，**零 requestfailed**）→
+  打印 `❌ 数据/脚本外联（算脏）`、`exit 1` ⇒ **既会红也会绿**。
+  ⚠️ 途中实测到一个细节：跨域 fetch 若被 CORS 拦，Chromium 报的是 `requestfailed`（走失败那条路），
+  **不会**产生 response 事件 ⇒ 「外部 origin」清单里看不到它。r224 要防的正是「外联**成功**、零 requestfailed」
+  那种，所以反向对照必须让外联成功才有意义（第一版就踩了这个坑）。
+
+### 四道闸
+- 单测 **2154/2154 fail 0**（基线 2143 + 本轮 11）｜eslint **0e / 120w**（error 零新增；warning 122→120，
+  因为顺手删掉了我自己写出的 2 条 `no-useless-escape`；本轮 7 个文件 lint 输出全 0）。
+- `dist_nightly_20261008r246` **37.09s**（未动 `dist/`；本轮零 `src/` 改动，产物不受影响）。
+- preview `5490`（`--outDir` 指向隔离产物；curl 验 main chunk = `text/javascript`）+
+  `cert_probe` **exit 0**（零数据外联）+ `render_smoke` **8/8 exit 0** + `route_sweep` **0/16 exit 0**；
+  反向对照 `cert_probe` **exit 1**。预览与反向对照服务均已按端口杀清。
+
+### ⚠️ 并发实记（本轮第二次遇到「锁被自己持有 ≠ 没人在跑」）
+- 19:52（开工 13 分钟后）**另一会话苏醒**，自称「第 249 轮」，读到我的 `running/r246` 后按纪律转
+  **只读审计**，只往 `docs/auto/backlog.md`(+64) 与 `HANDOFF.md`(+81) 追加，自称「不提交、不写 finished」。
+- ⇒ 按「别人的未提交文件只读、不编辑、不提交」，**这两个台账文件本轮未提交**（本节的追加也随它留在工作区）。
+  **这正是 r167→r212 那条「台账脏 ⇒ 各轮拒绝落笔记 ⇒ 零产出」链的又一次复发**，已在报告里点名。
+- 另：`scripts/patrol/daemon.mjs`（他人 in-flight，mtime 01:06）与 `.workbuddy-ai/memory/MEMORY.md`
+  全程只读未碰，未带进 commit。
+
+### 提案
+- **r246-①（A，很小）**：`scripts/healthcheck.mjs` 的 `--api` **默认值就是本机** `http://127.0.0.1:4000`，
+  而它自己头部的用法示例写着 `node scripts/healthcheck.mjs --log tmp/health.jsonl` ⇒
+  照抄一次就把本机采样写进线上趋势（r245 已让趋势按机器分组，但默认值这个坑还在）。
+  建议默认改成线上，或至少在「用了 `--log` 且查的是本机」时打印一句「你这次查的是本机，趋势里会多一台」。
+- **r246-②（B，观察）**：`scripts/patrol/daemon.mjs` 的 `renderReport()` 与 `heartbeatText()` 各判一套
+  「全绿」：文件顶部心跳按「server/mobile-dev 正常 + 无 fail + 无 lint」判，正文报告还看脏文件数 ⇒
+  **同一个文件里顶部写「✅ 全绿」、正文写「⚠️ 发现异常」**（本轮实测：心跳 `✅ 全绿`、正文 `脏文件 6 个`）。
+  且两处都把 `lintErrors: null`（报告读不出来）与 `tests.fail: null`（条数读不出来）当成「没问题」——
+  正是 r236 刚修过的那个假绿，只是换到了消费方。**未动手原因**：该文件有他人未提交改动（心跳锚点），
+  按纪律不编辑；请负责人定归属后一并修（判据抽成纯函数 + 锁，参照 `nightlyAuditVerdict.mjs`）。
+- **r246-③（B，沿用 r248-③）**：`test/fixtures/` 基线文件已多份，建议文件名带提交号 + 文件头写清来源。
+
+### 复用价值（新教训）
+1. **「断言恒真」是「假绿家族」的测试层分支**：与 r167（锚点改名 ⇒ 锁静默失效）并列 ——
+   前者是「查了但结果恒真」，后者是「压根没查」。修法：判据抽纯函数 + 样本放外部 fixture（否则自扫自）。
+2. **闸门要问「它现在还会红吗 / 还会绿吗」**：r224 把 cert_probe 判严了，r244 的新功能一撞就变成**恒红**。
+   改门禁前后都要跑**正反双向**对照（本轮：真产物 exit 0 + 合成成功外联 exit 1）。
+3. **跨域 fetch 被 CORS 拦时走的是 `requestfailed`，不产生 response 事件** ⇒
+   「按 response 事件统计外部 origin」看不到它。要验「外联成功那条路」，假服务必须带 CORS 头。
+4. **新加的 kit 别放进 `scripts/gate/`**：那里有 r158 的锁要求「目录里每个 .mjs 都走 base.mjs」，
+   纯判据放进去会被当场判红（本轮实测）。同类 kit 一律放 `scripts/` 根。
+
+## 第 247 轮（2026-10-08 20:53–21:0x，可开工轮）：体检把「作业批完了、老师还没点开看」报成「作业卡住了，重启后端」
+
+- 开工锁 `finished / 246`；`loopGuard.mjs acquire` 得 round=247（与 15:15 那条只读轮同号不同轮次，编号以 loopGuard 返回值为准）。
+  他方 in-flight：`.workbuddy-ai/memory/MEMORY.md`、`docs/auto/{backlog,HANDOFF}.md`、`scripts/patrol/daemon.mjs`、根目录 4 个未跟踪 docs —— **全程没碰、没带进 commit**。
+- 健康采样 20:54：uptime **390 分钟**、首响 2590ms / 复查 354ms、21 名学生、磁盘 73529MB；改后 21:0x 复采 **398 分钟**（1663/352ms）。
+  上一轮只读轮（r247）是 52 分钟 ⇒ 中途重启过一次，`bootAt 14:24:49` 与线上 `commit 51beacd`（14:23 提交）重合 ⇒ **推代码触发的部署重启，不是故障**（单次观测不下因果结论）。
+- ⭐ **主发现 r249-①（A 级，本轮落地，一处三用可见）**：`scripts/healthcheck.mjs:189-190` 把 `/api/tasks/summary` 的 `pendingTasks` 当成「卡在处理中」的份数，并劝「持续卡住就重启后端」。
+  真身是 `server/index.js:723` 那条 SQL 硬写的 `status=DONE AND deleted_at IS NULL AND notification_read_at IS NULL` = **已经批完、老师还没点开看**的作业（最多 5 份）。
+  实测生产（20:5x）：`failedTasks=0`、`inProgressCount=0`（**一份都没在跑**），只有 5 份已批完未读，体检照样印「5 份作业卡在处理中，等一会儿再看；持续卡住就重启后端」。
+  **真实代价**：老师照提示去重启生产后端，会打断那几条真正在跑的批改（同一时刻 `inProgressCount` 实测到过 5），而正确动作是去 App 点开看新批完的作业。两个语义正好拿反。
+  连带：`inProgressCount`（真正的「在批改」，`server/index.js:736`）体检**一次都没读过**。
+- **修法（零接口改动、零写库、只动文案与取数）**：三分支改准 —— ①`failed>0` ⇒ 红色照旧「N 份作业批改失败，需在 App 里点重试」；②有已批完未读 ⇒ 黄色「N 份作业已经批完了，你还没点开看（最早那一份是 X 前批的）；这不是卡住，去 App 里点开看就行，不用重启后端」；③全 0 ⇒ 合格，并补上此前从没读过的「现在有 M 份正在批改（那才是真的在跑，正常）」。
+  时间文案统一走新加的 `ageText`（全脚本唯一的时间人话出口）；报数用 `pendingReview`（手机里铃铛那个数字，同一口径）而不是被 `LIMIT 5` 截过的清单长度。
+  `inProgressCount` 只作补充信息**不参与判定**（缺了不会把结论说反，所以不套 r221「字段没回必须叫醒」那条纪律，避免多一盏天天亮的灯）。
+  顺带落地 **r249-③**：`healthTrend.mjs` 对没记 `api` 的老格式行，把写死的推论「多半是别人不带 --api 跑的那次」改成中立说法「看不出查的是哪台机器」（r198：夸大的推断比没告警更糟）。
+- **回归锁** `test/healthcheckUnreadTasks.test.mjs` 5 条（真跑脚本，假后端按真接口契约出数；反自检钉 `test/fixtures/healthcheck-baseline-23ef3df.mjs`）。
+  反向自检实测：修复前基线同场景印「5 份作业卡在处理中，等一会儿再看；持续卡住就重启后端」⇒ **洞坐实**；新锁 5 条全绿，旧版对应分支逐字对得上。
+- ⭐ **本轮自己踩的三个坑（高复用）**：
+  ① **反向自检断言方向写反**（r239 同款）：第一版写成「旧版不许含 `等一会儿再看`」⇒ 旧版本来就该含这句错话，**方向反了自检就变成假绿**，当场改成「旧版必须含」并留注释。
+  ② **禁词断言把自己写的文案判红**（r237/r241 同款）：新文案里有「**不用重启后端**」五个字，而断言禁的是「重启后端」⇒ 3 条当场红；改禁「持续卡住就重启后端」这种**整句建议**，并要求必须出现「不用重启后端」。
+  ③ **stage 布局的上一级相对依赖**（新增）：`test/baselineScriptKit.mjs` 只把兄弟文件拷到同目录不够 —— 基线还 `import '../server/utils/cjkFontState.js'` 是**上一级**路径；按同级摆放 ⇒ `MODULE_NOT_FOUND`，现象是「旧脚本什么都没输出」，真病因完全看不出来（与 r242 那条同款）。修法：stage 成 `<tmp>/probe/healthcheck.mjs` + `<tmp>/server/utils/cjkFontState.js`，两份依赖各归各位。
+- ⭐ **已验证无问题（下轮别再翻）**：`server/index.js:716-806` 的 `summary` 结构与字段（`pendingReview` / `failedTasks` / `inProgressCount` / `pendingTasks` / `recentTasks`），逐个 grep 与实测对齐；体检其余七项判据本轮未动。
+- **四道闸**：单测 **2159 / 2159 过 / fail 0 / skipped 0**（本轮 +5 锁）｜lint 4 文件 **0 error、0 warning**｜`dist_nightly_20261008r248` **36.27s**｜preview `5501` + cert_probe 零外联 exit 0 + render_smoke **8/8**（0 控制台错误 / 0 个 4xx-5xx）+ route_sweep **0/16** + text_audit **0/14**，预览已按端口杀清。
+- **线上改后复测**（不是只看测试）：那句黄灯变成「⚠️ 批改失败任务：5 份作业已经批完了，你还没点开看（最早那一份是 2 小时 4 分钟前批的）；这不是卡住，去 App 里点开看就行，不用重启后端」，**黄灯从 3 项降到 2 项**（少了一盏瞎亮的灯），没有多出新告警。
+- 提交 `8492df9`（代码 + 锁 + 基线快照 + stage 布局）+ `2f9ec2a`（lint 修正），已推送（含 patrol 会话的 `0acf0f0`）。
+- 提案 **r248-①**（B，本轮最大待拍板：「批改失败任务」这个灯名现在挂着两件不相干的事 —— 真批改失败 / 批完没看，建议改名或拆成两盏；改名会牵动现有锁与文档，等负责人定）、
+  **r248-②**（A，观察：报数用 `pendingReview`、清单只有 5 份，两者可能不一致，注释已写明取数顺序）、
+  **r248-③**（A，`/api/tasks/summary` 还有 `todayNewWrongQuestions` / `recentTasks` 等字段体检没读，只记录未改）。
+- **闭环**：r249-①、r249-③。
+- **下次触发接第 249 轮**（编号以 loopGuard 返回值为准）：首选 r249-②（拆灯/改名，需拍板）、㉘（141 题 `is_complete` 口径拍板，家长「批改题量」少 141 题）、㊸（export-retry-pdf 留/删/接线）、㊴+㉚（渲染超时 **180s**，r229 实测）、⑲/㊲/㊵（定每天自动体检 or 备份定时任务）；另需负责人处理 Render 面板部署（㉒/㊼）与 running/246 的 stale 锁。
+  ⚠️ backlog 里 r244~r248 若干节是**未提交的工作区内容**，别覆盖。
+
+## 第 248 轮（2026-10-09 09:07–09:5x，可开工轮）：体检的告警不再替你下结论，也不再给你做不到的建议
+
+- 开工锁 `finished / 247`，`loopGuard.mjs acquire` 得 round=248；他方 in-flight（`.workbuddy-ai/memory/MEMORY.md`、
+  `docs/auto/{backlog,HANDOFF}.md`、`scripts/patrol/daemon.mjs`、根目录 4 个未跟踪 docs）**全程没碰、没带进 commit**。
+  本轮零产品行为改动（`/api/health` 与所有接口一个字段没动），只动体检的**告警文案与判据措辞**。
+
+- 健康两次：09:07 uptime **191 分钟**、首响 1996ms / 复查 867ms → 改后复测 09:5x **203 分钟**（890/822ms），
+  单调上升无重启；21 名学生、磁盘 66177MB。
+
+- ⭐ **主发现（A 级，一处最贵 + 四处同族；实测不是推理）**：体检脚本里有五处文案，要么**拿单次观测替你下因果结论**，
+  要么**推荐一个负责人根本做不到的动作**。① 队列那盏灯「队列服务连不上（多半是 Redis 掉了）：……**建议重启后端**」——
+  `server/redisManager.js:129-131` 的 ioredis 是 `maxRetriesPerRequest: null`（重试不限次数）+ `reconnectOnError: () => true`，
+  `:207` 那行注释明写「Auto-reconnect is handled by ioredis retryStrategy」，而 `server/queue.js:102` 的
+  `redisManager.getAvailableClient()` 正是拿这个客户端 ⇒ **Redis 掉了后端会自己连回来，重启根本不解决**，白等一趟还打断正在跑的批改
+  （r248 刚修掉的那条「照提示重启打断了 5 份批改」是同一个坑的第二处）。② `missingFieldDetail` 那句「多半是接口结构变了」
+  —— 本周 66 条采样里「代码版本」连续 20 条亮（线上一直没换代码），而本周每一次「字段没回」的真实成因恰恰是**线上还没重启到新版**，
+  常见成因被指反了。③ 接口速度「多为网络往返，……**换到离国内更近的机房**」—— 前者是单次观测下的因果（红线性），
+  后者在 Render 上根本不是她的操作项（⛔ 给一个做不到的建议比不给更糟，r198）。④⑤ 队列积压「可能是 AI 额度紧张」、
+  本地版本读不出「多半是被复制到别处跑了」—— 同一个「一个成因定终身」的毛病。
+
+- 交付 `dfca4f7`（+685/−6，两文件）：五处文案改成「点到两种可能 + 给一个做得到的下一步」；队列那条改成
+  「后端会自己连回去，**不用重启**；要是好一阵都连不上，去查 Redis 那边的内存/连接数是不是到顶了」；
+  接口速度改成「偶尔碰上一次先不用管，过一会儿再跑一次体检；次次都这样才是服务器那边慢」。
+  新锁 `test/healthcheckAlertCopy.test.mjs` 5 条（**真跑脚本**：假后端按真契约出数，队列 `available:false` /
+  `summary` 整层不回 / 局域网 IP 造假后端 3s 延迟真跑线上那套慢文案 / 积压 30 个）；
+  反向自检基线钉 `test/fixtures/healthcheck-baseline-8492df9.mjs`，同场景**旧版必须印出**「建议重启后端」与
+  「多半是接口结构变了」⇒ 5/5 全过，不是空转。
+
+- ⭐ **本轮自己踩的坑（高复用）**：① 造「线上偏慢」场景必须让**假后端的 `/api/health` 慢**（`health.rt` 才是判据输入），
+  但 `isProd` 要非 127.0.0.1/localhost ⇒ 假后端得绑 `0.0.0.0` 并用 `os.networkInterfaces()` 拿局域网 IPv4 当 `--api`；
+  ② 第一版把 `readFileSync` 引进来却没用（删掉源码断言后）⇒ lint 的 no-unused-vars 当场抓到（r241 同款）。
+  ⛔ **下次再写「给建议」的告警，先问三句**：这建议她做得到吗？我有两次以上观测才下的结论吗？除了这个成因还有没有更常见的？
+
+- 四道闸：单测 **2164 / 2164 过 / fail 0 / skipped 0**（基线 2159 + 本轮 5，账对得上）｜lint 3 文件 0e/0w｜
+  `dist_nightly_20261009r250` **1m20s**（main chunk `main-CO0NAGlB.js` 与 r213–r249 同名 ⇒ 零前端产品码改动）｜
+  preview `5510` + cert_probe 零外联（只有 OSS 图片，正常业务）+ render_smoke **8/8**（0 控制台错误 / 0 个 4xx-5xx）
+  + route_sweep **0/16** + text_audit **0/14**，预览已按端口杀清。
+  改后复测生产：仍是 2 项黄灯（代码版本 + 那 1 份没点开的新作业），**没有多出任何瞎亮的灯**。
+
+- 提案 **r250-①**（A，很小未做）：`healthTrend.mjs` 报「代码版本」连亮时说「要么没解决、要么这盏灯本身坏了」——
+  两种可能点到是对的，但可以直接点名现在最常见的那种（刚推了代码没部署），省得她每次都去猜。
+  **r250-②**（B，沿用 r248-①：「批改失败任务」这个灯名挂着两件相反的事，拆/改名还没拍板，本轮只改文案没改名）；
+  **r250-③**（B，观察）：本轮推的 `dfca4f7` 要等 Render 面板部署，线上要看效果得先解决 ㉒/㊼。
+
+- 下轮接第 249 轮（编号以 loopGuard 返回值为准）：首选 **r250-①**、**r248-①**（灯名/拆灯，需拍板）、
+  ㉘（141 题 `is_complete` 口径）、㊸（export-retry-pdf）、㊴+㉚（渲染超时 **180s**，r229 实测）；
+  另需负责人处理 Render 面板部署（㉒/㊼）与 stale 锁。
