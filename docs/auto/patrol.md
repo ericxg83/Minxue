@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R151 — 2026/10/9 14:00:11（✅ 全绿）**
+> ⏱ **最近心跳：R152 — 2026/10/9 14:10:14（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1506,3 +1507,16 @@
     -  M .workbuddy-ai/memory/MEMORY.md
     -  M docs/auto/HANDOFF.md
     -  M scripts/patrol/daemon.mjs
+| 152 | 2026-10-09T06:10:14 | tests=2241/0 | lint=0 | build=skipped | server=ok | dirty=6 |
+
+### R152 — 2026/10/9 14:10:14（daemon 自动报告）
+
+**体检**：tests **2241/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 6
+
+⚠️ 发现异常：脏文件 6 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M server/services/dashboardService.js
+    - ?? test/dashboardCaliber.test.mjs
