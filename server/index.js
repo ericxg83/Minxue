@@ -733,8 +733,15 @@ app.get('/api/tasks/summary', async (req, res) => {
            FROM ${TABLES.TASKS} t
            WHERE t.status = $2 AND t.deleted_at IS NULL AND t.notification_read_at IS NULL
          ) f), '[]'::json) AS failed_detail,
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} WHERE lifecycle_status = $3 AND added_at::date = CURRENT_DATE), 0) AS today_new_wrong,
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $4 AND deleted_at IS NULL), 0) AS in_progress_count,
+         -- 今日新增错题（2026-10-09 负责人拍板，对齐周报 newWrongCount 口径）：
+         --   上海自然日 + 不限生命周期（统计的是「今日批卷产生的错题总数」）。
+         -- ⛔ 不用 CURRENT_DATE：Neon 会话时区是 UTC，北京 0-8 点新增会被算进「昨天」（实测当天丢 2 道）。
+         -- ⛔ 不过滤 lifecycle_status='new'：错题被重练推进后就不计入「今日新增」（实测当天丢 1 道），
+         --    且与周报口径（全部生命周期）冲突 ⇒ 展示语义（lifecycle 六态）与统计口径分离。
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS}
+            WHERE (added_at AT TIME ZONE 'Asia/Shanghai')::date
+                = (NOW() AT TIME ZONE 'Asia/Shanghai')::date), 0) AS today_new_wrong,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $3 AND deleted_at IS NULL), 0) AS in_progress_count,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
@@ -762,7 +769,7 @@ app.get('/api/tasks/summary', async (req, res) => {
              AND ((t.status = $1 AND t.notification_read_at IS NOT NULL) OR t.status = $2)
            ORDER BY COALESCE(t.notification_read_at, t.updated_at) DESC LIMIT 5
          ) t) AS recent_tasks`,
-      [TASK_STATUS.DONE, 'failed', 'new', TASK_STATUS.PROCESSING]
+      [TASK_STATUS.DONE, 'failed', TASK_STATUS.PROCESSING]
     )
 
     const mapTask = (t) => ({

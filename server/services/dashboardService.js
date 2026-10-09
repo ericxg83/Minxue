@@ -72,7 +72,11 @@ export async function getDailyTrend(days = 7) {
 
   const [{ rows: taskRows }, { rows: wrongRows }] = await Promise.all([
     query(
-      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
+      // ⛔ 必须在 SQL 侧输出文本日期（::date::text）：pg 会把 date 列反序列化成 JS Date 对象，
+      // String(Date) 得到 "Thu Oct 08 2026 00:00:00 GMT+0800…"，永远匹配不上下方
+      // Intl 生成的 "2026-10-08" 格式 key ⇒ 序列恒 0 ⇒「较昨日/今日已批改/近 7 日趋势」全恒 0
+      // （2026-10-09 老师报数实测事故，与 r130 图表空柱同族的 date 反序列化坑）。
+      `SELECT (created_at AT TIME ZONE 'Asia/Shanghai')::date::text AS day,
               COUNT(*)::int AS n
        FROM ${TABLES.TASKS}
        WHERE deleted_at IS NULL
@@ -82,7 +86,7 @@ export async function getDailyTrend(days = 7) {
       [lower]
     ),
     query(
-      `SELECT (added_at AT TIME ZONE 'Asia/Shanghai')::date AS day,
+      `SELECT (added_at AT TIME ZONE 'Asia/Shanghai')::date::text AS day,
               COUNT(*)::int AS n
        FROM ${TABLES.WRONG_QUESTIONS}
        WHERE added_at >= NOW() - make_interval(days => $1::int)
