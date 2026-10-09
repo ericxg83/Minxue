@@ -43,6 +43,9 @@
  *
  * 功能：换色 / 换粗细 / 橡皮 / 撤销 / 激光笔 / 清空 / 导出板书图（白底 + 题干
  * （KaTeX 渲染）+ 配图 + 笔迹 → PNG 下载）。
+ * 图形自动拉直（2026-10-09）：收笔后原地停顿 ~1 秒，手画的直线 / 三角 / 矩形 /
+ * 多边形 / 圆自动变成理想几何（识别见 utils/shapeRecognize.js，交互见下方
+ * 「图形自动拉直」块），移开笔 / 起另一笔 / 换工具即取消。
  *
  * 数据流：组件内部维护 localStrokes 作为唯一书写源；外部「切题替换笔迹」
  * 通过 props.strokes 传入，watch 覆盖本地并重绘；每一笔「收笔」时 emit
@@ -80,6 +83,7 @@
 import { onMounted, onBeforeUnmount, ref, shallowRef, toRaw, watch } from 'vue'
 import MathRender from './MathRender.vue'
 import { quantizeStrokePoint } from '../utils/strokePoint'
+import { recognizeShape } from '../utils/shapeRecognize'
 
 const props = defineProps({
   strokes: { type: Array, default: () => [] },
@@ -143,6 +147,95 @@ let wheelRafId = 0
 function cancelWheelPan() {
   if (wheelRafId) { clearTimeout(wheelRafId); wheelRafId = 0 }
   wheelTargetY = null
+}
+
+// ── 图形自动拉直（2026-10-09）：收笔后原处停顿 ~1 秒，手画的直线 / 三角 /
+//    矩形 / 多边形 / 圆自动变成理想几何（识别算法在 utils/shapeRecognize.js）。
+//    交互契约（负责人 2026-10-09 需求原话：「画完原处停顿一秒，系统自动拉直」）：
+//    ① 收笔时若最后一笔识别成功 → 激光层画半透明 ghost 预览 + 挂 1s 定时器；
+//    ② 期间出现任一「老师在干别的事」信号 → 立即取消，笔迹保持手绘原样：
+//       新起一笔 / 笔或鼠标移出收笔点 28px / 换工具 / 撤销·切题·清空（外部
+//       替换笔迹）/ 缩放平移视图；手掌触摸不算信号（防手掌误触打断识别）；
+//    ③ 到点把最后一笔的 points 换成理想点列并走正常 emit → 落盘链路
+//       （颜色 / 粗细 / 工具类型不变）。撤销（Z）会整笔删掉拉直后的图形。
+//    ghost 画在激光层是安全的：pending 只在 tool==='pen' 时存在，与激光笔
+//    互斥（换工具即取消），期间 drawLaser 不会被触发重绘。
+//    ⛔ 本块声明必须放在 props.strokes 的 immediate watch 之前：挂载时该
+//       watch 就会跑一次外部替换路径并调 cancelShapeFix，let 声明在其后
+//       会踩 TDZ（Cannot access before initialization）。
+const SHAPE_HOLD_MS = 1000
+const SHAPE_CANCEL_MOVE_PX = 28
+let shapeTimer = 0
+let shapePending = null // { index, strokeRef, points, anchorX, anchorY }
+let lastClientX = 0
+let lastClientY = 0
+
+function cancelShapeFix() {
+  if (shapeTimer) { clearTimeout(shapeTimer); shapeTimer = 0 }
+  if (shapePending) clearShapeGhost()
+  shapePending = null
+}
+
+/** 收笔后调用：识别成功则挂定时器等「原地停顿」，期间画 ghost 预览 */
+function maybeScheduleShapeFix(stroke, index) {
+  cancelShapeFix()
+  if (stroke.tool !== 'pen') return
+  const rec = recognizeShape(stroke.points)
+  if (!rec) return
+  shapePending = {
+    index,
+    strokeRef: stroke,
+    points: rec.points,
+    anchorX: lastClientX,
+    anchorY: lastClientY,
+  }
+  drawShapeGhost()
+  shapeTimer = setTimeout(applyShapeFix, SHAPE_HOLD_MS)
+}
+
+/** 到点：把理想点列换进最后一笔（对象身份对不上 = 已被撤销 / 替换，放弃） */
+function applyShapeFix() {
+  shapeTimer = 0
+  const pend = shapePending
+  shapePending = null
+  clearShapeGhost()
+  if (!pend) return
+  const arr = localStrokes.value
+  if (!arr || arr[pend.index] !== pend.strokeRef) return
+  const next = arr.slice()
+  next[pend.index] = { ...pend.strokeRef, points: pend.points }
+  localStrokes.value = next
+  redraw()
+  emit('update:strokes', next)
+}
+
+/** ghost 预览：画在激光层（半透明同色，板面空间变换与主画布一致） */
+function drawShapeGhost() {
+  const c = laserRef.value
+  if (!c || !laserCtx || !shapePending) return
+  const ratio = dpr()
+  laserCtx.setTransform(ratio * zoom, 0, 0, ratio * zoom, -panX * ratio, -panY * ratio)
+  const s = shapePending.strokeRef
+  const pts = shapePending.points
+  laserCtx.lineCap = 'round'
+  laserCtx.lineJoin = 'round'
+  laserCtx.globalAlpha = 0.32
+  laserCtx.strokeStyle = s.color || '#E11D48'
+  laserCtx.lineWidth = lineWidth(s)
+  laserCtx.beginPath()
+  laserCtx.moveTo(pts[0].x, pts[0].y)
+  for (let i = 1; i < pts.length; i++) laserCtx.lineTo(pts[i].x, pts[i].y)
+  laserCtx.stroke()
+  laserCtx.globalAlpha = 1
+  laserCtx.setTransform(ratio, 0, 0, ratio, 0, 0)
+}
+
+function clearShapeGhost() {
+  const c = laserRef.value
+  if (!c || !laserCtx) return
+  const ratio = dpr()
+  laserCtx.setTransform(ratio, 0, 0, ratio, 0, 0)
+  laserCtx.clearRect(0, 0, c.width / ratio, c.height / ratio)
 }
 
 // ── 双指捏合缩放（仅笔模式 allowTouch=false；手指绘画模式两指就是两笔画）──
@@ -209,6 +302,7 @@ function syncSize() {
   ctx.lineCap = 'round'
   ctx.lineJoin = 'round'
   cachedRect = null
+  cancelShapeFix() // 尺寸变化会重排视图：ghost 预览失效，识别取消（挂载时 pending 必为空，无副作用）
   redraw()
   syncLaserSize()
 }
@@ -225,6 +319,7 @@ onBeforeUnmount(() => {
   if (laserRaf) cancelAnimationFrame(laserRaf)
   laserStrokes = []
   cancelWheelPan()
+  cancelShapeFix()
 })
 
 // 外部替换笔迹（切题 / 撤销 / 清空）→ 覆盖本地并重绘。
@@ -242,6 +337,7 @@ watch(() => props.strokes, (val) => {
   penArmed = false
   activePointerId = null
   liveStroke = null
+  cancelShapeFix() // 外部替换笔迹（撤销 / 切题 / 清空）后 index 已不可信，识别取消
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
   localStrokes.value = Array.isArray(val) ? val : []
   // 切题 / 外部替换：视图回原位（顶部 + 1:1），重算边界，丢弃进行中的捏合
@@ -287,6 +383,7 @@ function trackTouchDown(e) {
     anchorBy: ((a.y + b.y) / 2 - rect.top + panY) / zoom,
   }
   cancelWheelPan()
+  cancelShapeFix() // 双指捏合会缩放视图，ghost 预览随之失效
   emit('pinchstart')
 }
 
@@ -343,6 +440,11 @@ function isPenTipDown(e) {
 function onPointerDown(e) {
   if (props.disabled) return
   if (e.pointerType === 'pen') lastPenActiveAt = Date.now()
+  // 收笔点屏幕坐标：图形识别的「原处停顿」锚点（手掌 touch 不更新，防误触打断）
+  if (e.pointerType !== 'touch') {
+    lastClientX = e.clientX
+    lastClientY = e.clientY
+  }
   // 激光笔：手指 / 触控笔 / 鼠标一视同仁 —— 只驱动光点层，不落墨、不进捏合
   if (tool.value === 'laser') {
     if (e.pointerType === 'mouse' && e.button !== 0) return
@@ -378,6 +480,7 @@ function onPointerDown(e) {
 
 /** 真正起笔：建笔画、缓存矩形、落墨点 */
 function startStroke(e, eraserEnd) {
+  cancelShapeFix() // 新一笔开始 = 老师没有在「原地停顿」，图形识别取消
   drawing = true
   penArmed = false
   cachedRect = canvasRef.value.getBoundingClientRect()
@@ -395,6 +498,16 @@ function startStroke(e, eraserEnd) {
 
 // ── 行笔：只收点 + 增量画新段。不碰响应式、不 emit、不全量重绘 ──────
 function onPointerMove(e) {
+  // 笔 / 鼠标的屏幕位置始终跟踪（图形识别的停顿锚点用它），手掌 touch 除外；
+  // 收笔后若指针移开超阈值 = 老师去干别的了 → 取消「原地停顿」识别
+  if (e.pointerType !== 'touch') {
+    lastClientX = e.clientX
+    lastClientY = e.clientY
+    if (!drawing && shapePending
+        && Math.hypot(lastClientX - shapePending.anchorX, lastClientY - shapePending.anchorY) > SHAPE_CANCEL_MOVE_PX) {
+      cancelShapeFix()
+    }
+  }
   // 激光会话中：只推光点，其余一律不碰（绝不 appendLivePoint）
   if (laserActive) {
     if (e.pointerId !== laserPointerId) return
@@ -521,6 +634,8 @@ function finishStroke() {
     if (p.x > contentMaxX) contentMaxX = p.x
   }
   emit('update:strokes', localStrokes.value)
+  // 图形自动拉直：这一笔若像直线 / 三角 / 矩形 / 多边形 / 圆，挂 1s 停顿定时器
+  maybeScheduleShapeFix(stroke, localStrokes.value.length - 1)
 }
 
 // ── 激光笔（2026-10-03 引入；10-04 上午改「无拖尾」；10-04 深夜按负责人新裁决改为
@@ -655,8 +770,9 @@ function onPointerLeave() {
   if (penArmed) penArmed = false
 }
 
-/** 切走激光笔（换笔 / 橡皮）时结束当前笔，让它照常 1 秒渐隐（而不是一直留在屏上） */
-watch(tool, (t) => { if (t !== 'laser') endLaser() })
+/** 切走激光笔（换笔 / 橡皮）时结束当前笔，让它照常 1 秒渐隐（而不是一直留在屏上）；
+ *  任何工具切换同时取消图形识别的停顿等待（老师明显在干别的事） */
+watch(tool, () => { endLaser(); cancelShapeFix() })
 
 // ── 笔迹渲染 ────────────────────────────────────────────────────────
 function lineWidth(stroke) {
@@ -928,6 +1044,7 @@ async function exportPng(filename = '板书.png') {
 /** 手动上下平移板书（工具栏 ▲/▼）。dir<0 上翻、dir>0 下翻；下滚不超过已写内容底边 */
 function panBoard(dy) {
   cancelWheelPan()
+  cancelShapeFix()
   const next = Math.min(Math.max(0, panY + dy), Math.max(0, contentMaxY * zoom - (wrapRef.value?.clientHeight || 0) + 60))
   if (next === panY) return
   panY = next
@@ -936,6 +1053,7 @@ function panBoard(dy) {
 /** 以屏幕点 (clientX, clientY) 为锚缩放纸面（Ctrl+滚轮；捏合走 trackTouchDown 一路） */
 function zoomAt(factor, clientX, clientY) {
   cancelWheelPan()
+  cancelShapeFix() // 视图缩放 = ghost 预览与停顿锚点失效
   const rect = canvasRef.value?.getBoundingClientRect()
   if (!rect) return
   const z2 = Math.min(ZOOM_MAX, Math.max(1, zoom * factor))
@@ -981,6 +1099,7 @@ function animateWheelPan() {
 }
 
 function wheelPanBy(delta) {
+  cancelShapeFix() // 滚轮拉板会移动视图下的笔迹，停顿识别取消
   if (wheelTargetY === null) wheelTargetY = panY
   wheelTargetY = Math.min(Math.max(0, wheelTargetY + delta), wheelMaxScroll())
   if (!wheelRafId) animateWheelPan()
