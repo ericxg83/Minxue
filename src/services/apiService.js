@@ -416,12 +416,24 @@ export const getQuestionsByTask = async (taskId, useCache = true) => {
  * 这里按页向后端要一次实测结果（后端只量一次并缓存），失败时返回空对象，调用方优雅降级。
  * @returns {Promise<{boxes: Object<string,{x,y,width,height}>, error?: string}>}
  */
-export const refineQuestionBoxes = async (taskId, pageNumber) => {
+export const refineQuestionBoxes = async (taskId, pageNumber, opts = {}) => {
   try {
+    const body = { pageNumber }
+    // [2026-10-09] 错题重练（paper）模式：题目挂在【原始作业 task】上，后端按 task_id
+    // 查不到该页题目；调用方按卷面自上而下顺序传该页题目 id（取自 task.result.retryAlign
+    // 的 pageNumber 分组），后端据此量框。不传时后端行为与改动前完全一致。
+    if (Array.isArray(opts.questionIds) && opts.questionIds.length) {
+      body.questionIds = opts.questionIds
+      // 卷面编号（与 questionIds 同序）。重练卷题目记录带的是【原始作业题号】，与卷面编号
+      // 不同 —— 不传的话后端会拿原题号喂模型，切段整体错位（见 server/index.js 注释）。
+      if (Array.isArray(opts.questionLabels) && opts.questionLabels.length) {
+        body.questionLabels = opts.questionLabels
+      }
+    }
     const data = await apiRequest(`/questions/task/${taskId}/refine-boxes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pageNumber })
+      body: JSON.stringify(body)
     })
     return { boxes: data?.boxes || {}, error: data?.error || null }
   } catch (e) {

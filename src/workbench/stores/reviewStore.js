@@ -1218,13 +1218,24 @@ export const useReviewStore = defineStore('review', () => {
 
       for (const q of questions) {
         const j = judgeMap[q.id]
-        if (j) {
+        // ⚠️ 只在 judgement 真的带置信度时才覆盖（2026-10-09 修复）：
+        //    人工类 judgement（manual_review 结算、pc_edit、pc_rejudge、workbook_to_ai_regrade）
+        //    根本不下置信度，confidence 恒为 NULL。旧实现无条件 `q.confidence = j.confidence`，
+        //    等于用 NULL 把题目自带的 0.95 抹掉 ⇒ getReviewState 的 confirmed 判据
+        //    （confidence >= threshold）落空，题目从「AI判对」掉进「待复核」。
+        //    用户截图实例：学生 $\frac{5}{2}$ / 参考「2又1/2小时」，库里 is_correct=true、
+        //    confidence=0.95，页面却显示待复核（学生答案与参考答案明明等值）。
+        //    全库实测 349 条命中「最新 judgement 的 confidence 为 NULL 且 is_correct=true」，
+        //    其中 41 条 review_status 为空 ⇒ 这 41 条被凭空判成待复核，老师被迫逐题重点一遍。
+        //    不做反向覆盖（null 不许覆盖非 null），因为置信度只可能来自 AI 判定；
+        //    人工结论走 is_correct，不表达为置信度。
+        if (j && j.confidence != null) {
           q.confidence = j.confidence
-          // ⚠️ 不再用 judgement.is_correct 兜底覆盖题目状态：
-          //    questions 表才是最终判题权威（Step 7 重判后写回），judgements 是审计流水，
-          //    历史上还存在"答案生成前写早了的脏 ai_ocr 记录"。用它兜底会把错题显示成判定正确。
-          //    这里只合并 confidence，is_correct 一律以 questions 表为准。
         }
+        // ⚠️ 不再用 judgement.is_correct 兜底覆盖题目状态：
+        //    questions 表才是最终判题权威（Step 7 重判后写回），judgements 是审计流水，
+        //    历史上还存在"答案生成前写早了的脏 ai_ocr 记录"。用它兜底会把错题显示成判定正确。
+        //    这里只合并 confidence，is_correct 一律以 questions 表为准。
       }
     } catch (e) {
       console.error('合并判定数据失败:', e)
@@ -1666,19 +1677,44 @@ export const useReviewStore = defineStore('review', () => {
 
   /** 取当前页的实测定位框；同一页只请求一次 */
   const ensureRefinedBoxes = async () => {
-    if (source.value !== 'image') return
-    const taskId = currentTask.value?.id
-    if (!taskId) return
+    if (source.value !== 'image' && source.value !== 'paper') return
     const pages = currentPaperPages.value
     const page = pages.length ? pages[Math.min(currentPageIndex.value, pages.length - 1)] : null
     const pageNumber = Number(page?.page_number || 1)
-    const key = `${taskId}|${pageNumber}`
+
+    // [2026-10-09] paper（错题重练）也走「实测切段」量框。
+    //   重练卷的题目记录挂在【原始作业 task】上，题目行自带的坐标属于原作业图，与答卷图
+    //   不是同一张图 —— 所以 paper 模式过去只认 retryAlign（判题对位时存下的【答卷 OCR
+    //   答案行】坐标）。但那是「学生答案的位置」：答案写在题干括号里的选择题会整体偏移
+    //   （实测第 3 题的框压到了下一个栏目「二、填空题」上，老师看到的就是「框不对应这道题」）。
+    //   改为在答卷图上按题切段实测（与 image 模式同一套 questionBoxMeasure），框住整道题，
+    //   填空/选择都准。题源 = 该页题目 id，按 retryAlign 的卷面顺序取。
+    let reqTaskId = currentTask.value?.id
+    let paperQuestionIds = null
+    let paperQuestionLabels = null
+    if (source.value === 'paper') {
+      // 页图任务 id（currentPaperPages 展开行内 images 时 id 会带 `::pN` 后缀）
+      reqTaskId = String(page?.id || '').split('::')[0]
+      if (!reqTaskId) return
+      const recs = parsePageAlignRecords(page)
+      const onPage = recs.filter(r => r && r.questionId && Number(r.pageNumber || 1) === pageNumber)
+      paperQuestionIds = onPage.map(r => r.questionId)
+      // 卷面编号必须一起传：题目记录带的是【原始作业题号】，与卷面编号不同，
+      // 不传会让模型按原题号找行、切段整体错位（见 server/index.js 的注释）。
+      paperQuestionLabels = onPage.map(r => (r.label === undefined ? null : r.label))
+      if (!paperQuestionIds.length) return
+    }
+    if (!reqTaskId) return
+
+    const key = `${reqTaskId}|${pageNumber}|${source.value}`
     if (refinedPageKey.value === key && refineStatus.value !== 'error') return
     refinedPageKey.value = key
     refinedBoxes.value = {}
     refineStatus.value = 'loading'
     try {
-      const { boxes, error } = await refineQuestionBoxes(taskId, pageNumber)
+      const { boxes, error } = await refineQuestionBoxes(
+        reqTaskId, pageNumber,
+        paperQuestionIds ? { questionIds: paperQuestionIds, questionLabels: paperQuestionLabels } : undefined)
       // 期间老师可能已经切页/切卷，结果作废
       if (refinedPageKey.value !== key) return
       refinedBoxes.value = boxes || {}

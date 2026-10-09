@@ -3322,12 +3322,41 @@ app.post('/api/questions/task/:taskId/refine-boxes', async (req, res) => {
     const pageImg = imgs.find(i => Number(i.page_number || 1) === pageNumber) || imgs[0]
     if (!pageImg?.image_url) return res.json({ success: true, cached: false, boxes: {}, error: '该页没有图片' })
 
-    const { rows: qs } = await query(
-      `SELECT id, question_number, sub_no, page_number, content, block_coordinates
-       FROM ${TABLES.QUESTIONS}
-       WHERE task_id = $1 AND COALESCE(page_number, 1) = $2
-       ORDER BY COALESCE((block_coordinates->>'y')::float, 99999), created_at`,
-      [taskId, pageNumber])
+    // [2026-10-09] 错题重练（paper）模式：重练卷的题目记录挂在【原始作业 task】上，
+    // 按 task_id 查本任务必然为空（实测返回「该页没有题目」→ 前端退回占位/对位框）。
+    // 调用方（reviewStore.ensureRefinedBoxes）按卷面自上而下顺序传该页题目 id
+    // （取自 task.result.retryAlign 的 pageNumber 分组）。传了就按传入顺序取题 ——
+    // 顺序必须与卷面一致，measurePageQuestionBoxes 的 sorted[i] 是按输入顺序对题的。
+    // 不传 questionIds 时走原分支，行为与改动前逐字一致。
+    const paperIds = Array.isArray(req.body?.questionIds) ? req.body.questionIds.filter(Boolean) : []
+    const paperLabels = Array.isArray(req.body?.questionLabels) ? req.body.questionLabels : []
+    let qs = []
+    if (paperIds.length) {
+      const { rows } = await query(
+        `SELECT id, question_number, sub_no, page_number, content, block_coordinates
+         FROM ${TABLES.QUESTIONS}
+         WHERE id = ANY($1::uuid[]) AND deleted_at IS NULL`, [paperIds])
+      const byId = new Map(rows.map(r => [r.id, r]))
+      // [2026-10-09] 关键：重练卷题目记录带的是【原始作业题号】（实测 4,1,3,7,5,5,7,9,4,11,10），
+      // 与重练卷卷面编号（1,2,3,4(2),5(5)…）完全不同。直接把原题号写进给模型的题目清单，
+      // 模型会按原题号去找行 → 切段整体错位（实测同一页两次调用 y 相差 30~180）。
+      // 用调用方给的卷面编号覆盖后再喂，实测连测两次结果几乎一致（差值 ≤8）。
+      qs = paperIds.map((id, i) => {
+        const q = byId.get(id)
+        if (!q) return null
+        const lab = paperLabels[i]
+        if (lab === undefined || lab === null || lab === '') return q
+        return { ...q, question_number: lab, sub_no: null }
+      }).filter(Boolean)
+    } else {
+      const { rows } = await query(
+        `SELECT id, question_number, sub_no, page_number, content, block_coordinates
+         FROM ${TABLES.QUESTIONS}
+         WHERE task_id = $1 AND COALESCE(page_number, 1) = $2
+         ORDER BY COALESCE((block_coordinates->>'y')::float, 99999), created_at`,
+        [taskId, pageNumber])
+      qs = rows
+    }
     if (!qs.length) return res.json({ success: true, cached: false, boxes: {}, error: '该页没有题目' })
 
     const resp = await fetch(pageImg.image_url)

@@ -187,7 +187,10 @@ const showBbox = computed(() => {
     // 按项目既有判据「宁可不出图，也不显示邻题的图」：量不到就一帧都不画，绝不拿占位框顶上。
     return Object.keys(store.refinedBoxes || {}).length > 0
   }
-  return Object.keys(store.currentRetryAlignBoxes || {}).length > 0
+  // [2026-10-09] paper（错题重练）：实测切段框（refinedBoxes）优先；量框还没回来或
+  // 失败时退回判题对位存下的 retryAlign 框兜底（旧口径，不至于让老师看不到框）。
+  return Object.keys(store.refinedBoxes || {}).length > 0
+    || Object.keys(store.currentRetryAlignBoxes || {}).length > 0
 })
 
 /** 定位框上的题号：重练卷显示学生卷面印的编号，老师才能与学生的作答对上 */
@@ -250,6 +253,9 @@ const getDisplayBox = (q) => {
   // 而 matchedBy='none' 的题（图上没痕迹）恰好就是"记录在、框全 null"，
   // 且实测卷内 16/16 题都带原作业坐标 → 必然命中。现在提前返回，阻断这条回退。
   if (store.source === 'paper') {
+    // [2026-10-09] 该页实测切段框已到位 → 只认实测框（缺的题返回 null 不画）。
+    // 混用两种口径会让同一页上「有的框框整道题、有的框只框答案行」，看着像画错了。
+    if (store.refineStatus === 'done' && Object.keys(store.refinedBoxes || {}).length > 0) return null
     const retryRaw = store.currentRetryAlignBoxes?.[q.id]
     if (!retryRaw) return null
     const retryUnion = unionBbox(parseBbox(retryRaw.text_bbox), parseBbox(retryRaw.image_bbox))

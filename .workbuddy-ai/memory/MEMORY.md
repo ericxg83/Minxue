@@ -14,6 +14,11 @@
 - ⛔ 几何显示唯一入口 `getGeometryDisplayUrl`；画图数值全来自题干；视觉框先目检再 apply；裁片无确定判据。→ geometry-pipeline
 - ⛔ 校验器只许加规则/测试、不得放宽；判分器两个解析函数不能单独改（补丁→全库对跑→只翻转可解释的 N 条）。→ answer-validators-and-judge
 - ⛔ 参考答案位只显示 `q.answer`（禁 analysis 兜底）；「AI 自述缺条件」先查 `parent_stem` 非空。→ answer-bank-trust
+- ⛔ 复核页「待复核」唯一判据 `src/utils/reviewDecision.js#getReviewState`（`is_correct===true && (review_status || confidence>=0.5)`）。
+  `judgements` 是审计流水、**只许提供 confidence**；人工类流水（`manual_review`/`pc_edit`/`pc_rejudge`/`regrade_script`/`workbook_to_ai_regrade`）confidence 恒为 NULL
+  ⇒ 合并**只许「有值才覆盖」**（`if (j && j.confidence != null)`），NULL 不得反向覆盖题目自带置信度，否则「AI判对」整片掉进「待复核」（r2026-10-09 全库 41 条）。
+  锁 `test/judgementConfidenceMerge.test.mjs`。→ answer-validators-and-judge §5
+- ⛔ 批改页「待复核」= `confidence` 空或 <0.5，**与答案对不对无关**；`reviewStore.mergeJudgements` 会拿 `/judgements/latest`（每道题最新一条、不过滤 source）**无条件覆盖** `q.confidence`，而结算/重判/人工编辑写的流水（`manual_review`/`regrade_script`/`pc_rejudge`…）`confidence` 恒为 null 且永远更新 ⇒ AI 判对的题被显示成待复核（2026-10-09 数学-1008-01 卷 9 题；全库 41 条）。复现：`server/_diag_repro_pending.mjs`。→ caliber-drift
 - ⛔ 错题「同一题」走 `questionIdentity.js`，禁相似度合并；变式题不进重练卷/组卷。重练卷答卷唯一口径 `retryPaperState.js#isRetryPaperTask`；练习册 published 必经 `getWorksheetPublishRisk`。→ wrongbook-gate-requeue
 - ⛔ 周末班课件多小问合并（`weekendHandout.js#buildCompleteQuestion`）分组键**不含 page_number** ⇒ 组内出现 ≥2 个不同非空 `parent_stem` 必须按错题行的 parent_stem 收窄（否则同一卷跨页题号撞车，把别题小问拼进来；r213 白板第1题）。
 - ⛔ 含 AI/长事务 POST 必须 `apiRequest(p,opts,1)`；错误体 `{error,message}`，前端读 `err?.payload?.message`。→ long-request-and-error-surfacing
@@ -29,7 +34,12 @@
 - ⛔ 门禁/体检脚本读「固定产物文件」（如 `tmp/prune-lint.json`）必须先删旧 + 只认本轮（mtime ≥ 本轮 startedAt）——这类文件跨 tick 持久，命令没写出报告（超时/配置错/二进制缺失）时旧报告会顶替 ⇒ 假 `lint=0`；⛔ 别拿退出码判「跑成了没」（eslint 有错误本来就 exit 1），能分出来的是「有没有写出新报告」。实现见 `scripts/patrol/lintReportKit.mjs` + 锁 `test/patrolLintFreshness.test.mjs`。
 - ⛔ 任务/答卷图的列表缩略图唯一入口 `src/utils/ossThumb.js`（给 OSS URL 追加 `?x-oss-process=image/resize,w_240`，实测 0.4~1.3MB → 10~16KB，**零后端改动**）；列表行⛔ 禁引 `imageUrl` 原图。判「OSS 参数生不生效」**禁用 HEAD**（HEAD 不应用处理参数、返回原图长度 ⇒ 会误判「没生效」），必须完整 GET 比字节数；换桶/换域名跑 `server/scripts/probeOssThumb.mjs`。
 - ⛔ `v-memo` 行上新增任何响应式依赖，必须同步进 memo 数组（漏了 = 静默不更新，不报错）；需要「失败即改样式」时用 DOM 级 `classList.add`，别引入响应式状态。
-- ⛔ 本机 `esbuild` 偶发崩（`fatal error: winmm.dll not found`，**`--version` 即崩**）⇒ `vite build`/`vite dev` 全废，与 diff 无关。`npm rebuild esbuild`/换目录/跳出沙箱/改 TEMP 均无效。此时闸 3/闸 4 走替代路径（`node _check_sfc.mjs` 真编译 / `@vue/compiler-sfc` 编译后渲染函数断言 `$setup.xxx` 绑定 / 真浏览器单点验证），且**提交说明里必须写明闸 3/闸 4 未执行**。
+- ⛔ 本机 Go 二进制（`esbuild` 等）**放在仓库目录 `D:/Minxue_App_V3/` 内执行必崩**（`fatal error: winmm.dll not found` + `runtime: panic before malloc heap initialized`）；**同一份二进制（哈希相同）放到仓库外就能跑**（实测 `D:/_esbprobe/`、`C:/Users/Administrator/`、`/tmp` 均正常）。与 cwd、沙箱开关、TEMP、esbuild 版本（0.19.12/0.20.2/0.21.0/0.21.5 全试）**都无关**，根因疑似 EDR/令牌按目录拦截，未查清。
+  **正解（2026-10-08 实测，此前"无解只能等重启"的结论作废）**：二进制放仓库外，用环境变量指过去——
+  `export ESBUILD_BINARY_PATH=C:/Users/Administrator/.workbuddy-ai/binaries/esbuild/esbuild.exe`，
+  再跑 `vite build` / `vite dev` / `node scripts/build-app.mjs` 即正常（JS 侧仍是 `node_modules/esbuild@0.21.5`，版本握手一致，无需改 package.json）。⛔ 别再 `npm rebuild esbuild`／换版本／换 TEMP。
+  极端兜底：闸 3/闸 4 走替代路径（`node _check_sfc.mjs` 真编译 / `@vue/compiler-sfc` 编译后渲染函数断言 / 真浏览器单点验证），且提交说明里写明闸 3/闸 4 未执行。
+- ⛔ APK 打包链：`export ESBUILD_BINARY_PATH=<仓库外 esbuild>` → `node scripts/build-app.mjs`（`BUILD_TARGET=app`→`dist-app`）→ `CODEBUDDY_SAFE_DELETE_ENABLED=0 npx cap sync android` → `cd android && ./gradlew assembleDebug`。`android/` 在 `.gitignore` 里但**关键文件仍被跟踪** ⇒ 改 `android/app/build.gradle`、`android/gradle.properties` 要 `git add -f`。⛔ `android/gradle.properties` 里**不得**写死 `-javaagent`（曾指向已归档的 `agent/pipefix-agent.jar`，会让 gradle 启动直接失败；该 Windows 绝对路径在 CI(ubuntu) 上必崩）。CI `.github/workflows/build-apk.yml` 跑的是 `npm run build`（输出 `dist/`）而 `webDir=dist-app` ⇒ **CI 打 APK 一直是坏的**，别指望它。
 - ⛔ Playwright `page.setContent()` 的页面 origin 是 `null` ⇒ 跨域 `fetch()` 必被 CORS 拦（验「图能否从 OSS 拉到」会全红假结论）。图片用 `<img>`+`naturalWidth`；字节数在 Node 侧量。
 
 ## 2. 前端验证纪律
