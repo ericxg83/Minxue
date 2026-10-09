@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R125 — 2026/10/9 09:41:01（✅ 全绿）**
+> ⏱ **最近心跳：R126 — 2026/10/9 09:50:55（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1221,3 +1222,17 @@
     -  M src/workbench/views/GradeCenterWorkbench.vue
     -  M test/taskAutoRetry.test.mjs
     - ?? server/services/pendingReviewService.js
+| 126 | 2026-10-09T01:50:55 | tests=2184/0 | lint=0 | build=FAIL | server=ok | dirty=7 |
+
+### R126 — 2026/10/9 09:50:55（daemon 自动报告）
+
+**体检**：tests **2184/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 7
+
+⚠️ 发现异常：build=FAIL；脏文件 7 个（ M .workbuddy-ai/memory/MEMORY.md,  M scripts/patrol/daemon.mjs,  M server/index.js…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M src/services/apiService.js
+    -  M src/workbench/components/review/PaperViewerPanel.vue
+    -  M src/workbench/stores/reviewStore.js
+    - ?? test/judgementConfidenceMerge.test.mjs
