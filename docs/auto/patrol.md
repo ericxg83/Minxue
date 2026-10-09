@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R123 — 2026/10/9 09:20:34（✅ 全绿）**
+> ⏱ **最近心跳：R124 — 2026/10/9 09:31:06（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1185,3 +1186,20 @@
     - ?? "\346\226\207\346\234\254\351\223\276\351\207\215\350\267\221"
     - ?? "\350\257\273\345\233\276\350\247\243\351\242\230"
     - ?? "\350\275\254\344\272\272\345\267\245\357\274\233\351\224\231\347\232\204\347\255\224\346\241\210\346\257\224\347\251\272\347\255\224\346\241\210\347\263\237\343\200\202\342\206\222"
+| 124 | 2026-10-09T01:31:06 | tests=2179/1 | lint=17071 | build=FAIL | server=ok | dirty=15 |
+
+### R124 — 2026/10/9 09:31:06（daemon 自动报告）
+
+**体检**：tests **2179/1** | lint 17071 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 15
+
+⚠️ 发现异常：测试 fail=1；lint errors=17071；build=FAIL；脏文件 15 个（ M .workbuddy-ai/memory/MEMORY.md,  M scripts/patrol/daemon.mjs,  M server/index.js…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M src/workbench/components/layout/AppSidebar.vue
+    -  M src/workbench/stores/notificationStore.js
+    -  M src/workbench/views/DashboardWorkbench.vue
+    -  M src/workbench/views/GradeCenterWorkbench.vue
+    - ?? .verify-dist-20261009/
+    - ?? server/services/pendingReviewService.js
+    - ?? src/workbench/utils/pendingReviewCaliber.js
