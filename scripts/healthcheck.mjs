@@ -235,7 +235,20 @@ if (health) {
         const running = typeof s.inProgressCount === 'number' && s.inProgressCount > 0
           ? `；另外现在有 ${s.inProgressCount} 份正在批改（那才是真的在跑，正常）`
           : ''
-        record('批改失败任务', 'ok', `没有批改失败，也没有没看的新作业${running}`)
+        // ⛔ 旧版这句「没有批改失败」是**说假的**，2026-10-09 实测坐实：
+        //   生产 tasks 表里真有一条 status='failed' 的作业（09-02「新闵学校"成长·桥"练习 数学堂堂清01」，
+        //   错误 `invalid input syntax for type json`、retry_count=3、describeAutoRetry 判
+        //   willRetry:false「超出 7 天自动恢复窗口」），它 09-02 就被点开过
+        //   （notification_read_at 非空），而 `/api/tasks/summary` 的 failed_detail 子查询
+        //   硬性带 `notification_read_at IS NULL`（server/index.js:733）
+        //   ⇒ failedTasks 恒 0 ⇒ 体检、铃铛**一次都没提醒过这份作业**，而它会一直在那儿：
+        //   不会自己重判，也没有任何一处定时清掉它。
+        //   ⇒ 没看到新的失败 ≠ 没有失败。合格那一支只许说「没看到新的」，并交代这一项到底看什么、
+        //     一直没批成的上哪儿翻（夸大的提示比没提示更糟 —— r198）。
+        record('批改失败任务', 'ok',
+          `没看到新的批改失败，也没有没看的新作业${running}｜` +
+          `（这一项只看「新冒出来、你还没点开过的失败」；点开过的不再提醒 —— ` +
+          `真有几份一直没批成的，得去作业列表里翻出来手动重试，它们不会自己重判、也不会自己消掉）`)
       }
     }
   } catch (e) {
