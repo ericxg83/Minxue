@@ -831,9 +831,18 @@ app.get('/api/tasks/summary', async (req, res) => {
     console.error('获取通知摘要失败:', error)
     // 卡顿排查(P0)：DB 抖断时若上次有成功缓存，返回 stale 数据而非 500，
     // 避免前端铃铛/通知在 Neon 连接波动时卡死或报错。前端可据 _stale 提示用户数据可能延迟。
+    // ⛔ r250（实测：这两个字段**加了以后全仓零消费方**，2026-10-09 才第一次有人读）：
+    //    `_stale` 只说「这是旧的」，`_staleAt` 才说「旧了多久」——只报「旧数字」不给时间，
+    //    跟 r245-①（灯亮了却不记触发值）是同一个毛病：听的人没法判断该不该信。
+    //    ⇒ 两个一起给。`_stale` 保持原样（旧前端不读，加了也零影响），只**新增**一个字段，
+    //    现有 key 一个没动、语义一个没改 ⇒ 旧调用方行为完全不变。
     if (summaryCache.data) {
       console.warn('[summary] DB 失败，降级返回上次缓存 (stale)')
-      return res.json({ ...summaryCache.data, _stale: true })
+      return res.json({
+        ...summaryCache.data,
+        _stale: true,
+        _staleAt: new Date(summaryCache.timestamp || Date.now()).toISOString(),
+      })
     }
     res.status(500).json({ error: error.message })
   }

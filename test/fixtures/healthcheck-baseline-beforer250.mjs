@@ -192,35 +192,11 @@ if (health) {
 if (health) {
   try {
     const r = await fetch(`${API}/api/tasks/summary`, { signal: AbortSignal.timeout(20000) })
-    const body = await r.json()
-    const s = body.summary
-    // ⛔ r250（本轮主发现）：数据库读不通时 `/api/tasks/summary` 会**降级把 10 秒前那次缓存
-    //    的数字原样返回**，并在响应里打 `_stale`（`server/index.js:836`，那行注释原文就写着
-    //    「前端可据 _stale 提示用户数据可能延迟」）。但**全仓零消费方** ——
-    //    `src/`、`server/`、`scripts/`、`test/` 里没有任何一处读它 ⇒
-    //    老师的铃铛、PC 工作台的待复核数、**这里**报的「N 份作业已经批完了」，
-    //    全是上一次成功读到的旧数字，却被当成刚发生的事报。
-    //    这正是 r221 堵的「看着在盯其实没盯」的同族，只不过这次不是字段没回，
-    //    而是**字段回了、值却是旧值**：比字段缺失更险 —— 旧值的样子和真值一模一样，
-    //    任何只看数字的消费方都分不出来。
-    //    ⇒ `_stale` 时把这一项标成要看一眼，并把「旧了多久」说清楚（只说「旧」不给时间，
-    //      跟 r245-① 一个毛病：听的人没法判断该不该信）；`_staleAt` 读不出就照实说读不出。
-    const isStale = body._stale === true
-    const staleAtMs = body._staleAt ? Date.parse(body._staleAt) : NaN
-    const staleTail = isStale
-      ? `（⚠️ 数据库刚才读不通，这一项看的是 ${
-          Number.isFinite(staleAtMs)
-            ? `${ageText(Math.max(0, Math.round((Date.now() - staleAtMs) / 60000)))}存下来的旧数字`
-            : '上一次存下来的旧数字（接口没说是什么时候存的）'
-        }，不是现在的值，先别照它做决定；过一会儿再跑一次体检）`
-      : ''
-    /** 同一句话两种口径：数据陈旧时一律降级成「要你看一眼」，本来致命的仍是致命的。 */
-    const put = (name, status, detail) =>
-      record(name, isStale && status !== 'bad' ? 'warn' : status, detail + staleTail)
+    const s = (await r.json()).summary
     // ⛔ 旧版 `.summary || {}`：接口哪天不回 summary，就退化成「没有失败也没有卡住的任务」⇒ 判合格。
     //    老师看到全绿，实际这一项一次都没在盯（r221，与 r220 队列同款）。
     if (s === undefined) {
-      put('批改失败任务', 'warn', missingFieldDetail('有没有失败/卡住的作业'))
+      record('批改失败任务', 'warn', missingFieldDetail('有没有失败/卡住的作业'))
     } else {
       // ⛔ r233：pendingTasks / failedTasks 是 summary 的**子字段**，r221 只堵了整层 summary 在不在。
       // 真接口两个字段都在（`server/index.js:713-753` 的 SELECT 明列），但哪天改名或拆结构，
@@ -240,9 +216,9 @@ if (health) {
         : (Array.isArray(s.pendingTasks) ? s.pendingTasks.length : 0)
       const failed = s.failedTasks || 0
       if (tasksMissing) {
-        put('批改失败任务', 'warn', missingFieldDetail('有几份批改失败 / 哪些作业还没点开看'))
+        record('批改失败任务', 'warn', missingFieldDetail('有几份批改失败 / 哪些作业还没点开看'))
       } else if (failed > 0) {
-        put('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
+        record('批改失败任务', 'bad', `${failed} 份作业批改失败，需在 App 里点重试`)
       } else if (unreadDone > 0) {
         // 清单只用来算「最早那一份是多久之前批的」（好判断是不是刚到的新作业，不是故障）；
         // 报数用 `pendingReview`（手机里铃铛那个数字，同一口径），不用被 LIMIT 5 截过的清单长度。
@@ -250,7 +226,7 @@ if (health) {
           .map((t) => (t && t.createdAt ? Date.parse(t.createdAt) : NaN))
           .filter((n) => Number.isFinite(n))
         const oldest = stamps.length ? ageText(Math.round((Date.now() - Math.min(...stamps)) / 60000)) : null
-        put('批改失败任务', 'warn',
+        record('批改失败任务', 'warn',
           `${unreadDone} 份作业已经批完了，你还没点开看${oldest ? `（最早那一份是 ${oldest}批的）` : ''}；` +
           `这不是卡住，去 App 里点开看就行，不用重启后端`)
       } else {
@@ -269,7 +245,7 @@ if (health) {
         //   不会自己重判，也没有任何一处定时清掉它。
         //   ⇒ 没看到新的失败 ≠ 没有失败。合格那一支只许说「没看到新的」，并交代这一项到底看什么、
         //     一直没批成的上哪儿翻（夸大的提示比没提示更糟 —— r198）。
-        put('批改失败任务', 'ok',
+        record('批改失败任务', 'ok',
           `没看到新的批改失败，也没有没看的新作业${running}｜` +
           `（这一项只看「新冒出来、你还没点开过的失败」；点开过的不再提醒 —— ` +
           `真有几份一直没批成的，得去作业列表里翻出来手动重试，它们不会自己重判、也不会自己消掉）`)
