@@ -963,6 +963,52 @@ class PendingTaskRecovery {
           console.log(`[PendingTaskRecovery] ✅ 错题本补偿: ${compensated}/${wrongbookRows.length} 个`)
         }
       }
+
+      // ── 4. 无资产行的判错题补建（2026-10-09，玻璃管题案）──
+      // registerGeometryAssets 只在批改流内跑一次；裁片晚于 register 才生成的题（裁剪后补 /
+      // 重裁 sweep）永远没有资产行 ⇒ 重绘管道从不覆盖，第 3 段补偿也只扫已有行。
+      // 全库实测：46 题有裁片无资产行、其中 6 题判错。这里复用 register 补建
+      // （配图闸门 + 数轴/函数图象确定性通道 + 闸门否决写 last_error 全部继承），
+      // 判错题建出 pending 行的当场入队。以「无资产行」为条件天然幂等：
+      // 建行后 NOT EXISTS 不再命中，无需静默窗。
+      const { rows: missingAssetRows } = await query(
+        `SELECT q.id, q.content, q.parent_stem, q.options, q.geometry_image_url,
+                q.image_type, q.image_bbox, q.page_number, w.student_id
+         FROM ${TABLES.QUESTIONS} q
+         JOIN ${TABLES.WRONG_QUESTIONS} w ON w.question_id = q.id
+         WHERE q.geometry_image_url IS NOT NULL AND q.deleted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM ${TABLES.QUESTION_ASSETS} qa
+             WHERE qa.question_id = q.id AND qa.asset_type = 'geometry_image'
+           )
+         ORDER BY q.created_at ASC
+         LIMIT 3`
+      )
+      if (missingAssetRows.length > 0) {
+        const { registerGeometryAssets } = await import('./utils/geometryAssetQueue.js')
+        for (const row of missingAssetRows) {
+          try {
+            const reg = await registerGeometryAssets({
+              questions: [row],
+              pageImageOf: () => row.geometry_image_url,
+              fallbackImageUrl: row.geometry_image_url,
+              studentId: row.student_id,
+              log: (m) => console.log(`[PendingTaskRecovery] ${m}`),
+              warn: (m) => console.warn(`[PendingTaskRecovery] ${m}`),
+            })
+            for (const p of (reg.pending || [])) {
+              try {
+                await geometryQueue.add('reconstruct', { assetId: p.assetId, source: 'missing-asset-backfill' }, { attempts: 1 })
+                console.log(`[PendingTaskRecovery] ✅ 无资产行判错题补建并入队: ${String(row.id).slice(0, 8)}`)
+              } catch (err) {
+                console.error(`[PendingTaskRecovery]  补建入队失败 ${String(row.id).slice(0, 8)}:`, err.message)
+              }
+            }
+          } catch (err) {
+            console.error(`[PendingTaskRecovery]  补建资产行失败 ${String(row.id).slice(0, 8)}:`, err.message)
+          }
+        }
+      }
     } catch (err) {
       console.error('[PendingTaskRecovery] ❌ 几何资产扫描失败:', err)
     }

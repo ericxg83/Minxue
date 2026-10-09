@@ -181,8 +181,12 @@ export function getTikzStatus(question) {
   if (question.tikz_svg_url) return 'done'
   if (isSvgCode(question.clean_geometry_image_url)) return 'done'
   if (isTikzCode(question.clean_geometry_image_url)) return 'done'
-  if (question.clean_geometry_image_url) return 'pending'
-  if (question.geometry_image_url) return 'pending'
+  // clean URL 是 PNG 发布列，存在即有重绘产物可显示
+  if (question.clean_geometry_image_url) return 'done'
+  // ⚠️ 有裁片但 API 没带 tikz_status 字段 = 重绘管道从未覆盖（无 question_assets 行），
+  // 真实状态是「使用原图」而不是「重建中」——否则永远转圈（2026-10-09 玻璃管题实证，
+  // 全库 46 题假重建中）。真正的 pending 一定带 tikz_status 字段（API 从资产行带出），
+  // 24h watchdog 也只对带字段的 pending 生效。
   return 'none'
 }
 
