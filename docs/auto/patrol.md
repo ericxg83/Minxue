@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R140 — 2026/10/9 12:10:14（✅ 全绿）**
+> ⏱ **最近心跳：R141 — 2026/10/9 12:20:11（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1375,6 +1376,15 @@
 | 140 | 2026-10-09T04:10:14 | tests=2215/0 | lint=0 | build=skipped | server=ok | dirty=2 |
 
 ### R140 — 2026/10/9 12:10:14（daemon 自动报告）
+
+**体检**：tests **2215/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 2
+
+⚠️ 发现异常：脏文件 2 个（ M .workbuddy-ai/memory/MEMORY.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M scripts/patrol/daemon.mjs
+| 141 | 2026-10-09T04:20:11 | tests=2215/0 | lint=0 | build=skipped | server=ok | dirty=2 |
+
+### R141 — 2026/10/9 12:20:11（daemon 自动报告）
 
 **体检**：tests **2215/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 2
 
