@@ -178,7 +178,7 @@
             </section>
             <section v-else-if="analysisOf(selectedQuestion)" class="detail-section"><label>解析</label><p class="analysis">{{ analysisOf(selectedQuestion) }}</p></section>
           </div>
-          <template #footer><div class="detail-actions"><ActionButton :disabled="labelOf(selectedQuestion) === '完全掌握'" @click="markMastered(selectedQuestion)">标记完全掌握</ActionButton><el-button text type="danger" @click="removeQuestion(selectedQuestion)">移除</el-button></div></template>
+          <template #footer><div class="detail-actions"><ActionButton variant="primary" :disabled="!originTaskIdOf(selectedQuestion)" :title="originTaskIdOf(selectedQuestion) ? '' : '这道题没有关联的原始作业（练习册自包含错题无法定位到原卷）'" @click="goEditOriginalQuestion(selectedQuestion)">去原题编辑</ActionButton><ActionButton :disabled="labelOf(selectedQuestion) === '完全掌握'" @click="markMastered(selectedQuestion)">标记完全掌握</ActionButton><el-button text type="danger" @click="removeQuestion(selectedQuestion)">移除</el-button></div></template>
         </ContentCard>
         <ContentCard v-else class="learning-record detail-empty" flush><EmptyState :icon="Reading" title="选择一道错题查看学习记录" description="这里会展示题目、答案、知识点、错误频次和重练状态，帮助判断下一步处理方式。" /></ContentCard>
       </section>
@@ -256,7 +256,51 @@ const overviewKpis = computed(() => {
 
 const categoryOptions = [{ key: 'all', label: '全部问题' }, { key: 'wrong', label: '答错' }, { key: 'unanswered', label: '未作答' }]; const summaryItems = computed(() => [{ key: 'pending', label: '待处理', value: stats.value.pendingMaster, note: '需要教师安排下一步', tone: 'danger' }, { key: 'repeat', label: '重复出错', value: stats.value.repeatCount, note: '优先关注', tone: 'warning' }, { key: 'unpracticed', label: '尚未重练', value: stats.value.unpracticedCount, note: '还没有后续练习', tone: 'primary' }, { key: 'mastered', label: '完全掌握', value: stats.value.mastered, note: '通过重练验证', tone: 'success' }]); const activeSummaryLabel = computed(() => summaryItems.value.find(item => item.key === activeSummary.value)?.label || '待处理')
 const getQuestion = item => item?.question || item || {}; const parentStemOf = item => resolveQuestionDisplayStem(getQuestion(item)).parentStem; const subLabelOf = item => { const q = getQuestion(item); const s = q.sub_no == null ? '' : String(q.sub_no).trim(); return s ? formatQuestionLabel(q.question_number, s) : '' }; const titleOf = item => { const text = contentOf(item); return text.length > 72 ? `${text.slice(0, 72)}…` : text }; const contentOf = item => getQuestion(item).content || item?.content || ''; const subjectOf = item => item?.subject || getQuestion(item).subject || '未分类'; const tagsOf = item => { const q = getQuestion(item); return (q.tags_source === 'manual' ? q.manual_tags : (q.ai_tags || q.tags)) || [] }; const answerOf = (item, key) => getQuestion(item)[key] || item?.[key] || ''; const analysisOf = item => getQuestion(item).analysis || item?.analysis || ''; const imageOf = item => getQuestion(item).image_url || ''; const errorTypeOf = item => (item?.error_type || getQuestion(item).error_type || '').trim(); const errorReasonOf = item => (item?.error_reason || getQuestion(item).error_reason || '').trim(); const errorTypeToneOf = item => { const t = errorTypeOf(item); if (!t) return 'muted'; if (/计算|运算/.test(t)) return 'danger'; if (/审题|单位/.test(t)) return 'warning'; if (/公式|概念|步骤/.test(t)) return 'primary'; if (/方法|分析/.test(t)) return 'success'; return 'info' }; const formatTime = item => { const value = item?.added_at || item?.created_at; if (!value) return '-'; const date = dayjs(value); if (date.isSame(dayjs(), 'day')) return `今天 ${date.format('HH:mm')}`; if (date.isSame(dayjs().subtract(1, 'day'), 'day')) return `昨天 ${date.format('HH:mm')}`; return date.format('MM-DD HH:mm') }; const fullTime = item => item?.added_at ? dayjs(item.added_at).format('YYYY-MM-DD HH:mm') : '-'; const isSelected = item => selectedQuestions.value.some(selected => selected.id === item.id); const toneOf = item => item.lifecycle_status === 'mastered' || item.status === 'mastered' ? 'success' : (item.error_count >= 2 ? 'warning' : 'danger'); const labelOf = item => item.lifecycle_status === 'mastered' || item.status === 'mastered' ? '完全掌握' : (item.error_count >= 2 ? '重复出错' : (item.practice_count > 0 ? '待重练' : '新错题'))
-function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; function setSummary(key) { activeSummary.value = key; wrongBookStore.setFilter('status', key === 'mastered' ? 'mastered' : key === 'pending' ? 'pending' : 'all'); wrongBookStore.setFilter('practiceState', key === 'unpracticed' ? 'none' : 'all'); wrongBookStore.setFilter('errorCount', key === 'repeat' ? '2+' : 'all') }; function applySubject(value) { wrongBookStore.setFilter('subject', value || 'all') }; function applyTime(value) { wrongBookStore.setFilter('time', value || 'all') }; function applyCategory(value) { categoryFilter.value = value; wrongBookStore.setFilter('category', value) }; function resetFilters() { wrongBookStore.resetFilters(); activeSummary.value = 'pending'; subjectFilter.value = 'all'; timeFilter.value = 'all'; categoryFilter.value = 'all'; searchInput.value = ''; sortLabel.value = '优先处理' }; function handleSort(command) { sortLabel.value = command === 'time_desc' ? '最近新增' : command === 'error_desc' ? '错误次数最多' : '优先处理'; wrongBookStore.sortBy = command === 'priority' ? 'error_desc' : command }; function switchStudent(student) { wrongBookStore.setCurrentStudent(student); wrongBookStore.loadWrongQuestions(student.id); selectedQuestion.value = null; showStudentDialog.value = false; pushRecentStudent(student.id); if (!embedded.value) router.replace({ path: `/students/${student.id}` }) }; async function createRetry() {
+function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; function setSummary(key) { activeSummary.value = key; wrongBookStore.setFilter('status', key === 'mastered' ? 'mastered' : key === 'pending' ? 'pending' : 'all'); wrongBookStore.setFilter('practiceState', key === 'unpracticed' ? 'none' : 'all'); wrongBookStore.setFilter('errorCount', key === 'repeat' ? '2+' : 'all') }; function applySubject(value) { wrongBookStore.setFilter('subject', value || 'all') }; function applyTime(value) { wrongBookStore.setFilter('time', value || 'all') }; function applyCategory(value) { categoryFilter.value = value; wrongBookStore.setFilter('category', value) }; function resetFilters() { wrongBookStore.resetFilters(); activeSummary.value = 'pending'; subjectFilter.value = 'all'; timeFilter.value = 'all'; categoryFilter.value = 'all'; searchInput.value = ''; sortLabel.value = '优先处理' }
+
+// ── 「去原题编辑」：错题本 → 批改工作区直达那道题并自动打开编辑面板 ──
+//
+//为什么需要它（2026-10-10）：错题本是老师唯一能按题干文字搜题的地方（批改中心与
+//   复核页左栏都没有文本搜索），但本视图的详情面板原本只有「标记掌握 / 移除」，
+//   想改题干只能人工记住题号 → 回批改中心翻原始卷 → 按题号定位。而错题卷的
+//   只读卷面预览（RetryPaperPreview，学生未交卷时走这条）**没有编辑入口**，
+//   于是老师从「看到错题」到「能改题」之间存在断点。
+//
+//口径（勿改）：
+//   · 落点是原题本身，不是副本。重练卷 question_ids 存的就是 questions 表主键，
+//     题目行 questions.task_id 指向原始作业（server/utils/taskRoute.js:81、
+//     src/workbench/utils/retryPaperState.js 头部注释）⇒ 只跳一次、改一处。
+//   · 原始 task 取 wrong_questions.last_wrong_task_id（迁移 058 为溯源而加，
+//     可空、无外键）。它为空时说明判错来源不可考，**不猜、不回退到任意 task**——
+//     跳到错的卷比不给入口更糟。
+//   · 练习册自包含错题 question_id 为空，无法定位原卷，按钮置灰并说明原因。
+//   · 编辑仍然只走批改工作区那一个实现（PUT /api/questions/:id），
+//     这里只负责把 reviewStore.pendingEditQuestionId 喂上，
+//     由 QuestionDetailPanel 已有的 watch 自动 handleEnterEdit（不新增第二处编辑实现）。
+const originTaskIdOf = item => (item?.question_id || item?.question?.id || '') && (item?.last_wrong_task_id || '') || '';
+const goEditOriginalQuestion = (item) => {
+  const taskId = originTaskIdOf(item);
+  const questionId = item?.question_id || item?.question?.id || '';
+  const studentId = currentStudent.value?.id || props.studentId || '';
+  if (!taskId) {
+    ElMessage.warning('这道题没有关联的原始作业（可能是练习册自包含错题），无法定位到原卷');
+    return;
+  }
+  if (!questionId) {
+    ElMessage.warning('这道题没有关联到题库题目，无法定位');
+    return;
+  }
+  if (!studentId) {
+    ElMessage.warning('未能确定这道题所属的学生，无法定位到原卷');
+    return;
+  }
+  // q=题目 id：复核页加载完题目后自动定位到该题并打开编辑面板。
+  // 走 router.push 而非 replace —— 老师改完按浏览器返回还能回到错题本。
+  // ⛔ 不传 source：复核页只读 studentId / taskId / examId，source 仅供批改中心分流
+  //   （ReviewWorkspace 全文未读 route.query.source）。硬塞一个值只会让人误以为它决定
+  //   分流，而 last_wrong_task_id 实际可能是 general / workbook。
+  router.push({ path: '/grade/task', query: { studentId, taskId, q: questionId } });
+}; function handleSort(command) { sortLabel.value = command === 'time_desc' ? '最近新增' : command === 'error_desc' ? '错误次数最多' : '优先处理'; wrongBookStore.sortBy = command === 'priority' ? 'error_desc' : command }; function switchStudent(student) { wrongBookStore.setCurrentStudent(student); wrongBookStore.loadWrongQuestions(student.id); selectedQuestion.value = null; showStudentDialog.value = false; pushRecentStudent(student.id); if (!embedded.value) router.replace({ path: `/students/${student.id}` }) }; async function createRetry() {
   const student = currentStudent.value
   if (!student) { ElMessage.warning('请先选择学生'); return }
   if (!selectedQuestions.value.length) { ElMessage.info('请先选择需要重练的题目'); return }

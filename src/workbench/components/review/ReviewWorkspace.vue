@@ -113,6 +113,7 @@
 import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { CircleCheck, Clock, WarningFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
 import { getResource } from '../../../services/apiService'
 import ReviewTopBar from './ReviewTopBar.vue'
@@ -218,6 +219,36 @@ const archiveState = computed(() => {
 // 暴露给 ReviewTopBar.handleComplete 弹"留底"确认用
 provide('archiveState', archiveState)
 
+// ── ?q=<questionId>：外部入口直达某道题并自动打开编辑面板 ──
+// 唯一来源是错题本详情的「去原题编辑」（2026-10-10）。
+//
+// ⛔ 位置铁律：必须在 onMounted 的**所有分支之外**各自调用。onMounted 里有两处
+//   提前 `return`（带 studentId 走 ~260 行、带 taskId 走 ~270 行），而本项目的外部
+//   入口必定同时带 studentId + taskId（openTask 一直这么传）⇒ 挂在函数末尾的代码
+//   **永远执行不到**。这正是铁律「清理挂唯一入口 / 派生判据取动作前快照」的同型坑：
+//   看起来在流程末尾，实际被早退分支吃掉。
+//   同理，必须等题目加载完再喂 pendingEditQuestionId——
+//   QuestionDetailPanel 的 watch 在题目未到位时 q.value.id 不匹配会直接 return
+//   且**不会重试**（静默失效：老师点了没反应，且没有任何报错）。
+//
+// 用 function 声明而非 const 箭头：它被 onMounted（定义在其之前）调用，
+//   const 会踩 TDZ，虽因 onMounted 回调延迟执行而侥幸不炸，但不该留这种巧合。
+function focusQuestionFromQuery() {
+  const requestedQuestionId = route.query.q
+  if (!requestedQuestionId) return
+  // 定位判据用 questionId 全等匹配，**不按题号找**：题号在错题卷上会被重排
+  // （分块后跨块累加），按题号匹配会落到隔壁题上——那比不定位更坏。
+  const idx = store.allQuestions.findIndex(q => String(q.id) === String(requestedQuestionId))
+  if (idx < 0) {
+    // 该题不在本卷（题目被删 / 被排除，或 taskId 其实指向另一份卷）：如实说，
+    // 不能静默停在别的题上让老师以为改的是目标题。
+    ElMessage.warning('这道题不在当前试卷里，可能已被删除或排除；请在题号列表里确认')
+    return
+  }
+  store.jumpToQuestion(idx)
+  store.pendingEditQuestionId = store.allQuestions[idx].id
+}
+
 // ── 初始化：加载数据 ──
 onMounted(async () => {
   store.setTaskType(props.taskType)
@@ -256,6 +287,7 @@ onMounted(async () => {
       } else {
         await store.autoSelectPendingTask?.()
       }
+      focusQuestionFromQuery()
       return
     }
     // studentId 带错（找不到该学生）：落到默认行为
@@ -265,6 +297,7 @@ onMounted(async () => {
   await store.initData()
   if (requestedTaskId) {
     await store.loadTaskById(requestedTaskId)
+    focusQuestionFromQuery()
     return
   }
   const fallbackStudentId = route.query.studentId
@@ -277,6 +310,7 @@ onMounted(async () => {
       await store.autoSelectPendingTask?.()
     }
   }
+  focusQuestionFromQuery()
 })
 
 // [④ 撤销 snackbar] 撤销动作 + 全局 ⌘Z / Ctrl+Z（输入焦点让位原生文本撤销）
