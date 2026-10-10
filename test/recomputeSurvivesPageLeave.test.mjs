@@ -163,7 +163,7 @@ function checkFrontend({ store, api, panel }, fails) {
 {
   // 服务端：删掉 res 'finish' 收口 + 删掉状态接口
   const brokenServer = INDEX
-    .replace(/res\.on\('finish',[\s\S]*?\n    \}\)\n/, '')
+    .replace(/res\.on\('finish',[\s\S]*?\n {4}\}\)\n/, '')
     .replace(/result: rows\[0\] \|\| null/, 'result: null')
   const f1 = []
   checkServer(brokenServer, f1)
