@@ -525,3 +525,52 @@ test('reference written as equation plus prose conclusion is unverifiable, not w
     assert.equal(r.unrecognized, true)
   }
 })
+
+// 「多行推导 + 末行结论」的收窄残渣导致假错（2026-10-10 用户截图题 #3/#4）。
+// 根因：narrowToFinalAnswer 按「最后一个 =」切分时，切点落在推导中间一行，
+// 该行的计算结果 "40．" 连同下一行结论一起留下；逗号切分后它成了独立一段，
+// 段数与参考（两段）对不上，逐项比对与数字兜底依次失效。
+// 两处配套修复：① narrowToFinalAnswer 丢弃「切后首行是纯数字」的残渣行；
+// ② 多答案分支补一轮「收窄后段数变多且逐段等值才判对」的重试。
+test('multiline derivation keeps only the conclusion line when the split leaves a bare-number residue', () => {
+  const NL = '\n'
+  const ju = String.fromCharCode(0xFF0E)      // ．（答案册原文用的是全角句点，不是「。」）
+  const comma = String.fromCharCode(0xFF0C)   // ，
+  const cm2 = String.fromCharCode(0x00B2)      // ²
+
+  // 用户案例：周长相差 60cm，结论「一个为100cm，一个为40cm」
+  const stu3 = [
+    '设一个为x，另一个为x-60' + ju,
+    '∴ x/(x-60) = 35/14' + ju,
+    '14x = 35x - 2100' + ju,
+    '2100 = 21x，x = 100' + ju,
+    '∴ x-60 = 100-60 = 40' + ju,
+    '一个为100cm，一个为40cm',
+  ].join(NL)
+  assert.deepEqual(judgeAnswer(stu3, '100 cm' + comma + ' 40 cm', 'answer'),
+    { isCorrect: true, unrecognized: false })
+
+  // 同型：面积相差 420cm²（结论行带平方单位）
+  const stu4 = [
+    '设一个面积为x cm' + cm2 + '，则另一个为x-420 cm' + cm2 + ju,
+    '∴ x/(x-420) = (35/14)' + cm2 + ju,
+    '∴ x-420 = 500-420 = 80' + ju,
+    '一个为500cm' + cm2 + '，一个为80cm' + cm2,
+  ].join(NL)
+  assert.deepEqual(judgeAnswer(stu4, '500 cm' + cm2 + comma + ' 80 cm' + cm2, 'answer'),
+    { isCorrect: true, unrecognized: false })
+
+  // 反例①：结论里的数值错了必须仍判错（不得因为丢弃残渣而放行）
+  const wrong3 = stu3.replace('= 40' + ju, '= 50' + ju).replace('一个为40cm', '一个为50cm')
+  assert.deepEqual(judgeAnswer(wrong3, '100 cm' + comma + ' 40 cm', 'answer'),
+    { isCorrect: false, unrecognized: false })
+
+  // 反例②：残渣行本身就是唯一答案（单行）时不能被丢
+  assert.deepEqual(judgeAnswer('42', '42', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('42', '43', 'answer'), { isCorrect: false, unrecognized: false })
+
+  // 反例③：首行含文字的推导不受影响（"答:" 形态与叙述结论保持原行为）
+  const nar = '解：48÷3=16（岁），16-2=14（岁）' + NL + '答：最小的是14岁，最大的是18岁。'
+  assert.deepEqual(judgeAnswer(nar, '14岁，18岁', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('4/9 答:占全班4/9。', '4/9', 'answer'), { isCorrect: true, unrecognized: false })
+})

@@ -29,6 +29,23 @@ function narrowToFinalAnswer(s) {
     if (isNarrativeResidue && /\d/.test(beforeAns)) str = beforeAns
     else str = afterAns
   }
+  // 切点残渣清理（2026-10-10，用户截图题 #3/#4）：
+  // 上面按"最后一个 ="切分时，切点往往落在推导过程的**中间一行**里，
+  // 于是那一行的计算结果（"40．"）会连同下一行的最终结论一起被留下：
+  //   "∴ x-60 = 100-60 = 40．\n一个为100cm，一个为40cm"
+  //   → 切出 "40．\n一个为100cm，一个为40cm"
+  // 逗号切分时 "40．" 变成独立一段，段数与参考（"100 cm，40 cm"两段）对不上，
+  // 逐项比对与数字兜底依次失效 ⇒ 学生答案完全正确却判错。
+  //
+  // 判据收窄到「切完仍≥2 行、首行是纯数字（可带句点/逗号）」：
+  // 单行答案、没有换行的答案都不动；首行含文字（如 "∴ 该方程两根相同"）也不动。
+  // 全库 2941 条里只命中 5 条、实际翻转 2 条，且**零判对→判错**。
+  if (!str.includes(String.fromCharCode(0xFF1A)) && !str.includes(':')) {
+    const lines = str.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
+    if (lines.length >= 2 && /^[0-9]+[.．、,，]?$/.test(lines[0])) {
+      str = lines.slice(1).join('\n')
+    }
+  }
   return str
 }
 
@@ -1420,6 +1437,30 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
         return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
       })
       if (allCorrect) return { isCorrect: true, unrecognized: false }
+    }
+  }
+
+  // 多答案场景：学生是「多行推导 + 末行结论」时，上面的 studentParts 取的是
+  // **未收窄原串**，段数被推导过程撑大（"设一个为x，另一个为x-60．…一个为100cm，
+  // 一个为40cm" → 4 段），与参考的 2 段对不上 ⇒ 逐项比对直接跳过（2026-10-10
+  // 用户截图题 #3/#4）。这里补一轮收窄后重试：
+  //   · 只在 narrowToFinalAnswer 确实削掉了内容（收窄前后段数不同）时才试，
+  //     不改变任何既有形态的行为；
+  //   · 仍要求「段数相等 + 逐段 normalizeAndCompare/extractAndCompare 都成立」，
+  //     禁止数字集合包含这类宽松兜底放水；
+  //   · 不命中不回传 false，权威结果仍是原路径。
+  if (refParts.length > 1) {
+    const narrowedForCompare = narrowToFinalAnswer(studentAnswer)
+    if (narrowedForCompare && narrowedForCompare !== String(studentAnswer).trim()) {
+      const narrowedParts = splitAnswers(narrowedForCompare)
+      if (narrowedParts.length > 1 && narrowedParts.length === refParts.length &&
+          narrowedParts.length !== studentParts.length) {
+        const allCorrect = narrowedParts.every((sp, i) => {
+          const rp = refParts[i]
+          return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
+        })
+        if (allCorrect) return { isCorrect: true, unrecognized: false }
+      }
     }
   }
 
