@@ -230,6 +230,10 @@ import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
 // 判题必须按【卷面顺序】对位，不能用 generated_exams.question_ids 原序 ——
 // 2026-09-13 事故：两套顺序不一致导致 21/25 份重练卷判题整体错位。
 import { buildRetryPaperOrder, alignRetryAnswers } from './utils/retryPaperOrder.js'
+// 重跑断根（2026-10-10）：删旧题库行前快照挂在档上的错题记录，重建后接回新档案行。
+// 否则 ON DELETE SET NULL（迁移005）会把错题记录断成孤儿——无法编辑/重练，且与
+// 重跑后重新入册的同题记录并存（错题本重复）。详见 utils/wrongQuestionRelink.js 头注。
+import { snapshotWrongQuestionsForTask, relinkWithSnapshot } from './utils/wrongQuestionRelink.js'
 
 // ── 多模态切题引擎：几何图处理 ──
 // 使用 Sharp 进行裁剪和图像增强（替代浏览器端的 Canvas/OpenCV）
@@ -6165,6 +6169,8 @@ export const processWorkbookGrading = async (job) => {
 
   // 5. 保存到数据库（复用现有 createQuestions）
   // 幂等：恢复链路/重试可能对同一 task 重复执行，先清掉旧题目行防止成倍重复
+  // ⛔ 断根：删档前先记下挂在旧档上的错题记录，落库后接回新档案行（防 SET NULL 孤儿）
+  const wqRelinkSnapshot = await snapshotWrongQuestionsForTask(query, taskId)
   const deletedOld = await deleteQuestionsByTaskId(taskId)
   if (deletedOld > 0) {
     console.log(`   [Workbook] 幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
@@ -6269,6 +6275,15 @@ export const processWorkbookGrading = async (job) => {
   }
 
   await createQuestions(questionsWithStudentId)
+
+  // ⛔ 断根：把删档前记下的错题记录接回新档案行（配对失败保持 NULL，不硬接）
+  try {
+    const relinkRes = await relinkWithSnapshot(query, taskId, wqRelinkSnapshot, questionsWithStudentId)
+    if (relinkRes.relinked > 0) console.log(`   [Workbook] 错题重链接: ${relinkRes.relinked} 条接回新档案 (taskId=${taskId})`)
+    if (relinkRes.kept > 0) console.log(`   [Workbook] 错题重链接: ${relinkRes.kept} 条未能配对，保持原状`)
+  } catch (e) {
+    console.warn(`   ⚠️ [Workbook] 错题重链接失败（不阻断批改，孤儿可由清存量脚本处理）: ${e.message}`)
+  }
 
   // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
   await markUnjudgedReasons(questionsWithStudentId)
@@ -7533,6 +7548,8 @@ const processAnswerBankGrading = async (job) => {
     await updateTaskStatus(taskId, TASK_STATUS.PROCESSING, { progress: 70 })
 
     // 幂等：先清旧题，再批量写入
+    // ⛔ 断根：删档前快照挂档错题，落库后接回（防 SET NULL 孤儿）
+    const wqRelinkSnapshot = await snapshotWrongQuestionsForTask(query, taskId)
     const deletedOld = await deleteQuestionsByTaskId(taskId)
     if (deletedOld > 0) {
       console.log(`   [AnswerBank] 幂等清理: 删除旧题目 ${deletedOld} 行`)
@@ -7550,6 +7567,15 @@ const processAnswerBankGrading = async (job) => {
     await aiJudgeUncertainQuestions(questionsWithIds)
 
     await createQuestions(questionsWithIds)
+
+    // ⛔ 断根：把删档前记下的错题记录接回新档案行（配对失败保持 NULL，不硬接）
+    try {
+      const relinkRes = await relinkWithSnapshot(query, taskId, wqRelinkSnapshot, questionsWithIds)
+      if (relinkRes.relinked > 0) console.log(`   [AnswerBank] 错题重链接: ${relinkRes.relinked} 条接回新档案 (taskId=${taskId})`)
+      if (relinkRes.kept > 0) console.log(`   [AnswerBank] 错题重链接: ${relinkRes.kept} 条未能配对，保持原状`)
+    } catch (e) {
+      console.warn(`   ⚠️ [AnswerBank] 错题重链接失败（不阻断批改）: ${e.message}`)
+    }
 
     // 判不出来的题：把原因落到 answer_exception_reason（观测用，不参与判定）
     await markUnjudgedReasons(questionsWithIds)
@@ -7975,6 +8001,8 @@ export const processTask = async (job) => {
       // workbook 与答案库管线早已在写入前清旧题，通用 AI 管线此前漏了，
       // 导致同一任务跑两次就产生成倍的 questions 行（实测 3 道题 → 6 行），
       // 进而污染 wrong_questions 与知识点掌握度。
+      // ⛔ 断根：删档前快照挂档错题，落库后接回（防 SET NULL 孤儿，2026-10-10）
+      const wqRelinkSnapshot = await snapshotWrongQuestionsForTask(query, taskId)
       const deletedOld = await deleteQuestionsByTaskId(taskId)
       if (deletedOld > 0) {
         console.log(`   幂等清理: 删除旧题目 ${deletedOld} 行 (taskId=${taskId})`)
@@ -8026,6 +8054,15 @@ export const processTask = async (job) => {
 
       await createQuestions(questionsWithStudentId)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCount} 张几何配图)`)
+
+      // ⛔ 断根：把删档前记下的错题记录接回新档案行（配对失败保持 NULL，不硬接）
+      try {
+        const relinkRes = await relinkWithSnapshot(query, taskId, wqRelinkSnapshot, questionsWithStudentId)
+        if (relinkRes.relinked > 0) console.log(`✅ [Step 6/8] 错题重链接: ${relinkRes.relinked} 条接回新档案 (taskId=${taskId})`)
+        if (relinkRes.kept > 0) console.log(`   [Step 6/8] 错题重链接: ${relinkRes.kept} 条未能配对，保持原状`)
+      } catch (e) {
+        console.warn(`   ⚠️ 错题重链接失败（不阻断批改，孤儿可由清存量脚本处理）: ${e.message}`)
+      }
 
       // ── 页面理解：将裁剪后的几何图保存到 question_assets（⚡ 并行化） ──
       // 待重绘的 pending 几何资产（{assetId, questionId}）：Step 6 收集，
