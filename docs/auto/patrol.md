@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R161 — 2026/10/10 09:37:02（✅ 全绿）**
+> ⏱ **最近心跳：R162 — 2026/10/10 09:47:08（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1651,4 +1652,18 @@
     -  M server/services/gradingFinalizer.js
     -  M server/services/judgeService.js
     - ?? test/reviewConflictSync.test.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 162 | 2026-10-10T01:47:08 | tests=2277/0 | lint=1 | build=skipped | server=ok | dirty=7 |
+
+### R162 — 2026/10/10 09:47:08（daemon 自动报告）
+
+**体检**：tests **2277/0** | lint 1 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 7
+
+⚠️ 发现异常：lint errors=1；脏文件 7 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/.env.example
+    -  M server/services/judgeService.js
+    - ?? server/scripts/clear-degraded-risk-notes-1010.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
