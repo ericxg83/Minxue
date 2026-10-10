@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R159 — 2026/10/10 09:17:40（✅ 全绿）**
+> ⏱ **最近心跳：R160 — 2026/10/10 09:27:47（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1605,6 +1606,22 @@
 | 159 | 2026-10-10T01:17:40 | tests=2268/0 | lint=0 | build=FAIL | server=ok | dirty=9 |
 
 ### R159 — 2026/10/10 09:17:40（daemon 自动报告）
+
+**体检**：tests **2268/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 9
+
+⚠️ 发现异常：build=FAIL；脏文件 9 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M src/hooks/useExamReview.js
+    -  M src/utils/reviewDecision.js
+    -  M src/workbench/components/review/QuestionNavPanel.vue
+    -  M src/workbench/stores/reviewStore.js
+    - ?? test/reviewAttentionCaliber.test.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 160 | 2026-10-10T01:27:47 | tests=2268/0 | lint=0 | build=FAIL | server=ok | dirty=9 |
+
+### R160 — 2026/10/10 09:27:47（daemon 自动报告）
 
 **体检**：tests **2268/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 9
 
