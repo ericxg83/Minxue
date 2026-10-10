@@ -270,14 +270,28 @@ function updateSearch() { wrongBookStore.setSearchQuery(searchInput.value) }; fu
 //   · 落点是原题本身，不是副本。重练卷 question_ids 存的就是 questions 表主键，
 //     题目行 questions.task_id 指向原始作业（server/utils/taskRoute.js:81、
 //     src/workbench/utils/retryPaperState.js 头部注释）⇒ 只跳一次、改一处。
-//   · 原始 task 取 wrong_questions.last_wrong_task_id（迁移 058 为溯源而加，
-//     可空、无外键）。它为空时说明判错来源不可考，**不猜、不回退到任意 task**——
-//     跳到错的卷比不给入口更糟。
-//   · 练习册自包含错题 question_id 为空，无法定位原卷，按钮置灰并说明原因。
+//   · 原始 task **两级取**（2026-10-10 实测修正，第一版只读第一级，白置灰了 36 条）：
+//       一级 wq.last_wrong_task_id（迁移 058 溯源列，可空）
+//       二级 ⭐ q.task_id（该题行自己的归属卷）
+//     一级为空的真实原因不是「题目无归属」，而是 neonService.js:565 的
+//     「来路不明（taskId 为空）时宁少勿多、不写 last_wrong_task_id」——
+//     这些题**照样有 questions.task_id**，实测 36/36 全部能命中 tasks 行。
+//     只读一级等于把这36 条误判成不可编辑（探针实证）。
+//   · 练习册自包含错题 question_id 为空 ⇒ 在questions 表里**根本没有那一行**，
+//     题干直接存在 wrong_questions.content 上（实测 88 条中 72 条有 content）。
+//     「编辑原题」对它**语义上不成立**（无原题可编辑），只能改错题本快照字段，
+//     那是另一件事、另一套语义 ⇒ 置灰并说明，不硬凑入口。
 //   · 编辑仍然只走批改工作区那一个实现（PUT /api/questions/:id），
 //     这里只负责把 reviewStore.pendingEditQuestionId 喂上，
 //     由 QuestionDetailPanel 已有的 watch 自动 handleEnterEdit（不新增第二处编辑实现）。
-const originTaskIdOf = item => (item?.question_id || item?.question?.id || '') && (item?.last_wrong_task_id || '') || '';
+//
+// ⛔ 两级都取不到时才置灰。判据为「有没有可编辑的题行」，不是「有没有原卷可跳」——
+//   这两件事上一版被我混为一谈（「不能编辑」），是错的。
+const questionIdOf = item => item?.question_id || item?.question?.id || '';
+const originTaskIdOf = item => {
+  if (!questionIdOf(item)) return '';
+  return item?.last_wrong_task_id || item?.task_id || item?.question?.task_id || '';
+};
 const goEditOriginalQuestion = (item) => {
   const taskId = originTaskIdOf(item);
   const questionId = item?.question_id || item?.question?.id || '';

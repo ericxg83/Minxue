@@ -3952,6 +3952,11 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
              'clean_geometry_svg', q.clean_geometry_svg, 'clean_geometry_image_url', q.clean_geometry_image_url,
              'display_image_type', q.display_image_type, 'tikz_svg_url', q.tikz_svg_url,
              'geometry_manual_override', q.geometry_manual_override,
+             -- 归属卷（2026-10-10）：题目行自己挂在哪份 task 上 = 这道题的「原卷」。
+             -- 错题本「去原题编辑」靠它定位；此前只有 wrong_questions.last_wrong_task_id
+             -- 一条路，而后者在「来路不明（taskId 为空）宁少勿多」（neonService.js:565）
+             -- 时会留 NULL ⇒ 实测 36 条错题被白置灰。**纯增量字段：不改不删任何现有键**。
+             'task_id', q.task_id,
              'tikz_status', a.tikz_status, 'asset_last_error', a.last_error
            )
          END AS question
