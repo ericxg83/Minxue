@@ -106,8 +106,48 @@ const UNVERIFIABLE_REFERENCE_PATTERNS = [
  */
 const PROSE_PAREN_EXPLAIN_RE = /[（(]\s*(?:即|也就是|也就是说)\s*[一-龥A-Za-z]/
 
+/**
+ * 几何证明「结论」形态的参考答案（2026-10-10，与上一条同源的第二种写法）。
+ *   "AD是线段AF、AB的比例中项"        —— 纯中文结论
+ *
+ * 与「等式（即中文结论）」互为镜像：答案册有时写等式（AD²=AF·AB）、
+ * 有时写中文结论（AD 是…的比例中项），二者是**同一个结论的两种表述**。
+ * 学生写哪种都可能，于是字面比对必然对不上：
+ *   · 学生写等式、参考写中文 → 公式通道不认中文
+ *   · 学生写中文、参考写等式 → 字面通道不等，公式通道也不认中文
+ * 判等层没有能力判定"等式 a²=bc" 与"a 是 b、c 的比例中项"等价 ⇒ 属判不出。
+ *
+ * 判据收窄到「线段名 + 是 + 线段名 + …的比例中项」这一种固定句式，
+ * 不泛化到所有含"比例中项"的答案（数值答案里的"比例"是另一回事）。
+ * ⚠️ 开头允许省略「线段」二字：答案册两种写法都有 ——
+ *   "线段DA是线段DB、DC的比例中项" 与 "AD是线段AF、AB的比例中项"。
+ */
+const GEOMETRY_PROSE_CONCLUSION_RE = /^(?:线段)?\s*[A-Za-z]{1,3}\s*是\s*线段/
+
 // 供 detectUnverifiableReference 逐条匹配（与上面的表保持同一份判据）
-UNVERIFIABLE_REFERENCE_PATTERNS.push(PROSE_PAREN_EXPLAIN_RE)
+UNVERIFIABLE_REFERENCE_PATTERNS.push(PROSE_PAREN_EXPLAIN_RE, GEOMETRY_PROSE_CONCLUSION_RE)
+
+/**
+ * 学生侧的中文几何结论 × 参考侧的纯等式 —— 判不出（2026-10-10，全库 82859a8c）。
+ *
+ * 与 GEOMETRY_PROSE_CONCLUSION_RE 是同一问题的两个方向：
+ *   · 那一条拦「参考是中文结论」；这一条拦「参考是纯等式、学生写中文结论」。
+ *
+ * 「参考是纯等式」的判据刻意严格：整串只允许数学符号与字母数字，
+ * **不得含任何汉字**（"AD²=AF·AB"✓ / "AD²=AF·AB（即…）"✗已被上一条拦 / "比例为2:3"✗）。
+ * 这样 "2 mm"、"x=3"、"3, 4" 等普通答案都不会命中。
+ */
+function isProseConclusionAgainstEquation(studentAnswer, referenceAnswer) {
+  const ref = String(referenceAnswer ?? '').trim()
+  if (!ref) return false
+  // 参考必须含等号、且整串无汉字（"AD²=AF·AB" 命中；含叙述的一律不命中）
+  if (!/[=＝]/.test(ref)) return false
+  if (/[一-龥]/.test(ref)) return false
+  // 学生侧必须出现中文结论句
+  const stu = String(studentAnswer ?? '')
+  if (!/[一-龥]/.test(stu)) return false
+  return /(?:线段)?\s*[A-Za-z]{1,3}\s*是\s*线段\s*[A-Za-z]{1,3}/.test(stu)
+}
 
 export function detectUnverifiableReference(referenceAnswer) {
   const raw = String(referenceAnswer ?? '').trim()
@@ -152,6 +192,11 @@ export function describeUnverifiableReference(referenceAnswer) {
   // 逐字比对与公式比对都判不出，只能人工核对。
   if (PROSE_PAREN_EXPLAIN_RE.test(raw)) {
     return '参考答案是「等式（即中文结论）」形态，无法自动比对，请人工核对'
+  }
+  // 几何证明的纯中文结论（"AD是线段AF、AB的比例中项"）：与上面的「等式（即…）」
+  // 是同一结论的两种表述，判等层无法判定两者等价，只能人工核对。
+  if (GEOMETRY_PROSE_CONCLUSION_RE.test(raw)) {
+    return '参考答案，几何证明的中文结论（与等式互为表述），无法自动比对，请人工核对'
   }
   if (PROOF_HEAD_RE.test(raw) || raw.length >= LONG_REF_LEN) {
     return '参考答案是整段证明/解答过程（答案册原答案），无法逐字自动比对，请人工核对'
@@ -1120,6 +1165,21 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // 参考答案本身无法自动核对（"证明略""见解析""答案不唯一"…）→ 判不出，交人工。
   // 必须在任何比对之前拦下：往下走只会得到一个没有依据的 true/false。
   if (detectUnverifiableReference(referenceAnswer)) {
+    return { isCorrect: null, unrecognized: true }
+  }
+
+  // 学生用中文叙述写几何结论、参考用等式（2026-10-10，全库 82859a8c）：
+  //   参考 "AD²=AF·AB"   —— 判等层完全可核对
+  //   学生 "∴ 线段AD是线段AF、AB的比例中项" —— 与该等式等价（比例中项定义）
+  // 但判等层无法验证「等式 ⇔ 中文结论」这个几何等价：写等式判对、写中文判错，
+  // 而**正确的中文结论与错误的中文结论同样无法区分**（把比例中项的对象写反
+  // 也是一句读得通的中文）。这正是「判不出」而非「判错」的定义。
+  //
+  // 判据要求两侧形态互补且都极窄：
+  //   · 参考是**纯等式**（无中文叙述、无"即"字解释）
+  //   · 学生答案里出现「是线段…的比例中项」这类中文结论
+  // 缺任一条都不生效；学生若写纯等式（与参考逐字相同）仍走原通道判对。
+  if (isProseConclusionAgainstEquation(studentAnswer, referenceAnswer)) {
     return { isCorrect: null, unrecognized: true }
   }
 

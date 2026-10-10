@@ -630,7 +630,55 @@ test('units are converted consistently even with a Chinese narration prefix', ()
     { isCorrect: false, unrecognized: false })
 
   // 既有行为不得回退
-  assert.deepEqual(judgeAnswer('2', '2', 'answer'), { isCorrect: true, unrecognized: false })
+assert.deepEqual(judgeAnswer('2', '2', 'answer'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer('1/2', '0.5', 'answer'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer('x=3', '3', 'answer'), { isCorrect: true, unrecognized: false })
+})
+
+// 几何证明结论的「等式 ⇔ 中文」互为表述，两个方向都要判不出（2026-10-10）。
+// 根因：答案册对同一个证明结论有两种写法（等式 AD²=AF·AB / 中文「AD 是…的比例中项」），
+// 判等层无法验证二者的几何等价 —— 写等式判对、写中文判错，而**正确的中文结论
+// 与写反了对象的中文结论同样无法区分**，属「判不出」而非「判错」。
+//   · 方向① 参考是中文结论 → GEOMETRY_PROSE_CONCLUSION_RE（上一组用例已覆盖）
+//   · 方向② 参考是纯等式、学生写中文结论 → isProseConclusionAgainstEquation
+test('geometry prose conclusion is unverifiable in both directions', () => {
+  const NL = '\n'
+  const sup2 = String.fromCharCode(0x00B2)   // ²
+  const midDot = String.fromCharCode(0x00B7) // ·
+
+  // 方向①：参考是中文结论
+  assert.equal(detectUnverifiableReference('AD是线段AF、AB的比例中项'), 'unverifiable_reference')
+  assert.equal(detectUnverifiableReference('线段DA是线段DB、DC的比例中项'), 'unverifiable_reference')
+  assert.match(describeUnverifiableReference('AD是线段AF、AB的比例中项'), /几何证明的中文结论/)
+
+  // 方向②：参考是纯等式，学生写中文结论（库里82859a8c 的形态）
+  const eqRef = 'AD' + sup2 + '=AF' + midDot + 'AB'
+  const proseStu = [
+    String.fromCharCode(0x8BC1, 0x660E, 0xFF1A) + ' DE // BC',
+    String.fromCharCode(0x2234) + ' AD/AF = AB/AD',
+    String.fromCharCode(0x5373) + ' AD' + sup2 + ' = AF' + midDot + 'AB',
+    String.fromCharCode(0x2234) + ' 线段AD是线段AF、AB的比例中项',
+  ].join(NL)
+  assert.deepEqual(judgeAnswer(proseStu, eqRef, 'answer'), { isCorrect: null, unrecognized: true })
+  // 中文结论把对象写反了 —— 同样判不出，绝不能放水成判对
+  assert.deepEqual(
+    judgeAnswer(String.fromCharCode(0x2234) + ' 线段DB是线段DA、DC的比例中项', eqRef, 'answer'),
+    { isCorrect: null, unrecognized: true })
+
+  // 学生写纯等式（与参考逐字相同）仍必须判对，闸门不得误伤
+  assert.deepEqual(judgeAnswer(eqRef, eqRef, 'answer'), { isCorrect: true, unrecognized: false })
+  // 反例：普通答案全部不受影响（含汉字但不是「是线段…」句式、无等号、非纯等式参考）
+  const same = [
+    ['2 mm', '2 mm'],
+    ['x=3', '3'],
+    ['3, 4', '3, 4'],
+    ['AD=5', 'AD=5'],
+    ['线段AB=5cm', '线段AB=5cm'],
+    ['比例为2:3', '比例为2:3'],
+    ['最小的是14岁，最大的是18岁。', '14岁，18岁'],
+  ]
+  for (const [s, r] of same) {
+    assert.deepEqual(judgeAnswer(s, r, 'answer'), { isCorrect: true, unrecognized: false },
+      `「${s}」不应被闸门拦`)
+  }
 })
