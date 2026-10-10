@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R180 — 2026/10/10 12:47:43（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R181 — 2026/10/10 12:57:41（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1896,4 +1897,18 @@
     -  M scripts/patrol/daemon.mjs
     -  M src/utils/reviewDecision.js
     - ?? server/scripts/fix-stale-figure-exception.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 181 | 2026-10-10T04:57:41 | tests=2335/0 | lint=1 | build=FAIL | server=ok | dirty=7 |
+
+### R181 — 2026/10/10 12:57:41（daemon 自动报告）
+
+**体检**：tests **2335/0** | lint 1 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 7
+
+⚠️ 发现异常：lint errors=1；build=FAIL；脏文件 7 个（ M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs,  M src/workbench/components/review/QuestionDetailPanel.vue…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M src/workbench/components/review/QuestionDetailPanel.vue
+    -  M src/workbench/stores/reviewStore.js
+    -  M test/gateDebtDecisionAffordance.test.mjs
+    - ?? test/gateDebtImmediateClear.test.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
