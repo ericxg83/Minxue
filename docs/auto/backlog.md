@@ -4428,7 +4428,18 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   ——`status==='done'` 即「待复核」，属另一语义，**有意保留**）。
 - **赛道变更（记入 `lanes.md`）**：负责人指定「移动端赛道你也一起负责」⇒ 本会话正式认领
   「移动端 App 体验 + 打印/PDF 产出物」；该赛道原记的 Quest 会话定时任务第 217 轮已实测**不存在**。
-- ⚠️ 并发实记：本轮在制区 8 个文件全属**他人**（答案引擎 + 几何渲染），与我的 4 个文件
-  （`NotificationList.vue`、`pendingReviewCaliber.test.mjs`、`lanes.md`、`backlog.md`）**零交集** ⇒ 路径级 `git add` 只提自己的。
+- ⚠️ **并发实记（本轮又踩一次，值得记）**：开工时在制区文件全属他人（答案引擎 + 几何渲染），
+  与我改的 4 个文件**零交集**，我也确实只 `git add` 了自己那 4 个（`git diff --cached --name-only` 当场确认）。
+  **但 `git commit` 落地时变成了 8 个文件** —— 在我 `add` 之后、`commit` 之前，对侧会话也 `git add` 了它的
+  4 个（`server/index.js`、`test/apiDeadEndpoint.test.mjs`、`test/apiDeadEndpoints.json`、`test/lifecycleQueue.test.mjs`，
+  内容是**提案 ㊸ 的落地**：删掉死端点 `POST /api/wrong-questions/export-retry-pdf` 及其路由文件），
+  我的 commit 把整个索引一起提了。**路径级 `git add` 挡不住「对侧在我 commit 前也 add」**。
+  处置：未做 reset（会动到对侧的在制状态，违反「保留他人修改」），改为**重跑全量测试确认提交态整体是绿的**
+  （2288/2288 fail 0，含对侧那 4 个文件）后照常推送；对侧内容完整未丢，只是挂在本次提交信息下。
+  **教训：并发环境下 `git add` 与 `git commit` 之间存在窗口，路径级 add 不是充分保护 ——
+  要么用 `git commit -- <paths>` 直接指定路径提交（绕过索引），要么提交后核对 `git show --stat` 的实际文件集。**
+- ⚠️ 另一处小混乱：对侧那个会话也把自己这一轮叫 **r254**（见 `test/lifecycleQueue.test.mjs:63` 注释
+  「r254（提案㊸ 拍板删除）」）⇒ 台账里出现两个 r254（本表 r253 那种情况重演）。轮次编号在多会话并行下
+  本就不可靠，**以 `loopGuard` 返回值为准、以提交内容区分**。
 - 下轮接第 255 轮：移动端赛道已归本会话，`lanes.md` 接手提示里的「首屏偶发 400（待观察）」
   「PullToRefresh 回归前查 manualChunks」可择机复核；B 级提案（㉘/㊸/㊴+㉚/r249-①/②/⑲/㊲/㊵）仍等拍板。
