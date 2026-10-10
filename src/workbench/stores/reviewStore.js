@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes, getGatePendingItems, sweepGatePending, recropFigures } from '../../services/apiService'
+import { getStudents, getWrongQuestionsByStudent, getQuestionsByTask, getTasksByStudent, getTaskById, updateTaskStatus, recalculateTaskStats, getLatestJudgements, clearStudentCaches, updateQuestionReviewStatus, addWrongQuestions, getGeneratedExamsByStudent, getQuestionsByIds, gradeGeneratedExam, refineQuestionBoxes, getGatePendingItems, sweepGatePending, recropFigures, getRecomputeAnswerStatus } from '../../services/apiService'
 import { LIFECYCLE_STATUS } from './lifecycleStore'
 import { checkQuestionCompleteness, COMPLETENESS_CODES } from '../../utils/questionCompleteness.js'
 import { TASK_TYPE, getReviewConfig } from '../config/reviewConfig'
@@ -1268,6 +1268,15 @@ export const useReviewStore = defineStore('review', () => {
   // 且允许多题同时在算。组件卸载后进行中的 Promise 仍会把结果写回这里。
   const recomputeJobs = ref({}) // questionId -> { loading, elapsed, notice: {type, text} | null }
   let recomputeTickTimer = null
+  const ensureRecomputeTick = () => {
+    if (recomputeTickTimer) return
+    // 单一秒表给所有在途题计时，全部结束即停，不留空转 interval
+    recomputeTickTimer = setInterval(() => {
+      for (const job of Object.values(recomputeJobs.value)) {
+        if (job.loading) job.elapsed += 1
+      }
+    }, 1000)
+  }
   const stopRecomputeTickIfIdle = () => {
     if (recomputeTickTimer && !Object.values(recomputeJobs.value).some(job => job.loading)) {
       clearInterval(recomputeTickTimer)
@@ -1278,22 +1287,65 @@ export const useReviewStore = defineStore('review', () => {
     if (questionId == null) return null
     return recomputeJobs.value[questionId] || null
   }
+
+  // ── 「离开页面也不丢」：在途标记落 localStorage + 回来续上（2026-10-10）──────
+  // 起因（负责人实测反馈）：「点了重解析，一离开这个页面它就停了。」
+  // 实测结论：服务端**不会**因客户端断开而停（Express 处理器照旧跑完并写库），
+  // 页面内 SPA 路由切换也不会中断在途 fetch —— 丢的是**整页重载/关标签页/WebView
+  // 挂起**之后的结果反馈：store 被清空 ⇒ 按钮退回「AI 重解析」，后端算完写库了也
+  // 没人告诉老师，看着就像「停了」。修法见 server/index.js 的 RECOMPUTE_JOBS。
+  const RECOMPUTE_INFLIGHT_KEY = 'wb_recompute_inflight_v1'
+  const RECOMPUTE_RESUME_POLL_MS = 4000
+  const RECOMPUTE_RESUME_MAX_MS = 6 * 60 * 1000
+  const readRecomputeInflight = () => {
+    try {
+      const raw = localStorage.getItem(RECOMPUTE_INFLIGHT_KEY)
+      const obj = raw ? JSON.parse(raw) : {}
+      return obj && typeof obj === 'object' ? obj : {}
+    } catch { return {} }
+  }
+  const writeRecomputeInflight = (map) => {
+    try { localStorage.setItem(RECOMPUTE_INFLIGHT_KEY, JSON.stringify(map)) } catch { /* 隐私模式等，尽力而为 */ }
+  }
+  const markRecomputeInflight = (questionId) => {
+    const m = readRecomputeInflight()
+    m[questionId] = Date.now()
+    writeRecomputeInflight(m)
+  }
+  const clearRecomputeInflight = (questionId) => {
+    const m = readRecomputeInflight()
+    if (m[questionId]) { delete m[questionId]; writeRecomputeInflight(m) }
+  }
+  const resumeTimers = new Map() // questionId -> intervalId
+  const stopResumeTimer = (questionId) => {
+    const t = resumeTimers.get(questionId)
+    if (t) { clearInterval(t); resumeTimers.delete(questionId) }
+  }
+
   const beginRecomputeJob = (questionId) => {
     recomputeJobs.value[questionId] = { loading: true, elapsed: 0, notice: null }
-    // 单一秒表给所有在途题计时，全部结束即停，不留空转 interval
-    if (!recomputeTickTimer) {
-      recomputeTickTimer = setInterval(() => {
-        for (const job of Object.values(recomputeJobs.value)) {
-          if (job.loading) job.elapsed += 1
-        }
-      }, 1000)
-    }
+    markRecomputeInflight(questionId)
+    ensureRecomputeTick()
   }
-  const finishRecomputeJob = (questionId, notice) => {
+  /**
+   * 收尾一次重解析。
+   *
+   * ⚠️ `keepInflight` 的存在理由（2026-10-10 实测踩到）：**整页重载时浏览器会中止
+   * 在途 fetch**，其 rejection 会在页面拆掉前跑进 catch → 若这里无条件清标记，
+   * 标记就在「离开页面」的同一瞬间被清掉，续查功能等于没做（实测：重载后标记变成
+   * `{}`，续查直接空转）。
+   * ⇒ 只有**真的拿到答案**时才清标记；失败/中止一律留着，交给服务端在途登记表裁决
+   *   （resumeRecomputeJobs 查到 running 就继续等、failed 就出结论、null 才清）。
+   */
+  const finishRecomputeJob = (questionId, notice, { keepInflight = false } = {}) => {
     const job = recomputeJobs.value[questionId]
     if (job) {
       job.loading = false
       if (notice) job.notice = notice
+    }
+    if (!keepInflight) {
+      clearRecomputeInflight(questionId)
+      stopResumeTimer(questionId)
     }
     stopRecomputeTickIfIdle()
   }
@@ -1308,6 +1360,87 @@ export const useReviewStore = defineStore('review', () => {
     if (resp.analysis) q.analysis = resp.analysis
     if (typeof resp.is_correct !== 'undefined') q.is_correct = resp.is_correct
     q.answer_source = 'ai'
+  }
+
+  /**
+   * 「离开页面再回来」时续上在途的重解析（2026-10-10）。
+   *
+   * 场景：老师点了「AI 重解析」，随后整页重载 / 关掉标签页 / WebView 被挂起。
+   * 服务端其实照旧跑完并写库（Express 不受客户端断开影响，已用最小脚本实测），
+   * 但前端那次 fetch 的响应没人接了、store 也被清空 ⇒ 按钮退回「AI 重解析」，
+   * 老师看着就像「它停了」。这里读 localStorage 的在途标记，逐题问服务端：
+   *   running → 恢复「AI 计算中」并按 4s 轮询，直到有结论（最多 6 分钟）
+   *   done    → 直接落答案 + 结论横幅（服务端把落库结果一并返回）
+   *   failed  → 给出失败结论，不让老师干等
+   *   null    → 服务端没在跑（进程重启过 / 从没点过），清掉标记退回普通按钮
+   * 幂等：同一题已在轮询就不再起第二个。
+   */
+  const resumeRecomputeJobs = async () => {
+    const markers = readRecomputeInflight()
+    for (const questionId of Object.keys(markers)) {
+      if (resumeTimers.has(questionId)) continue
+      const startedAt = Number(markers[questionId]) || 0
+      if (!startedAt || Date.now() - startedAt > RECOMPUTE_RESUME_MAX_MS) {
+        clearRecomputeInflight(questionId)
+        continue
+      }
+      const job = recomputeJobs.value[questionId]
+      if (!job || !job.loading) {
+        recomputeJobs.value[questionId] = {
+          loading: true,
+          elapsed: Math.round((Date.now() - startedAt) / 1000),
+          notice: null
+        }
+      }
+      ensureRecomputeTick()
+      let busy = false
+      const poll = async () => {
+        if (busy) return
+        busy = true
+        let status = null
+        try {
+          const resp = await getRecomputeAnswerStatus(questionId)
+          status = resp?.job || null
+        } catch (e) {
+          busy = false
+          // 老后端没有这个接口（404）：退回修复前的行为，别让按钮永远转圈。
+          // 前后端不同步是常态（后端无热重载），这里必须自己兜住。
+          if (e?.status === 404) { finishRecomputeJob(questionId, null); return }
+          return // 网络抖动：下一轮再试，绝不把「查不到」当成「算完了」
+        }
+        busy = false
+        if (!status) { finishRecomputeJob(questionId, null); return }
+        if (status.status === 'running') {
+          if (Date.now() - startedAt > RECOMPUTE_RESUME_MAX_MS) {
+            finishRecomputeJob(questionId, {
+              type: 'warning',
+              text: 'AI 重算超过 6 分钟仍未返回结论，可能已中断。请刷新页面查看，或人工填写答案'
+            })
+          }
+          return
+        }
+        if (status.status === 'done') {
+          const result = status.result || {}
+          const answer = String(result.answer || '').trim()
+          if (answer) applyRecomputeAnswer(questionId, { answer, analysis: result.analysis, is_correct: result.is_correct })
+          finishRecomputeJob(questionId, {
+            type: answer ? 'success' : 'warning',
+            text: answer ? `AI 重算完成：${answer.slice(0, 40)}` : 'AI 重算已结束，但没有写入新答案'
+          })
+          return
+        }
+        // failed（或 running 超时后兜底到这里）：服务端登记为失败。若老师已经手填了
+        // 参考答案，就别再弹「请人工填写」——那是他已经做过的事。
+        const failedResult = status.result || {}
+        if (String(failedResult.answer || '').trim()) { finishRecomputeJob(questionId, null); return }
+        finishRecomputeJob(questionId, {
+          type: 'warning',
+          text: 'AI 重算没有拿到可信答案（可能图不清晰、条件不足或需人工判读）。这是终态，请人工填写'
+        })
+      }
+      resumeTimers.set(questionId, setInterval(poll, RECOMPUTE_RESUME_POLL_MS))
+      poll()
+    }
   }
 
   // 获取人工复核进度
@@ -1824,6 +1957,7 @@ export const useReviewStore = defineStore('review', () => {
     recomputeJobFor,
     beginRecomputeJob,
     finishRecomputeJob,
+    resumeRecomputeJobs,
     applyRecomputeAnswer,
     // 多页试卷查看
     currentPageIndex,

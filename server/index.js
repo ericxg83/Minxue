@@ -2643,6 +2643,31 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
   }
 })
 
+// ── 「AI 重解析」在途登记表（2026-10-10）────────────────────────────────────
+// 要解决的问题（负责人实测反馈）：「点了重解析，一离开这个页面它就停了。」
+//
+// 实测结论（两个都不成立的假设先排除）：
+//   · 服务端**不会**因客户端断开而停 —— Express 处理器在客户端断连后照样跑完并写库
+//     （用最小复现脚本验证：curl -m 2 主动断开，8s 后 handler 仍执行到底）。
+//   · 页面内 SPA 路由切换**不会**中断在途 fetch（真浏览器实测：切走再回来按钮仍在
+//     「AI 计算中 Ns…」）。
+//   ⇒ 真正丢的是**结果反馈**：整页重载 / 关标签页 / WebView 挂起之后，Pinia store 里
+//     的在途状态被清空，按钮退回「AI 重解析」；后端算完写库了也没人告诉老师，
+//     看着就像「停了」。
+//
+// 修法：服务端把这次重算的**下场**（running / done / failed）记在一张进程内小表里，
+// 前端离开页面时把「哪道题在算」落 localStorage，回来先查这张表 → 续上「计算中」
+// 或直接给出结论。
+// ⚠️ 只记录状态、不参与判定；进程重启即清空（前端查到 null 就退回普通按钮）。
+const RECOMPUTE_JOBS = new Map() // questionId -> { status, startedAt, finishedAt, httpStatus }
+const RECOMPUTE_JOB_TTL_MS = 60 * 60 * 1000
+const pruneRecomputeJobs = () => {
+  const now = Date.now()
+  for (const [k, v] of RECOMPUTE_JOBS) {
+    if (now - (v.finishedAt || v.startedAt || 0) > RECOMPUTE_JOB_TTL_MS) RECOMPUTE_JOBS.delete(k)
+  }
+}
+
 // 教师工作台「AI 重解析」按钮（2026-09-23 临时功能）：
 // 老师在批改页遇到参考答案缺失时手动触发，调答案引擎重算这一题的标准答案并写库。
 // 默认仅在现有 answer 为空时写入，避免无脑覆盖老师已经填好的答案；force=true 时强制覆盖。
@@ -2727,6 +2752,22 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   try {
     const { id } = req.params
     const { force = false } = req.body || {}
+
+    // 登记本次重算（见 RECOMPUTE_JOBS 注释）：页面被整页重载/关闭后，前端靠这张表
+    // 续上「计算中」或拿到结论。res 'finish' 是**唯一**收口点，不必在 8 个 return
+    // 分支里各写一遍 —— 少写一处就是一个永远停在 running 的假状态。
+    pruneRecomputeJobs()
+    RECOMPUTE_JOBS.set(id, { status: 'running', startedAt: Date.now() })
+    res.on('finish', () => {
+      const cur = RECOMPUTE_JOBS.get(id)
+      if (!cur || cur.status !== 'running') return
+      RECOMPUTE_JOBS.set(id, {
+        status: res.statusCode >= 200 && res.statusCode < 300 ? 'done' : 'failed',
+        startedAt: cur.startedAt,
+        finishedAt: Date.now(),
+        httpStatus: res.statusCode
+      })
+    })
 
     // is_correct 一并读出（2026-09-23）：原先在写库后又单独 SELECT 一次拿旧值，
     // 在 Neon 慢连接下等于多付一次 20s 超时风险。读题时一次拿全。
@@ -3003,6 +3044,30 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     }
     console.error('AI 重算失败:', error)
     done(() => res.status(500).json({ error: msg || '服务器内部错误' }))
+  }
+})
+
+// 「AI 重解析」状态查询（2026-10-10）：只读，供前端「离开页面再回来」时续上进度。
+// 返回本次重算的下场：running / done / failed（含 httpStatus），以及 done 时的落库结果。
+// 查不到（null）说明服务端没在跑这次重算（进程重启过 / 从没点过）→ 前端退回普通按钮。
+app.get('/api/questions/:id/recompute-answer/status', async (req, res) => {
+  try {
+    const { id } = req.params
+    const job = RECOMPUTE_JOBS.get(id) || null
+    if (!job) return res.json({ ok: true, job: null })
+    if (job.status === 'running') return res.json({ ok: true, job })
+    // 终态（done / failed）：把当前落库值一并带上 —— 前端据此决定是「显示答案」还是
+    // 「提示重算没结果」，也避免老师已经手填了答案时还弹一句「请人工填写」。
+    const { rows } = await query(
+      `SELECT answer, analysis, is_correct, answer_exception, answer_exception_reason,
+              ai_answer_risk_reason, updated_at
+       FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+      [id]
+    )
+    res.json({ ok: true, job: { ...job, result: rows[0] || null } })
+  } catch (error) {
+    console.error('[AI 重解析] 状态查询失败:', error.message)
+    res.status(500).json({ ok: false, error: error.message })
   }
 })
 

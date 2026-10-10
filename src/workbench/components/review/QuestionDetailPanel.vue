@@ -1169,7 +1169,11 @@ const handleRecomputeAnswer = async () => {
     // error 呈现 —— 这不是系统故障，别让老师以为是坏了、反复重试烧额度。其余错误码
     // （timeout / primary-model-unavailable / db-unavailable）都是「这次没成」，用 error，可稍后重试。
     const declined = err?.payload?.error === 'ai-declined'
-    store.finishRecomputeJob(questionId, { type: declined ? 'warning' : 'error', text: readable })
+    // keepInflight：走到 catch 说明**没拿到响应**——最常见的就是「老师整页重载/关标签页
+    // 时浏览器中止了这次 fetch」。这时若把在途标记清掉，「离开页面再回来续上进度」就
+    // 等于没做（实测：重载后标记被清成 {}，续查空转）。所以失败一律留着标记，
+    // 由 store.resumeRecomputeJobs 按服务端在途登记表裁决（running 继续等 / failed 出结论）。
+    store.finishRecomputeJob(questionId, { type: declined ? 'warning' : 'error', text: readable }, { keepInflight: true })
     ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `AI 重解析：${readable}` })
   }
 }
@@ -1564,7 +1568,13 @@ const onPanelKeydown = (e) => {
     }
   }
 }
-onMounted(() => { window.addEventListener('keydown', onPanelKeydown) })
+onMounted(() => {
+  window.addEventListener('keydown', onPanelKeydown)
+  // 面板每次挂载都续一次在途重解析（2026-10-10）：覆盖「整页重载 / 关标签页 / 切走再回来」
+  // 之后 store 被清空的情形 —— 服务端其实还在跑（见 server/index.js RECOMPUTE_JOBS）。
+  // 内部按题去重，重复调用无副作用。
+  store.resumeRecomputeJobs()
+})
 onUnmounted(() => { window.removeEventListener('keydown', onPanelKeydown) })
 
 const handleImageUpload = async (file) => {

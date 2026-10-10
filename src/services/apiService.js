@@ -575,6 +575,12 @@ export const recomputeQuestionAnswer = async (questionId, { force = false } = {}
   }, 1)
 }
 
+// 「AI 重解析」状态查询（2026-10-10）：页面被整页重载/关闭后再回来时，用它续上进度。
+// 服务端在途登记表里没有这道题（null）说明这次重算已经没人管了 → 前端退回普通按钮。
+export const getRecomputeAnswerStatus = async (questionId) => {
+  return apiRequest(`/questions/${questionId}/recompute-answer/status`)
+}
+
 export const retryGeometry = async (questionId) => {
   return apiRequest(`/questions/${questionId}/retry-geometry`, {
     method: 'POST',
