@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R163 — 2026/10/10 09:57:42（✅ 全绿）**
+> ⏱ **最近心跳：R164 — 2026/10/10 10:07:01（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1681,4 +1682,14 @@
     -  M scripts/patrol/daemon.mjs
     -  M src/workbench/components/layout/NotificationList.vue
     -  M test/pendingReviewCaliber.test.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 164 | 2026-10-10T02:07:01 | tests=2288/0 | lint=0 | build=skipped | server=ok | dirty=3 |
+
+### R164 — 2026/10/10 10:07:01（daemon 自动报告）
+
+**体检**：tests **2288/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
+
+⚠️ 发现异常：脏文件 3 个（ M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs, ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
