@@ -164,12 +164,25 @@ function preprocessMath(text) {
   })
 
   // === 2. 指数: x^2 → x^{2} ===
-  result = result.replace(/([a-zA-Z0-9])\^([a-zA-Z0-9]+)/g, '$1^{$2}')
+  //
+  // ⚠ 必须**非贪婪**（2026-10-10 乱码事故）：贪婪的 `+` 会把 `6a^2b^6` 吞成
+  // `6a^{2b}^6`，`b` 被误当上标内容 ⇒ 产物非法 ⇒ KaTeX 红色源码。
+  // 三条分工：纯数字整体(x^12)、单个字母(a^2b)、括号组((x+1)^2)。
+  result = result.replace(/([a-zA-Z0-9])\^([0-9]+)(?![0-9A-Za-z])/g, '$1^{$2}')
+  result = result.replace(/([a-zA-Z0-9])\^([a-zA-Z])(?![a-zA-Z0-9])/g, '$1^{$2}')
+  result = result.replace(/([a-zA-Z0-9])\^\(([^()]*)\)/g, '$1^{$2}')
   result = result.replace(/([a-zA-Z0-9])\^([0-9])/g, '$1^{$2}')
 
   // === 3. 下标: x_1 → x_{1} ===
-  result = result.replace(/([a-zA-Z])_([a-zA-Z0-9]+)/g, '$1_{$2}')
-  result = result.replace(/([a-zA-Z])_([0-9])/g, '$1_{$2}')
+  //
+  // ⚠ 同样不能贪婪（2026-10-10 乱码事故）：几何角标 `A_1B_1C_1` 是**三个独立下标**，
+  // 贪婪会把中间的基底字母吞进花括号 ⇒ `A_{1B}_1C_{1}` ⇒ KaTeX 红色源码。
+  // 走确定性扫描，与 src/utils/mathText.js 的 normalizeScripts 同构（两份实现必须同步）。
+  result = normalizeScripts(result, '_')
+
+  // === 3.5 同一基底的上下标必须上标在前：p_1^k_1 → p_{1}^{k+1} ===
+  // `p_{1}^{k}_{1}` 在数学上非法（KaTeX 报错），下标步已把它排成这个形态，这里收口。
+  result = mergeTrailingSubscriptIntoSuperscript(result)
 
   // === 4. Unicode特殊符号替换 (将 Unicode 转为 LaTeX 命令) ===
   for (const [ch, latex] of Object.entries(latexSymbols)) {
@@ -180,6 +193,108 @@ function preprocessMath(text) {
   }
 
   return result
+}
+
+/**
+ * 上标/下标统一规范化（确定性逐字符扫描，不用正则）。marker 传 '^' 或 '_'。
+ *
+ * 与 src/utils/mathText.js 的 normalizeScripts **同构** —— 两份渲染实现必须同步，
+ * 否则白板/PDF 修好了、手机端还在吐红色源码（历史已踩过：循环点只改一边）。
+ *
+ * 规则（正则表达不了「只吃紧跟其后的那一个 token」）：
+ *   - marker 后紧跟 `{`      → 已有花括号形式，原样搬运；
+ *   - marker 后紧跟数字      → 连续数字整体（x^12 → x^{12}）；
+ *   - marker 后紧跟单个字母  → 该字母单独作上下标，后续字母仍属基底（A_1B → A_{1}B）；
+ *   - marker 后是别的        → 孤立 marker 丢弃（连续填充线 ____ 已在 -0.3 转走）。
+ */
+function normalizeScripts(s, marker) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    const c = s[i]
+    if (c !== marker) {
+      out += c
+      i++
+      continue
+    }
+    if (s[i + 1] === '{') {
+      let depth = 0
+      let j = i
+      while (j < s.length) {
+        out += s[j]
+        if (s[j] === '{') depth++
+        if (s[j] === '}') {
+          depth--
+          if (depth === 0) { j++; break }
+        }
+        j++
+      }
+      i = j
+      continue
+    }
+    if (/[0-9]/.test(s[i + 1] || '')) {
+      let j = i + 1
+      while (j < s.length && /[0-9]/.test(s[j])) j++
+      out += marker + '{' + s.slice(i + 1, j) + '}'
+      i = j
+      continue
+    }
+    if (/[a-zA-Z]/.test(s[i + 1] || '')) {
+      out += marker + '{' + s[i + 1] + '}'
+      i += 2
+      continue
+    }
+    i++
+  }
+  return out
+}
+
+/**
+ * 把紧贴在上标之后的孤立下标并入上标：`p^{k}_{1}` → `p^{k+1}`。
+ *
+ * 同一基底的上下标在数学上必须**上标在前**（`p_{1}^{k}` 合法，`p_{1}^{k}_{1}` 非法，
+ * KaTeX 会输出红色源码）。原始 OCR 里 `p_1^k_1` 这种写法会被规范化成后者，这里收口。
+ * 与 src/utils/mathText.js 的同名函数同构。
+ */
+function mergeTrailingSubscriptIntoSuperscript(s) {
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    if (s[i] === '^' && s[i + 1] === '{') {
+      let depth = 0
+      let j = i
+      while (j < s.length) {
+        if (s[j] === '{') depth++
+        if (s[j] === '}') {
+          depth--
+          if (depth === 0) { j++; break }
+        }
+        j++
+      }
+      const sup = s.slice(i, j)
+      if (s[j] === '_' && s[j + 1] === '{') {
+        let d2 = 0
+        let k = j
+        while (k < s.length) {
+          if (s[k] === '{') d2++
+          if (s[k] === '}') {
+            d2--
+            if (d2 === 0) { k++; break }
+          }
+          k++
+        }
+        out += sup.slice(0, -1) + '+' + s.slice(j + 2, k - 1) + '}'
+        i = k
+        continue
+      }
+      out += sup
+      i = j
+      continue
+    }
+    out += s[i]
+    i++
+  }
+  return out
 }
 
 /**
@@ -197,6 +312,9 @@ function splitToSegments(text, opts = {}) {
   const segments = []
   let mathBuffer = ''
   let textBuffer = ''
+  // LaTeX 环境深度（与 src/utils/mathText.js 同构）：>0 时环境内部整体锁为一个数学段，
+  // 否则 cases 会被空格/\\ 撕开，KaTeX 输出红色源码。
+  let envDepth = 0
 
   function flushMath() {
     if (!mathBuffer.trim()) {
@@ -229,6 +347,37 @@ function splitToSegments(text, opts = {}) {
   let i = 0
   while (i < text.length) {
     const char = text[i]
+
+    // 0. LaTeX 换行符 `\\`（cases/array 环境内的行分隔）—— 必须整段留在数学缓冲内。
+    // 2026-10-10 乱码事故：旧实现落到「普通字符」分支（`\` 不在 isMathChar 内），
+    // 把数学段从中间切断，`\begin{cases}` 与 `\end{cases}` 落进**不同**片段，
+    // KaTeX 拿到残缺环境就输出红色源码。
+    if (char === '\\' && text[i + 1] === '\\') {
+      flushText()
+      mathBuffer += '\\\\'
+      i += 2
+      continue
+    }
+
+    // 0.5 LaTeX 环境 \begin{cases}…\end{cases}：整段并入并跟踪深度。
+    // 环境名只允许字母；异常形态退回常规命令分支，保证 i 一定前进、不死循环。
+    if (char === '\\') {
+      const isBegin = text.slice(i, i + 7) === '\\begin{'
+      const isEnd = text.slice(i, i + 5) === '\\end{'
+      if (isBegin || isEnd) {
+        const headLen = isBegin ? 7 : 5
+        const close = text.indexOf('}', i + headLen)
+        const envName = close === -1 ? '' : text.slice(i + headLen, close)
+        if (close > i + headLen && /^[a-zA-Z]+$/.test(envName)) {
+          flushText()
+          mathBuffer += text.slice(i, close + 1)
+          if (isBegin) envDepth++
+          else envDepth = Math.max(0, envDepth - 1)
+          i = close + 1
+          continue
+        }
+      }
+    }
 
     // 1. 检测 LaTeX 命令: \xxx{...}{...}
     if (char === '\\' && i + 1 < text.length && /[a-zA-Z]/.test(text[i + 1])) {
@@ -289,6 +438,16 @@ function splitToSegments(text, opts = {}) {
         i++
       }
       flushMath()
+      continue
+    }
+
+    // 4.5 环境内部（cases/array）：整体锁进同一数学段，不做任何切断判定。
+    //     必须排在「空格判定」之前 —— 环境体里的空格与 `\\` 都不能切，
+    //     否则 \begin{cases} 与 \end{cases} 落进不同片段 ⇒ KaTeX 红色源码（2026-10-10）。
+    if (envDepth > 0) {
+      flushText()
+      mathBuffer += char
+      i++
       continue
     }
 
@@ -358,7 +517,9 @@ function isMathTokenAt(text, index) {
   if (index < 0 || index >= text.length) return false
   const c = text[index]
   if (isMathChar(c)) return true
-  return c === '\\' && /[a-zA-Z]/.test(text[index + 1] || '')
+  if (c !== '\\') return false
+  // `\\`（cases 行分隔）与 `\cmd` 都是数学记号，否则 cases 环境会被切断（2026-10-10）
+  return text[index + 1] === '\\' || /[a-zA-Z]/.test(text[index + 1] || '')
 }
 
 /**
@@ -373,7 +534,10 @@ function isMathInnerSpace(text, index, mathBuffer) {
   const prev = text[index - 1] || ''
   const next = text[index + 1] || ''
   if (!isMathTokenAt(text, index - 1) || !isMathTokenAt(text, index + 1)) return false
-  return MATH_STRUCT_CHAR.test(prev) || MATH_STRUCT_CHAR.test(next)
+  if (MATH_STRUCT_CHAR.test(prev) || MATH_STRUCT_CHAR.test(next)) return true
+  // `}` 收尾的环境/命令后接空格属公式内部，不切断（`\begin{cases} \angle`）。
+  // 仅这一侧放宽：反向放开会把 `6a^{2} \cdot b^{6}` 整段粘连，暴露坏形态（2026-10-10 回归）。
+  return prev === '}' && isMathTokenAt(text, index - 1)
 }
 
 // ── MathText 组件 ─
