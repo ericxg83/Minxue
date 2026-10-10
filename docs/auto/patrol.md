@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R167 — 2026/10/10 10:38:03（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R168 — 2026/10/10 10:47:47（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1738,5 +1739,22 @@
     -  M src/domain/wrongGateTier.js
     -  M src/services/apiService.js
     -  M src/workbench/components/review/QuestionDetailPanel.vue
+    -  M src/workbench/components/review/ReviewTopBar.vue
+    -  M src/workbench/stores/reviewStore.js
+| 168 | 2026-10-10T02:47:47 | tests=2303/0 | lint=1 | build=FAIL | server=ok | dirty=13 |
+
+### R168 — 2026/10/10 10:47:47（daemon 自动报告）
+
+**体检**：tests **2303/0** | lint 1 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 13
+
+⚠️ 发现异常：lint errors=1；build=FAIL；脏文件 13 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M server/routes/weeklyReport.js
+    -  M server/services/questionCompletenessSync.js
+    -  M server/services/wrongGateRequeue.js
+    -  M src/domain/wrongGateTier.js
     -  M src/workbench/components/review/ReviewTopBar.vue
     -  M src/workbench/stores/reviewStore.js
