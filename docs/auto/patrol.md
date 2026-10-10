@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R174 — 2026/10/10 11:47:05（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R175 — 2026/10/10 11:57:02（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1821,6 +1822,16 @@
 | 174 | 2026-10-10T03:47:05 | tests=2318/0 | lint=1 | build=skipped | server=ok | dirty=3 |
 
 ### R174 — 2026/10/10 11:47:05（daemon 自动报告）
+
+**体检**：tests **2318/0** | lint 1 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
+
+⚠️ 发现异常：lint errors=1；脏文件 3 个（ M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs, ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 175 | 2026-10-10T03:57:02 | tests=2318/0 | lint=1 | build=skipped | server=ok | dirty=3 |
+
+### R175 — 2026/10/10 11:57:02（daemon 自动报告）
 
 **体检**：tests **2318/0** | lint 1 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 3
 
