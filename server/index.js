@@ -3153,6 +3153,20 @@ app.post('/api/questions/batch', async (req, res) => {
       delete qq._cache_ai_tags
     }
 
+    // 与 GET /questions/task/:id 同款：带出「入册风险」code（含 low_confidence）。
+    // 复核页闸1 分层（src/domain/wrongGateTier.js）靠它判「自动放行 / 需人工拍板」，
+    // 重练卷走本接口，不带的话低置信题会被误当"系统性漏入"自动放行（2026-10-10 修复）。
+    // in_wrong_book 用 LEFT JOIN 出来的 wq_status 判定（带 studentId 时才有 JOIN）。
+    const BATCH_CONF_THRESHOLD = parseFloat(process.env.CONFIDENCE_THRESHOLD) || 0.8
+    for (const qq of merged) {
+      try {
+        qq.wrong_book_risks = computeWrongBookRisks(qq, qq.wq_status != null, BATCH_CONF_THRESHOLD)
+      } catch (e) {
+        // 只读展示字段：算失败不能拖垮主响应，置空让前端退回完整性判据
+        console.error(`[wrong_book_risks] batch 计算失败 q=${String(qq.id).slice(0, 8)}:`, e.message)
+      }
+    }
+
     // 关键修复：PostgreSQL 的 `WHERE id IN (...)` 不保证返回顺序与输入顺序一致，
     // 且移动端（不带 studentId，无 JOIN）与 PC 后台（带 studentId，含 LEFT JOIN）
     // 的查询计划不同，会导致同一套卷子的题目在两端以不同顺序展现（重大 BUG）。
@@ -3200,14 +3214,20 @@ app.get('/api/questions/task/:taskId', async (req, res) => {
          WHERE question_id = q.id AND asset_type = 'geometry_image'
          ORDER BY created_at DESC LIMIT 1
        ) a ON TRUE
-       -- 闸1 系统侧自动放行留痕（2026-09-27 待补清单）：最新一条 judgement 的
-       -- skipReason/gateAuto。配合 JS 侧 review_status='wrong_no_book' 判
+       -- 闸1 系统侧自动放行留痕（2026-09-27 待补清单）：最近一条**错题跳过决定**
+       -- judgement 的 skipReason/gateAuto。配合 JS 侧 review_status='wrong_no_book' 判
        -- 「缺元素被自动放行、尚未入册」，与「补全即补入」判据同源。
+       -- ⚠️ 2026-10-10 修复：原先取「最新一条 judgement」，于是任何后续 judgement
+       -- （pc_rejudge / pc_recompute_answer 等不带 skipReason 的流水）都会把欠账留痕顶掉
+       -- → 题仍被自动放行、仍未入册，却从徽标和待补清单里消失（实测第5题）。
+       -- 现只认带 skipReason 的 judgement：后续无关流水不再遮挡，而老师后来的
+       -- 手动「本次不加入」（带 skipReason、无 gateAuto）仍会正确覆盖。
        LEFT JOIN LATERAL (
          SELECT metadata->>'skipReason' AS skip_reason,
                 metadata->>'gateAuto'   AS gate_auto
          FROM ${TABLES.JUDGEMENTS} j
          WHERE j.question_id = q.id::text
+           AND j.metadata ? 'skipReason'
          ORDER BY j.created_at DESC LIMIT 1
        ) gs ON TRUE
        WHERE q.task_id = $1
@@ -3297,6 +3317,7 @@ app.get('/api/wrong-questions/gate-pending', async (req, res) => {
                 metadata->>'gateAuto'   AS gate_auto
          FROM ${TABLES.JUDGEMENTS} j
          WHERE j.question_id = q.id::text
+           AND j.metadata ? 'skipReason'
          ORDER BY j.created_at DESC LIMIT 1
        ) gs ON TRUE
        WHERE q.review_status = 'wrong_no_book'

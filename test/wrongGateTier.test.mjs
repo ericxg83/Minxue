@@ -18,9 +18,13 @@ const {
   splitWrongGateList,
   WRONG_GATE_AUTO_RESOLVABLE,
   WRONG_GATE_MANUAL_ONLY,
+  WRONG_GATE_CODE_LABELS,
 } = await import('../src/domain/wrongGateTier.js')
 
 const item = (issues, extra = {}) => ({ questionId: 'q1', index: 0, source: 'ai', reason: issues.length ? 'incomplete' : 'complete', issues, ...extra })
+// 2026-10-10 修复后调用方传的是 codes 字段（机器码）；issues 是旧调用方兼容。
+// 两者都必须是 code —— 中文文案传进来一律按未知项 fail-closed（见文件末尾用例）。
+const itemC = (codes, extra = {}) => ({ questionId: 'q1', index: 0, source: 'ai', reason: codes.length ? 'incomplete' : 'complete', codes, ...extra })
 
 test('★ 红线：low_confidence 永不自动放行', () => {
   const c = classifyWrongGateItem(item(['low_confidence']))
@@ -141,6 +145,50 @@ test('splitWrongGateList：空列表不报错', () => {
   // 容错：非数组输入
   const r2 = splitWrongGateList(null)
   assert.equal(r2.needsManual, false)
+})
+
+// ── 2026-10-10 修复：判据字段是 code，不是中文文案 ─────────────────────
+//
+// 真实 bug：reviewStore 把 checkQuestionCompleteness().issues（中文，如
+// 「题干引用几何图但缺少配图」）当 code 传进来，与本文件的 code 常量永不相等
+// ⇒ 真缺元素被当「未知 code」拦卷、完整但低置信（issues=[]）被当「系统性漏入」自动放行。
+// 下面把修复后的正确契约锁死。
+
+test('★ codes 字段（机器码）与旧 issues 字段走同一套分层', () => {
+  assert.equal(classifyWrongGateItem(itemC(['missing_figure'])).autoResolvable, true)
+  assert.equal(classifyWrongGateItem(itemC(['low_confidence'])).autoResolvable, false)
+})
+
+test('★ 完整题 + 低置信 → codes=[low_confidence] 必须拦卷（旧 bug 会放行）', () => {
+  // 这是本次修复的核心：完整题没有缺项（reason=complete），但低置信需要老师拍板。
+  // 正确表达 = codes=['low_confidence']（后端 computeWrongBookRisks 的产物）。
+  const c = classifyWrongGateItem(itemC(['low_confidence'], { reason: 'complete' }))
+  assert.equal(c.autoResolvable, false, '完整但低置信必须拦卷等老师确认')
+  assert.deepEqual(c.manualIssues, ['low_confidence'])
+})
+
+test('★ codes 优先于 issues（两字段不一致时不得用错字段）', () => {
+  const c = classifyWrongGateItem({
+    questionId: 'q1', index: 0, source: 'ai', reason: 'incomplete',
+    codes: ['missing_figure'], issues: ['low_confidence']
+  })
+  assert.equal(c.autoResolvable, true, '应信 codes（机器码），忽略旧 issues')
+})
+
+test('★ 中文文案当 code 传入 = 未知项 → fail-closed 拦卷（旧 bug 的症状）', () => {
+  // 直接把中文 issues 当判据，会让「真缺元素」被拦卷（与设计相反）。
+  // 本用例固化「中文文案永远不是已知 code」，提醒后来人别再用 issues 传中文。
+  const c = classifyWrongGateItem(itemC(['题干引用几何图但缺少配图']))
+  assert.equal(c.autoResolvable, false, '中文文案不是已知 code，必须按未知项拦卷')
+  assert.ok(c.manualIssues.includes('题干引用几何图但缺少配图'))
+})
+
+test('WRONG_GATE_CODE_LABELS 覆盖全部已知 code（含 low_confidence）', () => {
+  const known = [...WRONG_GATE_AUTO_RESOLVABLE, ...WRONG_GATE_MANUAL_ONLY, 'stem_only']
+  for (const c of known) {
+    assert.ok(WRONG_GATE_CODE_LABELS[c], `缺 ${c} 的中文标签`)
+  }
+  assert.equal(WRONG_GATE_CODE_LABELS.low_confidence, '低置信度，需人工确认')
 })
 
 test('两个分组常量互斥且覆盖已知 code', () => {

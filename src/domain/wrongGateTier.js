@@ -55,6 +55,23 @@ export const WRONG_GATE_MANUAL_ONLY = Object.freeze([
 ])
 
 /**
+ * 风险 code → 中文标签（展示用唯一口径）。
+ *
+ * 判据（classifyWrongGateItem）**只认 code**，中文文案一律在这里翻译。
+ * 2026-10-10 之前调用方把 checkQuestionCompleteness().issues（中文）当 code 传进判据，
+ * 两者永不相等 ⇒ 分层结论完全反了（详见 classifyWrongGateItem 注释）。
+ * 现在把 code→标签集中在这一处，UI 不再各自维护一份。
+ */
+export const WRONG_GATE_CODE_LABELS = Object.freeze({
+  missing_figure: '缺配图',
+  missing_options: '缺选项',
+  missing_answer: '缺答案',
+  invalid_type: '题型未定',
+  stem_only: '疑似题干行',
+  low_confidence: '低置信度，需人工确认'
+})
+
+/**
  * 未作答（answer_source='blank'）在批改管线里被写成 `confidence: 0`
  * （见 server/worker.js blank 分支），天生低于任何置信度阈值。
  * 但 blank 是终态、老师无需为它拍板 ⇒ 判分层时要先把这类 low_confidence 摘掉。
@@ -67,22 +84,34 @@ const isBlankQuestion = item => item?.answerSource === 'blank'
 /**
  * 把一条 unresolved 记录判成「能否自动放行」。
  *
- * @param {{issues?: string[], reason?: string, source?: string, answerSource?: string}} item
- *        来自 unresolvedWrongQuestions 的元素（含 issues / reason / source / answerSource）
+ * ⚠️ 入参的 `codes`（旧名 `issues`）**必须是机器 code**（missing_figure / low_confidence …），
+ * 不是中文文案。2026-10-10 修复的真实 bug：调用方 reviewStore 传的是
+ * `checkQuestionCompleteness().issues`（中文，如「题干引用几何图但缺少配图」），
+ * 与本文件的 code 常量永不相等 ⇒ autoIssues 恒空、unknownIssues 恒非空，分层结论正好反了：
+ *   · 真缺元素的题 → 被判「未知 code」→ 拦卷（与「系统侧缺项自动放行」相反）；
+ *   · 元素完整但低置信的题 → codes=[] → 走分支④「系统性漏入」→ 自动放行
+ *     （与「low_confidence 永不自动放行」的红线相反）。
+ * 现优先读 `item.codes`；`item.issues` 仅作旧调用方兼容（同样要求是 code）。
+ * 中文标签一律走 WRONG_GATE_CODE_LABELS，不要传进这里。
+ *
+ * @param {{codes?: string[], issues?: string[], reason?: string, source?: string, answerSource?: string}} item
+ *        来自 unresolvedWrongQuestions 的元素（含 codes / reason / source / answerSource）
  * @returns {{ autoResolvable: boolean, manualIssues: string[], autoIssues: string[], why: string }}
  */
 export const classifyWrongGateItem = (item) => {
-  const rawIssues = Array.isArray(item?.issues) ? item.issues.filter(Boolean) : []
+  const rawCodes = Array.isArray(item?.codes)
+    ? item.codes.filter(Boolean)
+    : (Array.isArray(item?.issues) ? item.issues.filter(Boolean) : [])
   // 未作答是终态：批改管线给它写 confidence=0 ⇒ 天生命中 low_confidence。
   // 老师不需要为空题拍板"算不算错"（未作答等同不会已是既定口径），
   // 这里把它的 low_confidence 摘掉，让它走"系统侧缺项/系统性漏入"的自动放行分支。
   const blank = isBlankQuestion(item)
-  const issues = blank ? rawIssues.filter(i => i !== 'low_confidence') : rawIssues
+  const codes = blank ? rawCodes.filter(i => i !== 'low_confidence') : rawCodes
 
-  const autoIssues = issues.filter(i => WRONG_GATE_AUTO_RESOLVABLE.includes(i))
-  const manualIssues = issues.filter(i => WRONG_GATE_MANUAL_ONLY.includes(i))
+  const autoIssues = codes.filter(i => WRONG_GATE_AUTO_RESOLVABLE.includes(i))
+  const manualIssues = codes.filter(i => WRONG_GATE_MANUAL_ONLY.includes(i))
   // 未知 code 一律按「需人工」处理（fail-closed：宁可多拦一次，不可误放行）
-  const unknownIssues = issues.filter(
+  const unknownIssues = codes.filter(
     i => !WRONG_GATE_AUTO_RESOLVABLE.includes(i) && !WRONG_GATE_MANUAL_ONLY.includes(i)
   )
 
@@ -109,9 +138,9 @@ export const classifyWrongGateItem = (item) => {
     }
   }
 
-  // ④ 没有 issues 信息（reason='complete'）→ 这题本该能直接入册，是系统性漏入
+  // ④ 没有任何风险 code（reason='complete'）→ 这题本该能直接入册，是系统性漏入
   //    未作答（blank）被摘掉 low_confidence 后也落在这里：空题终态，不拦卷
-  if (issues.length === 0) {
+  if (codes.length === 0) {
     return {
       autoResolvable: true,
       manualIssues: [],
@@ -120,7 +149,7 @@ export const classifyWrongGateItem = (item) => {
     }
   }
 
-  return { autoResolvable: false, manualIssues: issues, autoIssues, why: '按需人工' }
+  return { autoResolvable: false, manualIssues: codes, autoIssues, why: '按需人工' }
 }
 
 /**

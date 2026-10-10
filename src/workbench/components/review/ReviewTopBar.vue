@@ -89,14 +89,15 @@
         title="切到左栏「待处理」并跳到第一道未确认题" @click="store.jumpToFirstUnconfirmed()">还差 {{ store.reviewProgress.unconfirmed }} 题</button>
       <el-popover v-if="store.gateSkippedQuestions.length > 0" placement="bottom" :width="380" trigger="click" popper-class="gate-skip-popover">
         <template #reference>
-          <button class="tb-gate" type="button" title="这些错题因缺图/缺选项等未入册，补全后保存即自动入册">⚠ 缺元素 {{ store.gateSkippedQuestions.length }}</button>
+          <button class="tb-gate" type="button" title="这些错题因缺元素/低置信未入错题本，点开逐题处理">⚠ {{ gateSkipBadgeLabel }}</button>
         </template>
         <div class="gate-skip-pop">
-          <div class="gate-skip-tip">补全元素并保存后会自动加入错题本；也可在左栏点「⚠」标签逐题处理。</div>
-          <div v-for="{ q, idx } in store.gateSkippedQuestions" :key="q.id" class="gate-skip-item" @click="jumpToGateSkip(idx)">
+          <div class="gate-skip-tip">缺元素的补全并保存后会自动加入错题本；低置信的需你拍板确认。也可在左栏点「⚠」标签逐题处理。</div>
+          <div v-for="{ q, idx } in store.gateSkippedQuestions" :key="q.id" class="gate-skip-item" @click="jumpToGateSkip(idx, q)">
             <div class="gate-skip-head">
               <span class="gate-skip-no">第 {{ q._paperLabel || (idx + 1) }} 题</span>
               <span class="gate-skip-codes">{{ gateIssueLabels(q).join('、') }}</span>
+              <span class="gate-skip-act">{{ gateSkipKind(q) === 'missing_element' ? '去补全 ›' : '去拍板 ›' }}</span>
             </div>
             <div class="gate-skip-stem">{{ (q.content || q.parent_stem || '').slice(0, 46) || '（无题干文本）' }}</div>
           </div>
@@ -269,6 +270,7 @@ import ConvertRouteDialog from './ConvertRouteDialog.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 import { checkQuestionCompleteness } from '../../../utils/questionCompleteness.js'
+import { WRONG_GATE_CODE_LABELS } from '../../../domain/wrongGateTier.js'
 
 const store = useReviewStore()
 const route = useRoute()
@@ -328,20 +330,54 @@ const reviewProgressPercent = computed(() => {
   const count = Number(store.reviewProgress.confirmed) || 0
   return total > 0 ? Math.min(100, Math.round((count / total) * 100)) : 0
 })
-const GATE_ISSUE_LABELS = {
-  [store.COMPLETENESS_CODES.missing_figure]: '缺配图',
-  [store.COMPLETENESS_CODES.missing_options]: '缺选项',
-  [store.COMPLETENESS_CODES.missing_answer]: '缺答案',
-  [store.COMPLETENESS_CODES.invalid_type]: '题型未定',
-  [store.COMPLETENESS_CODES.stem_only]: '疑似题干行',
-}
+// 风险 code → 中文标签的唯一口径在 wrongGateTier.js（WRONG_GATE_CODE_LABELS）。
+// ⚠️ 徽标口径是「闸1 自动放行且仍未入册」的**全部**题，不只有缺元素 ——
+// 历史存量里还夹着被旧判据误放行的「完整但低置信」题。所以标签必须按
+// 入册闸同款函数（后端 wrong_book_risks / 前端 checkQuestionCompleteness）现算，
+// 低置信会显示成「低置信度，需人工确认」，不会出现"题号后面空白"的假缺元素。
+// 徽标文案：口径是「闸1 自动放行且仍未入册」的**全部**题，绝大多数是系统侧缺元素，
+// 但历史存量里可能夹着被旧判据误放行的「完整但低置信」题 —— 那种不叫缺元素。
+// 全为缺元素类才写「缺元素」，否则写中性的「未入册」，避免徽标说谎（2026-10-10）。
+const GATE_MISSING_CODES = new Set(['missing_figure', 'missing_options', 'missing_answer', 'invalid_type'])
+const gateSkipBadgeLabel = computed(() => {
+  const list = store.gateSkippedQuestions
+  if (!list.length) return ''
+  const allMissing = list.every(({ q }) => {
+    const { codes } = checkQuestionCompleteness(q)
+    return codes.length > 0 && codes.every(c => GATE_MISSING_CODES.has(c))
+  })
+  return `${allMissing ? '缺元素' : '未入册'} ${list.length}`
+})
 const gateIssueLabels = (q) => {
-  const { codes } = checkQuestionCompleteness(q)
-  return codes.map(c => GATE_ISSUE_LABELS[c] || c)
+  // wrong_book_risks 非空时即入册闸现算的 code（含 low_confidence）；
+  // 为空只说明「无风险」或「参考答案缺失导致闸提前返回」，此时退回完整性 codes，
+  // 保证「缺答案」这类仍能显示出来（否则题号后面会是空白）。
+  const risks = (Array.isArray(q?.wrong_book_risks) && q.wrong_book_risks.length)
+    ? q.wrong_book_risks
+    : checkQuestionCompleteness(q).codes
+  return risks.map(c => WRONG_GATE_CODE_LABELS[c] || c)
 }
-const jumpToGateSkip = (idx) => {
-  const q = store.allQuestions[idx]
-  if (q) store.focusQuestionForEdit(q.id)
+// 徽标弹层每一行的去向 —— 与顶栏「待补入」弹窗的 goGateItem 同一路由规则：
+//   · 缺元素（有完整性缺项）→ 打开编辑面板去补图/补选项/补答案；
+//   · 低置信 / 待补入（元素已齐，只是没入册）→ **只定位**，不弹编辑面板。
+//     面板底部的判定区会给「标对 / 标错」：标错=强入错题本、标对=本题翻篇，欠账当场清掉。
+// ⛔ 不在这里直接写判定逻辑（不新增判定路径），只负责把老师送到该去的地方。
+// （2026-10-10 负责人实测：低置信题点徽标只弹出编辑表单，看不到拍板按钮 → 改成按类型分流。）
+const gateSkipKind = (q) => {
+  const { codes } = checkQuestionCompleteness(q)
+  return codes.length > 0 ? 'missing_element' : 'decision'
+}
+const jumpToGateSkip = (idx, rowQ) => {
+  const q = rowQ || store.allQuestions[idx]
+  if (!q) return
+  const realIdx = store.allQuestions.findIndex(item => item.id === q.id)
+  const targetIdx = realIdx >= 0 ? realIdx : idx
+  if (gateSkipKind(q) === 'missing_element') {
+    store.focusQuestionForEdit(q.id)
+  } else {
+    store.jumpToQuestion(targetIdx)
+  }
+  store.wrongGateVisible = false
 }
 
 const selectedStudentId = ref('')
@@ -391,11 +427,8 @@ watch(() => store.autoReviewNotice, (notice) => {
 // [2026-09-23 P2] 门禁分层：系统侧缺项（缺图/缺选项/题型非法）被自动记为
 // 「本次不加入错题本」，不再拦卷。必须给老师一条可见提示——否则老师只会发现
 // "这几题怎么没进错题本"，无法区分是系统故障还是老师自己点过（铁律 #11 不许静默）。
-const GATE_ISSUE_LABEL = {
-  missing_figure: '缺配图',
-  missing_options: '缺选项',
-  invalid_type: '题型未定',
-}
+// 自动放行的 toast 文案标签 —— 同样复用共享口径（不再单独维护一份）。
+const GATE_ISSUE_LABEL = WRONG_GATE_CODE_LABELS
 watch(() => store.autoGateResolved, (info) => {
   if (!info) return
   const parts = (info.issues || []).map(i => GATE_ISSUE_LABEL[i] || i)
@@ -613,14 +646,9 @@ const handleGateComplete = async () => {
 const pendingGateVisible = ref(false)
 const pendingGateLoading = ref(false)
 const gateJumpLoading = ref('')
-const GATE_CODE_LABEL = {
-  missing_figure: '缺配图',
-  missing_options: '缺选项',
-  missing_answer: '缺答案',
-  invalid_type: '题型未定',
-  stem_only: '疑似题干行',
-}
-const gateCodeLabel = (c) => GATE_CODE_LABEL[c] || c
+// 标签口径统一走 wrongGateTier.js 的 WRONG_GATE_CODE_LABELS（含 low_confidence），
+// 不再各自维护一份，避免「同一 code 两处译名不同」的漂移。
+const gateCodeLabel = (c) => WRONG_GATE_CODE_LABELS[c] || c
 // 按欠账类型给描述：缺元素（去补全即自动入册）/ 低置信（需拍板）/
 // 元素已齐待补入（下次保存或重判链路自动入册，也可手动标错立即强入）
 const gateItemLabel = (it) => {
@@ -990,6 +1018,7 @@ const handleRetryTask = async () => {
 .gate-skip-head { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .gate-skip-no { font-weight: 700; color: var(--wb-text); }
 .gate-skip-codes { color: var(--wb-danger, #DC2626); font-weight: 600; }
+.gate-skip-act { margin-left: auto; color: var(--wb-primary, #2563EB); font-weight: 600; }
 .gate-skip-stem { font-size: 12px; color: var(--wb-text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1280px) { .tb-progress__bar { display: none; } }
 /* ── 重练卷不可复核时的顶栏提示 ──

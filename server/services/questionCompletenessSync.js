@@ -69,6 +69,73 @@ export const syncQuestionCompleteness = async (questionIds) => {
 }
 
 /**
+ * 读前自愈：把「动态口径判完整、但 is_complete 缓存陈旧」的题在**读取前**回写。
+ *
+ * ── 为什么要它（提案㉘，2026-10-07r215 发现 / 2026-10-10 负责人拍板修）──
+ * `questions.is_complete` 只是为了让 SQL 能 `WHERE is_complete = TRUE` 而存在的
+ * 反范式缓存列。周报 / 分享卡 / 讲义这条链路**从来不写它**，于是缓存可以长期偏旧：
+ * r215 实测近 30 天有 141 道早已批完的题（所属90 个任务状态全是 `reviewed`）
+ * 被缓存值挡住，家长看到「批改题量」少 141 题（6.0%）、正确率被**抬高**。
+ * 个别学生偏差极大（陈施君 51.2% → 真实 40.4%），即给家长的数字比孩子实际掌握的好看。
+ *
+ * ── 为什么方向是「只增不减」──
+ * 这里只挑 `is_complete IS DISTINCT FROM TRUE`（即当前为假的）行重算，
+ * 所以最多把这些行**加回**可见集合，绝不会把已可见的题踢出去。
+ * 反向问题（缓存为真但动态口径判残题）属另一个缺陷，不在本函数范围内，
+ * 避免一个改动同时动两个方向、无法归因。
+ *
+ * ── 与既有自愈的关系（同一件事只准一个实现）──
+ * 写侧自愈在`server/index.js:3719` 与 `server/worker.js:6235`；
+ * 错题本列表的读前自愈在 `server/index.js:3770`。本函数是**周报/ 分享卡
+ * 这条链路的**读前自愈，判据与回写一律走 `syncQuestionCompleteness`，不另立一套。
+ *
+ * ⚠️ 单次上限：命中数达到 limit 时必须在日志里说「可能还有更多」，
+ *    绝不能让「只扫了 500 行」静默变成「全扫过了」。
+ *
+ * @param {string|null} studentId 该学生；传 null 表示不按学生限定（全班口径用）
+ * @param {Date} periodStart 周期起（含）
+ * @param {Date} periodEnd 周期止（不含）
+ * @param {{limit?: number, label?: string}} [opts]
+ * @returns {Promise<{candidates:number, updated:number, truncated:boolean}>}
+ */
+export const healStaleCompletenessForPeriod = async (
+  studentId,
+  periodStart,
+  periodEnd,
+  { limit = 500, label = 'period' } = {}
+) => {
+  const params = [periodStart, periodEnd]
+  const studentFilter = studentId ? 'AND student_id = $3' : ''
+  if (studentId) params.push(studentId)
+
+  const { rows } = await query(
+    `SELECT id
+     FROM ${TABLES.QUESTIONS}
+     WHERE created_at >= $1
+       AND created_at < $2
+       ${studentFilter}
+       AND is_complete IS DISTINCT FROM TRUE
+     LIMIT $${params.length + 1}`,
+    [...params, limit]
+  )
+
+  if (rows.length === 0) return { candidates: 0, updated: 0, truncated: false }
+
+  const { updated } = await syncQuestionCompleteness(rows.map(r => r.id))
+  const truncated = rows.length >= limit
+  if (updated > 0) {
+    console.log(`[is_complete 读前自愈] ${label} 候选 ${rows.length} → 回写 ${updated} 题`)
+  }
+  if (truncated) {
+    console.warn(
+      `[is_complete 读前自愈] ${label} 候选已达上限 ${limit}，可能还有陈旧行未处理` +
+      `（student=${studentId || '全部'}）`
+    )
+  }
+  return { candidates: rows.length, updated, truncated }
+}
+
+/**
  * fire-and-forget 版本：缓存列回写失败绝不能影响批改/入册主流程，
  * 失败只记日志，由一次性的 backfill 脚本兜底。
  *

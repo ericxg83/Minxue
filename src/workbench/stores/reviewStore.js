@@ -15,7 +15,7 @@ import {
 } from '../utils/retryPaperState'
 import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect, needsHumanAttention } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
-import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON, WRONG_GATE_AUTO_FLAG } from '../../domain/wrongGateTier.js'
+import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON, WRONG_GATE_AUTO_FLAG, WRONG_GATE_CODE_LABELS } from '../../domain/wrongGateTier.js'
 // 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
 //   L0 已判出 → 自动复核；L1 系统侧缺口 → 先补再判，不拦老师；L2 真判不出 → 留人工。
 import { resolvePaperAutoComplete } from '../../domain/paperReviewDecision.js'
@@ -473,7 +473,14 @@ export const useReviewStore = defineStore('review', () => {
         return needsWrongBookDecision(q, inBook.has(q.id))
       })
       .map(({ question: q, index }) => {
-        const { isComplete, issues } = checkQuestionCompleteness(q)
+        const { isComplete, codes: completenessCodes } = checkQuestionCompleteness(q)
+        // ⚠️ 喂给分层判据的必须是**机器 code**，不是中文文案（2026-10-10 修复）。
+        // 后端 GET /questions/task/:id 已按入册闸同款函数算好 wrong_book_risks
+        // （含 low_confidence，且 blank 已排除），优先用它；拿不到时（如重练卷走
+        // /questions/batch）退回 checkQuestionCompleteness().codes。
+        // 用中文 issues 会让分层结论整体反向：真缺元素被当未知项拦卷、
+        // 完整但低置信因 codes=[] 被当"系统性漏入"自动放行（详见 wrongGateTier.js）。
+        const codes = Array.isArray(q.wrong_book_risks) ? q.wrong_book_risks : completenessCodes
         return {
           questionId: q.id,
           index,
@@ -483,7 +490,10 @@ export const useReviewStore = defineStore('review', () => {
           // 天生命中 low_confidence。分层时需据此把该 code 摘掉——否则整卷被拦，
           // 而老师对空题本就无事可拍板（见 src/domain/wrongGateTier.js）。
           answerSource: q.answer_source || null,
-          issues
+          // codes：分层判据（唯一消费方 splitWrongGateList）
+          codes,
+          // issues：仅展示用中文标签，与 codes 一一对应（不参与任何判定）
+          issues: codes.map(c => WRONG_GATE_CODE_LABELS[c] || c)
         }
       })
   })

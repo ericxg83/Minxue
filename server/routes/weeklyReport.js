@@ -2,8 +2,39 @@ import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
 import { parsePeriod, getIsoWeek, getPeriodRange, toLocalYmd } from '../utils/period.js'
 import { sqlCorrectExpr, sqlWrongExpr } from '../utils/questionResultCaliber.js'
+import { healStaleCompletenessForPeriod } from '../services/questionCompletenessSync.js'
 
 const router = Router()
+
+/**
+ * 周报链路的读前自愈（提案㉘，2026-10-10 负责人拍板）。
+ *
+ * 本文件下面每一条统计 SQL 都带 `AND is_complete = TRUE`，而`is_complete`
+ * 只是 `checkQuestionCompleteness()` 的反范式缓存列 —— 周报/分享卡这条链路
+ * 从来不写它，缓存长期偏旧，**家长看到的「批改题量」与正确率被系统性低估/抬高**
+ * （r215 实测近 30 天少141 题、6.0%；陈施君正确率 51.2% 实际 40.4%）。
+ *
+ * 所以在取数**之前**先把本周期里「动态口径判完整、缓存却是假」的题回写，
+ * 本次响应就能带上它们 —— 老师/家长不必等下一次批改才看到真实数字。
+ *
+ * 三个刻意的设计：
+ *  ① **失败不阻断**：自愈挂了最多退回「数字偏旧」，不能把整个周报打成 500
+ *     （与`server/index.js:3770` 错题本读前自愈同纪律）。
+ *  ② **只处理本周期**：全表扫描会让周报从亚秒级变成秒级，热路径不能这么付代价。
+ *  ③ **不改口径定义**：`is_complete = TRUE` 一个字都没动，只是让缓存回到动态真值。
+ *
+ * @param {string|null} studentId null = 全班口径（不按学生限定）
+ * @param {Date} periodStart
+ * @param {Date} periodEnd
+ * @param {string} label 日志上下文
+ */
+async function healPeriodCompletenessQuietly(studentId, periodStart, periodEnd, label) {
+  try {
+    await healStaleCompletenessForPeriod(studentId, periodStart, periodEnd, { label })
+  } catch (e) {
+    console.error(`[weekly-report] is_complete 读前自愈失败（不影响本次统计）: ${e.message}`)
+  }
+}
 
 /**
  * 计算上一周期（当前周期的前一期），用于成长对比。
@@ -108,6 +139,11 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
     err.statusCode = 404
     throw err
   }
+
+    // 1b. 读前自愈 is_complete（提案㉘）。必须排在下面所有统计 SQL 之前——
+    //     它们都按 `is_complete = TRUE` 过滤，缓存陈旧就会静默漏题。
+    await healPeriodCompletenessQuietly(studentId, periodStart, periodEnd,
+      `单学生周报 student=${studentId} mode=${mode}`)
 
     // 2. 本周作业任务统计
     const { rows: taskRows } = await query(
@@ -497,6 +533,11 @@ router.get('/', async (req, res) => {
       `SELECT id, name, grade FROM ${TABLES.STUDENTS} ORDER BY name`
     )
 
+    // 读前自愈 is_complete（提案㉘）。全班口径**只跑一次**（不按学生逐个跑）：
+    // 21 名学生逐个跑就是 21 次往返，而自愈判据与学生无关，传 null 即覆盖全班。
+    await healPeriodCompletenessQuietly(null, periodStart, periodEnd,
+      `全班周报 mode=${mode}`)
+
     const reports = await Promise.all(studentRows.map(async (student) => {
       try {
         // 本周作业任务统计
@@ -686,6 +727,11 @@ function buildPeriodTrend(rows, mode, periodStart) {
 /**
  * 上一周期的对比快照：作业/题量/正确率/错题/掌握状态 + 知识点诊断 */
 export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mode, offset }) {
+  // 读前自愈 is_complete（提案㉘）。对比页与本周页必须同口径，否则
+  // 「上周 61.2% → 本周 59.7%」这种下降可能是自愈造成的假象（本周被修、上周没修）。
+  await healPeriodCompletenessQuietly(studentId, periodStart, periodEnd,
+    `周期对比 student=${studentId} offset=${offset}`)
+
   const [taskRows, questionRows, wrongCountRows, statusRows] = await Promise.all([
     query(
       `SELECT

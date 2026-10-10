@@ -35,8 +35,13 @@ const CODE_MESSAGE = Object.freeze({
 })
 
 /**
- * 读该题最新一条 judgement 的 metadata（skipReason / gateAuto 等）。
+ * 读该题最近一条**错题跳过决定** judgement 的 metadata（skipReason / gateAuto 等）。
  * judgements.question_id 是 text 列，与 questions.id::text 对齐。
+ *
+ * ⚠️ 2026-10-10：原先取「最新一条 judgement」，于是 pc_rejudge / pc_recompute_answer
+ * 这类不带 skipReason 的流水会把它顶掉 → 老师的手动否决被误判成「系统自动放行」
+ * （或反之），与 GET 待补清单（server/index.js 同款 LATERAL）口径不一致。
+ * 现只认带 skipReason 的 judgement。
  */
 const fetchLatestSkipMeta = async (questionId) => {
   const { rows } = await query(
@@ -44,6 +49,7 @@ const fetchLatestSkipMeta = async (questionId) => {
             metadata->>'gateAuto'   AS gate_auto
        FROM ${TABLES.JUDGEMENTS}
       WHERE question_id = $1::text
+        AND metadata ? 'skipReason'
       ORDER BY created_at DESC
       LIMIT 1`,
     [questionId]
@@ -175,6 +181,7 @@ const SWEEP_SELECT = `
              metadata->>'gateAuto'   AS gate_auto
         FROM ${TABLES.JUDGEMENTS} j
        WHERE j.question_id = q.id::text
+         AND j.metadata ? 'skipReason'
        ORDER BY j.created_at DESC LIMIT 1
     ) gs ON TRUE
    WHERE q.review_status = 'wrong_no_book'
