@@ -316,10 +316,24 @@
             :closable="false"
             class="ops-geom-hint"
           />
+          <!-- [闸1 欠账拍板 2026-10-10] 当前这道题若还挂着「待补入」欠账，全卷已确认也不能
+               只显示完成态 —— 否则老师从顶栏「待补入」点「去定位」跳过来，看到的只有
+               「完成复核/下一份」，无事可做（负责人 2026-10-10 实测截图）。
+               判定区必须回到 标对/标错：标错=强入错题本、标对=本题翻篇，欠账当场清掉。
+               ⚠️ 不新增任何判定路径 —— 键盘 Space/X 在完成态本来就能用（见 onPanelKeydown
+               的守卫里没有 allConfirmed），这里只是把这条既有能力显示出来。 -->
+          <el-alert
+            v-if="allConfirmed && currentQIsGateDebt"
+            title="这题被系统按「本次不加入」放行了，需要你拍板：标错＝加入错题本，标对＝本题翻篇"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="ops-geom-hint"
+          />
           <!-- [P0-1 完成引导 2026-09-27] 全卷已确认时判定区切换为完成态：
                「过」的尽头直接给出收尾出口，复用顶栏 handleComplete 的错题门禁流程。
                改判仍可用 ← 回看 + Space/X 重判（store 的重判路径不经过这里）。 -->
-          <div v-if="allConfirmed" class="ops-buttons-primary ops-complete-state">
+          <div v-if="allConfirmed && !currentQIsGateDebt" class="ops-buttons-primary ops-complete-state">
             <span class="ops-complete-text">本卷 {{ store.reviewProgress.total }} 题已全部确认</span>
             <el-button size="default" type="success" @click="emit('complete-review')">
               {{ store.reviewConfig.completeLabel }} <span class="ops-el-kbd">Enter</span>
@@ -535,6 +549,29 @@ const emit = defineEmits(['complete-review', 'next-task', 'prev-task'])
 const allConfirmed = computed(() =>
   store.reviewProgress.total > 0 && store.reviewProgress.unconfirmed === 0
 )
+
+// [闸1 欠账拍板 2026-10-10] 当前这道题是否还挂着「待补入错题本」的欠账
+// （闸1 自动放行、仍未入册 —— 判据唯一口径见 server/utils/wrongGateRequeue.js
+//  的 isGateAutoSkippedRow，后端把它标在题目行的 gate_auto_skipped 上）。
+// 用途只有一个：全卷已确认时，别把这道题的判定区换成完成态，否则老师从顶栏
+// 「待补入」点「去定位」跳过来会无事可做（只能看到「完成复核/下一份」）。
+const currentQIsGateDebt = computed(() => {
+  const id = q.value?.id
+  if (!id) return false
+  return store.gateSkippedQuestions.some(({ q: gq }) => gq.id === id)
+})
+
+// 老师就这道欠账题拍板后（review_status 不再是 wrong_no_book），本地立刻把它从
+// 「待补入」清单与卷内标识里摘掉，不必等重进页面才看到徽标变化。
+// 清单只是展示性缓存，权威判据在后端（gate-pending 端点要求 review_status='wrong_no_book'），
+// 下次拉取自然一致 —— 这里不清也不会写错任何数据，只是让反馈即时。
+watch(() => q.value?.review_status, (status) => {
+  const cur = q.value
+  if (!cur || cur.gate_auto_skipped !== true) return
+  if (!status || status === 'wrong_no_book') return
+  cur.gate_auto_skipped = false
+  store.removeGatePendingItem(cur.id)
+})
 
 // [P0-3 归因免打扰 2026-09-27] 会话级开关（组件存续期间有效，刷新页面恢复询问）：
 // 勾选「本次批改不再询问」后，本会话内 wrong→correct 一律静默落库，misjudgeType 留空
