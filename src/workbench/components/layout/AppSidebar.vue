@@ -56,7 +56,8 @@ const navGroups = [
       { label: '学习诊断', path: '/weekly-report', icon: DataAnalysis },
       { label: '学生管理', path: '/students', icon: User },
       // r260（2026-10-10 负责人拍板方案 A）：错题检索直达页，翻 r91「侧栏 3 项」口径
-      { label: '错题', path: '/wrongbook', icon: Reading }
+      // 文案「错题管理」：与同组其余三项保持四字格式（负责人 15:44 定）
+      { label: '错题管理', path: '/wrongbook', icon: Reading }
     ]
   },
   {

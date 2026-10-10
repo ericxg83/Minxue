@@ -153,7 +153,7 @@ test('侧栏「教学工作」4 项：批改中心 / 学习诊断 / 学生管理
   const group = flat.slice(at)
   const line = group.slice(0, group.indexOf(']'))
   assert.ok(!line.includes('/growth'), '侧栏还有成长中心入口')
-  for (const keep of ['批改中心', '学习诊断', '学生管理', '错题']) {
+  for (const keep of ['批改中心', '学习诊断', '学生管理', '错题管理']) {
     assert.ok(line.includes(keep), `侧栏教学工作少了「${keep}」`)
   }
   assert.ok(line.includes('/wrongbook'), '侧栏缺错题检索入口（r260 负责人拍板方案 A）')
