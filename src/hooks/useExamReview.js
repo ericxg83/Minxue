@@ -6,7 +6,7 @@ import {
   updateTaskStatus
 } from '../services/apiService'
 import { getStatusInfo } from '../pages/ExamReview/status.jsx'
-import {  REVIEW_STATUS,  getReviewState } from '../utils/reviewDecision'
+import { REVIEW_STATUS, needsHumanAttention } from '../utils/reviewDecision'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 
 // 复审核心逻辑：题目数据加载、人工评判 edits 管理、保存
@@ -211,13 +211,14 @@ export function useExamReview({ task, onSave }) {
     }
   }, [edits, wrongIdMap, questions, task, Toast, onSave])
 
-  // ── 需老师处理的题数（与 PC 端 needsAttentionCount 同定义；本次已判的不计入） ──
+  // ── 需老师处理的题数（与 PC 端 needsAttentionCount 同源：reviewDecision.js#needsHumanAttention）──
+  // 2026-10-10：除 pending / exception / processing 三态外，「AI 已判但参考答案存疑」
+  // （ai_answer_risk_reason 非空）也要算进来，否则同一份卷手机端说"改完了"、
+  // PC 端左栏却还列着要核对的题 —— 两端各判一套正是本仓反复踩过的口径漂移。
   const needsAttentionCount = useMemo(() => {
     return validQuestions.filter(q => {
       const edit = edits[q.id]
-      if (edit?.review_status) return false
-      const state = getReviewState({ ...q, ...(edit || {}) })
-      return state === 'pending' || state === 'exception' || state === 'processing'
+      return needsHumanAttention({ ...q, ...(edit || {}) })
     }).length
   }, [validQuestions, edits])
 

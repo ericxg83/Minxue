@@ -18,6 +18,11 @@
   `judgements` 是审计流水、**只许提供 confidence**；人工类流水（`manual_review`/`pc_edit`/`pc_rejudge`/`regrade_script`/`workbook_to_ai_regrade`）confidence 恒为 NULL
   ⇒ 合并**只许「有值才覆盖」**（`if (j && j.confidence != null)`），NULL 不得反向覆盖题目自带置信度，否则「AI判对」整片掉进「待复核」（r2026-10-09 全库 41 条）。
   锁 `test/judgementConfidenceMerge.test.mjs`。→ answer-validators-and-judge §5
+- ⛔ 复核页左栏「待处理」页签 / 顶部「需处理 N」/ 移动端 `useExamReview` 的 `needsAttentionCount` 唯一判据
+  `reviewDecision.js#needsHumanAttention` = 6 态三态（pending/exception/processing）**+ `ai_answer_risk_reason` 非空且未人工复核**
+  （AI 判错/判对但参考答案存疑，负责人 2026-10-10 要求也进待处理；列表行配 `.item-answer-risk`「⚠ 参考答案」小签）。
+  ⛔ 必须靠 `review_status` 收口：后端只在「人工改写参考答案」时清该列（`PUT /api/questions/:id` 的 `answerRewritten`），
+  老师点判错/判对确认结论时该列**仍留着** ⇒ 不看 review_status 会永远卡在待处理里清不掉。锁 `test/reviewAttentionCaliber.test.mjs`。
 - ⛔ 批改页「待复核」= `confidence` 空或 <0.5，**与答案对不对无关**；`reviewStore.mergeJudgements` 会拿 `/judgements/latest`（每道题最新一条、不过滤 source）**无条件覆盖** `q.confidence`，而结算/重判/人工编辑写的流水（`manual_review`/`regrade_script`/`pc_rejudge`…）`confidence` 恒为 null 且永远更新 ⇒ AI 判对的题被显示成待复核（2026-10-09 数学-1008-01 卷 9 题；全库 41 条）。复现：`server/_diag_repro_pending.mjs`。→ caliber-drift
 - ⛔ 错题「同一题」走 `questionIdentity.js`，禁相似度合并；变式题不进重练卷/组卷。重练卷答卷唯一口径 `retryPaperState.js#isRetryPaperTask`；练习册 published 必经 `getWorksheetPublishRisk`。→ wrongbook-gate-requeue
 - ⛔ 周末班课件多小问合并（`weekendHandout.js#buildCompleteQuestion`）分组键**不含 page_number** ⇒ 组内出现 ≥2 个不同非空 `parent_stem` 必须按错题行的 parent_stem 收窄（否则同一卷跨页题号撞车，把别题小问拼进来；r213 白板第1题）。
@@ -27,6 +32,7 @@
 - ⛔ 白板：内容走 `MathRender`；激光笔不进 strokes，像笔写、抬手 1s 渐隐；导出走离屏层（`Teleport to="body"`）；`saveStrokes()` 按 `current` 算键 ⇒ 换题先落盘；板书占 localStorage（r89 有清空入口）。→ board
 - ⛔ 任务「自愈」唯一实现 `server/pendingTaskRecovery.js#describeAutoRetry`（照 SQL 判）；前端 `taskAutoRetry.js` 只翻译；缺 `auto_retry` 按「不自愈」。→ task-self-healing
 - ⛔ 「待复核」有两个语义，不许混用：`summary.pendingReview` = **未读通知数**（铃铛，点一次铃铛即归零）；`summary.pendingReviewPapers` = **待人工复核卷数**（首页 KPI / 侧栏徽标，口径 = 批改中心 chip，唯一实现 `src/workbench/utils/pendingReviewCaliber.js`，服务端 `pendingReviewService.js` 用同一份）。历史事故：首页 1 vs 批改中心 7。
+- ⛔ 批改中心「待处理」= `isPendingReviewItem`（与「待人工复核」chip 同一判据），**不许**再拿 `PENDING_REVIEW_WORKFLOW_STATUSES.has()` 直接过列表 —— 该集合含 `'retry'`，会把「已布置·待学生作答」的重练卷列进待处理（chip 写 0、列表 10 条，2026-10-09 负责人截图）。未交卷重练卷只在「待学生作答」tab /「重练已布置」chip 可见；其右侧摘要「错题」必须显示「—」（原数字来自原作业题目行旧判定）。锁 `test/pendingReviewCaliber.test.mjs`。
 - ⛔ 多根组件收不到 class ⇒ 定位类挂外层；工作台自己滚 ⇒ 看 `getBoundingClientRect().top`。→ data-pages
 - ⛔ src/ 不许有不可达模块（`test/moduleReachability.test.mjs` 全量 BFS）；删死代码走归档惯例（负责人 WIP 先 cp `D:\Minxue_Archive\` 再 git rm）。
 - ⛔ 批改/识别唯一在服务端（worker processSlimGrading）；前端禁直调 AI（noClientDirectAI 锁）；QuotaBanner 的 modelscope 是标签键不是调用。

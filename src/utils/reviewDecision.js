@@ -176,6 +176,42 @@ export const getAiAnswerRiskText = (question) => {
 }
 
 /**
+ * 「这道题还需要老师动手吗」—— 复核页左栏「待处理」页签 / 顶部「需处理 N」
+ * 的**唯一判据**（2026-10-10）。
+ *
+ * 与 6 态的关系：pending / exception / processing 三态天然需要老师处理。
+ * 额外把「AI 已给出正误结论，但参考答案存疑」也纳入 —— 这类题在 6 态里是**终态**
+ * （AI 判错 → wrong 红 X；AI 判对 → correct），旧口径下老师翻页即过，但题面明确写着
+ * 「建议核对参考答案」，属于必须人工核对的事项。
+ * （2026-10-10 负责人要求：这类题也要出现在题目列表的「待处理」里。）
+ *
+ * ⚠️ 人工已下结论（review_status 非空）或已排除的题不再计入。这不是可选项：
+ * 后端只在「参考答案被人工改写」时才清 ai_answer_risk_reason
+ * （见 server/index.js `PUT /api/questions/:id` 的 answerRewritten 分支），
+ * 老师点「判错 / 判对」确认 AI 结论时该列**仍然留着** —— 若这里不看 review_status，
+ * 这题会永远卡在「待处理」里清不掉，老师会以为系统坏了。
+ *
+ * @returns {boolean}
+ */
+export const needsHumanAttention = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
+  if (!question) return false
+  if (question.review_status === REVIEW_STATUS.EXCLUDE) return false
+  const state = getReviewState(question, threshold)
+  if (state === 'pending' || state === 'exception' || state === 'processing') return true
+  // 走到这里说明是终态（correct / wrong / blank）：人工已下结论的不再打扰老师
+  if (question.review_status) return false
+  return getAiAnswerRiskText(question) !== ''
+}
+
+/**
+ * 题目列表行上「因参考答案存疑而需核对」的小签文案（与 needsHumanAttention 同源）。
+ * 只在「确实因它进待处理」时返回文本 —— 老师复核 / 改答案后与待处理状态同步消失，
+ * 避免「已确认的题还挂着 ⚠」这种自相矛盾。
+ */
+export const getAnswerRiskPendingText = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) =>
+  needsHumanAttention(question, threshold) ? getAiAnswerRiskText(question) : ''
+
+/**
  * 参考答案的**来源** —— 纯展示，不参与任何判定（2026-09-14 P2 引入，2026-09-15 收敛为两档）。
  *
  * 为什么要让老师看见：批改页上「参考答案」和「学生答案」两栏长得一样，老师看不出

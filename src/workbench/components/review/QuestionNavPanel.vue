@@ -99,6 +99,13 @@
           v-else-if="q.confidence != null && q.confidence < store.confidenceThreshold"
           class="item-confidence low"
         >{{ Math.round(q.confidence * 100) }}</span>
+        <!-- 参考答案存疑（图题视觉推理等）：AI 已判出正误，但参考本身要老师核一遍。
+             它正是这题出现在「待处理」页签里的原因，行上必须说清楚。 -->
+        <span
+          v-if="answerRiskText(q)"
+          class="item-answer-risk"
+          :title="answerRiskText(q)"
+        >⚠ 参考答案</span>
         <span
           v-for="risk in (q.wrong_book_risks || [])"
           :key="risk"
@@ -124,7 +131,7 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import StatusIcon from './StatusIcon.vue'
-import { getReviewStateLabel } from '../../../utils/reviewDecision'
+import { getReviewStateLabel, getAnswerRiskPendingText } from '../../../utils/reviewDecision'
 // 「第N页」页标的唯一实现（含"同页只标首次出现"规则，有单测）
 import { buildRetryAnswerPageLabels } from '../../../utils/retryAnswerPageLabel'
 
@@ -169,6 +176,11 @@ watch(
 // 状态文案走同源函数：exception 桶里"学生未作答"与"AI 判不出"是两回事，
 // 旧版一律写死「未识别答案」，会让答案明明已识别的题看着像 OCR 故障。
 const stateLabel = (q) => getReviewStateLabel(q, store.confidenceThreshold)
+
+// 「参考答案存疑」小签（2026-10-10）：这类题 AI 已判出正误（终态），旧口径下它不会
+// 出现在「待处理」页签里、行上也没有任何标记 —— 老师看不出为什么它现在要核对。
+// 文案与待处理判据同源（needsHumanAttention），老师复核 / 改答案后自动消失。
+const answerRiskText = (q) => getAnswerRiskPendingText(q, store.confidenceThreshold)
 
 // 题目归属试卷序号标签（仅每卷首题显示）
 // 三种来源：
@@ -461,6 +473,16 @@ const onThresholdChange = (val) => {
 }
 /* 软挡：老师一句话即可放行 */
 .item-wrong-book-risk.low_confidence {
+  color: var(--wb-warning);
+  background: var(--wb-warning-soft);
+}
+/* 参考答案存疑（2026-10-10）：软提示，与「低置信」同色系 —— 都是"请老师看一眼" */
+.item-answer-risk {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: var(--wb-radius-xs);
+  white-space: nowrap;
+  flex-shrink: 0;
   color: var(--wb-warning);
   background: var(--wb-warning-soft);
 }

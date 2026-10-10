@@ -13,7 +13,7 @@ import {
   RETRY_STATE_TO_TASK_STATUS,
   isRetryPaperTask,
 } from '../utils/retryPaperState'
-import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect } from '../../utils/reviewDecision'
+import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect, needsHumanAttention } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
 import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON, WRONG_GATE_AUTO_FLAG } from '../../domain/wrongGateTier.js'
 // 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
@@ -435,11 +435,15 @@ export const useReviewStore = defineStore('review', () => {
   // 现在统一：需要老师处理的只有 pending / exception / processing 三态
   //（与 needsAttentionCount 完全同一集合），其余（correct/wrong/blank）都算已确认。
   // 低置信 AI 错误的风险由完成复核时的错题门禁（prepareWrongGate）兜底，不靠进度条。
+  //
+  // [2026-10-10 补] 判据收敛到 reviewDecision.js#needsHumanAttention（唯一口径）：
+  // 除上述三态外，**「AI 已判但参考答案存疑」（ai_answer_risk_reason 非空）也算待处理** ——
+  // 这类题是终态（AI 判错红 X），老师会翻页即过，但题面写着「建议核对参考答案」，
+  // 必须让老师看见（负责人要求）。needsAttentionCount 走同一函数，两个数永远一致。
   const questionConfirmationMap = computed(() => {
     const map = {}
     for (const q of allQuestions.value) {
-      const state = getReviewState(q, confidenceThreshold.value)
-      map[q.id] = state !== 'pending' && state !== 'exception' && state !== 'processing'
+      map[q.id] = !needsHumanAttention(q, confidenceThreshold.value)
     }
     return map
   })
@@ -1334,12 +1338,14 @@ export const useReviewStore = defineStore('review', () => {
     return stats
   })
 
-  // 需要老师处理的题数（待复核 + 异常 + 处理中）。
+  // 需要老师处理的题数（待复核 + 异常 + 处理中 + 参考答案存疑）。
   // blank（未作答）不算：未作答等同不会已是统计口径，老师无需逐题点击确认（2026-09-13）。
-  const needsAttentionCount = computed(() => {
-    const s = aiStateStats.value
-    return s.pending + s.exception + s.processing
-  })
+  // [2026-10-10] 判据与左栏「待处理」页签（questionConfirmationMap）共用
+  // reviewDecision.js#needsHumanAttention —— 顶部「需处理 N」与页签计数必须同源，
+  // 否则又是「两个数字打架」（本仓反复踩过的口径漂移）。
+  const needsAttentionCount = computed(() =>
+    allQuestions.value.filter((q) => needsHumanAttention(q, confidenceThreshold.value)).length
+  )
 
   // 跳到下一份试卷（仅在 done 的待复核试卷中导航）
   const nextTask = () => {
