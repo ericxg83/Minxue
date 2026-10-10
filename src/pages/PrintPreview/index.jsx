@@ -8,6 +8,7 @@ import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } fr
 import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
 import dayjs from 'dayjs'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
+import { saveFileToDevice } from '../../utils/nativeDownload'
 import { triggerBrowserPrint } from '../../utils/browserPrint'
 import { printHtmlOnDevice, isNativePrintAvailable } from '../../utils/nativePrint'
 import {
@@ -340,7 +341,20 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
       const result = await generatePDF(questions)
       if (result && result.pdfBlob) {
         setPdfStage('正在保存到文件…')
-        Toast.show({ icon: 'success', content: saved ? '已下载，并存入组卷历史' : '已下载到设备文件', duration: 2600 })
+        // ⛔ 「下载PDF」的唯一下载动作就在这里：generatePDF 只负责产出 blob，
+        //    落盘由 saveFileToDevice 完成（原生写 Documents，Web 走 saveAs）。
+        //    2026-10-02 这一行曾被死代码清理器误删（返回值 savedTo 未被读取 ⇒
+        //    eslint 当死代码删掉整行，副作用随之消失），导致点按钮只弹成功提示、
+        //    文件从未保存。返回值必须被消费，否则会被再次误杀 —— 别改成裸调用。
+        const filename = `${currentStudent?.name || 'student'}_${getExamName()}_${dayjs().format('YYYYMMDD_HHmm')}.pdf`
+        const { native, savedTo } = await saveFileToDevice(result.pdfBlob, filename)
+        Toast.show({
+          icon: 'success',
+          content: native
+            ? `已保存到 ${savedTo}`
+            : (saved ? '已下载，并存入组卷历史' : '已下载到设备文件'),
+          duration: 2600,
+        })
       } else {
         throw new Error('PDF 生成结果为空')
       }
