@@ -270,7 +270,13 @@ export function buildShareCardHTML(reportData, { maskName = false } = {}) {
     const str = String(iso || '')
     return /^\d{4}-\d{2}-\d{2}/.test(str) ? str.slice(5, 10).replace('-', '/') : str
   }
-  const periodLine = period.start && period.end ? `${fmtMD(period.start)} ~ ${fmtMD(period.end)}` : ''
+  // ⛔ 成长总览（all）是「全部历史记录」，没有具体起止日期。
+  //   直接印 start/end 会被家长读成「某一年的 1/1 ~ 12/31」——
+  //   实测渲染（CASE C）出的是「学习周期 01/01 ~ 12/31」，与「成长总览」自相矛盾，
+  //   家长可能以为这是「某一年」的数据而非全部累计。
+  //   周/月模式才是真实日期区间，保持原样；all 改成说人话。
+  let periodLine = period.start && period.end ? `${fmtMD(period.start)} ~ ${fmtMD(period.end)}` : ''
+  if (mode === 'all') periodLine = '全部学习记录'
 
   // 正确率圆环（无数据时灰色 —）
   const hasQuestions = s.totalQuestions > 0
