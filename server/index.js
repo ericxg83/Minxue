@@ -2706,8 +2706,40 @@ async function lookupWorksheetAnswerForRecompute(questionId) {
   const units = [...new Set(pages.map(p => p && p.matched_unit).filter(Boolean))]
   if (units.length === 0) return null
 
+  // ── 复刻 worker.js 的「题号上界闸」────────────────────────────────────
+  // sectionMatch 记的是批改当时的锚定结果，可能本身就是错的（那正是本次事故：
+  // 第 1 页被错挂到题号只到 15 的 20.2(4)，而这 4 题因此挂空、老师来点重解析）。
+  // 直查若照着错单元取答案 = 把同一个错挂原样搬到重解析入口，等于没修。
+  // 这里按单元答案池上界过滤：装不下本页最大题号的一律不算候选。
+  const { rows: pageRows } = await query(
+    `SELECT page_number, MAX(question_number)::int AS max_q
+       FROM ${TABLES.QUESTIONS}
+      WHERE task_id = $1 AND deleted_at IS NULL AND question_number IS NOT NULL
+      GROUP BY page_number`,
+    [row.task_id]
+  )
+  const pageMax = pageRows.map(r => r.max_q).filter(n => Number.isFinite(n))
+  if (pageMax.length > 0) {
+    const { rows: spanRows } = await query(
+      `SELECT u.unit_key, MAX(a.question_no)::int AS max_q
+         FROM worksheet_answers a JOIN resource_units u ON u.id = a.unit_id
+        WHERE u.resource_id = $1 AND u.unit_key = ANY($2::text[])
+        GROUP BY u.unit_key`,
+      [row.worksheet_id, units]
+    )
+    const spanMap = new Map(spanRows.map(s => [s.unit_key, s.max_q]))
+    const usable = units.filter(uk => {
+      const up = spanMap.get(uk)
+      if (up == null) return true          // 池信息缺失时不拦（宁可多查一次）
+      return !pageMax.some(mq => mq > up)  // 任一页题号超上界 ⇒ 装不下本页
+    })
+    if (usable.length === 0) return null
+    units.length = 0
+    units.push(...usable)
+  }
+
   const { rows: ansRows } = await query(
-    `SELECT a.unit_key, a.question_no, a.sub_no, a.answer
+    `SELECT u.unit_key, a.question_no, a.sub_no, a.answer
        FROM worksheet_answers a
        JOIN resource_units u ON u.id = a.unit_id
       WHERE u.resource_id = $1
@@ -2906,6 +2938,7 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     if (force) {
       try {
         const bankHit = await lookupWorksheetAnswerForRecompute(id)
+        console.log(`[AI 重解析] 答案库直查 q=${String(id).slice(0, 8)} → ${bankHit ? `命中 unit="${bankHit.unit}" ans="${String(bankHit.answer).slice(0, 20)}"` : '未命中'}`)
         if (bankHit && bankHit.answer) {
           const bankAnswer = String(bankHit.answer).trim()
           if (bankAnswer) {
