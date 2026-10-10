@@ -574,3 +574,63 @@ test('multiline derivation keeps only the conclusion line when the split leaves 
   assert.deepEqual(judgeAnswer(nar, '14岁，18岁', 'answer'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer('4/9 答:占全班4/9。', '4/9', 'answer'), { isCorrect: true, unrecognized: false })
 })
+
+// 单位量纲不对称导致正确答案判错（2026-10-10 用户截图题 #10 零件厚度 2mm）。
+// 根因：parseValueWithUnit 的单位正则要求**以数字开头**，
+//   参考 "2 mm" → 命中 → 2×0.001 = 0.002（毫米基准）
+//   学生「零件的厚度为2mm」→ 不命中 → 剥非数字字符 → 2（裸值，无单位）
+// 同一个 2mm 被换算到两个不同基准 ⇒ isNumericEquivalent 恒 false。
+// 修复：正则允许不含数字/运算符的中文叙述前缀，但**仍只在 UNIT_BASE 命中时才换算**。
+test('units are converted consistently even with a Chinese narration prefix', () => {
+  const NL = '\n'
+  const ffDot = String.fromCharCode(0xFF0E)  // ．
+  const cm2 = String.fromCharCode(0x00B2)    // ²
+
+  // 用户案例：交叉卡钳量零件厚度
+  const stu = [
+    '在△OCD与△OAB中，',
+    'OC/OA = OD/OB，∠AOB = ∠COD，',
+    '∴ △OCD∽△OAB，',
+    '∴ OC/OA = OD/OB = CD/AB = 1/3' + ffDot,
+    '代入得：7/AB = 1/3，AB = 21' + ffDot,
+    '∴ x = (25-21)/2 = 4/2 = 2' + ffDot,
+    '答：零件的厚度为2mm' + ffDot,
+  ].join(NL)
+  assert.deepEqual(judgeAnswer(stu, '2 mm', 'answer'), { isCorrect: true, unrecognized: false })
+
+  // 量纲换算真值表：放宽正则后跨单位换算必须依然成立
+  assert.deepEqual(judgeAnswer('2mm', '2 mm', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2 cm', '20 mm', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('1 m', '100 cm', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('3 km', '3000 m', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('2 L', '2000 mL', 'answer'), { isCorrect: true, unrecognized: false })
+
+  // 反例①：带叙述前缀但数值不同，仍必须判错（不得因放宽而放水）
+  assert.deepEqual(judgeAnswer('零件的厚度为5mm', '2 mm', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('零件的厚度为2mm', '3 mm', 'answer'), { isCorrect: false, unrecognized: false })
+
+  // 反例②：字母变量/根号不得被误当单位（DM、X 不在 UNIT_BASE 里）
+  assert.deepEqual(judgeAnswer('3X', '3x', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer(String.fromCharCode(0x221A) + '15x', String.fromCharCode(0x221A) + '15 x', 'answer'),
+    { isCorrect: true, unrecognized: false })
+
+  // 反例③：平方单位与一次单位语义不同，学生把「半径」答成「面积」必须判错。
+// 库里真实样本（322c4489）整段推导 + 答:句形态下，修复前被extractAndCompare
+  // 的数字兜底放水（两侧都退化成 5），修复后量纲层能区分 cm² 与 cm ⇒ 判错。
+  // ⚠️ 已知残留缺口：同样两条的**短形态**（"面积为√5 cm²" vs "…半径√5 cm"）
+  // 仍会被数字兜底放水 —— 属 extractAndCompare 的既有宽松通道，独立任务，本次不修。
+  assert.deepEqual(judgeAnswer([
+    '设小圆面积 x cm' + cm2 + '。',
+    '圆环 2x cm' + cm2 + '。',
+    '(' + String.fromCharCode(0x221A) + '15)' + String.fromCharCode(0x00B2) + String.fromCharCode(0x03C0, 0x003D, 0x0020) + '3x',
+    '15' + String.fromCharCode(0x03C0) + ' = x',
+    String.fromCharCode(0x221A) + '(5' + String.fromCharCode(0x03C0) + '/' + String.fromCharCode(0x03C0) + ') = ' + String.fromCharCode(0x221A) + '5 cm' + cm2,
+    '答：面积为' + String.fromCharCode(0x221A) + '5 cm' + cm2 + '。',
+  ].join(NL), '小圆的半径是' + String.fromCharCode(0x221A) + '5 cm.', 'answer'),
+    { isCorrect: false, unrecognized: false })
+
+  // 既有行为不得回退
+  assert.deepEqual(judgeAnswer('2', '2', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('1/2', '0.5', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x=3', '3', 'answer'), { isCorrect: true, unrecognized: false })
+})
