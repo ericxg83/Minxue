@@ -146,6 +146,11 @@ export const createQuestions = async (questions) => {
       student_answer: coerceAIText(q.student_answer) || null,
       ai_answer: coerceAIText(q.ai_answer) || null,
       answer_source: q.answer_source || 'recognized',
+      // 参考答案来源（迁移 063）：只回答「答案从哪来」，不回答学生写没写。
+      // 与 answer_source 拆开的原因见迁移文件头：两者挤在一列时，
+      // worker 的blank 分支会顺手抹掉刚记的来源，产出 374 道自相矛盾的数据。
+      // 取值：engine / worksheet / teacher / external；无参考答案时留NULL。
+      reference_source: q.reference_source || null,
       analysis: coerceAIText(q.analysis) || null,
       // AI 解析自检：worker.js 在 createQuestions 前对每题调 aiParseSelfCheck，
       // 把"是否通过"和"具体 issues"两路都写进 questions 表，前端据此给红色横幅。

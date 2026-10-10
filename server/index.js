@@ -67,6 +67,7 @@ import { migrateWrongQuestionsIdentitySplit } from './migrations/059_wrongbook_i
 import { migrateTeachingMarks } from './migrations/060_teaching_marks.js'
 import { migrateKaofaMultiKp } from './migrations/061_kaofa_multi_kp.js'
 import { migrateKpRelations } from './migrations/062_kp_relations.js'
+import { migrateReferenceSource } from './migrations/063_add_reference_source.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -5079,7 +5080,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit],
         ['migrateTeachingMarks', migrateTeachingMarks],
         ['migrateKaofaMultiKp', migrateKaofaMultiKp],
-        ['migrateKpRelations', migrateKpRelations]
+        ['migrateKpRelations', migrateKpRelations],
+        ['migrateReferenceSource', migrateReferenceSource]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

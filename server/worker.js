@@ -6022,7 +6022,14 @@ export const processWorkbookGrading = async (job) => {
       if (answerRow) {
         usedQKeys.add(usedKey)
         q.answer = answerRow.answer
-        q.answer_source = 'worksheet'
+        // ── 「参考答案从哪来」记入独立列 reference_source（2026-10-10 迁移063）──
+        // ⛔ 旧实现此处写 `q.answer_source = 'worksheet'`，而下面 else 分支（学生未作答）
+        //    又无条件覆写成 'blank' —— 同一行刚记的来源被抹掉，产出「学生没写」+「但有
+        //    参考答案」的自相矛盾行（实测 374 道，其中 265 道已进错题本）。
+        //    `answer_source === 'blank'` 被 40+ 处当作「学生未作答」判据（错题本/
+        //    掌握度/置信度闸），不能靠加枚举值绕过，只能另开一格。
+        //    参考：questions.reference_source 只回答「答案哪来的」，不回答学生写没写。
+        q.reference_source = 'worksheet'
         // 答案库的 answer_type 描述的是「这条答案记录」的题型，不是本题的题型，
         // 不能无条件覆盖 OCR 判定结果。实测事故（2026-09-11，练习册 27.5 第 6 题）：
         // 卷面第 6 题是填空题「则当OP=______米时，该花坛POQ的面积最大.」，答案库同题号
@@ -6056,10 +6063,18 @@ export const processWorkbookGrading = async (job) => {
           if (q.is_correct === null) {
             q._unjudged_reason = detectUnverifiableReference(q.answer) || 'no_reference_answer'
           }
+          // 已作答时 answer_source 表达「学生写了」——答案来源已记在 reference_source，
+          // 这里不需要（也不能）再往 answer_source 里塞来源信息。
+          q.answer_source = 'recognized'
         } else {
           q.is_correct = null // 未作答
           // 必须显式标 blank：本管线原先只把 is_correct 置 null，未作答题与"AI 判不出"
           // 在库里长得一样，列表页的"空"和"待复核"两桶就分不开（复核页也只能显示"处理中"）。
+          //
+          // ⚠️ 2026-10-10：此处**只**表达「学生没作答」，不再覆写答案来源 ——
+          //   q.answer / q.reference_source 在上面已由答案库填好，blank 与「有参考答案」
+          //   并不矛盾，两者分属不同维度（详见迁移 063 与本段上方注释）。
+          //   旧写法把 'worksheet' 抹成 'blank'，是 374 道自相矛盾数据的唯一来源。
           q.answer_source = 'blank'
           // L1-a（2026-09-23）：未作答的 confidence 统一 1.0。
           // 此处原来是 `q.confidence || 0`（默认 0，见建题段 isEmpty ? 0 : …），
