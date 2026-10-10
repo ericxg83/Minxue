@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R168 — 2026/10/10 10:47:47（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R169 — 2026/10/10 10:57:04（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1758,3 +1759,14 @@
     -  M src/domain/wrongGateTier.js
     -  M src/workbench/components/review/ReviewTopBar.vue
     -  M src/workbench/stores/reviewStore.js
+| 169 | 2026-10-10T02:57:04 | tests=2318/0 | lint=1 | build=skipped | server=ok | dirty=4 |
+
+### R169 — 2026/10/10 10:57:04（daemon 自动报告）
+
+**体检**：tests **2318/0** | lint 1 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 4
+
+⚠️ 发现异常：lint errors=1；脏文件 4 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
