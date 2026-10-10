@@ -3917,7 +3917,14 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     let bestUnit = null
     let bestHits = 0
     let bestTotalScore = 0
+    // 题号上界闸（2026-10-10，见 unitQuestionSpan 注释）：本页最大题号超出某单元
+    // 答案池上界 ⇒ 该单元装不下本页，不参与竞选。
+    const covPageSpan = pageQuestionSpan(questions)
     for (const [unitKey, fp] of unitFingerprints) {
+      if (covPageSpan) {
+        const span = unitQuestionSpan(answersByUnit.get(unitKey))
+        if (span && covPageSpan.max > span.max) continue
+      }
       let hits = 0
       let totalScore = 0
       for (const q of studentAnswerList) {
@@ -4044,6 +4051,56 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
 // ═══════════════════════════════════════════════════════════════
 
 /**
+ * 单元答案池的题号跨度（该单元存在答案的题号最小/最大值）。
+ *
+ * ── 为什么需要它（2026-10-10 「第十八章 实数」假红叉事故）───────────────
+ * 任务 a7c984ac「第 20 章 二次根式 · 数学」第 1 页（题 7~19）被 pickAnswerUnit
+ * 锚到 `20.2(4)`，但该单元答案池题号只到 **15**：
+ *   · 题 16/17/19 查不到键 → 走「答案库无匹配」→ 报「缺少参考答案，无法自动判定」；
+ *   · 题 7/11/12/13 查到了键，但那是**另一套卷**的答案（`x=√3/15`、`x>5+√10`、
+ *     `-√15/15`、`-3`），而本题真答案在「第20章测试(一)」单元里
+ *     （`2√3y/x²`、`-6a√b`、`2-√3`、`③④`）⇒ 3 道学生答对的题被判错（假红叉）。
+ * 而同任务第 2 页（题 20~24）被正确锚到「第20章测试(一)」—— 两页本属同一单元。
+ *
+ * 关键教训：**题号上界越界的单元，不是本页的单元**。
+ * 一个单元装不下本页最大题号，却仍被采用，是因为既有判据里
+ * 「答案覆盖率」只统计"命中了几题"（15 个单元都能命中 13 题里的 7~9 题），
+ * 从不检查"有没有漏掉本页的题"。命中数多 ≠ 能装下整页。
+ *
+ * @param {Map<string, Map<string, Map<string, object>>>} secMap unit→section→qKey→row
+ * @returns {{min:number, max:number}|null} 空池返回 null
+ */
+function unitQuestionSpan(secMap) {
+  if (!secMap) return null
+  let min = Infinity
+  let max = -Infinity
+  for (const qMap of secMap.values()) {
+    for (const key of qMap.keys()) {
+      const n = Number(String(key).split('|')[0])
+      if (!Number.isFinite(n)) continue
+      if (n < min) min = n
+      if (n > max) max = n
+    }
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
+}
+
+/**
+ * 本页题号跨度（minQ/maxQ），忽略无题号的题。
+ */
+function pageQuestionSpan(questions) {
+  let min = Infinity
+  let max = -Infinity
+  for (const q of Array.isArray(questions) ? questions : []) {
+    const n = Number(q && q.question_number)
+    if (!Number.isFinite(n)) continue
+    if (n < min) min = n
+    if (n > max) max = n
+  }
+  return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null
+}
+
+/**
  * 计算一组题目在给定 unit 答案库中的覆盖率（0~1）。
  * 覆盖键为 `${question_number}|${sub_no||''}`（与答案库 qKey 结构一致），
  * 保证 sub_no 参与区分，避免"只看题号存在性"导致同号不同小题互相污染。
@@ -4089,7 +4146,14 @@ function _groupByQuestionContinuity(pageDataList, answersByUnit) {
     if (answersByUnit && qnos.length > 0) {
       // 收集所有 coverage 最高的候选单元
       const candidates = []
+      // ── 题号上界闸（2026-10-10，见 unitQuestionSpan 注释）──────────────────
+      // 单元答案池装不下本页最大题号时，它就不是本页的单元：即便它"命中了本页
+      // 大半的题"也不行。事故现场：题 7~19 的页被 `20.2(4)`（题号只到 15）以
+      // 覆盖率优势抢走 → 题 16/17/19 报"缺少参考答案"，题 7/11/12/13 挂上别的
+      // 卷的答案 → 3 道学生答对的题被判错。上界越界的候选一律不参与竞选。
       for (const [uk, secMap] of answersByUnit) {
+        const span = unitQuestionSpan(secMap)
+        if (span && maxQ > span.max) continue
         const cov = coverageOfQuestionsInUnit(pg.questions || [], secMap)
         if (cov > bestCov) { bestCov = cov; candidates.length = 0; candidates.push(uk) }
         else if (cov === bestCov && cov > 0) candidates.push(uk)
@@ -4332,9 +4396,15 @@ function inferUnitByStructureFingerprint(answersByUnit, questions) {
   let bestSubHits = -1
   let bestCov = -1
   let tie = false
+  // 题号上界闸（2026-10-10，见 unitQuestionSpan 注释）
+  const fpPageMax = pageNos.length ? Math.max(...pageNos) : null
 
   for (const [uk, secMap] of answersByUnit) {
     if (!secMap) continue
+    if (fpPageMax != null) {
+      const span = unitQuestionSpan(secMap)
+      if (span && fpPageMax > span.max) continue
+    }
     const unitFp = new Map()
     for (const qMap of secMap.values()) {
       for (const key of qMap.keys()) {
@@ -4425,7 +4495,12 @@ export function resolveAnswerUnits(answersByUnit, pageDataList) {
       let bestUnit = null
       let bestCov = 0
       const candidates = []
+      // 题号上界闸（2026-10-10，见 unitQuestionSpan 注释）：组内最大题号超出
+      // 某单元答案池上界 ⇒ 该单元装不下这组题，不参与竞选。
+      const grpMaxQ = Math.max(...grpQuestions.map(q => Number(q.question_number)).filter(Number.isFinite))
       for (const [uk, secMap] of answersByUnit) {
+        const span = unitQuestionSpan(secMap)
+        if (span && Number.isFinite(grpMaxQ) && grpMaxQ > span.max) continue
         const cov = coverageOfQuestionsInUnit(grpQuestions, secMap)
         if (cov > bestCov) { bestCov = cov; candidates.length = 0; candidates.push(uk) }
         else if (cov === bestCov && cov > 0) candidates.push(uk)
@@ -5070,6 +5145,12 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
     : null
 
   const unitScores = new Map() // unitKey → { hits, totalScore }
+  // 题号上界闸（2026-10-10，见 unitQuestionSpan 注释）：本页最大题号超出某单元
+  // 答案池上界 ⇒ 该单元装不下本页，不参与反推竞选。事故现场：题 7~19 的页被
+  // `20.2(4)`（题号只到 15）抢走，题 16/17/19 报"缺少参考答案"、题 7/11/12/13
+  // 挂上别的卷的答案（3 道学生答对的题被判错）。
+  const pageSpan = pageQuestionSpan(questions)
+  const unitSpanCache = new Map()
 
   for (const q of questions) {
     const studentAnswer = (q.student_answer || '').toString().trim()
@@ -5079,6 +5160,11 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
 
     for (const [unitKey, unitAnswers] of answersByUnit) {
       if (allowedKeys && !allowedKeys.has(unitKey)) continue
+      if (pageSpan) {
+        if (!unitSpanCache.has(unitKey)) unitSpanCache.set(unitKey, unitQuestionSpan(unitAnswers))
+        const span = unitSpanCache.get(unitKey)
+        if (span && pageSpan.max > span.max) continue
+      }
       const found = searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, new Set())
       if (found && found.score >= 0.7) {
         if (!unitScores.has(unitKey)) unitScores.set(unitKey, { hits: 0, totalScore: 0 })

@@ -2668,6 +2668,66 @@ const pruneRecomputeJobs = () => {
   }
 }
 
+/**
+ * 「AI 重解析」的练习册答案库直查（2026-10-10）。
+ *
+ * 背景：老师点「AI 重解析」时看到的题是**练习册题**，答案本来就在 worksheet_answers 里
+ *   ——只是批改阶段的单元锚定把它漏挂了。此时让 AI 从零解一遍，等于用最慢最贵的路
+ *   回答一个数据库里已经写好的问题（实测老师对着「AI 计算中 178s…」转圈 3 分钟）。
+ *
+ * 口径（三条都必须满足，缺一即返回 null 走引擎链）：
+ *   ① 本题所属 task 挂了练习册（tasks.worksheet_id 非空）；
+ *   ② 只查该 task 批改阶段**实际锚定到**的单元（tasks.result.sectionMatch.pages），
+ *      不重新推断单元 —— 重新推断会把「批改时挂错」变成「重解析时也挂错」，
+ *      只是把同一个错误换了个入口；
+ *   ③ 该单元答案池里存在本题号（题号 + 小问号）的行。
+ *
+ * 查不到就返回 null，**绝不**因为"想帮上忙"而放宽到别的单元 —— 错挂比空着更危险。
+ *
+ * @returns {Promise<{answer:string, unit:string, questionNo:number}|null>}
+ */
+async function lookupWorksheetAnswerForRecompute(questionId) {
+  const { rows } = await query(
+    `SELECT q.id, q.task_id, q.question_number, q.sub_no, q.question_type,
+            t.worksheet_id, t.result->'sectionMatch'->'pages' AS pages
+       FROM ${TABLES.QUESTIONS} q
+       JOIN tasks t ON t.id = q.task_id
+      WHERE q.id = $1 AND q.deleted_at IS NULL`,
+    [questionId]
+  )
+  if (rows.length === 0) return null
+  const row = rows[0]
+  if (!row.worksheet_id) return null
+  if (row.question_number == null) return null
+  const pages = Array.isArray(row.pages) ? row.pages : []
+  if (pages.length === 0) return null
+
+  // 批改阶段实际用过的单元（去重，保持 sectionMatch 里的顺序）
+  const units = [...new Set(pages.map(p => p && p.matched_unit).filter(Boolean))]
+  if (units.length === 0) return null
+
+  const { rows: ansRows } = await query(
+    `SELECT a.unit_key, a.question_no, a.sub_no, a.answer
+       FROM worksheet_answers a
+       JOIN resource_units u ON u.id = a.unit_id
+      WHERE u.resource_id = $1
+        AND a.question_no = $2
+        AND u.unit_key = ANY($3::text[])
+      ORDER BY array_position($3::text[], u.unit_key)`,
+    [row.worksheet_id, row.question_number, units]
+  )
+  if (ansRows.length === 0) return null
+
+  // 小问号优先精确匹配；本题无小问号时才接受整题行（'' 或 NULL）。
+  const wantSub = row.sub_no == null ? '' : String(row.sub_no)
+  const exact = ansRows.find(r => (r.sub_no == null ? '' : String(r.sub_no)) === wantSub)
+  const picked = exact || (wantSub === '' ? ansRows[0] : null)
+  if (!picked) return null
+  const answer = String(picked.answer || '').trim()
+  if (!answer) return null
+  return { answer, unit: picked.unit_key, questionNo: picked.question_no }
+}
+
 // 教师工作台「AI 重解析」按钮（2026-09-23 临时功能）：
 // 老师在批改页遇到参考答案缺失时手动触发，调答案引擎重算这一题的标准答案并写库。
 // 默认仅在现有 answer 为空时写入，避免无脑覆盖老师已经填好的答案；force=true 时强制覆盖。
@@ -2831,6 +2891,55 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     let finalAnswer = ''
     let usedChannel = null
     let rejectReason = null
+
+    // ── 练习册答案库直查闸（2026-10-10）──────────────────────────────────
+    // 为什么放在最前面（这是「AI 重解析点了 3 分钟还没完」的直接原因）：
+    //   老师点「AI 重解析」时看到的题是练习册题，答案本来就在 worksheet_answers 里
+    //   ——只是批改阶段的单元锚定把它漏挂了（题号越界的单元抢走，见 worker.js
+    //   unitQuestionSpan 注释）。这时让 AI 从零解一遍题，是**用最慢最贵的路去回答
+    //   一个数据库里已经写好的问题**：主通道 120s + 备用 55s 串行 = 最长 175s，
+    //   实测老师对着转圈等 3 分钟。
+    //   口径：只在【本题所属 task 挂了练习册】时回查，且只查该 task 批改阶段实际
+    //   锚定到的单元（tasks.result.sectionMatch），不重新推断单元 —— 重新推断会
+    //   把「批改时挂错」变成「重解析时也挂错」，只是把同一个错误换个入口。
+    //   查到即返回，不烧额度、不等待；查不到才走原有引擎链。
+    if (force) {
+      try {
+        const bankHit = await lookupWorksheetAnswerForRecompute(id)
+        if (bankHit && bankHit.answer) {
+          const bankAnswer = String(bankHit.answer).trim()
+          if (bankAnswer) {
+            const upd = await query(
+              `UPDATE ${TABLES.QUESTIONS}
+                  SET answer = $1, answer_source = 'worksheet', answer_exception = false,
+                      answer_exception_reason = NULL, confidence = 1.0, updated_at = NOW()
+                WHERE id = $2 AND deleted_at IS NULL RETURNING id`,
+              [bankAnswer, id]
+            )
+            if (upd.rows.length > 0) {
+              await query(
+                `INSERT INTO judgements (question_id, student_id, source, is_correct, content, answer, student_answer, confidence, metadata)
+                 VALUES ($1, $2, 'pc_recompute_bank', NULL, $3, $4, $5, 1.0, $6)`,
+                [id, q.student_id, q.content, bankAnswer, q.student_answer,
+                 JSON.stringify({ via: 'worksheet_answer_bank', unit: bankHit.unit, questionNo: bankHit.questionNo })]
+              ).catch(() => { /* 审计写失败不阻塞主流程 */ })
+              console.log(`[AI 重解析] 题目 ${String(id).slice(0, 8)} 命中练习册答案库（unit="${bankHit.unit}" 题号${bankHit.questionNo}），跳过 AI 引擎`)
+              const judged = judgeAnswer(q.student_answer || '', bankAnswer, q.question_type || 'answer')
+              return done(() => res.json({
+                answer: bankAnswer,
+                is_correct: judged?.isCorrect ?? null,
+                engine: 'worksheet_answer_bank',
+                source: 'worksheet',
+                unit: bankHit.unit
+              }))
+            }
+          }
+        }
+      } catch (e) {
+        // 回查失败绝不阻断：直查只是优化，失败就照常走引擎链。
+        console.warn(`[AI 重解析] 练习册答案库直查失败，降级为引擎求解：${e.message}`)
+      }
+    }
 
     // ── 缺配图预判闸（2026-09-24，用户要求：缺图就别解析，别浪费 token 和时间）──────
     // 题干明示引图（如图①②③ / 数轴 / 统计图 / 函数图象）而本题**无配图**时：
