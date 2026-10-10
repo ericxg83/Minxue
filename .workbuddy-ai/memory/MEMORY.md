@@ -23,6 +23,13 @@
   （AI 判错/判对但参考答案存疑，负责人 2026-10-10 要求也进待处理；列表行配 `.item-answer-risk`「⚠ 参考答案」小签）。
   ⛔ 必须靠 `review_status` 收口：后端只在「人工改写参考答案」时清该列（`PUT /api/questions/:id` 的 `answerRewritten`），
   老师点判错/判对确认结论时该列**仍留着** ⇒ 不看 review_status 会永远卡在待处理里清不掉。锁 `test/reviewAttentionCaliber.test.mjs`。
+- ⛔ 「错题标记」`review_status`（wrong/wrong_no_book）与判定 `is_correct` **不得并存矛盾**（2026-10-10 负责人裁定「严重 BUG」）：
+  重练结算判对（`gradingFinalizer.finalizeGeneratedExamResults`）、人工改判为对（`finalizeRejudgeResult` 的 `$5=manualOverride`，
+  **AI 自动重解析 manualOverride=false 不得推翻人工结论**）、`PUT /api/questions/:id` 改判为对
+  → 必须解除错题标记（`→NULL::text`）**并**把 `status='wrong'` 翻回 `'pending'`；
+  `PUT` **只传 `review_status`** 时必须按人工结论同步 `is_correct`（PC 端 `apiService.updateQuestionReviewStatus` 只传一个，
+  移动端 `handleSetReviewAction` 传两个 —— 这是全库 31 条矛盾的根因）。`exclude` 是软删除，不动 `is_correct`。
+  锁 `test/reviewConflictSync.test.mjs`；存量收口口径 =「以最近一条 judgement 的结论为准」。
 - ⛔ 批改页「待复核」= `confidence` 空或 <0.5，**与答案对不对无关**；`reviewStore.mergeJudgements` 会拿 `/judgements/latest`（每道题最新一条、不过滤 source）**无条件覆盖** `q.confidence`，而结算/重判/人工编辑写的流水（`manual_review`/`regrade_script`/`pc_rejudge`…）`confidence` 恒为 null 且永远更新 ⇒ AI 判对的题被显示成待复核（2026-10-09 数学-1008-01 卷 9 题；全库 41 条）。复现：`server/_diag_repro_pending.mjs`。→ caliber-drift
 - ⛔ 错题「同一题」走 `questionIdentity.js`，禁相似度合并；变式题不进重练卷/组卷。重练卷答卷唯一口径 `retryPaperState.js#isRetryPaperTask`；练习册 published 必经 `getWorksheetPublishRisk`。→ wrongbook-gate-requeue
 - ⛔ 周末班课件多小问合并（`weekendHandout.js#buildCompleteQuestion`）分组键**不含 page_number** ⇒ 组内出现 ≥2 个不同非空 `parent_stem` 必须按错题行的 parent_stem 收窄（否则同一卷跨页题号撞车，把别题小问拼进来；r213 白板第1题）。
