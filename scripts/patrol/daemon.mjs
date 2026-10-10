@@ -54,6 +54,37 @@ function releaseLock() {
   } catch { /* 忽略 */ }
 }
 
+// ── 心跳锚点：patrol.md 顶部常驻一行“最近心跳”，每轮原地更新。
+//   用户/agent 打开文件第一眼即知 daemon 是否活着、多久前还在转（根治“看起来停了”的感知盲区）。
+const HEARTBEAT_START = '<!-- PATROL_HEARTBEAT:start -->'
+const HEARTBEAT_END = '<!-- PATROL_HEARTBEAT:end -->'
+function heartbeatText(round, l) {
+  const zh = (t) => new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
+  // l.health 未就绪（初始化占位）→ 不吓人：显示“首轮巡查中”而非“有异常”
+  if (!l.health) return `${HEARTBEAT_START}
+> ⏱ **最近心跳：R${round} — ${zh(l.finishedAt)}（首轮巡查中…）**
+${HEARTBEAT_END}
+`
+  const verdict = l.health?.server === 'ok' && l.health?.['mobile-dev'] === 'ok' && !l.tests?.fail && !l.lintErrors
+    ? '✅ 全绿' : '⚠️ 有异常（见下方报告）'
+  return `${HEARTBEAT_START}
+> ⏱ **最近心跳：R${round} — ${zh(l.finishedAt)}（${verdict}）**
+${HEARTBEAT_END}
+`
+}
+function ensureHeartbeat() {
+  try {
+    if (!fs.existsSync(TIMELINE)) return
+    const txt = fs.readFileSync(TIMELINE, 'utf8')
+    if (txt.includes(HEARTBEAT_START)) return
+    // 插入到文件头部（第一个标题之前），不破坏时间线结构
+    const head = txt.split('\n').find(l => l.trim().startsWith('#') && !l.trim().startsWith('#' + '#')) || '## 巡查轮次时间线（机器事实）'
+    const idx = txt.indexOf(head)
+    if (idx < 0) return
+    fs.writeFileSync(TIMELINE, txt.slice(0, idx) + head + '\n\n' + heartbeatText(0, { finishedAt: Date.now() }) + '\n' + txt.slice(idx + head.length))
+  } catch { /* 心跳初始化失败不影响主职能 */ }
+}
+
 // ── 从本轮体检 entry 生成人类可读报告段落（agent 缺席也能产出）──
 function renderReport(round, l) {
   const zh = (t) => new Date(t).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })
@@ -98,9 +129,20 @@ async function runRound() {
       log(`✔ 巡查 #${state.round} 完成 — tests ${l.tests.pass}/${l.tests.fail ?? '?'} | lint ${l.lintErrors} | build ${l.build} | server ${l.health?.server} | dirty ${l.dirtyCount}`)
       // 自动追加人类可读报告（agent 缺席也保证 patrol.md 每轮有可读段落）
       try {
+        // 先原地刷新顶部心跳锚点，再追加本轮报告
+        const hb = heartbeatText(state.round, l)
+        const txt = fs.readFileSync(TIMELINE, 'utf8')
+        const start = txt.indexOf(HEARTBEAT_START)
+        const end = txt.indexOf(HEARTBEAT_END)
+        if (start >= 0 && end > start) {
+          fs.writeFileSync(TIMELINE, txt.slice(0, start) + hb + txt.slice(end + HEARTBEAT_END.length))
+        } else {
+          // 锚点缺失（文件被外部重建）→ 追加在文件头重建
+          fs.writeFileSync(TIMELINE, hb + txt)
+        }
         const report = renderReport(state.round, l)
         fs.appendFileSync(TIMELINE, report)
-        log('  已追加自动报告到 docs/auto/patrol.md')
+        log('  已刷新心跳 + 追加自动报告到 docs/auto/patrol.md')
         // 自动提交（只 add patrol.md，不抢并行会话的文件）
         // ⛔ 走共享入口：默认 stdio 在本机必 EBUSY ⇒ git.status 恒为 null，自动提交会**静默不执行**
         //    （日志还会说成「跳过（无新内容或冲突）」，把环境故障伪装成正常跳过）
@@ -132,6 +174,7 @@ if (!acquireLock()) {
 process.on('exit', releaseLock)
 
 log(`巡查守护进程启动 — 每 ${Math.round(INTERVAL / 1000)}s 一轮，引擎 ${ENGINE}`)
+ensureHeartbeat() // 确保 patrol.md 顶部有心跳锚点（首次运行/文件重建时插入）
 await runRound() // 启动立即跑第一轮
 
 setInterval(runRound, INTERVAL)
