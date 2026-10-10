@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R207 — 2026/10/10 17:17:05（✅ 全绿）**
+> ⏱ **最近心跳：R208 — 2026/10/10 17:27:41（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -2209,3 +2210,20 @@
 **体检**：tests **2354/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 0
 
 ✅ 全绿：无异常，无需人工介入
+| 208 | 2026-10-10T09:27:41 | tests=2354/0 | lint=0 | build=FAIL | server=ok | dirty=11 |
+
+### R208 — 2026/10/10 17:27:41（daemon 自动报告）
+
+**体检**：tests **2354/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 11
+
+⚠️ 发现异常：build=FAIL；脏文件 11 个（ M server/index.js,  M src/services/apiService.js,  M src/utils/serverPdfExporter.js…）（需 agent 深修时下轮处理）
+    -  M server/index.js
+    -  M src/services/apiService.js
+    -  M src/utils/serverPdfExporter.js
+    -  M src/workbench/components/layout/AppSidebar.vue
+    -  M src/workbench/router/index.js
+    -  M test/migrationLedger.test.mjs
+    - ?? server/migrations/063_paper_bank_questions.js
+    - ?? server/routes/paperBank.js
+    - ?? server/services/paperBankService.js
+    - ?? src/utils/handoutPdf.js
