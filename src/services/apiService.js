@@ -1,4 +1,5 @@
 import { requestJson, requestBlob, onNetworkRecover, getNetworkHealth } from './httpCore'
+import { pickTasksCacheKeys } from './taskCacheKeys'
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api'
 
@@ -43,6 +44,33 @@ export const clearCache = (key) => {
   try {
     localStorage.removeItem(key)
     localStorage.removeItem(key + '_ts')
+  } catch { /* 隐私模式等场景 localStorage 不可用属预期 */ }
+}
+
+/**
+ * 任务状态变了（重新处理 / 改批改方式）→ 必须让「按学生缓存的任务列表」失效。
+ *
+ * ⛔ 缓存键是 `tasks_cache_{studentId}`（见 getTasksByStudent），**不是** `tasks_cache_{taskId}`。
+ *    旧写法传的是任务 id ⇒ 清了个不存在的键，老师点「重新处理」后批改中心那一行 5 分钟内不变
+ *    （2026-10-10 r253 实测；键判据见 ./taskCacheKeys.js）。
+ * 只清「缓存里确实含这道任务」的学生缓存；定位不到（缓存已过期/内容损坏）时退回清全部任务列表缓存，
+ * 宁可多刷一次也不留旧列表。
+ */
+const clearTasksCacheForTask = (taskId) => {
+  try {
+    const keys = Object.keys(localStorage)
+    const hit = pickTasksCacheKeys(keys, {
+      taskId,
+      containsTask: (key) => {
+        try {
+          const list = JSON.parse(localStorage.getItem(key) || '[]')
+          return Array.isArray(list) && list.some((t) => t && String(t.id) === String(taskId))
+        } catch {
+          return true // 缓存内容读不出来 → 当成命中，清掉最安全
+        }
+      },
+    })
+    hit.forEach(clearCache)
   } catch { /* 隐私模式等场景 localStorage 不可用属预期 */ }
 }
 
@@ -347,7 +375,7 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
 
 export const retryTask = async (taskId) => {
   const data = await apiRequest(`/tasks/${taskId}/retry`, { method: 'POST' })
-  clearCache(`tasks_cache_${taskId}`)
+  clearTasksCacheForTask(taskId)
   return data
 }
 
@@ -372,7 +400,7 @@ export const convertTaskRoute = async (taskId, { target, resourceId = null, work
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ target, resourceId, worksheetId, dryRun }),
   })
-  if (!dryRun) clearCache(`tasks_cache_${taskId}`)
+  if (!dryRun) clearTasksCacheForTask(taskId)
   return data
 }
 
