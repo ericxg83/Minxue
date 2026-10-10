@@ -2150,9 +2150,29 @@ app.put('/api/questions/:id', async (req, res) => {
   try {
     const { id } = req.params
     const { content, options, answer, analysis, status, question_type, subject, is_correct, student_answer, image_url, ai_answer, answer_source, geometry_image_url, review_status, review_metadata, display_image_type, source_type, geometry_manual_override } = req.body
-    const hasIsCorrect = 'is_correct' in req.body
+    const hasIsCorrectRaw = 'is_correct' in req.body
     const hasAnswerSource = 'answer_source' in req.body && answer_source !== undefined
     const hasReviewStatus = 'review_status' in req.body
+
+    // [2026-10-10 修复] 老师只标复核结论、body 里没带 is_correct 时，is_correct 必须按人工结论同步。
+    //
+    // 事故：PC 端 updateQuestionReviewStatus（src/services/apiService.js）**只传 review_status**，
+    // 老师标「错误」后 questions.is_correct 仍留着 AI 的 true ⇒ 复核页同时显示
+    // 「已标记错误」与「已复核-AI翻案」（全库 31 条；2026-10-10 负责人截图报障）。
+    // 移动端 handleSetReviewAction 是 is_correct + review_status 一起传的 —— 两端行为必须一致，
+    // 判据与下方 hasReviewStatus 分支写 judgement 的 isCorrect 逐字同源。
+    // exclude 是「这题不该出现在本卷」的软删除，与正误无关，保持不动 is_correct。
+    let isCorrectEffective = is_correct
+    let hasIsCorrect = hasIsCorrectRaw
+    if (!hasIsCorrectRaw && hasReviewStatus) {
+      if (review_status === 'wrong' || review_status === 'wrong_no_book') {
+        isCorrectEffective = false
+        hasIsCorrect = true
+      } else if (review_status === 'correct') {
+        isCorrectEffective = true
+        hasIsCorrect = true
+      }
+    }
     const hasDisplayImageType = 'display_image_type' in req.body
     const hasSourceType = 'source_type' in req.body && source_type !== undefined
     // 手动配图标记：只在 body 里显式给了值时才更新，undefined/null 都不动。
@@ -2209,7 +2229,13 @@ app.put('/api/questions/:id', async (req, res) => {
            ai_answer = COALESCE($11, ai_answer),
            answer_source = CASE WHEN $15 THEN $12::text ELSE answer_source END,
            geometry_image_url = COALESCE($16, geometry_image_url),
-           review_status = CASE WHEN $17 THEN $18::text ELSE review_status END,
+           review_status = CASE
+             WHEN $17 THEN $18::text
+             -- [2026-10-10] 老师改判为「对」时，旧的错题标记必须一并解除：
+             -- 错题一旦被改判为对，「已标记错误」就是过期状态，继续留着会让复核页
+             -- 同时显示「已标记错误」+ 判定为对（负责人报障的 31 条即此形态）。
+             WHEN $14 AND $8::boolean IS TRUE AND review_status IN ('wrong', 'wrong_no_book') THEN NULL::text
+             ELSE review_status END,
            display_image_type = CASE WHEN $20 THEN $19::text ELSE display_image_type END,
            source_type = CASE WHEN $21 THEN $22::text ELSE source_type END,
            geometry_manual_override = CASE WHEN $23 THEN $24::boolean ELSE geometry_manual_override END,
@@ -2219,7 +2245,7 @@ app.put('/api/questions/:id', async (req, res) => {
            updated_at = NOW()
        WHERE id = $13
        RETURNING *`,
-      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(is_correct), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type), hasGeometryManualOverride, n(geometry_manual_override), answerRewritten]
+      [n(content), optionsJson, n(answer), n(analysis), n(status), n(question_type), n(subject), n(isCorrectEffective), n(student_answer), n(image_url), n(ai_answer), n(answer_source), id, hasIsCorrect, hasAnswerSource, n(geometry_image_url), hasReviewStatus, n(review_status), n(display_image_type), hasDisplayImageType, hasSourceType, n(source_type), hasGeometryManualOverride, n(geometry_manual_override), answerRewritten]
     )
 
     if (rows.length === 0) return res.status(404).json({ error: '题目不存在' })
@@ -2278,7 +2304,7 @@ app.put('/api/questions/:id', async (req, res) => {
     // 透传到 judgements.metadata 用于事后分析"AI 判错样本归因"。
     const reviewMetadataIn = (review_metadata && typeof review_metadata === 'object') ? review_metadata : null
     const misjudgeType = reviewMetadataIn?.misjudgeType || null
-    if (hasIsCorrect && oldIsCorrect !== is_correct) {
+    if (hasIsCorrect && oldIsCorrect !== isCorrectEffective) {
       // [问题4 修复 2026-09-01] PUT 改 is_correct 时必须走 settle 流程，
       // 否则 wrong_questions.status / questions.status 不同步——移动端只调 PUT
       // 不调 /rejudge，错题本永远不 mastered。finalizeRejudgeResult 内部按
@@ -2286,8 +2312,8 @@ app.put('/api/questions/:id', async (req, res) => {
       // 与 /rejudge 共用同一 settle 路径，错题本 + judgement + questions.status 一次同步。
       try {
         await finalizeRejudgeResult({
-          question: { ...updatedQuestion, is_correct },
-          isCorrect: is_correct,
+          question: { ...updatedQuestion, is_correct: isCorrectEffective },
+          isCorrect: isCorrectEffective,
           oldIsCorrect,
           source: 'review_edit',
           // 老师手动改 is_correct = 人工判定（ground truth），按口径「人工标错直接入」，
@@ -2299,7 +2325,7 @@ app.put('/api/questions/:id', async (req, res) => {
         // [P1-几何重绘] 老师改判错（旧判对/未定 → 新判错）→ 复活几何资产并重绘。
         // 重绘异步进行、失败只告警，绝不阻塞改判响应（幂等见 requeueGeometryRedrawOnRejudgeWrong）。
         // 只对 is_correct 明确变错触发；改成对/平移状态不花钱重绘。
-        if (is_correct === false && updatedQuestion?.id && oldIsCorrect !== false) {
+        if (isCorrectEffective === false && updatedQuestion?.id && oldIsCorrect !== false) {
           requeueGeometryRedrawOnRejudgeWrong(updatedQuestion.id).catch(e =>
             console.warn(`[几何重绘·改判错] 异步调用异常: ${e.message.slice(0, 80)}`)
           )
@@ -2310,7 +2336,7 @@ app.put('/api/questions/:id', async (req, res) => {
       createJudgement({
         questionId: id,
         source: 'pc_edit',
-        isCorrect: is_correct,
+        isCorrect: isCorrectEffective,
         metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id'), misjudgeType }
       }).catch(e => console.error('[Shadow] judgements写入失败 (pc_edit):', e.message))
     }

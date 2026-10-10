@@ -254,6 +254,15 @@ export const finalizeRejudgeResult = async ({
            WHEN $1 IS FALSE THEN 'wrong'
            WHEN status = 'wrong' THEN 'pending'
            ELSE status END,
+         review_status = CASE
+           -- [2026-10-10 修复] 人工改判为「对」= 误判 ⇒ 错题标记必须一并解除。
+           -- 判对时本函数下方已 DELETE wrong_questions（从错题本移除），
+           -- 若还留着 review_status='wrong'，复核页就会同时显示「已标记错误」+判定为对
+           -- （负责人报障的「已复核-AI翻案」形态，全库 31 条）。
+           -- 只认人工触发（manualOverride）：AI 自动重解析（manualOverride=false）
+           -- 不得推翻老师的人工结论。
+           WHEN $5::boolean AND $1 IS TRUE AND review_status IN ('wrong', 'wrong_no_book') THEN NULL::text
+           ELSE review_status END,
          confidence = CASE
            -- blank（L1-a 2026-09-23）：无条件覆盖，不保留旧值也不走 GREATEST。
            -- 旧值可能是 0（历史残留）或 0.95（错误管线写的），两种都要归到 1.0。
@@ -264,7 +273,7 @@ export const finalizeRejudgeResult = async ({
          END,
          updated_at = NOW()
      WHERE id = $3`,
-    [isCorrect, nextConfidence, question.id, isBlankQuestion]
+    [isCorrect, nextConfidence, question.id, isBlankQuestion, manualOverride === true]
   )
 
   let wrongQuestionAdded = false
@@ -535,11 +544,29 @@ export const finalizeGeneratedExamResults = async ({
         questionId,
         updateQuestionValues[index]
       ])
+      // [2026-10-10 修复] 重练判对 = 这道错题被消灭，题目上的错题标记必须一并解除：
+      //   · review_status='wrong' / 'wrong_no_book' → NULL（否则复核页同时显示
+      //     「已标记错误」+「已复核-AI翻案」）
+      //   · status='wrong' → 'pending'（与 finalizeRejudgeResult 判对时的翻法同口径，
+      //     否则 GET /api/questions?status=wrong 仍把这题当错题筛出来）
+      // 此前只写 is_correct ⇒ 老师看到「重练都做对了，标记还写着错」（负责人报障，全库 31 条）。
+      // 只清判「对」的题；判错的题保持原标记不动。
+      const correctIds = updateQuestionIds.filter((_, index) => updateQuestionValues[index] === true)
+      const correctParam = params.length + 1
+      const idsParam = params.length + 2
       await client.query(
         `UPDATE ${TABLES.QUESTIONS}
-         SET is_correct = CASE id ${buildIsCorrectAssignments(updateQuestionIds)} END, updated_at = NOW()
-         WHERE id = ANY($${params.length + 1}::uuid[])`,
-        [...params, updateQuestionIds]
+         SET is_correct = CASE id ${buildIsCorrectAssignments(updateQuestionIds)} END,
+             review_status = CASE
+               WHEN id = ANY($${correctParam}::uuid[]) AND review_status IN ('wrong', 'wrong_no_book')
+                 THEN NULL::text
+               ELSE review_status END,
+             status = CASE
+               WHEN id = ANY($${correctParam}::uuid[]) AND status = 'wrong' THEN 'pending'
+               ELSE status END,
+             updated_at = NOW()
+         WHERE id = ANY($${idsParam}::uuid[])`,
+        [...params, correctIds, updateQuestionIds]
       )
     }
 
