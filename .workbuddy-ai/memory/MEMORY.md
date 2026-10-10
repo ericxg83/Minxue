@@ -53,6 +53,7 @@
 - ⛔ 批改中心「待处理」= `isPendingReviewItem`（与「待人工复核」chip 同一判据），**不许**再拿 `PENDING_REVIEW_WORKFLOW_STATUSES.has()` 直接过列表 —— 该集合含 `'retry'`，会把「已布置·待学生作答」的重练卷列进待处理（chip 写 0、列表 10 条，2026-10-09 负责人截图）。未交卷重练卷只在「待学生作答」tab /「重练已布置」chip 可见；其右侧摘要「错题」必须显示「—」（原数字来自原作业题目行旧判定）。锁 `test/pendingReviewCaliber.test.mjs`。
 - ⛔ 多根组件收不到 class ⇒ 定位类挂外层；工作台自己滚 ⇒ 看 `getBoundingClientRect().top`。→ data-pages
 - ⛔ src/ 不许有不可达模块（`test/moduleReachability.test.mjs` 全量 BFS）；删死代码走归档惯例（负责人 WIP 先 cp `D:\Minxue_Archive\` 再 git rm）。
+- ⛔ **删「死代码」前必须分清「死声明」和「有副作用的调用」**：`eslint no-unused-vars` 只判「返回值没人读」，判不出调用本身在落盘/写库/发通知。2026-10-02 `4a0fcf6` 就是这样把 `const { savedTo } = await saveFileToDevice(blob, filename)` 整行删掉 ⇒ 移动端「下载PDF」变成只弹成功提示、文件从不保存（2026-10-10 修复 `e63d096`）。规矩：此类调用**必须消费返回值**（哪怕只用于 Toast 回显），锁 `test/printPreviewDownload.test.mjs`。移动端「下载PDF」落盘唯一入口 `src/utils/nativeDownload.js`（原生 Capacitor Filesystem → `Documents/敏学试卷/`，Web file-saver saveAs）。
 - ⛔ 批改/识别唯一在服务端（worker processSlimGrading）；前端禁直调 AI（noClientDirectAI 锁）；QuotaBanner 的 modelscope 是标签键不是调用。
 - ⛔ 冒烟双闸门：构建 `MSYS_NO_PATHCONV=1 VITE_API_URL=/api vite build --outDir …`（防烤入生产 base/MSYS 改写）；preview 必带 --outDir 并 curl 验对象。→ frontend-verify-discipline
 - ⛔ 门禁/体检脚本读「固定产物文件」（如 `tmp/prune-lint.json`）必须先删旧 + 只认本轮（mtime ≥ 本轮 startedAt）——这类文件跨 tick 持久，命令没写出报告（超时/配置错/二进制缺失）时旧报告会顶替 ⇒ 假 `lint=0`；⛔ 别拿退出码判「跑成了没」（eslint 有错误本来就 exit 1），能分出来的是「有没有写出新报告」。实现见 `scripts/patrol/lintReportKit.mjs` + 锁 `test/patrolLintFreshness.test.mjs`。
