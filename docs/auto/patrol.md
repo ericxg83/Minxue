@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R160 — 2026/10/10 09:27:47（✅ 全绿）**
+> ⏱ **最近心跳：R161 — 2026/10/10 09:37:02（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1634,4 +1635,20 @@
     -  M src/workbench/components/review/QuestionNavPanel.vue
     -  M src/workbench/stores/reviewStore.js
     - ?? test/reviewAttentionCaliber.test.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 161 | 2026-10-10T01:37:02 | tests=2275/0 | lint=0 | build=skipped | server=ok | dirty=9 |
+
+### R161 — 2026/10/10 09:37:02（daemon 自动报告）
+
+**体检**：tests **2275/0** | lint 0 | build skipped | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 9
+
+⚠️ 发现异常：脏文件 9 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/.env.example
+    -  M server/index.js
+    -  M server/services/gradingFinalizer.js
+    -  M server/services/judgeService.js
+    - ?? test/reviewConflictSync.test.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
