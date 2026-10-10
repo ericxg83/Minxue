@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R165 — 2026/10/10 10:17:10（✅ 全绿）**
+> ⏱ **最近心跳：R166 — 2026/10/10 10:28:01（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1704,3 +1705,20 @@
     -  M docs/auto/HANDOFF.md
     -  M scripts/patrol/daemon.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 166 | 2026-10-10T02:28:01 | tests=2297/1 | lint=1 | build=FAIL | server=ok | dirty=13 |
+
+### R166 — 2026/10/10 10:28:01（daemon 自动报告）
+
+**体检**：tests **2297/1** | lint 1 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 13
+
+⚠️ 发现异常：测试 fail=1；lint errors=1；build=FAIL；脏文件 13 个（ M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs,  M server/index.js…）（需 agent 深修时下轮处理）
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M server/services/wrongGateRequeue.js
+    -  M src/domain/wrongGateTier.js
+    -  M src/services/apiService.js
+    -  M src/workbench/components/review/QuestionDetailPanel.vue
+    -  M src/workbench/components/review/ReviewTopBar.vue
+    -  M src/workbench/stores/reviewStore.js
+    -  M test/wrongGateTier.test.mjs
