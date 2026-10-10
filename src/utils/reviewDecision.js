@@ -154,12 +154,41 @@ export const getReviewStateLabel = (question, threshold = DEFAULT_CONFIDENCE_THR
  * 原因由后端判题管线写入 questions.answer_exception_reason（复用既有列），
  * 是纯观测标注：展示层只读它，绝不用它推断正误 —— 正误只看 is_correct。
  * 只在 exception 状态且学生确实作答了的题上显示；未作答本身已经说明了一切。
+ *
+ * ── 自愈（2026-10-10）────────────────────────────────────────────────
+ * `answer_exception_reason` 是一次性写入的**历史快照**，而配图是会事后补齐的
+ * （`services/figureRelocateSweep.js` 只填空、不覆盖已有值）。于是补图之后那条
+ * 「未采集到配图」仍在展示层原样弹出，与「图明明就在页面上」自相矛盾 ——
+ * 实测全库 11 条该文案里有 10 条其实已经有图。
+ *
+ * 这里在**渲染时**按当前真实状态改写文案，不写库、不动判题数据：
+ *   · 图已存在 → 改成「配图已补齐，点『AI 重解析』可重算」，并给出可执行动作；
+ *   · 答案已存在 → 直接不显示（没有任何待老师做的事，挂红条纯属噪音）。
+ * 判据只用展示层已有的字段，不新增接口。
  */
 export const getUnjudgedReasonText = (question, threshold = DEFAULT_CONFIDENCE_THRESHOLD) => {
   if (getReviewState(question, threshold) !== 'exception') return ''
   if (question?.answer_source === 'blank') return ''
   const reason = question?.answer_exception_reason
-  return typeof reason === 'string' ? reason.trim() : ''
+  const text = typeof reason === 'string' ? reason.trim() : ''
+
+  // 自愈①：缺图类标注，且配图现已存在 —— 原文已与事实不符，改为可行动提示
+  if (text.includes('未采集到配图')) {
+    const hasFigure = !!(question?.geometry_image_url && String(question.geometry_image_url).trim())
+    if (hasFigure) {
+      return '配图已补齐，可点「AI 重解析」重新计算答案'
+    }
+  }
+
+  // 自愈②：参考答案已经拿到（后端补图重算或老师手填后落的库）—— 没有待办事项了
+  const hasAnswer = !!(question?.answer && String(question.answer).trim())
+  if (hasAnswer && text) {
+    const decided = !!question?.review_status
+    // 已下结论的题不该再挂「AI未判定」红条；未下结论的保留原文（老师仍需处理）
+    if (decided) return ''
+  }
+
+  return text
 }
 
 /**
