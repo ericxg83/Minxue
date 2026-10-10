@@ -366,16 +366,23 @@ export const updateTaskStatus = async (taskId, status, result = null) => {
     const data = await apiRequest(`/tasks/${taskId}/retry`, { method: 'POST' })
     return data
   }
-  return apiRequest(`/tasks/${taskId}`, {
+  const data = await apiRequest(`/tasks/${taskId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status })
   })
+  // 写操作禁静默缓存：task.status 一变，批改中心列表卡与摘要里的待复核卷数都得重算。
+  // ⛔ 不清的话，老师点「完成复核」后侧栏徽标最长 90s 仍显示旧数字（2026-10-10 事故）。
+  clearTasksCacheForTask(taskId)
+  clearCache('tasks_summary_cache')
+  return data
 }
 
 export const retryTask = async (taskId) => {
   const data = await apiRequest(`/tasks/${taskId}/retry`, { method: 'POST' })
   clearTasksCacheForTask(taskId)
+  // 同 updateTaskStatus：重新处理会把 failed 挪进/挪出待复核队列 ⇒ 摘要缓存必须失效
+  clearCache('tasks_summary_cache')
   return data
 }
 
@@ -1130,7 +1137,14 @@ export const clearStudentCaches = (studentId) => {
       `tasks_cache_${studentId}`,
       `exams_cache_${studentId}`,
       `wrong_questions_cache_${studentId}`,
-      generatedExamsCacheKey(studentId)
+      generatedExamsCacheKey(studentId),
+      // 全局摘要（/api/tasks/summary）：里面装着 pendingReviewPapers = 全系统待人工复核卷数，
+      // 复核完成会直接把它从 N 改成 N-1。不清 ⇒ 侧栏「批改中心」徽标在最长 90s
+      // （getTasksSummary 的 localStorage TTL）内一直显示旧数字，而同页 chip 已经是 0 ——
+      // 2026-10-10 负责人截图：「批改中心已经是没有任务了，为什么左侧还是 1」。
+      // 它跟 studentId 无关，但**任何**学生状态变化都会影响这个全局计数，
+      // 所以凡调本函数（=凡学生数据变了）都必须连它一起清。
+      'tasks_summary_cache',
     ]
     studentCacheKeys.forEach(key => {
       clearCache(key)

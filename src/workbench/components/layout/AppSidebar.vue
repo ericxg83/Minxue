@@ -75,11 +75,12 @@ const go = (path) => { if (route.path !== path) router.push(path) }
 // 批改中心=待人工复核卷数；其余入口暂无现成计数，不加。
 // ⛔ 批改中心徽标必须用 pendingReviewPapers（口径与页内 chip 同源）；
 //    用 pendingReview（未读通知数）会出现「徽标 1 / 页面 7」（2026-10-09 事故）。
-// r25x（负责人裁决，2026-10-09）：学习诊断「今日新增错题」角标下线——纯信息性计数，
-//    进页面不清零、也不代表有待办（「这个 1 是什么」），违反小而美原则。
+// ⛔ 2026-10-10：原先写成 `?? pendingReview` 兜底 —— 摘要接口一旦没下发新字段，
+//    徽标就会静默退化成「未读通知数」，也就是把 2026-10-09 那个事故重新埋回去。
+//    这里只认唯一字段，缺失就当 0（顶多少显示一个角标，绝不显示另一个语义的数字）。
 const badgeFor = (path) => {
   if (path === '/grade') {
-    return noti.summary?.pendingReviewPapers ?? noti.summary?.pendingReview ?? 0
+    return noti.summary?.pendingReviewPapers ?? 0
   }
   return 0
 }
