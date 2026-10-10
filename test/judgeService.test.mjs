@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType, stripAnswerScaffolding, sanitizeReferenceAnswer } from '../server/services/judgeService.js'
+import { judgeAnswer, normalizeChoiceAnswer, normalizeQuestionType, stripAnswerScaffolding, sanitizeReferenceAnswer, detectUnverifiableReference, describeUnverifiableReference } from '../server/services/judgeService.js'
 
 test('normalizes explicit choice answer variants globally', () => {
   assert.equal(normalizeChoiceAnswer('D'), 'D')
@@ -484,4 +484,44 @@ test('sanitizeReferenceAnswer truncates chained equations to their final segment
   // 既有能力不得回退：解析标记截断照旧
   assert.equal(sanitizeReferenceAnswer('-1/4 解析：设直线 AB 与 y 轴交于点 D，如图'), '-1/4')
   assert.equal(sanitizeReferenceAnswer('y = -1/3(x + 3)²'), 'y = -1/3(x + 3)²')
+})
+
+// 「等式（即 中文结论）」参考形态必须转人工，而不是硬判错（2026-10-10 用户截图题 #11）。
+// 根因：参考 "DA² = DB·DC（即 DA 是 DB、DC 的比例中项）" 收窄后只剩括号里的中文叙述，
+// 学生写的也是中文结论句 ⇒ 字面/公式/量纲三条通道同时失效 ⇒ 恒判错。
+// 本质是「判不出」，必须落 unrecognized；全库 2941 条里只有 1 条命中该形态。
+test('reference written as equation plus prose conclusion is unverifiable, not wrong', () => {
+  const DSup = String.fromCharCode(0x00B2) // ²
+  const midDot = String.fromCharCode(0x00B7) // ·
+  const lparen = String.fromCharCode(0xFF08) // （
+  const rparen = String.fromCharCode(0xFF09) // ）
+  const ji = String.fromCharCode(0x5373)      // 即
+  const ref = `DA${DSup} = DB${midDot}DC${lparen}${ji} DA 是 DB${lparen}DC${rparen}的比例中项${rparen}`
+
+  assert.equal(detectUnverifiableReference(ref), 'unverifiable_reference')
+  assert.match(describeUnverifiableReference(ref), /等式（即中文结论）/)
+
+  // 完整证明过程（用户案例）：判不出 → 转人工，不是判错
+  const student = [
+    String.fromCharCode(0x2234) + String.fromCharCode(0x25B3, 0x0043, 0x0044, 0x0041) +
+      String.fromCharCode(0x223D, 0x25B3, 0x0041, 0x0044, 0x0042),
+    String.fromCharCode(0x2235, 0x0044, 0x0041, 0x002F, 0x0044, 0x0042, 0x0020, 0x003D, 0x0020, 0x0044, 0x0043, 0x002F, 0x0044, 0x0041),
+  ].join('\n')
+  assert.deepEqual(judgeAnswer(student, ref, 'answer'), { isCorrect: null, unrecognized: true })
+
+  // 反例①：括号内是**数字换算**，必须仍能判对（闸门不得误伤可核对的答案）
+  assert.equal(detectUnverifiableReference('23/20' + lparen + ji + ' 1又3/20' + rparen), null)
+  assert.deepEqual(judgeAnswer('23/20', '23/20' + lparen + ji + ' 1又3/20' + rparen, 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 反例②：普通答案全部不受影响
+  assert.equal(detectUnverifiableReference('2 mm'), null)
+  assert.equal(detectUnverifiableReference('500 cm' + String.fromCharCode(0xFF0C) + ' 80 cm' + String.fromCharCode(0xB2)), null)
+  assert.deepEqual(judgeAnswer('2', '2', 'answer'), { isCorrect: true, unrecognized: false })
+  // 反例③：闸门只拦"判不出"，不得把这类参考变成放水通道
+  //（参考不可核对时一律 unrecognized，绝不返回 true）
+  for (const stu of ['', '乱写', 'DA 是 DB 的中项', 'DA/DB = 3']) {
+    const r = judgeAnswer(stu, ref, 'answer')
+    assert.equal(r.isCorrect, null, `学生答案「${stu}」不应被判对`)
+    assert.equal(r.unrecognized, true)
+  }
 })

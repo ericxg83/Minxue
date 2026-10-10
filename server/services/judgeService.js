@@ -71,6 +71,27 @@ const UNVERIFIABLE_REFERENCE_PATTERNS = [
   /[；;，,]\s*证明[:：]/
 ]
 
+/**
+ * 「等式（即 中文结论）」形态的参考答案（2026-10-10 用户截图题 #11）。
+ *   "DA² = DB·DC（即 DA 是 DB、DC 的比例中项）"
+ *
+ * 判等层对这类参考**无从核对**：收窄后只剩括号里的中文叙述，而学生写的也是中文
+ * 结论句，字面 / 公式 / 量纲三条通道会同时失效 ⇒ 恒判错。本质是「判不出」，
+ * 必须落到 unrecognized 转人工，否则正确证明被判错、进错题本与掌握度。
+ *
+ * 判据收窄到「括号内以 即/也就是 开头，且后面跟字母或汉字（叙述）」：
+ * 满库 3341 条参考只命中 1 条；而 "23/20（即 1又3/20）"、
+ * "点B表示3/4（即0.75）" 这类括号内是**数字换算**的答案不命中
+ * （"即"后跟数字），仍走原数值比对。
+ *
+ * ⚠️ 「即」后必须允许字母：`（即 DA 是…）` 的 "即" 后面是空格+字母 D，
+ * 写成只认中文会漏掉这条唯一的目标样本。
+ */
+const PROSE_PAREN_EXPLAIN_RE = /[（(]\s*(?:即|也就是|也就是说)\s*[一-龥A-Za-z]/
+
+// 供 detectUnverifiableReference 逐条匹配（与上面的表保持同一份判据）
+UNVERIFIABLE_REFERENCE_PATTERNS.push(PROSE_PAREN_EXPLAIN_RE)
+
 export function detectUnverifiableReference(referenceAnswer) {
   const raw = String(referenceAnswer ?? '').trim()
   if (!raw) return null
@@ -108,6 +129,12 @@ export function describeUnverifiableReference(referenceAnswer) {
   const bare = raw.replace(/[。.；;，,\s、]+/g, '')
   if (BARE_PLACEHOLDER_RE.test(bare)) {
     return `参考答案为「${raw}」（答案册原答案），无从自动比对，请人工核对`
+  }
+  // 「等式（即 中文结论）」单独一档（2026-10-10）：它是**结论**不是过程，
+  // 说成"整段证明过程"会让老师以为答案是空的；实际是"等式+中文解释"双写形态，
+  // 逐字比对与公式比对都判不出，只能人工核对。
+  if (PROSE_PAREN_EXPLAIN_RE.test(raw)) {
+    return '参考答案是「等式（即中文结论）」形态，无法自动比对，请人工核对'
   }
   if (PROOF_HEAD_RE.test(raw) || raw.length >= LONG_REF_LEN) {
     return '参考答案是整段证明/解答过程（答案册原答案），无法逐字自动比对，请人工核对'
