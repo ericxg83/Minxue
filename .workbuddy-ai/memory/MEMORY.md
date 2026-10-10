@@ -23,6 +23,14 @@
   （AI 判错/判对但参考答案存疑，负责人 2026-10-10 要求也进待处理；列表行配 `.item-answer-risk`「⚠ 参考答案」小签）。
   ⛔ 必须靠 `review_status` 收口：后端只在「人工改写参考答案」时清该列（`PUT /api/questions/:id` 的 `answerRewritten`），
   老师点判错/判对确认结论时该列**仍留着** ⇒ 不看 review_status 会永远卡在待处理里清不掉。锁 `test/reviewAttentionCaliber.test.mjs`。
+- ⛔ 「同档通道」不算降级（2026-10-10 负责人要求）：实测与主模型**并列满分**的答案通道
+  （默认 `ANSWER_ENGINE_TRUSTED` = `Bailian:qwen3.8-flash` / `SenseNova:glm-5.2` / `SenseNova:deepseek-v4-pro`，
+  横评依据 `_答案引擎模型选型-全量汇总-20261010.md`）产出的答案**不得**写
+  「参考答案由降级通道 X 生成（主模型不可用），建议核对」—— 那是环境噪音，不是答案错。
+  ⛔ 两个闸**故意不合并**：`isDegradedAnswerEngine`（要不要提醒老师核对，同档豁免）与
+  `needsConsensusSampling`（要不要多路投票，同档**照旧投票** —— Bailian 自己的三路采样也会分歧，
+  全库 39 条留痕，那是唯一能自动发现「参考答案算错」的信号）。锁 `test/answerEngineTrustedChannel.test.mjs`。
+  弱通道（fallback-text-chain / Huihuiyun / BigModel glm-4.7-flash / sensenova-6.8-lite）判据不变。
 - ⛔ 「错题标记」`review_status`（wrong/wrong_no_book）与判定 `is_correct` **不得并存矛盾**（2026-10-10 负责人裁定「严重 BUG」）：
   重练结算判对（`gradingFinalizer.finalizeGeneratedExamResults`）、人工改判为对（`finalizeRejudgeResult` 的 `$5=manualOverride`，
   **AI 自动重解析 manualOverride=false 不得推翻人工结论**）、`PUT /api/questions/:id` 改判为对
