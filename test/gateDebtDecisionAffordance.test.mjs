@@ -47,10 +47,13 @@ const auditPanel = (src) => {
   }
 
   // ② 欠账判据必须来自闸1 的唯一口径（store.gateSkippedQuestions），不得另算一套
+  //[2026-10-10] 区间终点从「组件里的 watcher」改为「判定唯一入口」——
+  // 摘账逻辑已上移到 store.reviewQuestion（组件里那个 watcher 因前置条件恒不生效而删除，
+  // 详见 test/gateDebtImmediateClear.test.mjs）。判据本身的落点没变，仍是 gateSkippedQuestions。
   const debtComputed = anchoredRange(
     src,
     'const currentQIsGateDebt = computed(',
-    'watch(() => q.value?.review_status',
+    '// [闸1 欠账清零 2026-10-10]',
     LABEL,
     fails
   )
@@ -65,13 +68,15 @@ const auditPanel = (src) => {
   }
 
   // ④ 拍板后本地要即时摘掉欠账（否则徽标仍显示 2，老师以为没生效）
-  const watcher = anchoredSlice(src, 'watch(() => q.value?.review_status', 520, LABEL, fails)
+  //[2026-10-10] 摘账实现已上移到 store.reviewQuestion（判定唯一入口）。此处只断言
+  // 「组件里不再有第二个摘账实现」—— 真正的清账判据由 gateDebtImmediateClear.test.mjs 盯。
+  const watcher = anchoredSlice(src, '// [闸1 欠账清零 2026-10-10]', 600, LABEL, fails)
   if (watcher !== null) {
-    if (!watcher.includes('gate_auto_skipped')) {
-      fails.push(`${LABEL}：拍板后没清 gate_auto_skipped ⇒ 卷内 ⚠ 标识不会消失`)
+    if (watcher.includes('removeGatePendingItem')) {
+      fails.push(`${LABEL}：QuestionDetailPanel 里仍有摘账实现 ⇒ 同一件事两个实现，且那个 watcher 因前置条件恒不生效`)
     }
-    if (!watcher.includes('removeGatePendingItem')) {
-      fails.push(`${LABEL}：拍板后没从待补入清单摘掉 ⇒ 顶栏「待补入 N」不会减`)
+    if (!watcher.includes('store.reviewQuestion')) {
+      fails.push(`${LABEL}：删掉组件 watcher 后没写明清账已上移到 store.reviewQuestion —— 后人容易再把失效 watcher 加回来`)
     }
   }
 
@@ -94,7 +99,7 @@ test('★ 反向自检：修复前的形态（完成态无条件吞掉判定区�
     '</template>',
     '<script setup>',
     'const currentQIsGateDebt = computed(() => true)',
-    'watch(() => q.value?.review_status, () => {})',
+    '// [闸1 欠账清零 2026-10-10] 摘账已上移到 store.reviewQuestion',
     '</script>'
   ].join('\n')
   const fails = auditPanel(before)

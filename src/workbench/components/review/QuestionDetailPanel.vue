@@ -561,17 +561,12 @@ const currentQIsGateDebt = computed(() => {
   return store.gateSkippedQuestions.some(({ q: gq }) => gq.id === id)
 })
 
-// 老师就这道欠账题拍板后（review_status 不再是 wrong_no_book），本地立刻把它从
-// 「待补入」清单与卷内标识里摘掉，不必等重进页面才看到徽标变化。
-// 清单只是展示性缓存，权威判据在后端（gate-pending 端点要求 review_status='wrong_no_book'），
-// 下次拉取自然一致 —— 这里不清也不会写错任何数据，只是让反馈即时。
-watch(() => q.value?.review_status, (status) => {
-  const cur = q.value
-  if (!cur || cur.gate_auto_skipped !== true) return
-  if (!status || status === 'wrong_no_book') return
-  cur.gate_auto_skipped = false
-  store.removeGatePendingItem(cur.id)
-})
+// [闸1 欠账清零 2026-10-10] 拍板后「摘掉欠账」的逻辑**已上移到 store.reviewQuestion**
+// （判定的唯一入口，鼠标/键盘/误判弹窗三条路径都经过它）。
+// 此处原有一个 watcher，但它在拍板路径上永远不生效：它以 `gate_auto_skipped === true`
+// 为前置，而拍板成功后后端已把那一位置为 false ⇒ 每次都在第一行 return，
+// 于是顶栏「⚠ 待补入 N」不减、老师点进去是空的（负责人 11:32 实测）。
+// 同一件事只留一个实现（AGENTS 铁律），故删此 watcher。
 
 // [P0-3 归因免打扰 2026-09-27] 会话级开关（组件存续期间有效，刷新页面恢复询问）：
 // 勾选「本次批改不再询问」后，本会话内 wrong→correct 一律静默落库，misjudgeType 留空

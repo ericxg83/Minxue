@@ -730,6 +730,13 @@ export const useReviewStore = defineStore('review', () => {
     const question = allQuestions.value.find(q => q.id === questionId)
     if (!question) return
 
+    // [闸1 欠账即时清零2026-10-10] 判定「前」先把这道题是否欠账捕获下来。
+    // 为什么要前置：拍板成功后后端会把 gate_auto_skipped 置false（它已不再是
+    // 「自动放行且未入册」），此时再问「这题欠不欠账」永远答 false ⇒ 角标不减、
+    // 老师看到「⚠ 待补入 2」点进去却是空的（负责人 11:32 实测）。
+    // 唯一口径仍是 gate_auto_skipped（← 后端 isGateAutoSkippedRow），不另立判据。
+    const wasGateDebt = question.gate_auto_skipped === true
+
     // ── 完整逻辑（完整性校验 + 错题本同步） ──
     // 完整性检查 — 标记"错误"时，不完整的题目不进错题本
     if (result === REVIEW_STATUS.WRONG) {
@@ -782,6 +789,13 @@ export const useReviewStore = defineStore('review', () => {
     trackReviewWrite(
       updateQuestionReviewStatus(questionId, result, metadata)
         .then(async (data) => {
+          // [闸1 欠账即时清零 2026-10-10] 拍板成功 → 这道题不再是「自动放行且未入册」，
+          // 顶栏角标必须当场减，不能等下次进页面才收敛（否则「角标还在、点进去空」）。
+          // 只动本地展示性缓存，不承担任何写入判据（权威判据在后端 gate-pending 端点）。
+          if (wasGateDebt) {
+            question.gate_auto_skipped = false
+            removeGatePendingItem(questionId)
+          }
           if (result === REVIEW_STATUS.WRONG) {
             // 后端回传的强入结果：只在「没入成」时提醒老师，added/already_exists 静默通过
             const sync = data?.question?.wrong_book_sync
