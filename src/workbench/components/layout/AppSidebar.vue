@@ -36,7 +36,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { Collection, DataAnalysis, DocumentChecked, Files, HomeFilled, MoreFilled, Notebook, Tickets, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, DocumentChecked, Files, HomeFilled, MoreFilled, Notebook, Reading, Tickets, User } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 
 const route = useRoute()
@@ -54,7 +54,9 @@ const navGroups = [
     items: [
       { label: '批改中心', path: '/grade', icon: DocumentChecked },
       { label: '学习诊断', path: '/weekly-report', icon: DataAnalysis },
-      { label: '学生管理', path: '/students', icon: User }
+      { label: '学生管理', path: '/students', icon: User },
+      // r260（2026-10-10 负责人拍板方案 A）：错题检索直达页，翻 r91「侧栏 3 项」口径
+      { label: '错题', path: '/wrongbook', icon: Reading }
     ]
   },
   {

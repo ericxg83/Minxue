@@ -3997,6 +3997,57 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
   }
 })
 
+// [r260 · 2026-10-10 负责人拍板方案A] 跨学生全库错题检索：
+// 老师想找"某道题"时往往不预设学生（现有 /student/:studentId 必须先定学生）。
+// 搜索范围 = 题干（有档案行走 questions.content，无档案孤儿行走 wrong_questions.content 快照），
+// 正确答案一并参与匹配（辅助定位）。只读检索，全量搜（含已掌握），结果带学生名与
+// task_id/question_id，前端复用「去原题编辑」链路直达（/grade/task?studentId=&taskId=&q=）。
+// 数据规模实测（2026-10-10 探针）：1261 条错题，跨 join ILIKE 仅 73-75ms，无需索引。
+app.get('/api/wrong-questions/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim()
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200)
+    if (!q) {
+      return res.json({ success: true, items: [], total: 0 })
+    }
+    // LIKE 通配符转义，防老师输入 % / _ 引发全表模糊
+    const like = '%' + q.replace(/[\\%_]/g, (m) => '\\' + m) + '%'
+    const { rows } = await query(
+      `SELECT wq.id, wq.student_id, s.name AS student_name, wq.question_id,
+         wq.lifecycle_status, wq.error_count, wq.practice_count, wq.added_at,
+         COALESCE(NULLIF(q.content, ''), wq.content) AS content,
+         COALESCE(NULLIF(q.answer, ''), wq.correct_answer) AS correct_answer,
+         q.task_id
+       FROM ${TABLES.WRONG_QUESTIONS} wq
+       LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+       JOIN ${TABLES.STUDENTS} s ON s.id = wq.student_id
+       WHERE COALESCE(NULLIF(q.content, ''), wq.content) ILIKE $1
+          OR COALESCE(NULLIF(q.answer, ''), wq.correct_answer) ILIKE $1
+       ORDER BY wq.added_at DESC
+       LIMIT $2`,
+      [like, limit]
+    )
+    // total 用相同条件再数一次（ LIMIT 前的命中总数，供结果区显示"共 N 条"）
+    const { rows: countRows } = await query(
+      `SELECT COUNT(*)::int AS total
+       FROM ${TABLES.WRONG_QUESTIONS} wq
+       LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
+       WHERE COALESCE(NULLIF(q.content, ''), wq.content) ILIKE $1
+          OR COALESCE(NULLIF(q.answer, ''), wq.correct_answer) ILIKE $1`,
+      [like]
+    )
+    res.json({
+      success: true,
+      items: rows,
+      total: countRows[0]?.total ?? rows.length,
+      truncated: (countRows[0]?.total ?? 0) > rows.length
+    })
+  } catch (error) {
+    console.error('错题检索失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
 // [P0-2a] 按 (student_id, question_id) upsert，修复扫码批改 ID 错配
 app.put('/api/wrong-questions/upsert', async (req, res) => {
   try {

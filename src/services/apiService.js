@@ -721,6 +721,18 @@ export const fetchWrongQuestionsPage = async (studentId, { limit = 100, offset =
   }
 }
 
+// 跨学生全库错题检索（r260 · 2026-10-10）：老师按题干关键字找一道题，不预设学生。
+// 只读搜索，免缓存（每次输入词不同，缓存无意义）；结果带 student_name + task_id/question_id
+// 供「去原卷编辑」直达。q 为空时后端返回空集。
+export const searchWrongQuestions = async (q, { limit = 50 } = {}) => {
+  const data = await apiRequest(`/wrong-questions/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+  return {
+    items: data.items || [],
+    total: data.total ?? 0,
+    truncated: !!data.truncated
+  }
+}
+
 export const getLatestJudgements = async (studentId, questionIds) => {
   return apiRequest('/judgements/latest', {
     method: 'POST',

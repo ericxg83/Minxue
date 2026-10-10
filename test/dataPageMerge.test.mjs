@@ -11,10 +11,17 @@
  * ⛔ 本文件里最要紧的一条是**「家长成长卡不能丢」**：它是老师转发给家长的产出物
  *    （`GrowthCardButton`），成长中心下线时如果只删页面不搬它，等于删掉一条业务链路。
  *
- * ⛔ 第二条是「页面下线 ≠ 老书签 404」：两条路由必须留 redirect 兜底。
+ * ⛔ 第二条是「页面下线 ≠ 老书签 404」：两条路由必须留兜底。
  *
- * ⛔ 第三条是「别再给死入口」：全仓不得再出现指向 /wrongbook 的硬跳转
- *    （错题中心里那排勾选框是死 UI，真正能组重练卷的入口在移动端错题本与学习诊断）。
+ * ⛔ 第三条是「别再给死入口」：全仓不得再出现指向 /growth 的硬跳转。
+ *
+ * ── r260 翻案（2026-10-10 负责人拍板方案 A）─────────────────────────────
+ * /wrongbook 复活为「错题检索」真页面（跨学生按关键字找一道题 + 去原卷编辑直达）。
+ * 这不是 r91 下线的「错题分析页」回流：检索页不放统计卡/图表，只做"搜题 → 行动"。
+ * 学生档案页的 embedded 错题清单（③ 组断言）保持不动。
+ * 同步变化：侧栏「教学工作」从 3 项变 4 项（+错题）；/wrongbook 老书签兜底从
+ * redirect 改为 beforeEnter（带 studentId 仍落档案页）；指向 /wrongbook 的跳转
+ * 白名单 = 侧栏 + 路由定义。
  */
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -136,7 +143,7 @@ test('⛔ 知识点下钻抽屉（openDrill）不得复活：它依赖已删除�
 
 // ─────────────────── ② 页面真的下线了 ───────────────────
 
-test('侧栏「教学工作」只剩 3 项，成长中心与错题中心都不在菜单里', () => {
+test('侧栏「教学工作」4 项：批改中心 / 学习诊断 / 学生管理 / 错题（r260 翻案 +错题，成长中心永不在菜单）', () => {
   // ⚠️ 压掉空白再切片（r214）：navGroups 被格式化成多行后，旧的
   // `indexOf("label:'教学工作'")` 找不到锚点 ⇒ 切出空串 ⇒ 三条「少了 XX」全红（假红，
   // 2026-10-06 实测踩过）。见 test/sourceLockKit.mjs#flatSource。
@@ -146,10 +153,10 @@ test('侧栏「教学工作」只剩 3 项，成长中心与错题中心都不�
   const group = flat.slice(at)
   const line = group.slice(0, group.indexOf(']'))
   assert.ok(!line.includes('/growth'), '侧栏还有成长中心入口')
-  assert.ok(!line.includes('/wrongbook'), '侧栏还有错题中心入口')
-  for (const keep of ['批改中心', '学习诊断', '学生管理']) {
+  for (const keep of ['批改中心', '学习诊断', '学生管理', '错题']) {
     assert.ok(line.includes(keep), `侧栏教学工作少了「${keep}」`)
   }
+  assert.ok(line.includes('/wrongbook'), '侧栏缺错题检索入口（r260 负责人拍板方案 A）')
   // 图标 import 也要跟着清：TrendCharts 已无使用者
   assert.ok(!/TrendCharts/.test(SIDEBAR_SRC), 'TrendCharts 图标已无使用者，应从 import 里去掉')
 })
@@ -172,15 +179,16 @@ test('下线页的文件与只被它引用的资产都已删除（不留孤儿�
     'getRecommendedTopics 已无前端调用方，应随页删除（后端 /weakness/recommend 路由保留）')
 })
 
-test('⛔ 页面下线 ≠ 老书签 404：两条路由必须留 redirect 兜底', () => {
+test('⛔ 老书签不白屏：/growth 仍 redirect；/wrongbook 是真页面且带 studentId 兜底落档案页（r260）', () => {
   assert.ok(!/import\('\.\.\/views\/GrowthWorkbench\.vue'\)/.test(ROUTER_SRC), '路由还在加载已删除的 GrowthWorkbench')
-  assert.ok(!/import\('\.\.\/views\/WrongBookWorkbench\.vue'\)/.test(ROUTER_SRC), '路由还在加载已删除的 WrongBookWorkbench')
+  assert.ok(!/import\('\.\.\/views\/WrongBookWorkbench\.vue'\)/.test(ROUTER_SRC), '路由还在加载 r91 已删除的旧 WrongBookWorkbench（r260 复活的是新的 WrongBookSearch，不是旧分析页）')
   const growth = ROUTER_SRC.slice(ROUTER_SRC.indexOf("path: '/growth'"), ROUTER_SRC.indexOf("path: '/growth'") + 160)
   assert.match(growth, /redirect:/, '/growth 必须留 redirect，否则老书签白屏')
   assert.match(growth, /\/weekly-report/, '/growth 应重定向到学习诊断')
-  const wb = ROUTER_SRC.slice(ROUTER_SRC.indexOf("path: '/wrongbook'"), ROUTER_SRC.indexOf("path: '/wrongbook'") + 240)
-  assert.match(wb, /redirect:/, '/wrongbook 必须留 redirect，否则老书签白屏')
-  assert.match(wb, /studentId/, '/wrongbook?studentId=x 应落到那名学生的档案页，而不是丢掉学生上下文')
+  const wb = ROUTER_SRC.slice(ROUTER_SRC.indexOf("path: '/wrongbook'"), ROUTER_SRC.indexOf("path: '/wrongbook'") + 320)
+  assert.match(wb, /WrongBookSearch\.vue/, '/wrongbook 应加载错题检索页（r260 负责人拍板方案 A）')
+  assert.match(wb, /beforeEnter/, '带 studentId 的老书签必须兜底落档案页（redirect 改真页面后由 beforeEnter 承担）')
+  assert.match(wb, /studentId/, '兜底逻辑必须保留学生上下文')
 })
 
 // ─────────────────── ③ 错题清单搬到了学生档案页 ───────────────────
@@ -237,17 +245,23 @@ test('学生档案页「最近重练」空态指向本页就能做到的入口',
   assert.ok(!code.includes('生成再测卷'), '入口统一叫「重练卷」，不得再出现「生成再测卷」旧说法')
 })
 
-// ─────────────────── ④ 全仓不再有指向 /wrongbook 的硬跳转 ───────────────────
+// ─────────────────── ④ 指向 /wrongbook 的跳转必须走合法入口（r260 白名单） ───────────────────
 
-test('⛔ 全仓（除路由 redirect 定义外）不得再出现指向 /wrongbook 的跳转', () => {
+test('⛔ 全仓指向 /wrongbook 的跳转只允许出现在合法入口（r260：侧栏导航 + 路由定义）', () => {
+  // r91 时 /wrongbook 是纯死路由所以一刀切禁；r260 它复活为错题检索页，
+  // 合法引用收窄为：路由定义 + 侧栏导航项。其余文件出现即违规（防止死入口回流）。
+  const ALLOWED = new Set([
+    'src/workbench/router/index.js',
+    'src/workbench/components/layout/AppSidebar.vue'
+  ])
   const offenders = []
   for (const file of walk(join(ROOT, 'src', 'workbench'))) {
     const rel = file.slice(ROOT.length + 1).replace(/\\/g, '/')
-    if (rel === 'src/workbench/router/index.js') continue // redirect 定义本身，允许
+    if (ALLOWED.has(rel)) continue
     const code = stripComments(readFileSync(file, 'utf8'))
     if (/\/wrongbook/.test(code)) offenders.push(rel)
   }
-  assert.deepEqual(offenders, [], `以下文件还在硬跳 /wrongbook：${offenders.join(', ')}`)
+  assert.deepEqual(offenders, [], `以下文件还在硬跳 /wrongbook（不在白名单）：${offenders.join(', ')}`)
 })
 
 test('全仓（除路由 redirect 定义外）不得再出现指向 /growth 的跳转', () => {

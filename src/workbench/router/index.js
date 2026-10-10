@@ -24,12 +24,17 @@ const routes = [
   // 复核台空态一颗按钮触达。整页删除，复核台那颗按钮改指首页 '/'。该页非导航目标、
   // 无外部书签，不留 redirect。
   // 第 91 轮：独立的「错题中心」页面下线，错题清单并入学生档案页（#student-wrong）。
-  // 保留 redirect 只作历史书签的兜底：老链接带 studentId 就落到那名学生的档案页，否则落到学生列表。
+  // r260（2026-10-10 负责人拍板方案 A）：/wrongbook 复活为「错题检索」真页面——
+  //   跨学生按关键字找一道题（此前唯一入口要先定学生再长下拉）。这不是 r91 下线的
+  //   「错题分析页」回流：不放统计卡/图表，只做"搜题 → 去原卷编辑"一件事。
+  //   学生档案页的 embedded 错题清单保持不动（单生操作场景）。
+  //   老书签兜底：/wrongbook?studentId=x 仍落到那名学生的档案页（beforeEnter）。
   {
     path: '/wrongbook',
-    redirect: to => (to.query.studentId
-      ? { path: `/students/${to.query.studentId}` }
-      : { path: '/students' })
+    name: 'WrongBookSearch',
+    component: () => import('../views/WrongBookSearch.vue'),
+    beforeEnter: (to) => (to.query.studentId ? { path: `/students/${to.query.studentId}` } : true),
+    meta: { requiresPC: true }
   },
   {
     path: '/paper',
