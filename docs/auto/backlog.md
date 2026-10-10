@@ -4350,3 +4350,51 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   **r250-③**（B，观察）：`SUMMARY_TTL` 只有 10s，DB 恢复后缓存里那份旧值最多旧十几秒；真正要命的是 DB 断的时间窗内前端一直拿旧数字。
 - **第二候选（仍未做）**：㉘（141 题 `is_complete` 口径拍板，家长「批改题量」少 141 题）、㊸（export-retry-pdf 留/删/接线）、㊴+㉚（渲染超时 **180s**，r229 实测）、r249-②（灯名挂着两件事，需拍板）、⑲/㊲/㊵（每天自动体检 or 备份定时任务）。
 - 另需负责人处理 Render 面板部署（㉒/㊼）与 running/206 的 stale 锁。
+
+## 第 253 轮（2026-10-10 08:46–09:1x，每小时兜底脉冲 → 移动端/工作台共用层）：「重新处理」后任务列表缓存没被清掉（清错了键）
+
+- 开工三级判据：锁 `finished / 252`（**18 小时前**释放）｜`git status -uall` 只有 3 个**陈旧**在制
+  （`.workbuddy-ai/memory/MEMORY.md` 10-09 10:31、`docs/auto/HANDOFF.md` 10-09 13:16、`scripts/patrol/daemon.mjs` 10-08 01:06）
+  + 未跟踪 `巡检报告_r252.md`｜最近提交 `bbe8a04`(10-09 14:40) 已 **18 小时**、daemon 最后 tick 也在 10-09 14:40
+  ⇒ 主循环与 daemon **一起停了 18 小时**（机器过夜）⇒ `loopGuard acquire` 接管 **r253**（收尾 release 成 `finished/r253`）。
+- ⚠️ **并发实记（本轮最该记住的）**：开工约 10 分钟后**另一会话苏醒**（08:56 起 daemon 也恢复：R156/R157 自动报告已提交）——
+  它认领的**也叫 r253**（`server/_r253_dump.mjs` mtime 08:57，`_*` 被 gitignore），在改 `src/utils/mathText.js`（09:01）、
+  `src/utils/reviewDecision.js`、`src/workbench/stores/reviewStore.js`（几何题 KaTeX 乱码方向）。
+  两侧文件集**不相交** ⇒ 零碰撞零覆盖；本会话**路径级 `git add` 只提交自己的 4 个文件**，它的在制一律未碰、未带进 commit。
+  ⇒ **教训：`finished` 锁龄 18 小时 ≠ 可以安心干一整天** —— 环境可能在你开工后不久就被唤醒，别的会话（甚至同号轮次）随时会冒出来。
+    落笔后必须复看 `git status`：本轮就是靠「`M src/utils/mathText.js` 凭空出现」发现的（r244→r245 / r167 同款）。
+- 赛道：**移动端 App 体验 + 打印/PDF 产出物**（`src/services/apiService.js`；该赛道认领方 Quest 会话的自动化**实测不存在**，见 lanes 勘误）
+  —— 属本兜底脉冲历史赛道（r212/r234 先例）。
+- ⭐ **主发现（A 级·缓存失效，实测不是推理）**：`retryTask` / `convertTaskRoute` 清的是 `tasks_cache_{taskId}`，
+  而任务列表缓存的键是 **`tasks_cache_{studentId}`**（`getTasksByStudent` 唯一写入方）⇒ **拿任务 id 拼学生的键，该键永远不存在 = 等于没清**。
+  链路：老师在工作台批改中心点「重新处理」→ `retryTask` 清了个空键 → `GradeCenterWorkbench.handleRetryTask` 接着
+  `loadData()`（默认 `force=false`）→ `getTasksByStudent(studentId, /*useCache*/ true)` **命中 5 分钟旧缓存**
+  （`CACHE_MAX_AGE.TASKS`）⇒ 那一行状态不变、「重新处理」按钮还在，**看着像没点上**
+  （服务端其实已重新入队，再点一次会回「正在处理中，不用重复提交」）。
+  `ConvertRouteDialog`「改批改方式」走 `convertTaskRoute` + `emit('converted')` → `loadData()`，同一枚雷。
+  （`ReviewTopBar` 那条路径不受影响：它调 `store.loadStudentTasks()`，内部用 `getTasksByStudent(id, false)` 绕过缓存。）
+- 修（4 文件 +308/−20）：
+  - 新增 `src/services/taskCacheKeys.js`：缓存键判据**唯一实现**（`isTasksCacheKey` 只认本体、不认 `_ts` 兄弟键；
+    `pickTasksCacheKeys` 挑要清的键），纯函数、Node 可直接 import；
+  - `src/services/apiService.js` 新增 `clearTasksCacheForTask(taskId)`：只清「缓存里**确实含这道任务**」的学生缓存
+    （解析 JSON 定位），定位不到（缓存已过期/内容损坏）时退回清全部任务列表缓存 —— 宁可多刷一次，也不留旧列表；
+  - `retryTask` / `convertTaskRoute` 两处改引它（错键写法一处不剩）。
+- ⭐ **连带修了一处门禁假红（r234 铁律的镜像）**：新模块的**文档注释**里写了 `getTasksByStudent(studentId, useCache = true)`
+  ⇒ `test/mobileApiImports.test.mjs` 把**注释里的说明文字**判成「调用了但没导入」，套件当场 1 红。
+  按 r234 先例（门禁语料必须先剥注释）改**判据**而不是改注释：该锁改用 `apiCallerAuditKit.stripComments`，
+  并把单文件检查抽成纯函数 `unimportedCallsIn` + 加反向自检（真调用仍判红 / 注释说明不判红 / 字符串里的 `//` 不许被吃）。
+- 回归锁 `test/mobileTaskCacheInvalidation.test.mjs` **9 条**（纯函数真跑 + 接线源码锁 + 模块可 import 自证）。
+  **反向自检**：内联合成「修复前」片段 ≥2 处判红；另**真实旧版对跑**（`git show HEAD:src/services/apiService.js` 导出后喂同一把判据）
+  ⇒ retryTask / convertTaskRoute **2/2 判红**，新树 9/9 绿。
+- 四道闸：单测 **2251 / 2251 过 / fail 0**（基线 2241 + 本轮 9 + 门禁自检 1）｜eslint **0e / 118w**（error 零新增，warning 126→118）｜
+  `dist_nightly_20261010r253` **48.95s**（main `main-D3w5a0I_.js`，未动 `dist/`）｜preview `5530`（curl 验对象 `text/javascript`）+
+  cert_probe **exit 0**（只有 OSS 图片，正常业务）+ render_smoke **8/8** + route_sweep **0/16**，预览已按 PID 杀清。
+- ⚠️ **跨赛道实记（请负责人定归属）**：改的 `src/services/apiService.js` 属「移动端」赛道（Quest 会话自动化实测不存在）；
+  `test/mobileApiImports.test.mjs` 属「测试套件门禁基线」。开工锁 18 小时陈旧、工作区 18 小时零写入、主循环与 daemon 双停 ⇒ 零碰撞，
+  按 r142/r148/r152/r234 先例执行并点名。
+- 提案 **r253-①**（A/B 边界，很小未做）：`NotificationList.vue`（PC 通知中心）那张卡把 `summary.pendingReview`（**未读通知数**）
+  标成「待复核」，而「待复核」在首页 KPI / 侧栏徽标 / 批改中心 chip 上都是 `pendingReviewPapers`（**卷数**）——
+  同一句词两个数，正是 2026-10-09「首页 1 vs 批改中心 7」那件事的另一个入口；移动端同类卡已叫「待确认」。改文案即可，等拍板。
+  **r253-②**（B，沿用）：㉘（141 题 `is_complete` 口径）、㊸（export-retry-pdf 留/删/接线）、㊴+㉚（渲染超时 180s）、
+  r249-①/②（失败灯口径与灯名）、⑲/㊲/㊵（定时任务）。
+- 下轮接第 254 轮（编号以 loopGuard 返回值为准）：A 级活基本清完，首选 r253-①（文案一行）或从 B 级挑一件请负责人拍板后落地。

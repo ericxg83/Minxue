@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R157 — 2026/10/10 08:58:01（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R158 — 2026/10/10 09:07:40（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -1582,4 +1583,21 @@
     -  M src/services/apiService.js
     - ?? src/services/taskCacheKeys.js
     - ?? test/mobileTaskCacheInvalidation.test.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 158 | 2026-10-10T01:07:40 | tests=2261/0 | lint=0 | build=FAIL | server=ok | dirty=10 |
+
+### R158 — 2026/10/10 09:07:40（daemon 自动报告）
+
+**体检**：tests **2261/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 10
+
+⚠️ 发现异常：build=FAIL；脏文件 10 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M src/hooks/useExamReview.js
+    -  M src/utils/mathText.js
+    -  M src/utils/reviewDecision.js
+    -  M src/workbench/components/review/QuestionNavPanel.vue
+    -  M src/workbench/stores/reviewStore.js
+    - ?? test/reviewAttentionCaliber.test.mjs
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
