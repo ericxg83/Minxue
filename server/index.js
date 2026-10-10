@@ -2916,6 +2916,8 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     // 通道，必须让老师知道该自己核一遍，而不是当成标准答案照单全收。
     // 标尺用「本次点名的通道」而不是全局主模型：重解析点名的是 kimi-k3 / qwen3.8-flash，
     // 拿全局主模型（SenseNova:deepseek-flash）当标尺会把一次成功的点名误判成降级。
+    // ⚠️ 2026-10-10：「同档通道」（Bailian:qwen3.8-flash 等，见 config/ai.js
+    //    ANSWER_ENGINE_TRUSTED）不算降级，不出这条标注 —— 重解析第 1 跳正是它。
     const degraded = isDegradedAnswerEngine(result?.engine, result?.expectedProvider)
     // 与人工改写参考答案同一口径（见本文件人工改写处的注释）：
     // 新答案写库后，针对**旧**答案写下的风险标注全部失效，必须清掉或换成新的，

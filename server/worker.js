@@ -14,7 +14,7 @@ import crypto from 'crypto'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, getResourceAnswersBySection, getResourceById, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -2082,7 +2082,10 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
     // rpm 限流后，代码降级到兜底弱模型 Huihuiyun:deepseek-v4-flash，而该模型在
     // **同一道题**上连续 4 次给出 `±5 / ±10 / ±10 / ±10` —— 单次采样等于掷骰子；
     // 对照 Bailian 付费池的 deepseek-v4-pro 同题 3/3 全对。
-    // 降级通道才需要投票：多路一致 → 采纳；分歧 → 采纳多数派但必须留痕交人工。
+    // 非主通道才需要投票：多路一致 → 采纳；分歧 → 采纳多数派但必须留痕交人工。
+    // ⚠️ 2026-10-10：「同档通道」（如 Bailian:qwen3.8-flash，横评 20/20）**照旧投票** ——
+    //    它不出「建议核对」标注（那是 isDegradedAnswerEngine 的事），但它自己的多路分歧
+    //    是目前唯一能自动发现「参考答案算错」的信号。两个闸问的不是同一个问题，别合并。
     let consensus = null
     // ⚠️ 这里**故意不提供「关掉补采」的开关**（2026-09-24 定调）：
     // 补采投票存在的唯一理由是「产出答案的不是主模型」。此时关掉它等于把弱模型的
@@ -2091,7 +2094,7 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
     // 拿不到就失败），不是靠关投票来给降级答案放行。
     if (ANSWER_QUALITY.CONSENSUS_ENABLED
         && !imageDataURL
-        && isDegradedAnswerEngine(engine, expectedProvider)
+        && needsConsensusSampling(engine, expectedProvider)
         && isVotableAnswer(answer)) {
       const extraCount = Math.max(0, ANSWER_QUALITY.SAMPLES_ON_DEGRADED - 1)
       if (extraCount > 0) {
@@ -2409,6 +2412,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
   // 参考答案可信度提示：多路分歧 / 通道降级。
   // 缓存命中的题没有 result（答案来自 question_cache，不是本次求解）→ 不产生任何提示。
+  // ⚠️ 2026-10-10：「同档通道」（Bailian:qwen3.8-flash 等，见 config/ai.js ANSWER_ENGINE_TRUSTED）
+  //    不算降级 —— 实测与主模型并列满分，不该让老师逐条核对（负责人要求）。
   const buildAnswerTrustNotes = (result) => {
     if (!result || !result.engine) return []
     const notes = []

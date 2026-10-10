@@ -1316,13 +1316,62 @@ export function isAnswerEnginePrimaryDegraded() {
   return Date.now() < _answerEnginePrimaryDownUntil
 }
 
-/** 产出该答案的通道是不是「主供应商 + 主模型」——不是就说明发生了降级，答案可信度要打折 */
-export function isDegradedAnswerEngine(provider, expected = null) {
+/**
+ * ── 「同档通道」（2026-10-10 负责人要求）─────────────────────────────────────
+ *
+ * 实测与主模型**并列满分**的答案通道：命中它们的答案，可信度不打折，
+ * **不得**给老师挂「参考答案由降级通道 X 生成（主模型不可用），建议核对」。
+ *
+ * 依据 `_答案引擎模型选型-全量汇总-20261010.md`（2026-09-21 横评，10 题 × 2 次）：
+ *   · `Bailian:qwen3.8-flash` —— 20/20，与 deepseek-v4-pro / qwen3.8-max 并列；1.3s、0.0015 元/题。
+ *     是当前批改链路的兜底第 3 跳 + 重解析第 1 跳，**主模型一倒就由它顶上**。
+ *   · `SenseNova:glm-5.2` —— 20/20，30 题里 29 对（97%）。
+ *   · `SenseNova:deepseek-v4-pro` —— 20/20（该模型名在商汤端点已 404，只为存量标注兼容保留）。
+ *
+ * ⛔ 这条豁免**只影响「要不要提醒老师自己核一遍」**，不影响多路投票：
+ *    实测 `Bailian:qwen3.8-flash` 自己三路采样也会分歧（全库 39 条因此留痕，
+ *    候选真出现过 5/2、17/7、17/14 三个不同结果），撤掉投票等于把它的单次采样当标准答案。
+ *    投票闸见 `needsConsensusSampling`。
+ *
+ * 回滚：`ANSWER_ENGINE_TRUSTED=` 置空即恢复「只有主模型不算降级」的旧口径。
+ */
+export const ANSWER_ENGINE_TRUSTED = (process.env.ANSWER_ENGINE_TRUSTED
+  || 'Bailian:qwen3.8-flash,SenseNova:glm-5.2,SenseNova:deepseek-v4-pro')
+  .split(',').map(s => s.trim()).filter(Boolean)
+
+/** 该通道是否属于「同档通道」（主模型本身也算） */
+export function isTrustedAnswerEngine(provider) {
+  if (!provider) return false
+  if (provider === `${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}`) return true
+  return ANSWER_ENGINE_TRUSTED.includes(provider)
+}
+
+/**
+ * 多路投票闸（**准确性**机制，与「要不要给老师标注」解耦）。
+ *
+ * 只要产出答案的不是「主模型 / 本次点名通道」就补采多路投票 —— 因为单次采样可能掷骰子
+ * （2026-09-21 事故：兜底弱模型同题连测 `±5/±10/±10/±10`）。
+ * ⚠️ 「同档通道」也要投票：`Bailian:qwen3.8-flash` 横评 20/20 不代表每题稳定，
+ *    它的多路分歧正是目前唯一能自动发现「参考答案算错」的信号（会写进 ai_answer_risk_reason）。
+ */
+export function needsConsensusSampling(provider, expected = null) {
   if (!provider) return true
   // expected = 本次调用实际点名的通道（由 callAnswerEngineCompletion 的 expectedProvider 带回）。
   // 不传时退回全局主模型标尺 —— 批改链路正是这种用法，行为与改造前逐字一致。
   const target = expected || `${ANSWER_ENGINE.VENDOR}:${ANSWER_ENGINE.MODEL}`
   return provider !== target
+}
+
+/**
+ * 产出该答案的通道是不是「可信度要打折的降级通道」—— 决定要不要提醒老师自己核一遍。
+ *
+ * 与 `needsConsensusSampling` 的唯一差别：**同档通道不算降级**。
+ * 两者都基于「不是主模型 / 不是点名通道」，不是两套口径（见 ANSWER_ENGINE_TRUSTED 注释）。
+ */
+export function isDegradedAnswerEngine(provider, expected = null) {
+  if (!provider) return true
+  if (isTrustedAnswerEngine(provider)) return false
+  return needsConsensusSampling(provider, expected)
 }
 
 /**
