@@ -71,8 +71,14 @@ export const planForOrphan = (orphan, archiveRows) => {
       // 重跑后小问结构变化（如2问变3问）：小问号对不上，宁可不接
       return { action: 'keep', reason: `第${orphan.questionNumber}题小问结构在重跑后变化(${sameNo.length}行)，不硬接` }
     }
+  } else if (sameNo.length === 1) {
+    // ⛔ 孤儿无小问号 + 同题号唯一 ⇒ 题号即身份（同一份卷重跑），直接采用，
+    //    不再要求内容一致——OCR 重跑文字常有微差，卡内容会把可接的拒之门外
+    //    （实测：唯一行 35 条里 24 条因文字微差被误判 keep）。
+    target = sameNo[0]
   }
   if (!target) {
+    // 走到这里只剩：多行且无小问号 → 内容归一化逐字相同唯一定位
     const byContent = sameNo.filter(q => normContent(q.content) === normContent(orphan.content))
     if (byContent.length !== 1) {
       return { action: 'keep', reason: `第${orphan.questionNumber}题拆${sameNo.length}行且内容无法唯一定位，不硬接` }
