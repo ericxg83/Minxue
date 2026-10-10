@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R195 — 2026/10/10 15:17:00（⚠️ 有异常（见下方报告））**
+> ⏱ **最近心跳：R196 — 2026/10/10 15:27:40（⚠️ 有异常（见下方报告））**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -2069,4 +2070,19 @@
 ⚠️ 发现异常：lint errors=1；脏文件 3 个（ M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs, ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"…）（需 agent 深修时下轮处理）
     -  M docs/auto/HANDOFF.md
     -  M scripts/patrol/daemon.mjs
+    - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
+| 196 | 2026-10-10T07:27:40 | tests=2351/3 | lint=1 | build=FAIL | server=ok | dirty=8 |
+
+### R196 — 2026/10/10 15:27:40（daemon 自动报告）
+
+**体检**：tests **2351/3** | lint 1 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 8
+
+⚠️ 发现异常：测试 fail=3；lint errors=1；build=FAIL；脏文件 8 个（ M .workbuddy-ai/memory/MEMORY.md,  M docs/auto/HANDOFF.md,  M scripts/patrol/daemon.mjs…）（需 agent 深修时下轮处理）
+    -  M .workbuddy-ai/memory/MEMORY.md
+    -  M docs/auto/HANDOFF.md
+    -  M scripts/patrol/daemon.mjs
+    -  M server/index.js
+    -  M src/services/apiService.js
+    -  M src/workbench/router/index.js
+    - ?? src/workbench/views/WrongBookSearch.vue
     - ?? "\345\267\241\346\243\200\346\212\245\345\221\212_r252.md"
