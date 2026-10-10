@@ -1,11 +1,6 @@
 {
   "$comment": "r219 门禁登记册：后端暴露、但全仓找不到调用方的**业务**端点必须在此登记「为什么它还留着」。运维类端点（/api/admin/ /api/diagnostics/ /api/knowledge/ /api/worksheets/ /api/paper 前缀）允许零调用方，不进本册。改册 = 产品决定，别随手删条目。",
   "endpoints": {
-    "POST /api/wrong-questions/export-retry-pdf": {
-      "reason": "r219 实测：这条服务端重练卷 PDF + 二维码导出链路全仓零调用方。学生扫的二维码其实是手机端现算的（src/pages/PrintPreview → src/utils/retryTaskUrl.js），根本不经本端点；这条服务端路径连同它那套「用请求来源推二维码地址」的逻辑（来源是本机地址时会印出学生扫不了的死链）一起没人跑。留着还是删掉/接线，等负责人拍板（提案 ㊸）。",
-      "since": "2026-10-06",
-      "track": "服务端基础设施（本轮已登记，等拍板）"
-    },
     "POST /api/wrong-questions/figure-relocate": {
       "reason": "r219 实测零调用方：几何配图的重定位端点。几何配图与重绘管线是 lanes.md 点名的另一条在跑的赛道，本轮不越界动手，只登记事实，等那条赛道的会话认领或放弃。",
       "since": "2026-10-06",

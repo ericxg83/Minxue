@@ -37,7 +37,7 @@
 
 | 赛道 | 范围（可写路径） | 认领方 | 状态 |
 |---|---|---|---|
-| **移动端 App 体验 + 打印/PDF 产出物** | `src/App.jsx`、`src/pages/**`、`src/components/**`、`src/hooks/**`、`src/utils/**`（含 `pdfGenerator.js`、`imageEnhancer.js`、`nativeDownload.js`）、`src/services/apiService.js`、`src/domain/**`、`vite.config.js` 分包、`server/routes/**` 中仅导出/PDF 相关端点 | Quest 会话（2026-10-04 认领，定时任务「移动端与PDF产出物巡检优化」每 30 分钟） | 🟢 已认领 |
+| **移动端 App 体验 + 打印/PDF 产出物** | `src/App.jsx`、`src/pages/**`、`src/components/**`、`src/hooks/**`、`src/utils/**`（含 `pdfGenerator.js`、`imageEnhancer.js`、`nativeDownload.js`）、`src/services/apiService.js`、`src/domain/**`、`vite.config.js` 分包、`server/routes/**` 中仅导出/PDF 相关端点 | **每小时兜底脉冲会话（2026-10-10 起，负责人明确「移动端赛道你也一起负责」）** ＋ Quest 会话（2026-10-04 名义认领；其定时任务实测**不存在**，见第 217 轮勘误） | 🟢 已认领 |
 | **服务端基础设施（非批改）** | `server/config/**`、`server/utils/**`（除 `geom/**`、`areaModel*`、`numberAxis*`、`functionGraph*`）、`server/queue.js` 的队列/连接配置、`server/index.js` 的非批改部分、数据库查询与索引健康、进程内存/句柄、定时任务、日志与可观测性、**家长可见产出物的服务端渲染**（`server/services/shareCard*.js`、`server/routes/{shareCard,weeklyReport}.js`） | 常驻巡检会话（2026-10-04 认领，定时任务「敏学常驻巡检循环」每日 21:30） | 🟢 已认领 |
 
 **第 132 轮（2026-10-05，本赛道）已交付：家长分享卡「基本掌握」层（commit `d3a899d`）**
@@ -422,3 +422,11 @@
   cert_probe 零外联 exit 0 + render_smoke **8/8** + route_sweep **0/16**，全 exit 0。
 - 复用价值：①「显式清单」修法本身 fail-open，要对着磁盘真实清单判；②门禁判据要问「它看得见新增吗」；
   ③ 扫描失效（空结果）必须判红，否则退化成永真门禁。
+
+**2026-10-10（第 254 轮）：负责人指定「移动端赛道你也一起负责」——本兜底脉冲会话正式接管该赛道**
+- 背景：本表「移动端 App 体验 + 打印/PDF 产出物」原记为 Quest 会话认领，但第 217 轮实测其定时任务
+  **不存在** ⇒ 该赛道长期无人守（r253 的 `tasks_cache` 清错键就是在这条赛道上修掉的）。
+- 负责人 2026-10-10 明确：「从今往后，移动端赛道你也一起负责」⇒ 认领方补上本会话（见上表）。
+- 范围不变（见上表可写路径）；跨赛道（PC 工作台视图/store、白板、批改链路、几何管线、DB）仍只写提案。
+- 本轮落地：PC 通知中心那张「未读通知数」卡不再叫「待复核」（改「待确认」，与移动端同词）——
+  详见 backlog 第 254 轮。

@@ -94,7 +94,6 @@ assert.deepEqual(badReason, [], `登记册里以下条目的 reason 太短/缺�
 // ── 5. 本轮实测的真实死端点必须都在扫描结果里（防止扫描悄悄失灵）───────────
 // 它们是本轮取证的依据；若哪天这些端点真被删/真被接线，本条会红 ⇒ 提醒同步更新登记册。
 const MEASURED_DEAD = [
-  'POST /api/wrong-questions/export-retry-pdf',
   'POST /api/wrong-questions/figure-relocate',
   'POST /api/questions/batch-update-tags',
   'GET /api/teaching/error-types',

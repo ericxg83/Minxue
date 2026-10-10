@@ -60,9 +60,16 @@ test('每日重练卷服务端选题默认排除 review_1/mastered（队列分�
   // 默认分支必须只放行 new；opt-in 分支才排除 mastered
   assert.match(svc, /: wqRows\.filter\(\(r\) => r\.lifecycle_status === 'new'\)/)
   assert.match(svc, /includeReview1 = false/)
-
-  const route = read('server/routes/wrongQuestionsExport.js')
-  assert.match(route, /includeReview1: includeReview1 === true/)
+  // ⚠️ r254（提案㊸ 拍板删除）：原断言读的是 `server/routes/wrongQuestionsExport.js` 里的
+  //    `includeReview1: includeReview1 === true`（HTTP 入参 → 服务参数的 opt-in 转换）。
+  //    那条死路由已按负责人拍板删除 ⇒ 这里再断言它就变成了「守住一个已不存在的东西」。
+  //    口径本身没变（默认仍只放行 new），改为在**服务签名**上守住 opt-in 的默认值，
+  //    保证将来有人改默认档位时这条锁仍会判红。
+  assert.match(
+    svc,
+    /export async function exportWrongRetryPdf\(\{[\s\S]*?includeReview1 = false/,
+    '重练卷导出的 includeReview1 默认值必须是 false（默认只放行 new），opt-in 才放开 review_1'
+  )
 })
 
 test('周报重练卷选题必须包含到期 review_1（第二次验证承载）', () => {

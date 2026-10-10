@@ -14,8 +14,14 @@
       <div class="summary-card" @click="goRoute('pendingReview')">
         <div class="card-icon icon-blue"><el-icon size="18"><DocumentChecked /></el-icon></div>
         <div class="card-body">
+          <!-- 第 254 轮：这张卡的数字是 summary.pendingReview = **未读通知数**
+               （SQL: status='done' AND notification_read_at IS NULL，点一次铃铛就全部标已读、数字塌缩到 0），
+               ⛔ 不能叫「待复核」——PC 别处的「待复核」是**待人工复核的卷数**（pendingReviewPapers，
+               首页 KPI / 侧栏徽标 / 批改中心 chip 同口径，见 utils/pendingReviewCaliber.js），
+               同一个词两个数正是 2026-10-09「首页 1 vs 批改中心 7」那件事的另一个入口。
+               这里与移动端 NotificationsPanel.jsx 同词叫「待确认」（同一字段、两端一个名）。 -->
           <span class="card-num">{{ summary.pendingReview }}</span>
-          <span class="card-label">待复核</span>
+          <span class="card-label">待确认</span>
         </div>
       </div>
       <div class="summary-card" @click="goRoute('failedTasks')">

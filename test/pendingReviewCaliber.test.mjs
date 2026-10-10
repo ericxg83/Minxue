@@ -223,3 +223,57 @@ test('源码锁：/api/tasks/summary 必须同时下发 pendingReview（未读�
   assert.match(block, /pendingReviewPapers/, '缺少待复核卷数字段')
   assert.match(block, /getPendingReviewPaperCount\(\)/, '必须调用服务端计数服务')
 })
+
+// ─────────── C. 通知中心那张「未读通知数」卡的标签（2026-10-10 第 254 轮）───────────
+//
+// 缺陷：PC 通知中心（NotificationList.vue）那张卡的数字取 `summary.pendingReview`
+//   —— 那是**未读通知数**（点一次铃铛即归零），卡片标签却写「待复核」；
+//   而 PC 别处的「待复核」= **待人工复核的卷数**（pendingReviewPapers，首页 KPI / 侧栏徽标 /
+//   批改中心 chip 同口径）。**同一个词、两个数**，正是 2026-10-09「首页 1 vs 批改中心 7」
+//   事故的另一个入口（那一次只改了 KPI/徽标，通知中心漏网）。
+// 修复：该卡改叫「待确认」—— 与移动端 NotificationsPanel.jsx 对同一字段的用词一致（两端一个名）。
+//   ⛔ 不改卡片的数字来源（它本来就该是「未读」，随已读归零），只改词。
+
+test('源码锁：PC 通知中心「未读通知数」卡的标签不得叫「待复核」，须与移动端同词', () => {
+  const pc = read('src/workbench/components/layout/NotificationList.vue')
+  const mobile = flatSource(read('src/components/NotificationsPanel.jsx'))
+
+  // 移动端的词作为「唯一来源」抽出（不硬编码，两端才真会同进同退）
+  const m = mobile.match(/key:'pendingReview',label:'([^']+)'/)
+  assert.ok(m, '移动端 NotificationsPanel 的 pendingReview 卡片标签没解析到 —— 更新本锁前先对账')
+  const mobileLabel = m[1]
+
+  const fails = []
+  const block = anchoredSlice(
+    flatSource(pc),
+    '{{summary.pendingReview}}',
+    120,
+    'NotificationList.pendingReviewCard',
+    fails
+  )
+  assert.deepEqual(fails, [], fails.join('; '))
+  assert.doesNotMatch(
+    block,
+    /待复核/,
+    '该卡数字是「未读通知数」（点一次铃铛即归零），叫「待复核」会与 PC 别处的「待复核=卷数」撞词'
+  )
+  assert.ok(
+    block.includes(mobileLabel),
+    `该卡标签应与移动端同词「${mobileLabel}」（同一字段两端一个名）`
+  )
+})
+
+test('反向自检：合成「修复前」片段（该卡标签写「待复核」）必须判红', () => {
+  const oldSnippet = flatSource(
+    '<span class="card-num">{{ summary.pendingReview }}</span>' +
+      '<span class="card-label">待复核</span>'
+  )
+  const fails = []
+  const block = anchoredSlice(oldSnippet, '{{summary.pendingReview}}', 120, 'synthetic-old', fails)
+  assert.deepEqual(fails, [], fails.join('; '))
+  // 把上面那条「不得叫待复核」的判据原样套到旧片段上，必须抛 —— 否则本锁是空锁
+  assert.throws(
+    () => assert.doesNotMatch(block, /待复核/),
+    '合成旧样本判绿了 —— 说明「不得叫待复核」这条判据没起作用'
+  )
+})

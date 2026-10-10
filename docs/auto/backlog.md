@@ -4398,3 +4398,37 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   **r253-②**（B，沿用）：㉘（141 题 `is_complete` 口径）、㊸（export-retry-pdf 留/删/接线）、㊴+㉚（渲染超时 180s）、
   r249-①/②（失败灯口径与灯名）、⑲/㊲/㊵（定时任务）。
 - 下轮接第 254 轮（编号以 loopGuard 返回值为准）：A 级活基本清完，首选 r253-①（文案一行）或从 B 级挑一件请负责人拍板后落地。
+
+## 第 254 轮（2026-10-10 09:5x，负责人直接指派 → 移动端/工作台共用层）：「待复核」这个词在通知中心被用错了地方（已修）+ 移动端赛道正式接管
+
+- 来源：**负责人直接指令**（非兜底脉冲自选）——回上轮交付报告时给了两条：
+  ① 「通知中心那句『待复核』的地方，文案可以改」；② 「从今往后，移动端赛道你也一起负责」。
+- 开工判据：锁 `finished / r253`（09:07 释放，约 50 分钟前）｜`git status` 在制 8 个**全属他人**
+  （`server/config/ai.js`、`server/worker.js`、`server/index.js`、`src/utils/mathText.js`、
+  `reviewStore.js`、`useExamReview.js`、`QuestionNavPanel.vue` 等，属答案引擎 + 几何渲染两个方向）
+  ｜HEAD `d1d409c` ⇒ 按协议 `loopGuard acquire` 认领 **r254**（收尾 release 成 `finished/r254`）。
+- **交付（A 级，纯文案 + 锁）**：`src/workbench/components/layout/NotificationList.vue` 那张卡的标签
+  「待复核」→「**待确认**」。数字来源一字未动（仍是 `summary.pendingReview` = 未读通知数，随已读归零），
+  只把**词**改对：PC 别处的「待复核」= `pendingReviewPapers`（**卷数**，首页 KPI / 侧栏徽标 / 批改中心 chip
+  同口径，见 `utils/pendingReviewCaliber.js`），同一个词两个数 —— 正是 2026-10-09「首页 1 vs 批改中心 7」
+  那件事的**另一个入口**（r253 只发现、未动）。改「待确认」= 与移动端 `NotificationsPanel.jsx:82` 对
+  同一字段的用词**两端同词**。
+- 新锁（追加进既有 `test/pendingReviewCaliber.test.mjs`，不另开文件）：
+  ① 源码锁「该卡不得叫『待复核』，且必须与移动端同词」——移动端的词用正则**现场抽出**（不硬编码，
+     两端才真会同进同退）；② 反向自检（合成「修复前」片段必须判红）。
+  **真实旧版对跑**：`git show HEAD:` 导出旧 `NotificationList.vue` ⇒ 同一把判据 **2/2 判红**，新树 19/19 绿。
+- 四道闸：`npm test` **2288/2288 fail 0**｜eslint 改动文件零输出（`.vue` 是**已登记的 lint 盲区**，
+  `eslint.config.js` 文件头写明；唯一在闸内的 `test/*.mjs` 干净）｜`dist_nightly_20261010r254` **52.67s**
+  （未动 `dist/`；main `main-C2RtgLja.js`）｜preview `5531`（curl 验 index `text/html` + main JS
+  `text/javascript` 313904B）+ cert_probe **exit 0**（仅 OSS 图片，正常业务）+ render_smoke **8/8**（0 错误）
+  + route_sweep **0/16**。
+- **真机级验证（本轮额外做）**：playwright 打开 `workbench.html#/` → 点 `#bell-btn` → 读 DOM：
+  卡片标签 `["待确认","失败任务","今日错题","全部待办"]`、数字 `["1","0","1","1"]`、**0 控制台错误**。
+  产物核对：`workbench` chunk 里 `待确认 ×1`、`待复核 ×1`（剩下那条是「最近待办」每行的**任务状态**
+  ——`status==='done'` 即「待复核」，属另一语义，**有意保留**）。
+- **赛道变更（记入 `lanes.md`）**：负责人指定「移动端赛道你也一起负责」⇒ 本会话正式认领
+  「移动端 App 体验 + 打印/PDF 产出物」；该赛道原记的 Quest 会话定时任务第 217 轮已实测**不存在**。
+- ⚠️ 并发实记：本轮在制区 8 个文件全属**他人**（答案引擎 + 几何渲染），与我的 4 个文件
+  （`NotificationList.vue`、`pendingReviewCaliber.test.mjs`、`lanes.md`、`backlog.md`）**零交集** ⇒ 路径级 `git add` 只提自己的。
+- 下轮接第 255 轮：移动端赛道已归本会话，`lanes.md` 接手提示里的「首屏偶发 400（待观察）」
+  「PullToRefresh 回归前查 manualChunks」可择机复核；B 级提案（㉘/㊸/㊴+㉚/r249-①/②/⑲/㊲/㊵）仍等拍板。
