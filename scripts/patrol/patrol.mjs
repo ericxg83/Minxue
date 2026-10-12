@@ -111,12 +111,20 @@ if (FORCE_BUILD || srcChanged) {
 
 /* ── D2. 冒烟（构建通过且 src 有改动时自动跑，让 daemon 轮自足）── */
 let smoke = null
-if ((FORCE_BUILD || srcChanged) && buildOk === 'ok') {
+// ⛔ 冒烟依赖 :5173 dev server 存活；守护进程按负责人指令关闭后 dev 可能未启动，
+//    此时直接跑冒烟必假红（2/11 一类），还会把环境缺省当成代码缺陷记入状态。
+//    dev DOWN 则标 n/a：环境未就绪 ≠ 系统异常。
+if ((FORCE_BUILD || srcChanged) && buildOk === 'ok' && health['mobile-dev'] === 'ok') {
   const s = run(process.execPath, [path.join(ROOT, 'scripts', 'patrol', 'smoke.mjs'), 'http://127.0.0.1:5173'], { timeout: 200000, silent: true })
   const m = (s.stdout || '').match(/patrol smoke[^\n]*: (\d+)\/(\d+)/)
   smoke = m ? { pass: +m[1], total: +m[2], ok: s.status === 0 } : { pass: 0, total: 0, ok: false }
   console.log(`  冒烟 ${smoke.pass}/${smoke.total}${smoke.ok ? '' : '  ⚠️ 有失败或解析不了'}`)
   if (!smoke.ok) console.log('  ' + ((s.stdout || s.stderr || '').split('\n').filter(Boolean).slice(-10).join('\n  ')))
+} else {
+  const reason = (FORCE_BUILD || srcChanged) && buildOk === 'ok'
+    ? 'dev server :5173 未运行（环境未就绪）'
+    : (buildOk !== 'ok' ? `build=${buildOk}` : 'src 无改动 + 未强制')
+  console.log(`  冒烟跳过（${reason}）→ n/a`)
 }
 
 /* ── E. lint + 死声明 ── */
