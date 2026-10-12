@@ -13,6 +13,7 @@ import express from 'express'
 import { fetchStudentWeeklyReport } from './weeklyReport.js'
 import { generateShareCardPNG } from '../services/shareCardService.js'
 import { query, TABLES } from '../config/neon.js'
+import { healStaleCompletenessForPeriod } from '../services/questionCompletenessSync.js'
 
 /**
  * 该学生是否**曾经**被批改过（不限周期，只判有没有历史）。
@@ -27,6 +28,23 @@ import { query, TABLES } from '../config/neon.js'
  *      为一张分享卡的文案让它每次多花 0.1~0.24s 不划算（r133 实测数据见该文件注释）。
  */
 async function fetchHasEverGraded(studentId) {
+  // ── 读前自愈（提案㉙，2026-10-12 负责人拍板；与周报 ㉘ 共用同一实现）──
+  // 本函数读的 is_complete 是 checkQuestionCompleteness() 的反范式缓存列，分享卡
+  // 这条链路从不写它。若某学生的题全是陈旧行（缓存假、动态口径真），这里判 false
+  // ⇒ 家长卡把老学生写成「刚起步」，与事实完全说反。
+  // r208/r272 实测当前 21 名学生无一命中（陈旧行 140 条全是真残题），修的是结构风险。
+  // 三个刻意的设计（与周报自愈同纪律）：
+  //   ① 失败不阻断：自愈挂最多退回旧判据，不能把分享卡打成 500；
+  //   ② 宽周期：'曾经' 不限周期，periodStart 取 epoch 覆盖全历史；
+  //   ③ 按学生限定：只治愈本学生的行，不做全班扫描。
+  try {
+    await healStaleCompletenessForPeriod(studentId, new Date(0), new Date(), {
+      limit: 500,
+      label: 'shareCard:everGraded'
+    })
+  } catch (e) {
+    console.error(`[shareCard] is_complete 读前自愈失败（不影响本次判据）: ${e.message}`)
+  }
   const { rows } = await query(
     `SELECT EXISTS (
        SELECT 1 FROM ${TABLES.QUESTIONS}
