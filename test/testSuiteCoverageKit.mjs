@@ -12,6 +12,7 @@
 export const MUST_COVER = [
   'server/tests/aiParseSelfCheck.test.mjs',
   'server/tests/figureBboxSemantics.test.mjs',
+  'server/tests/figureRegionRefiner.test.mjs',
   'server/tests/judgeChoiceAnswer.test.mjs',
   'server/tests/normalizeBlockBoxSemantics.test.mjs',
   'server/tests/repairAIJson.test.mjs',
@@ -20,8 +21,16 @@ export const MUST_COVER = [
   'server/utils/answerConsensus.test.js'
 ]
 
-/** 已知排除（真缺陷 + 跨赛道），与 backlog 提案 ㊱ 一一对应 */
-export const EXCLUDED = 'server/tests/figureRegionRefiner.test.mjs'
+/**
+ * 已知排除白名单（r268 起为**数组**；此前是单字符串，只容得下一条）。
+ * 2026-10-06 r215 曾登记 `server/tests/figureRegionRefiner.test.mjs`（18 过 1 红，
+ * 跨几何赛道）⇒ backlog 提案 ㊱。r268 关闭 ㊱：该文件已纳入 MUST_COVER 且唯一过期
+ * 期望按 2026-09-21 产品规则改写 ⇒ 白名单清空。
+ * ⚠️ 未来再出现「暂时不能进套件的红测试」，流程是：**先在 backlog 登记提案**，再把
+ *   文件加进本数组；`auditTestFileDiscovery` 对磁盘上任何未登记文件 fail-closed，
+ *   白名单不是「静默漏跑」的通道。每条必须是非空字符串、不含 '|'、不在覆盖清单里。
+ */
+export const EXCLUDED = []
 
 /** 把 test 脚本切成「文件/模式」列表：去引号、去 shell 噪声。 */
 export function parseTestFiles(script) {
@@ -73,7 +82,7 @@ export function auditTestFileDiscovery(pkgText, actualTestFiles) {
     fails.push('scripts.test 里没有 test/*.test.mjs —— 主套件被挤没了')
   }
 
-  const covered = new Set([...MUST_COVER, EXCLUDED])
+  const covered = new Set([...MUST_COVER, ...EXCLUDED])
 
   for (const raw of actualTestFiles) {
     const f = toPosix(raw)
@@ -124,16 +133,20 @@ export function auditCoverage(pkgText) {
     }
   }
 
-  if (!EXCLUDED.length) fails.push('EXCLUDED 常量被清空了，无法证明排除是有意为之')
-  if (listed.includes(EXCLUDED)) {
-    fails.push(`${EXCLUDED} 已在覆盖清单里 —— 那它就不该留在 EXCLUDED 白名单，请把提案 ㊱ 一并关掉`)
-  }
-  if (EXCLUDED.includes('|')) {
-    fails.push('EXCLUDED 变成了多条 —— 请把它们分别登记成独立的提案，别塞在一个字符串里')
-  }
-  // 白名单不能和覆盖清单撞车（同一文件既跑又不跑 = 清单自相矛盾）
-  if (MUST_COVER.some((f) => f === EXCLUDED)) {
-    fails.push('EXCLUDED 同时出现在 MUST_COVER 里')
+  // 白名单不变量（r268：EXCLUDED 从单字符串改为数组，逐条校验）
+  if (!Array.isArray(EXCLUDED)) {
+    fails.push('EXCLUDED 必须是数组（r268 起；单字符串形态只容得下一条排除）')
+  } else {
+    for (const f of EXCLUDED) {
+      if (typeof f !== 'string' || !f) fails.push('EXCLUDED 条目必须是非空字符串')
+      if (typeof f === 'string' && f.includes('|')) {
+        fails.push(`EXCLUDED 条目含 '|'（${f}）—— 请把它们分别登记成独立的提案，别塞在一个字符串里`)
+      }
+      if (MUST_COVER.includes(f)) fails.push(`EXCLUDED 同时出现在 MUST_COVER 里：${f}（同一文件既跑又不跑 = 清单自相矛盾）`)
+      if (listed.includes(f)) {
+        fails.push(`${f} 已在覆盖清单里 —— 那它就不该留在 EXCLUDED 白名单，请把对应 backlog 提案一并关掉`)
+      }
+    }
   }
 
   return fails

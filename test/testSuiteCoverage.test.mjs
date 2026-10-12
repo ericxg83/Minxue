@@ -44,6 +44,7 @@ import {
   EXCLUDED,
   auditCoverage,
   auditTestFileDiscovery,
+  parseTestFiles,
   TEST_FILE_RE,
   MAIN_GLOB_RE
 } from './testSuiteCoverageKit.mjs'
@@ -103,10 +104,23 @@ for (const f of MUST_COVER) {
   })
 }
 
-test('已知排除项必须真实存在且只登记一条（不允许静默漏掉更多 server 侧测试）', () => {
-  assert.ok(EXCLUDED.length > 0, 'EXCLUDED 常量被清空了，无法证明排除是有意为之')
-  // 排除项得是真实存在的文件，别写了个不存在的路径当"已登记"
-  assert.ok(existsSync(path.join(ROOT, EXCLUDED)), `${EXCLUDED} 在磁盘上不存在，白名单是假的`)
+test('排除白名单现状：㊱ 已关闭（r268），EXCLUDED 必须为空数组', () => {
+  // 2026-10-06 r215 登记的唯一排除项 server/tests/figureRegionRefiner.test.mjs 已于 r268
+  // 关闭（纳入套件 + 过期期望按 2026-09-21 产品规则改写）⇒ 白名单清空。
+  // 「排除是有意为之」的证明转移到：① 本断言（白名单不许悄悄长出条目）；
+  // ② auditTestFileDiscovery 对磁盘上任何未登记文件 fail-closed（上面 r216 用例盯着）；
+  // ③ 新增排除必须走 backlog 提案（kit 里 EXCLUDED 的注释写着流程）。
+  assert.ok(Array.isArray(EXCLUDED), 'EXCLUDED 必须是数组（r268 起从单字符串改为数组）')
+  assert.deepEqual(EXCLUDED, [], '白名单必须为空：figureRegionRefiner 已进 MUST_COVER，不许再退回排除')
+})
+
+test('㊱ 闭环锁（r268）：figureRegionRefiner 必须留在覆盖清单里，且三个入口同口径', () => {
+  // 防「回退」：任何人把它从 package.json / testFileList / kit 任一处置处，本条约判红。
+  assert.ok(MUST_COVER.includes('server/tests/figureRegionRefiner.test.mjs'), '必须留在 MUST_COVER')
+  assert.ok(!EXCLUDED.includes('server/tests/figureRegionRefiner.test.mjs'), '不许退回 EXCLUDED 白名单')
+  const listed = parseTestFiles(JSON.parse(pkgText).scripts.test)
+  assert.ok(listed.includes('server/tests/figureRegionRefiner.test.mjs'), 'package.json test script 里必须有它')
+  assert.ok(existsSync(path.join(ROOT, 'server/tests/figureRegionRefiner.test.mjs')), '文件必须在磁盘上真实存在')
 })
 
 // ───────────────────────────────────────────────────────────────────────────

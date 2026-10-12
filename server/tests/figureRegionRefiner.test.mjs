@@ -1,5 +1,17 @@
+/**
+ * 配图收紧（figureRegionRefiner）回归测试 —— 2026-09-20 初版，r268 纳入套件。
+ *
+ * 来历：本文件是 2026-09-20 配图收紧上线时的草稿锁，误提交进 b93c594 后一直放在
+ *   server/tests/ 下，**从未被任何入口执行过**（npm test / patrol / nightlyAudit 三处
+ *   口径都不含它）—— 2026-10-06 r215 实测它 18 过 1 红，登记为 backlog 提案 ㊱。
+ *   r268 关闭 ㊱：接入 package.json / scripts/testFileList.mjs / testSuiteCoverageKit，
+ *   并把唯一一条过期期望（case f，09-21 修正前的旧行为）按现行产品规则改写。
+ * ⚠️ 端到端的权威锁是 test/figureRegionRefiner.test.mjs（node:test 写法，随套件全量跑）；
+ *   本文件保留为纯函数（projectionBands / isTextBand / buildInkMask / denoiseInkMask 等）
+ *   与早期合成版面的补充覆盖 —— 这些检查在权威锁里没有，删掉它们等于白放 15 条断言。
+ */
 import {
-  projectionBands, bandStats, isTextBand, isFigureBand, refineFigureRegion,
+  projectionBands, isTextBand, isFigureBand, refineFigureRegion,
   buildInkMask, denoiseInkMask
 } from '../utils/figureRegionRefiner.js'
 
@@ -65,17 +77,31 @@ for (const [name, box, expect] of [
   else { fail++; console.log(`❌ ${name}: 实际 ${JSON.stringify({ x: r.x, y: r.y, w: r.width, h: r.height })}，期望约 x ${expect.x0}..${expect.x1} y ${expect.y0}..${expect.y1}`) }
 }
 
-// ── 配图下限不低于模型框（2026-09-18 白板第9题事故）──
-// 收紧被限制为"向邻图/图注让边"，不再越过模型框裁图形。
-// 所以「模型框偏大跨到隔壁」不再强制收回单图，而是保留模型框完整覆盖 ——
-// 宁可多留边界、不砍真图（旧行为会把模型准确定位的流程图砍掉 78% 面积）。
+// ── 模型框偏大跨到隔壁（2026-09-18 事故 + 2026-09-21 修正，r268 按现行规则改写）──
+// 2026-09-18 白板第9题事故定的初衷：收紧不得把模型框已覆盖的真图砍掉
+//   （数值转换器流程图被砍剩 22% 面积）⇒ 收紧结果与模型框求并集。
+// 2026-09-21 白板第2/4/5/6/7题事故后修正：并集【之后】必须再让一次边 ——
+//   模型框整体偏到图形下方一带（图注「（第N题）」+ 下一题题干）时，不得把那段文字并回来
+//   （完整规则见维护中的锁 test/figureRegionRefiner.test.mjs「模型框落在图注/下一题文字上
+//   → 收紧后不得把那段文字并回来」，该锁自 2026-09-21 起随 npm test 全量运行）。
+// ⇒ 本文件 2026-09-20 建时断言「输出覆盖模型框完整范围（含图注带 292..300）」，
+//   那是 09-21 修正前的旧行为，已被废除；r268 关闭 backlog ㊱ 时按现行产品规则改写：
+//   · 窄模型框（45% 页宽 < 62% 满宽阈值）→ 水平仍与模型框求并集（130..310 完整保留）；
+//   · 纵向收紧到图形带（200..279 墨迹），图注带（292..300）不得并回来。
+//   ⛔ 若哪天并集保护被改回"无条件覆盖模型框"，本条与上面那条维护锁会一起判红。
 {
-  // f) 模型框偏大跨到隔壁：收紧本可收回单图，但齐下限要求保住模型框覆盖
+  // f) 模型框偏大跨到隔壁：水平保住模型框，纵向只认图形带
   const r = refineFigureRegion(ink, W, H, { x: 130, y: 190, width: 180, height: 110 })
-  if (!r) { fail++; console.log(`❌ 大框跨到隔壁（保住模型框覆盖）: 返回 null`) }
+  if (!r) { fail++; console.log(`❌ 大框跨到隔壁: 返回 null`) }
   else {
-    const coversBox = r.x <= 130 && r.y <= 190 && r.x + r.width >= 310 && r.y + r.height >= 300
-    ok('大框跨到隔壁（保住模型框完整覆盖）', coversBox)
+    const inRange = (v, lo, hi) => v >= lo && v <= hi
+    const got = { x: r.x, y: r.y, w: r.width, h: r.height }
+    ok(`大框跨到隔壁：水平保住窄模型框（130..310）→ ${JSON.stringify(got)}`,
+      inRange(r.x, 128, 130) && inRange(r.x + r.width, 310, 312))
+    ok('大框跨到隔壁：纵向收紧到图形带（覆盖 200..279 墨迹）',
+      inRange(r.y, 198, 202) && inRange(r.y + r.height, 277, 281))
+    ok('大框跨到隔壁：图注带（292..300）不得被并回来（2026-09-21 规则）',
+      r.y + r.height <= 291)
   }
 }
 

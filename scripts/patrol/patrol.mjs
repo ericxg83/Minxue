@@ -73,6 +73,8 @@ console.log(`  最近提交：${lastCommit.stdout.trim()}`)
 /* ── C. 单元测试（展开文件列表后直跑 node，回避 Windows npx/.cmd 陷阱）── */
 // r267：清单收敛到全仓唯一实现 scripts/testFileList.mjs（nightlyAudit 同走它，
 // 修它 glob 漏跑 8 个 server 侧文件 65 条用例的假绿）；此处行为不变。
+// r268：清单 8 → 9（纳入 figureRegionRefiner，关闭 backlog ㊱）⇒ patrol 现在会
+// 多跑这一个文件（+1 条 file 级用例），这是有意为之，不是行为漂移。
 section('C. 单元测试')
 const testFiles = collectTestFiles(ROOT)
 const t = run(process.execPath, ['--env-file=.env', '--test', ...testFiles], { timeout: 300000, silent: true })

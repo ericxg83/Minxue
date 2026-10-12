@@ -20,6 +20,11 @@
  * ⛔ 为什么不真跑 nightlyAudit：它是脚本，import 即执行全量 lint+test+build（分钟级）。
  *   所以「清单内容」用真 import 纯函数验证（行为用例），「两个引擎都走了它」用源码
  *   契约验证，反向自检用内联合成坏样本（不 spawnSync 调 git，Windows EBUSY）。
+ *
+ * r268 追加（关闭 backlog ㊱）：显式清单 8 → 9，纳入
+ *   `server/tests/figureRegionRefiner.test.mjs`（2026-09-20 草稿锁，从未被任何入口
+ *   执行；唯一过期期望已按 2026-09-21 产品规则改写，详见该文件头部注释与
+ *   test/testSuiteCoverageKit.mjs 的 EXCLUDED 说明）。
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -48,9 +53,9 @@ export function collectScopeFailures(src) {
   return bad
 }
 
-test('collectTestFiles 覆盖 EXTRA_SERVER_TESTS 全部 8 个 server 侧测试（且磁盘真实存在）', () => {
+test('collectTestFiles 覆盖 EXTRA_SERVER_TESTS 全部 9 个 server 侧测试（且磁盘真实存在）', () => {
   const files = collectTestFiles(ROOT)
-  assert.equal(EXTRA_SERVER_TESTS.length, 8, 'EXTRA_SERVER_TESTS 必须是 8 个（与 package.json test script 对齐）')
+  assert.equal(EXTRA_SERVER_TESTS.length, 9, 'EXTRA_SERVER_TESTS 必须是 9 个（r268 起纳入 figureRegionRefiner，与 package.json test script 对齐）')
   for (const f of EXTRA_SERVER_TESTS) {
     assert.ok(files.includes(f), `清单缺少 ${f}`)
     assert.ok(existsSync(join(ROOT, f)), `${f} 在磁盘上不存在（清单指向了幽灵文件）`)

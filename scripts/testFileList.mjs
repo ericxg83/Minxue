@@ -10,9 +10,13 @@
  *   手动入口，保持 package.json 原样（被 testSuiteCoverage 锁盯着，不反复改）。
  *
  * 与磁盘的关系：`test/` 目录每次现扫（新增 .test.mjs 自动纳入）；
- *   8 个 server 侧文件是显式清单（它们在 test/ 之外，glob 表达不了）。
+ *   9 个 server 侧文件是显式清单（它们在 test/ 之外，glob 表达不了）。
  *   ⚠️ test/ 下只收 `.test.mjs`——与 package.json 的 `test/*.test.mjs` 同口径，
  *   `.test.js` 在 test/ 下没有先例；server 侧那两个 .test.js 在显式清单里点名。
+ *
+ * r268 变更（关闭 backlog ㊱）：显式清单 8 → 9，纳入
+ *   `server/tests/figureRegionRefiner.test.mjs`（2026-09-20 草稿锁，一直没被任何
+ *   入口执行；其唯一过期期望已按 2026-09-21 产品规则改写，详见该文件头部注释）。
  */
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,6 +25,7 @@ import path from 'node:path'
 export const EXTRA_SERVER_TESTS = [
   'server/tests/aiParseSelfCheck.test.mjs',
   'server/tests/figureBboxSemantics.test.mjs',
+  'server/tests/figureRegionRefiner.test.mjs',
   'server/tests/judgeChoiceAnswer.test.mjs',
   'server/tests/normalizeBlockBoxSemantics.test.mjs',
   'server/tests/repairAIJson.test.mjs',
