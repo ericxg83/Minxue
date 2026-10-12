@@ -80,6 +80,34 @@ export function toLocalYmd(date) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai' }).format(date)
 }
 
+/** YYYY-MM-DD 字符串上平移 N 天（纯 UTC 日历运算，与运行环境时区无关）；格式非法时原样返回 */
+export function shiftYmd(ymd, days) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''))
+  if (!m) return String(ymd || '')
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + days)).toISOString().slice(0, 10)
+}
+
+/**
+ * 「排他边界 → 对外展示的最后一天」：取边界时刻的上海日历日，再往前挪一天。
+ *
+ * ⛔ 不要写 `toLocalYmd(new Date(boundary.getTime() - 1))`（r266 实测生产缺陷）：
+ *   周期边界由 `new Date(y, m, d)` 按**服务器本地时区**算 —— Render 容器 TZ=UTC，
+ *   边界是 UTC 零点；而 toLocalYmd 固定按 Asia/Shanghai(+8) 格式化。
+ *   于是在 UTC 服务器上「边界 − 1ms」加 8 小时后仍落在边界的上海日历日里，
+ *   减 1ms 被完全抵消 ⇒ 周报 / 家长分享卡把「学习周期」印成 10/12 ~ 10/19
+ *   （把下周一也算了进去；月模式印成 10/01 ~ 11/01）。生产 GET /api/weekly-report
+ *   2026-10-12（周一）实测 period.end = "2026-10-19"。
+ *   先取边界的上海日历日、再在**日历日字符串**上减一天，两种服务器时区下都对：
+ *   · Render(TZ=UTC)：边界 10/19 00:00 UTC → 上海日 '2026-10-19' → 减一 → '2026-10-18' ✓
+ *   · 本机(TZ=+8)：边界 10/19 00:00 +08 → 上海日 '2026-10-19' → 减一 → '2026-10-18' ✓（与旧行为逐字一致）
+ *
+ * @param {Date} periodEnd - 排他边界（下周一 / 次月 1 日 00:00）
+ * @returns {string} YYYY-MM-DD，该周期对家长展示的「最后一天」
+ */
+export function exclusiveEndYmd(periodEnd) {
+  return shiftYmd(toLocalYmd(periodEnd), -1)
+}
+
 /**
  * 「N 天前的本地日历日」（YYYY-MM-DD），供统计类接口的默认窗口起点使用。
  *

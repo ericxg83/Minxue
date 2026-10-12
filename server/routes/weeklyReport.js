@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { query, TABLES } from '../config/neon.js'
-import { parsePeriod, getIsoWeek, getPeriodRange, toLocalYmd } from '../utils/period.js'
+import { parsePeriod, getIsoWeek, getPeriodRange, toLocalYmd, exclusiveEndYmd } from '../utils/period.js'
 import { sqlCorrectExpr, sqlWrongExpr } from '../utils/questionResultCaliber.js'
 import { healStaleCompletenessForPeriod } from '../services/questionCompletenessSync.js'
 
@@ -469,9 +469,12 @@ export async function fetchStudentWeeklyReport(studentId, options = {}) {
         //    周一 10/05 印成 10/04、10 月周期印成 09-30（家长看到的 PDF/分享卡「月徽章」成了「9月」）。
         //    r148 修，锁 test/weeklyReportPeriodLocalDate.test.mjs。
         start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
-        // end 是**排他**边界（下周一 / 次月 1 日 00:00），对家长要说的是「最后一天」⇒ 减 1ms
-        // （与 server/lib/weekendHandout.js:1131 同一口径；all 模式保留 2099-12-31 哨兵值）
-        end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : toLocalYmd(new Date(periodEnd.getTime() - 1)),
+        // end 是**排他**边界（下周一 / 次月 1 日 00:00），对家长要说的是「最后一天」。
+        // ⛔ 必须走 exclusiveEndYmd：旧写法 `toLocalYmd(new Date(periodEnd.getTime() - 1))`
+        //    在 TZ=UTC 的生产容器上减 1ms 被 +8h 格式化抵消，把下周一也印了进去
+        //    （实测 2026-10-12 周一印成 10/12 ~ 10/19）。见 period.js 的 exclusiveEndYmd 注释。
+        //    （all 模式保留 2099-12-31 哨兵值）
+        end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : exclusiveEndYmd(periodEnd),
         mode,
         offset,
         weekNum
@@ -637,7 +640,8 @@ router.get('/', async (req, res) => {
       period: {
         // 同上（全班版）：必须按本地日历日印，别用 toISOString 的 UTC 日 —— 见本文件上方单学生版的注释
         start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
-        end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : toLocalYmd(new Date(periodEnd.getTime() - 1)),
+        // 排他边界 → 最后一天必须走 exclusiveEndYmd（旧「减 1ms」写法在 UTC 服务器上失效，见上方注释）
+        end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : exclusiveEndYmd(periodEnd),
         mode,
         weekNum: isWeekMode ? getIsoWeek(periodStart) : null
       },
@@ -774,7 +778,8 @@ export async function fetchPeriodCompare(studentId, { periodStart, periodEnd, mo
     period: {
       // 同上：上一周期的「学习周期」也是印给家长看的（PDF 对比页），必须按本地日历日印
       start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
-      end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : toLocalYmd(new Date(periodEnd.getTime() - 1)),
+      // 排他边界 → 最后一天必须走 exclusiveEndYmd（旧「减 1ms」写法在 UTC 服务器上失效，见上方注释）
+      end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : exclusiveEndYmd(periodEnd),
       mode,
       offset
     },

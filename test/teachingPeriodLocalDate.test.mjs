@@ -12,7 +12,12 @@
  * 「潜在地雷」的原因，本轮按 A 级行为保持型缺陷修掉。
  * 修法与 `server/routes/weeklyReport.js`（r148 已修）完全同口径：
  *   start: toLocalYmd(periodStart)
- *   end:   toLocalYmd(new Date(periodEnd.getTime() - 1))   // end 是排他边界，对外说「最后一天」
+ *   end:   exclusiveEndYmd(periodEnd)   // end 是排他边界，对外说「最后一天」
+ *
+ * r266 更新（2026-10-12）：旧「end = toLocalYmd(边界 − 1ms)」在 TZ=UTC 的生产容器上被
+ *   +8h 格式化**抵消**（边界是 UTC 零点，减 1ms 后加 8 小时仍落在边界的上海日历日），
+ *   会把下周一印进「学习周期」——r151 锁里「必须 −1ms」的判据因此**反转为禁止项**，
+ *   end 必须走 period.js 的 exclusiveEndYmd（两种服务器时区下输出一致）。
  *
  * 判据同样分两层：① 真跑 toLocalYmd 的行为断言；② 源码锁住 teaching.js 不得回退。
  * ⛔ 行为断言一律用**带显式 +08:00 偏移**的日期构造 —— 若用 getWeekRange() 现算再断言，
@@ -25,7 +30,7 @@ import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { toLocalYmd, getWeekRange } from '../server/utils/period.js'
+import { toLocalYmd, exclusiveEndYmd, getWeekRange } from '../server/utils/period.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -45,19 +50,24 @@ test('本地日历日格式化：UTC+8 的本地 00:00 不得被印成前一天'
 
 test('周期起点印出来必须是周一、终点必须落在本周期内（周模式，跨时区不变）', () => {
   const week = getWeekRange(0)
-  // teaching.js 实际用的两个表达式
+  // r266 起 teaching.js 与 weeklyReport 同口径走 exclusiveEndYmd
   const start = toLocalYmd(week.periodStart)
-  const end = toLocalYmd(new Date(week.periodEnd.getTime() - 1))
+  const end = exclusiveEndYmd(week.periodEnd)
   assert.equal(weekdayOf(start), 1, '周模式周期起点必须是周一')
-  assert.equal(weekdayOf(end), 0, '周模式周期最后一天（排他边界减 1ms）必须是周日')
+  assert.equal(weekdayOf(end), 0, '周模式周期最后一天（排他边界的上海日减一天）必须是周日')
   assert.notEqual(start, end, '起止不得印成同一天')
 })
 
-test('排他边界减 1ms 后仍落在同一天（custom 入参传整点也稳）', () => {
-  const exclusiveEnd = new Date('2026-10-12T00:00:00+08:00') // 下周一 00:00
-  assert.equal(toLocalYmd(new Date(exclusiveEnd.getTime() - 1)), '2026-10-11')
-  // 旧写法在 UTC+8 下会把这个排他边界印成 10/11 —— 与「下周一」自相矛盾的反面证据
-  assert.equal(oldUtcFmt(exclusiveEnd), '2026-10-11')
+test('排他边界的上海日减一天仍落在本周期（UTC 服务器与 +8 机器都对）', () => {
+  const exclusiveEnd = new Date('2026-10-12T00:00:00+08:00') // 下周一 00:00（+8 机器算出的边界）
+  assert.equal(exclusiveEndYmd(exclusiveEnd), '2026-10-11')
+  assert.equal(oldUtcFmt(exclusiveEnd), '2026-10-11', '旧 UTC 日写法会印成 10/11（r148 的反面证据）')
+
+  // r266 反面证据（UTC 服务器口径）：同一条排他边界若按 UTC 零点出现（Render 容器），
+  // 旧「−1ms」写法被 +8h 格式化抵消、把下周一本身印出来；exclusiveEndYmd 不受影响。
+  const utcBoundary = new Date('2026-10-12T00:00:00Z')
+  assert.equal(toLocalYmd(new Date(utcBoundary.getTime() - 1)), '2026-10-12', '旧 −1ms 写法在 UTC 服务器上把下周一印出来（r266 修掉的 bug 本身）')
+  assert.equal(exclusiveEndYmd(utcBoundary), '2026-10-11', '新写法印周期最后一天')
 })
 
 // ─────────────────────────── ② 源码锁（接线不得回退） ───────────────────────────
@@ -76,15 +86,24 @@ export function collectFailures(root) {
     fails.push(`teaching: 仍有 ${utcHits.length} 处按 UTC 印周期边界（必须走 toLocalYmd）`)
   }
 
-  // 2) 必须真的接了 toLocalYmd（start / end 各至少一处）
+  // 2) 必须真的接了本地日历日格式化（start 走 toLocalYmd；end 走 r266 的 exclusiveEndYmd）
   const startHits = src.match(/toLocalYmd\(periodStart\)/g) || []
-  const endHits = src.match(/toLocalYmd\(new Date\(periodEnd\.getTime\(\) - 1\)\)/g) || []
+  const endHits = src.match(/exclusiveEndYmd\(periodEnd\)/g) || []
   if (startHits.length < 1) fails.push('teaching: period.start 未走 toLocalYmd(periodStart)')
-  if (endHits.length < 1) fails.push('teaching: period.end 未走 toLocalYmd(new Date(periodEnd - 1))')
+  if (endHits.length < 1) fails.push('teaching: period.end 未走 exclusiveEndYmd(periodEnd)')
+
+  // 2b) 旧「−1ms」写法一处都不许留（r266 修掉的 bug：UTC 服务器上被 +8h 格式化抵消）
+  const minusOneHits = src.match(/toLocalYmd\(new Date\(periodEnd\.getTime\(\) - 1\)\)/g) || []
+  if (minusOneHits.length > 0) {
+    fails.push(`teaching: 仍有 ${minusOneHits.length} 处旧「减 1ms」写法（UTC 服务器上会把下周一印进去，必须走 exclusiveEndYmd）`)
+  }
 
   // 3) import 必须带上（防「函数不存在」这类静默失败）
   if (!/import\s*\{[^}]*toLocalYmd[^}]*\}\s*from\s*'\.\.\/utils\/period\.js'/.test(src)) {
     fails.push('teaching: 未从 utils/period.js 导入 toLocalYmd')
+  }
+  if (!/import\s*\{[^}]*exclusiveEndYmd[^}]*\}\s*from\s*'\.\.\/utils\/period\.js'/.test(src)) {
+    fails.push('teaching: 未从 utils/period.js 导入 exclusiveEndYmd')
   }
   return fails
 }
@@ -108,13 +127,35 @@ const period = {
 }
 `, 'utf8')
   const probe = collectFailures(base)
-  // 精确比对「四条判据逐条命中 + 命中顺序」，不只是数条数：
+  // 精确比对「五条判据逐条命中 + 命中顺序」，不只是数条数：
   // 只数条数的话，判据写错位置（比如写到 start 分支里）也会「碰巧」凑够条数 = 假通过。
   assert.deepEqual(probe, [
     'teaching: 仍有 2 处按 UTC 印周期边界（必须走 toLocalYmd）',
     'teaching: period.start 未走 toLocalYmd(periodStart)',
-    'teaching: period.end 未走 toLocalYmd(new Date(periodEnd - 1))',
+    'teaching: period.end 未走 exclusiveEndYmd(periodEnd)',
     'teaching: 未从 utils/period.js 导入 toLocalYmd',
+    'teaching: 未从 utils/period.js 导入 exclusiveEndYmd',
   ], '判据套坏样本必须逐条命中，不能空锁 / 不能错命中')
-  assert.ok(probe.length >= 4, `判据套坏样本应报 ≥4 处，实际 ${probe.length} —— 锁可能是空锁`)
+  assert.ok(probe.length >= 5, `判据套坏样本应报 ≥5 处，实际 ${probe.length} —— 锁可能是空锁`)
+})
+
+test('锁健全性②：套「旧 −1ms 写法」坏样本必须逐条判红（r266 反转判据不空转）', () => {
+  const base = join(ROOT, '_r266_teaching_minusone')
+  const q = join(base, 'server/routes/teaching.js')
+  mkdirSync(dirname(q), { recursive: true })
+  // 内联合成「r266 之前」的写法：start 走 toLocalYmd、end 走 −1ms（+8 开发机上看起来全对）
+  writeFileSync(q, `
+import { parsePeriod, toLocalYmd } from '../utils/period.js'
+const period = {
+  start: toLocalYmd(periodStart),
+  end: toLocalYmd(new Date(periodEnd.getTime() - 1)),
+  mode,
+}
+`, 'utf8')
+  const probe = collectFailures(base)
+  assert.deepEqual(probe, [
+    'teaching: period.end 未走 exclusiveEndYmd(periodEnd)',
+    'teaching: 仍有 1 处旧「减 1ms」写法（UTC 服务器上会把下周一印进去，必须走 exclusiveEndYmd）',
+    'teaching: 未从 utils/period.js 导入 exclusiveEndYmd',
+  ], '旧 −1ms 写法在 r266 判据下必须逐条命中，不能空锁 / 不能错命中')
 })
