@@ -1646,3 +1646,18 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 **下一轮（第 252 轮）首选**：㉘（141 题 `is_complete` 口径，家长「批改题量」少 141 题）、㊴+㉚（渲染超时 180s，r229 实测）、㊸（export-retry-pdf 留/删/接线）、⑲/㊲/㊵（每天自动体检 or 备份定时任务）、r250-②（让 PC 铃铛/移动端首页也认 `_stale`）、r249-②（灯名拆分/改名）。另需负责人处理 Render 面板部署（㉒/㊼）与 stale 锁。
 
 **未碰他人文件**：`.workbuddy-ai/memory/MEMORY.md`、`scripts/patrol/daemon.mjs`、`src/workbench/components/DrawingCanvas.vue`、`src/workbench/utils/shapeRecognize.js`、`test/shapeRecognize.test.mjs` 全程没动，也没带进 commit。
+
+### 第 266 轮（2026-10-12 15:57–16:5x，可开工轮）交付：`3250fb8`
+
+**做了什么**：修掉一处**家长可见的周期印错**（真实缺陷，非美化）——「学习周期」把下周一 / 次月 1 日印了进去。
+
+- 实测取证（双证，非推理）：① `GET /api/weekly-report/:id?mode=week`（2026-10-12 周一）生产 JSON 返回 `period.end = "2026-10-19"`（应为 10/18）；② 真渲染生产分享卡 PNG 亲眼看：「学习周期 10/12 ~ 10/19」。r150 备忘里那句「周 10/05 ~ 10/12 跨 7 天 ⇒ r148 修对了」是把**排他边界日**当成了展示值——与代码注释自己的口径（「对家长要说的是最后一天 ⇒ 减 1ms」）矛盾，属**错误的验证背书**，本轮一并纠正。
+- 根因：周期边界按**服务器本地时区**算（Render TZ=UTC ⇒ 边界是 UTC 零点），`toLocalYmd` 固定按 Asia/Shanghai(+8) 格式化 ⇒ `toLocalYmd(边界 − 1ms)` 的减 1ms 在 UTC 服务器被 +8h **完全抵消**。旧写法只在 +8 开发机碰巧正确（r148 修的是「算本地/印 UTC」，这次是反方向的「算 UTC/印上海」，同族不同向）。
+- 修法：`period.js` 新增纯函数 `exclusiveEndYmd`（先取边界的上海日、再在日历日字符串上减一天；UTC 与 +8 服务器输出一致；**+8 环境与旧行为逐字相同 = 行为保持**）。`weeklyReport.js` 3 处（单学生/全班/上一周期）+ `teaching.js` 1 处换用。
+- 回归锁：新 `test/weeklyReportEndBoundary.test.mjs` 7 条（helper 单测含跨年/闰月、Render 场景 UTC 边界、新旧行为分歧锚点、接线计数、注释豁免）；r148/r151 两把源码锁的「必须 −1ms」判据**更新为守住新口径**（exclusiveEndYmd 必接 + 旧写法列为禁止项），合成坏样本反向自检**逐条判红实测**（含套 HEAD 旧版路由的判据必红验证）。
+- **四道闸**：单测 **2432/2432 fail 0**（基线 2430，先见 2 红→分清是旧判据锁旧口径→更新判据而非删）｜lint 6 文件 **0e/0w**｜`dist_nightly_20261012r266` **38.01s**｜preview 5566 + Chrome 读 DOM：HTTP 200 / `#workbench-app` 渲染 11211 字符 / 0 pageerror（第一版判据写 `id="root"` 假红，回查构建产物真实挂载点 `id="workbench-app"` 后重跑——r155「判据过期造假红」教训再现）。
+- **健康采样**：15:58 uptime **102 分钟**（858ms），自 14:17 部署起单调上升无重启。
+- **本轮顺带核销的疑点（下轮别再翻）**：teaching.js `period` 死字段的**日期部分已随本轮修对**（原 backlog 说它是 r148 残留——实测代码早已用 toLocalYmd，只是字段仍无消费方；删字段仍待负责人点头，见 backlog ⑩）；`buildAutoTaskName` 的 UTC 字段用法是**故意的 +8 换算**（注释明说），不是 bug；家长产出物字段对齐全查一遍：`fetchStudentWeeklyReport`/`fetchPeriodCompare` 返回的 stats 含模板消费的全部字段（`notStartedCount` 等），无静默缺口；分享卡 74 条既有测试全绿。
+- **未碰他人文件**：worksheets.js、apiService.js、serverPdfExporter.js、AppSidebar.vue、router/index.js、migrationLedger.test.mjs 及 paperBank 新文件全程没动、没带进 commit。
+
+**下一轮（第 267 轮）首选**：复测生产 `period.end`（部署生效后应印 10/18，本轮收尾时若 Render 已重启可直接看）；其余同 r252 备忘——㉘（141 题 is_complete 已修见 `2721556`）、㊴+㉚（渲染超时 180s）、㊸、⑲/㊲/㊵；teaching.js `period` 死字段删除待拍板（⑩）。
