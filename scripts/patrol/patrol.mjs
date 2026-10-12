@@ -93,7 +93,14 @@ section('D. 构建')
 const srcChanged = dirty.some(l => / src\//.test(l))
 let buildOk = 'skipped'
 if (FORCE_BUILD || srcChanged) {
-  const b = run(process.execPath, [path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'], { timeout: 240000, silent: true })
+  // ⛔ 本机 WorkBuddy LiteSandbox 拦截 %TEMP% 下 esbuild 临时文件创建→删除
+  //    （Access is denied，2026-10-12 实测），临时目录指到工作区内 logs/esbuild_tmp 绕开。
+  const esbuildTmp = path.join(ROOT, 'logs', 'esbuild_tmp')
+  fs.mkdirSync(esbuildTmp, { recursive: true })
+  const b = run(process.execPath, [path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js'), 'build'], {
+    timeout: 240000, silent: true,
+    env: { TMP: esbuildTmp, TEMP: esbuildTmp, TMPDIR: esbuildTmp }
+  })
   buildOk = b.status === 0 ? 'ok' : (b.error ? 'FAIL(kill)' : 'FAIL')
   const tailStr = ((b.stderr || b.stdout) || '').split('\n').filter(Boolean).slice(-8).join('\n  ')
   console.log(`  vite build（${FORCE_BUILD ? '--build 强制' : 'src 有改动'}）→ ${buildOk}`)

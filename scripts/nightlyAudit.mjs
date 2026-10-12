@@ -145,8 +145,13 @@ function collectTests() {
 // ── 3. 构建（产物落独立目录，绝不写 dist/）────────────────────────────────
 function collectBuild() {
   const outDir = `dist_nightly_${today}`
+  // ⛔ 本机 WorkBuddy LiteSandbox 拦截 %TEMP% 下 esbuild 原生二进制临时文件的
+  //    创建→删除（Access is denied，2026-10-12 实测复现），把临时目录指到
+  //    工作区内 logs/esbuild_tmp（已被 .gitignore 覆盖）即可绕开。
+  const esbuildTmp = path.join(ROOT, 'logs', 'esbuild_tmp')
+  fs.mkdirSync(esbuildTmp, { recursive: true })
   const { code, out } = runNode('node_modules/vite/bin/vite.js', ['build'], {
-    env: { ...process.env, BUILD_OUTDIR: outDir }
+    env: { ...process.env, BUILD_OUTDIR: outDir, TMP: esbuildTmp, TEMP: esbuildTmp, TMPDIR: esbuildTmp }
   })
   const dir = path.join(ROOT, outDir)
   const bytes = fs.existsSync(dir)
