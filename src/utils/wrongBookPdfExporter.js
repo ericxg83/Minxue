@@ -10,23 +10,23 @@ import { exportServerPDF } from './serverPdfExporter'
  * 统一「周诊断报告·错题再测卷」「移动端错题本·重练卷」「后台自动重练卷」三处生成：
  *   数据源可以不同（周报自动拉取 / 用户手动勾选），但渲染模板、公式解析、样式组件 100% 一致。
  *
- * 【本轮改造：双路径方案 —— 服务端 Playwright + 浏览器原生打印】
+ * 【本轮改造：统一走服务端 Playwright 渲染（生产/开发一致）】
  *
  *   之前 html2canvas 是光栅化（PNG/JPEG），KaTeX 用 vlist + 负 margin 渲染的
  *   根号对勾 SVG 实际绘制范围越出 .katex bbox，导致"对勾飘出""\frac 分子丢失"等
  *   系列视觉错位。本轮彻底弃用 html2canvas/jsPDF。
  *
- *   新方案（按环境分流）：
- *     - 开发环境（localhost / import.meta.env.PROD=false）：
- *       主路径 → 服务端 Playwright（exportServerPDF）：客户端跑 KaTeX + QR，
- *       POST HTML 给后端 /api/exam-pdf，后端 Chromium page.pdf() 矢量保留。
- *       fallback → 浏览器原生打印（triggerBrowserPrint）。
+ *   新方案（统一服务端路径，不再按环境分流）：
+ *     主路径 → 服务端 Playwright（exportServerPDF）：客户端跑 KaTeX + QR，
+ *     POST HTML 给后端 /api/exam-pdf，后端 Chromium page.pdf() 矢量保留。
+ *     - 生产环境同样走此路径：后端用 @sparticuz/chromium（Chromium 随 npm 打包，
+ *       部署 install 即自动获得），无需手动装浏览器，Render 生产可正常工作。
+ *     - 兜底 → 浏览器原生打印（triggerBrowserPrint）仅在服务端失败时降级；
+ *       下载 PDF 场景（returnPdfBlob）不降级，直接抛错由调用方提示重试。
+ *     - forceBrowser=true（仅测试用）强制走浏览器原生打印。
  *
- *     - 生产环境（minxue.pages.dev 等线上环境）：
- *       直接走浏览器原生打印（triggerBrowserPrint），避免依赖服务端 Chromium 部署。
- *       浏览器原生 print() 走 Chromium 内置 PDF 引擎，矢量保留，与 PrintPreview 100% 一致。
- *
- *   关键：所有路径都明确选择，不静默 fallback —— 生产环境不会调 exportServerPDF。
+ *   关键：生产环境调 exportServerPDF 是**既定行为**（后端有打包 Chromium），
+ *   不是环境检测错误；detectProductionEnv/isProd 仅作调试日志辅助。
  *
  * 职责：
  *   1. 数据标准化 —— 若传入的题目缺 options/几何配图等字段，自动用 getQuestionsByIds 拉取完整数据；
