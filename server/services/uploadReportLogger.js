@@ -1,5 +1,10 @@
 const uploadReports = new Map()
 
+// 内存上限：只保留最近这份数量的报告（常驻进程，无界增长会累积内存）。
+// 诊断端点查的是"最近的现场问题"，淘汰最旧的不影响功能。
+// 每份报告含全部文件尝试明细，单用户晚托班日上传量有限，100 份足以覆盖近期排查窗口。
+const MAX_UPLOAD_REPORTS = 100
+
 export const createUploadReport = (studentId, uploadSummary, boundingBoxResults = []) => {
   const report = {
     id: `report-${studentId}-${Date.now()}`,
@@ -53,6 +58,11 @@ export const createUploadReport = (studentId, uploadSummary, boundingBoxResults 
   }
 
   uploadReports.set(report.id, report)
+  // 淘汰最旧：Map 按插入序迭代，超出上限时删最早的一份
+  if (uploadReports.size > MAX_UPLOAD_REPORTS) {
+    const oldestKey = uploadReports.keys().next().value
+    if (oldestKey) uploadReports.delete(oldestKey)
+  }
   return report
 }
 
