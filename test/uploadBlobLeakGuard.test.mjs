@@ -113,3 +113,20 @@ test('P7 回归锁：handleDeleteTask 两个删除分支都先 revoke 再 filter
   const filterIdx = tempBranch.indexOf('.filter(t => t.id !== taskId)')
   assert.ok(revokeIdx > 0 && filterIdx > revokeIdx, 'temp 分支先 revoke 再 filter')
 })
+
+// ── P7 补齐（2026-10-12 R44）：工作台 SFC 卸载必须回收临时预览 blob ──
+// QuestionDetailPanel.vue：换题/下次调用已 revoke，但组件卸载（onUnmounted）此前漏了；
+// WorksheetManagement.vue：图片选择预览 createObjectURL，卸载时未 revoke（选了图未提交即切走会泄漏）。
+const QDP = fs.readFileSync(path.join(ROOT, 'src', 'workbench', 'components', 'review', 'QuestionDetailPanel.vue'), 'utf-8')
+const WSM = fs.readFileSync(path.join(ROOT, 'src', 'workbench', 'views', 'WorksheetManagement.vue'), 'utf-8')
+
+test('P7 回归锁：QuestionDetailPanel onUnmounted 必须回收两个预览 blob', () => {
+  const block = QDP.slice(QDP.indexOf('onUnmounted('), QDP.indexOf('onUnmounted(') + 400)
+  assert.match(block, /URL\.revokeObjectURL\(questionRecognizePreviewToRevoke\)/, '卸载时必须 revoke questionRecognizePreviewToRevoke')
+  assert.match(block, /URL\.revokeObjectURL\(recognizePreviewUrlToRevoke\)/, '卸载时必须 revoke recognizePreviewUrlToRevoke')
+})
+
+test('P7 回归锁：WorksheetManagement onUnmounted 必须清理图片预览 blob', () => {
+  const block = WSM.slice(WSM.indexOf('onUnmounted('), WSM.indexOf('onUnmounted(') + 300)
+  assert.match(block, /clearSelectedImages\(\)/, '卸载时必须调用 clearSelectedImages（revoke 全部预览 URL）')
+})

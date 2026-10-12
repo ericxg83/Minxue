@@ -405,6 +405,8 @@ onUnmounted(() => {
     parseMessageTimer = null
   }
   stopPolling()
+  // 卸载时回收图片预览对象 URL（P7 同口径）：选了图但未提交/重置就切走页面也会泄漏
+  clearSelectedImages()
 })
 
 const statusType = (status) => {

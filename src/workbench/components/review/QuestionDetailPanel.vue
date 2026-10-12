@@ -1607,7 +1607,18 @@ onMounted(() => {
   // 内部按题去重，重复调用无副作用。
   store.resumeRecomputeJobs()
 })
-onUnmounted(() => { window.removeEventListener('keydown', onPanelKeydown) })
+onUnmounted(() => {
+  window.removeEventListener('keydown', onPanelKeydown)
+  // 卸载时回收临时预览对象 URL，防止面板反复开关累积泄漏（P7 同口径）
+  if (questionRecognizePreviewToRevoke) {
+    URL.revokeObjectURL(questionRecognizePreviewToRevoke)
+    questionRecognizePreviewToRevoke = ''
+  }
+  if (recognizePreviewUrlToRevoke) {
+    URL.revokeObjectURL(recognizePreviewUrlToRevoke)
+    recognizePreviewUrlToRevoke = ''
+  }
+})
 
 const handleImageUpload = async (file) => {
   const question = q.value
