@@ -88,6 +88,13 @@ export default function RetryTask({ taskId, onBack }) {
     loadTask()
   }, [taskId])
 
+  // 卸载时回收未上传的本地预览 blob（P7 同口径）：选了照片但未上传/未移除就离开页面也会泄漏
+  useEffect(() => {
+    return () => {
+      pendingRef.current?.forEach((p) => p.url && URL.revokeObjectURL(p.url))
+    }
+  }, [])
+
   const status = task?.status && STATUS_META[task.status] ? task.status : 'ungraded'
   const meta = STATUS_META[status]
   const StatusIcon = meta.icon

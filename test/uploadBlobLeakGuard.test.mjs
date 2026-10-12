@@ -130,3 +130,17 @@ test('P7 回归锁：WorksheetManagement onUnmounted 必须清理图片预览 bl
   const block = WSM.slice(WSM.indexOf('onUnmounted('), WSM.indexOf('onUnmounted(') + 300)
   assert.match(block, /clearSelectedImages\(\)/, '卸载时必须调用 clearSelectedImages（revoke 全部预览 URL）')
 })
+
+// ── P7 补齐（2026-10-12 R45）：继续扫描全仓 createObjectURL 发现的两处卸载泄漏 ──
+// GrowthCardButton.vue：分享卡 PNG 预览有 releaseUrl，但弹窗还开着时组件被卸载（路由切换）不清理；
+// RetryTask/index.jsx：重练答卷照片预览，选了未上传就离开页面不清理。
+const GCB = fs.readFileSync(path.join(ROOT, 'src', 'workbench', 'components', 'GrowthCardButton.vue'), 'utf-8')
+const RTT = fs.readFileSync(path.join(ROOT, 'src', 'pages', 'RetryTask', 'index.jsx'), 'utf-8')
+
+test('P7 回归锁：GrowthCardButton 卸载必须回收分享卡预览 blob', () => {
+  assert.match(GCB, /onUnmounted\(\(\) => \{\n\s*releaseUrl\(\)\n\s*\}\)/, '卸载时必须调用 releaseUrl（revoke pngUrl）')
+})
+
+test('P7 回归锁：RetryTask 卸载必须回收未上传照片预览 blob', () => {
+  assert.match(RTT, /useEffect\(\(\) => \{\n\s*return \(\) => \{\n\s*pendingRef\.current\?\.forEach\(\(p\) => p\.url && URL\.revokeObjectURL\(p\.url\)\)/, '卸载 effect 必须遍历 pendingRef.current 并 revoke 每个 url')
+})

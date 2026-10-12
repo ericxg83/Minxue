@@ -16,7 +16,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { saveAs } from 'file-saver'
 import dayjs from 'dayjs'
@@ -47,6 +47,11 @@ let pngBlob = null
 
 watch(visible, (v) => {
   if (!v) releaseUrl()
+})
+
+// 卸载时回收预览 blob（P7 同口径）：弹窗还开着时组件被卸载（路由切换等）也会泄漏
+onUnmounted(() => {
+  releaseUrl()
 })
 
 async function open() {
