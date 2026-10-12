@@ -32,6 +32,7 @@ import path from 'node:path'
 
 import { toLocalYmd } from '../server/utils/period.js'
 import { resolveNightlyVerdict, readTestsRun } from './nightlyAuditVerdict.mjs'
+import { collectTestFiles } from './testFileList.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const AUTO_DIR = path.join(ROOT, 'docs', 'auto')
@@ -127,8 +128,12 @@ function collectLint() {
 }
 
 // ── 2. 单元测试 ────────────────────────────────────────────────────────────
+// ⛔ r267：旧写法 --test 后接裸 glob（只展开 test/ 目录）漏跑 8 个 server 侧
+//   测试文件（65 条用例，含判题语义 / AI JSON 修复锁）⇒ 「全绿」是假绿。
+//   改走全仓唯一清单实现 scripts/testFileList.mjs（与 patrol / npm test 同口径），
+//   并带 --env-file=.env 与 patrol.mjs 对齐（.env 存在；测试不依赖它也不受影响）。
 function collectTests() {
-  const { code, out } = runNode(null, ['--test', 'test/*.test.mjs'])
+  const { code, out } = runNode(null, ['--env-file=.env', '--test', ...collectTestFiles(ROOT)])
   const counters = {}
   const failed = []
   for (const line of out.split(/\r?\n/)) {

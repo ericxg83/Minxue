@@ -24,6 +24,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { collectLintReport, lintReportReasonText } from './lintReportKit.mjs'
+import { collectTestFiles } from '../testFileList.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '../..')
@@ -70,17 +71,10 @@ const lastCommit = run('git', ['log', '-1', '--format=%h %ci %s'])
 console.log(`  最近提交：${lastCommit.stdout.trim()}`)
 
 /* ── C. 单元测试（展开文件列表后直跑 node，回避 Windows npx/.cmd 陷阱）── */
+// r267：清单收敛到全仓唯一实现 scripts/testFileList.mjs（nightlyAudit 同走它，
+// 修它 glob 漏跑 8 个 server 侧文件 65 条用例的假绿）；此处行为不变。
 section('C. 单元测试')
-const testFiles = []
-try {
-  for (const f of fs.readdirSync(path.join(ROOT, 'test')).filter(f => f.endsWith('.test.mjs'))) testFiles.push('test/' + f)
-} catch {}
-for (const f of [
-  'server/tests/aiParseSelfCheck.test.mjs', 'server/tests/figureBboxSemantics.test.mjs',
-  'server/tests/judgeChoiceAnswer.test.mjs', 'server/tests/normalizeBlockBoxSemantics.test.mjs',
-  'server/tests/repairAIJson.test.mjs', 'server/tests/uploadValidatorHeic.test.mjs',
-  'server/utils/aiParseSelfCheck.test.js', 'server/utils/answerConsensus.test.js',
-]) testFiles.push(f)
+const testFiles = collectTestFiles(ROOT)
 const t = run(process.execPath, ['--env-file=.env', '--test', ...testFiles], { timeout: 300000, silent: true })
 const passMatch = (t.stdout || '').match(/^ℹ pass (\d+)/m) || (t.stdout || '').match(/# pass (\d+)/m)
 const failMatch = (t.stdout || '').match(/^ℹ fail (\d+)/m) || (t.stdout || '').match(/# fail (\d+)/m)
