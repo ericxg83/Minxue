@@ -89,3 +89,27 @@ test('P7 回归锁：重试移除旧行前 revoke', () => {
   const filterIdx = block.lastIndexOf('prev.filter(t => t.id !== taskId)')
   assert.ok(revokeIdx > 0 && filterIdx > revokeIdx, '先 revoke 旧行再 filter 移除')
 })
+
+// ── P7 补齐（2026-10-12 R18）：移动端删除任务路径同样必须回收临时 blob ──
+// App.jsx handleDeleteTask 删 temp-* 任务或删正式任务成功后的本地移除，都要先 revoke。
+const APP_JSX = path.join(ROOT, 'src', 'App.jsx')
+const appSrc = fs.readFileSync(APP_JSX, 'utf-8')
+
+test('P7 回归锁：App.jsx 存在 revokeTaskBlobs 辅助函数', () => {
+  const fn = appSrc.match(/const revokeTaskBlobs = \(task\) => \{[\s\S]*?task\.__blobUrls = \[\]\n\}/)
+  assert.ok(fn, '必须存在 revokeTaskBlobs（遍历 __blobUrls 并 revoke、清空清单）')
+  assert.match(fn[0], /URL\.revokeObjectURL/, 'revokeTaskBlobs 必须真正调用 revokeObjectURL')
+})
+
+test('P7 回归锁：handleDeleteTask 两个删除分支都先 revoke 再 filter', () => {
+  // temp 分支：find + revokeTaskBlobs + filter 在同一 setTasks 回调内
+  const tempBranch = appSrc.slice(appSrc.indexOf("taskId.startsWith('temp-')"), appSrc.indexOf('删除成功', appSrc.indexOf("taskId.startsWith('temp-')")))
+  assert.match(tempBranch, /revokeTaskBlobs\(old\)/, 'temp 分支移除前必须回收 blob')
+  // 正式任务分支：删除成功后也 revoke
+  const realBranch = appSrc.slice(appSrc.indexOf('await deleteTask(taskId)'), appSrc.indexOf('catch (error)', appSrc.indexOf('await deleteTask(taskId)')))
+  assert.match(realBranch, /revokeTaskBlobs\(old\)/, '正式任务删除成功后的本地移除也必须回收 blob')
+  // 结构约束：必须是「先 find/revoke 后 filter」的顺序
+  const revokeIdx = tempBranch.indexOf('revokeTaskBlobs(old)')
+  const filterIdx = tempBranch.indexOf('.filter(t => t.id !== taskId)')
+  assert.ok(revokeIdx > 0 && filterIdx > revokeIdx, 'temp 分支先 revoke 再 filter')
+})

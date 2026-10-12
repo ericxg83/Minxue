@@ -42,6 +42,18 @@ import dayjs from 'dayjs'
 // 错题本分页大小（与服务端 limit 保持一致）
 const WRONG_PAGE_SIZE = 100
 
+// 任务删除时回收临时预览 blob URL（与 useUploadFlow 的 revokeTempBlobs 同口径，P7）：
+// 上传临时任务（temp-*）的 pages 预览用 URL.createObjectURL 生成，删除任务后必须 revoke，
+// 否则每删一个未同步任务就泄漏 N 个 blob。正式任务无 __blobUrls 字段，此处为空操作。
+const revokeTaskBlobs = (task) => {
+  const urls = task?.__blobUrls
+  if (!Array.isArray(urls) || urls.length === 0) return
+  for (const url of urls) {
+    try { URL.revokeObjectURL(url) } catch { /* revoke 失败无害，忽略 */ }
+  }
+  task.__blobUrls = []
+}
+
 // Lazy load non-critical pages with error handling
 const lazyWithRetry = (factory) => {
   return lazy(() => {
@@ -672,13 +684,21 @@ export default function App() {
     try {
       // For local-only temp tasks (upload failed/never synced), skip API call
       if (typeof taskId === 'string' && taskId.startsWith('temp-')) {
-        setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
+        setTasks((prev) => {
+          const old = (Array.isArray(prev) ? prev : []).find(t => t.id === taskId)
+          if (old) revokeTaskBlobs(old)
+          return (Array.isArray(prev) ? prev : []).filter(t => t.id !== taskId)
+        })
         invalidateCache('tasks', currentStudent?.id)
         Toast.show({ message: '删除成功', type: 'success' })
         return
       }
       await deleteTask(taskId)
-      setTasks((Array.isArray(tasks) ? tasks : []).filter(t => t.id !== taskId))
+      setTasks((prev) => {
+        const old = (Array.isArray(prev) ? prev : []).find(t => t.id === taskId)
+        if (old) revokeTaskBlobs(old)
+        return (Array.isArray(prev) ? prev : []).filter(t => t.id !== taskId)
+      })
       invalidateCache('tasks', currentStudent?.id)
       Toast.show({ message: '删除成功', type: 'success' })
     } catch (error) {
