@@ -488,6 +488,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
 
     let tempTask
     try {
+      const __blobUrls = files.map(file => URL.createObjectURL(file))
       tempTask = {
         id: `temp-retry-${Date.now()}`,
         student_id: currentStudent.id,
@@ -496,13 +497,14 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
         generated_exam_id: examId,
         pages: files.map((file, index) => ({
           id: `page-${index + 1}`,
-          image_url: URL.createObjectURL(file),
+          image_url: __blobUrls[index],
           file_name: file.name,
           page_number: index + 1
         })),
         status: 'pending',
         created_at: new Date().toISOString(),
-        isRetryPaper: true
+        isRetryPaper: true,
+        __blobUrls
       }
 
       addTask(tempTask)
@@ -516,10 +518,20 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
           id: updatedTask.id,
           generatedExamId: updatedTask.generated_exam_id || examId
         })
+        // 任务已转为服务端正式记录：如果服务端返回了真实图片 URL（images），
+        // 预览不再需要本地 blob —— 立即 revoke 防泄漏（P7）。
+        // 注意 updateTaskInStore 只合并字段不替换 pages，所以这里要主动替换 + 回收。
+        if (Array.isArray(updatedTask.images) && updatedTask.images.length > 0) {
+          setTasks(prev => prev.map(t => t.id === tempTask.id
+            ? { ...t, pages: updatedTask.images.map((u, i) => ({ id: `page-${i + 1}`, image_url: u, file_name: t.pages?.[i]?.file_name || '', page_number: i + 1 })) }
+            : t))
+          revokeTempBlobs(tempTask)
+        }
         // r103（负责人裁决⑧）：前端直调 AI 识别已删除。批改统一由服务端 worker
         // 精简管线（processSlimGrading：OCR + 题库答案确定性比对 + 0.8 置信度门禁）
         // 完成，任务状态经既有轮询/刷新同步 —— 与普通作业上传同一条状态链。
       }
+
 
       retryToast.dismiss()
       Toast.show({ message: `错题重练卷上传成功！`, type: 'success', duration: 2000 })
@@ -556,6 +568,22 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     updateTaskFromServer({ ...tempTask, status: 'failed', error: readable, result: { error: readable, rawError: raw } })
   }
 
+  // blob URL 泄漏治理（P7，2026-10-12）：tempTask 创建时用 URL.createObjectURL 生成的
+  // 预览地址，任务一旦转成服务端正式记录（pages 被 taskResult.images 覆盖）、或用户
+  // 重试时旧行被移除，这些 blob 就成了永远无人 revoke 的孤儿（每上传一份多页作业
+  // 就泄漏 N 个 blob，长期使用内存持续累积）。
+  // 统一由 __blobUrls 清单记录，在替换/移除时一次性 revoke；**失败保留预览不回收**，
+  // 因为用户要看着图重试（重试路径里旧行移除时再回收）。
+  const revokeTempBlobs = (tempTask) => {
+    const urls = tempTask?.__blobUrls
+    if (!Array.isArray(urls) || urls.length === 0) return
+    for (const url of urls) {
+      try { URL.revokeObjectURL(url) } catch { /* revoke 失败无害，忽略 */ }
+    }
+    tempTask.__blobUrls = []
+  }
+
+
   // 客户端重传：temp 任务服务端没有记录，/api/tasks/retry 无从下手；
   // 靠 temp 上保留的 File 引用原样重走一次上传管道。
   const retryTempUpload = async (taskId) => {
@@ -589,8 +617,12 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
       setPendingFlow(null)
       pendingFlowRef.current = null
     }
-    // 先移除旧行，重传会生成新的 temp 任务
-    setTasks(prev => prev.filter(t => t.id !== taskId))
+    // 先移除旧行，重传会生成新的 temp 任务（旧行的预览 blob 一并回收，P7）
+    setTasks(prev => {
+      const old = prev.find(t => t.id === taskId)
+      if (old) revokeTempBlobs(old)
+      return prev.filter(t => t.id !== taskId)
+    })
     // 重传沿用 temp 任务创建时的学生归属，不能跟着当前选中的学生走
     await uploadViaBackend(files, temp.student_id)
   }
@@ -637,15 +669,16 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
         ? examResourceNameEffective
         : `${subjectEffective || '数学'}作业 ${timeLabel}`
 
+    const __blobUrls = files.map(file => URL.createObjectURL(file))
     const tempTask = {
       id: `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       student_id: studentId,
-      image_url: URL.createObjectURL(files[0]),
+      image_url: __blobUrls[0],
       original_name: taskName,
       task_type: isWorkbook ? 'workbook' : (isExam ? 'exam' : 'homework'),
       pages: files.map((file, index) => ({
         id: `page-${index + 1}`,
-        image_url: URL.createObjectURL(file),
+        image_url: __blobUrls[index],
         file_name: file.name,
         page_number: index + 1
       })),
@@ -655,6 +688,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
       is_temp: true,
       // 客户端重传所需：File 引用 + 上传通道上下文（服务端没有该记录，服务端 retry 用不了）
       __files: files,
+      __blobUrls,
       __options: {
         worksheetId: isWorkbook ? worksheetIdEffective : null,
         worksheetName: isWorkbook ? worksheetNameEffective : null,
@@ -707,6 +741,11 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
           setTasks(prev => prev.map(t =>
             t.id === tempTask.id ? { ...taskResult, status: 'processing', pages: taskResult.images || tempTask.pages, is_temp: false } : t
           ))
+        }
+        // 服务端已返回真实图片 URL（taskResult.images）→ 预览不再用本地 blob，
+        // 立即 revoke 防泄漏（P7）。注意两个分支的 pages 都优先用了 images。
+        if (Array.isArray(taskResult.images) && taskResult.images.length > 0) {
+          revokeTempBlobs(tempTask)
         }
       } else {
         failedCount = 1

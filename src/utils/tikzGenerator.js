@@ -210,7 +210,9 @@ export function tikzToSvg(tikzCode, strict = false) {
     // ── 5. 圆弧（arc）──
     // \draw (x,y) arc[start angle=..., end angle=..., radius=...];
     // \draw (x,y) arc (start:end:radius);
-    const arcRegex = /\\draw(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*arc\s*\[?start\s*angle\s*=\s*(-?[\d.]+)\s*,\s*end\s*angle\s*=\s*(-?[\d.]+)\s*,\s*radius\s*=\s*([\d.]+)\s*cm?\]?/g
+    // ⛔ 2026-10-12 P9：radius 后缀 `cm?` 曾写成 `c` 必需 + `m?` 可选 ⇒ `radius=1`（无 cm）
+    //    永远匹配不上，该写法根本不解析。改为 `(?:cm)?` 整组可选，兼容带/不带单位。
+    const arcRegex = /\\draw(?:\[([^\]]*)\])?\s*\((-?[\d.]+)\s*,\s*(-?[\d.]+)\)\s*arc\s*\[?start\s*angle\s*=\s*(-?[\d.]+)\s*,\s*end\s*angle\s*=\s*(-?[\d.]+)\s*,\s*radius\s*=\s*([\d.]+)\s*(?:cm)?\]?/g
     while ((match = arcRegex.exec(cleanCode)) !== null) {
       hasSubstantialContent = true
       const cx = toSvgX(parseFloat(match[2])), cy = toSvgY(parseFloat(match[3]))
@@ -219,7 +221,13 @@ export function tikzToSvg(tikzCode, strict = false) {
       const startRad = startAngle * Math.PI / 180, endRad = endAngle * Math.PI / 180
       const sx = cx + radius * Math.cos(startRad), sy = cy - radius * Math.sin(startRad)
       const ex = cx + radius * Math.cos(endRad), ey = cy - radius * Math.sin(endRad)
-      const largeArc = (endAngle - startAngle) > 180 ? 1 : 0
+      // TikZ arc 从 start angle 起逆时针（角度递增方向）到 end angle；当 end < start 时
+      // 实际走 end+360，弧长 = (endAngle - startAngle) 归一化到 [0,360)。
+      // ⛔ 修复（2026-10-12 P9）：旧写法 `(endAngle - startAngle) > 180` 在 end < start
+      //    且跨 0° 的大弧场景（如 330°→190° 实际走 220°）会得到负差值 → 永远判小弧，
+      //    画出的弧线走错方向/弧度。picAngleRegex 分支有 min/max 归一化，这里漏了。
+      const delta = (((endAngle - startAngle) % 360) + 360) % 360
+      const largeArc = delta > 180 ? 1 : 0
       const style = match[1] || ''
       const styleInfo = parseStyle(style)
       svgElements.push(`<path d="M ${sx.toFixed(1)} ${sy.toFixed(1)} A ${radius.toFixed(1)} ${radius.toFixed(1)} 0 ${largeArc} 0 ${ex.toFixed(1)} ${ey.toFixed(1)}" fill="none" stroke="${styleInfo.strokeColor}" stroke-width="${styleInfo.strokeWidth}"/>`)
