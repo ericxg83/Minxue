@@ -205,7 +205,7 @@ import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import { getStudents, createGeneratedExam, getGeneratedExamsByStudent } from '../../services/apiService'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
-import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
+import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../domain/examNaming'
 import { useWrongBookStore } from '../stores/wrongBookStore'
 // 多小问（题组）共享题干展示口径：与移动端、重练卷共用同一套实现
 import { resolveQuestionDisplayStem, formatQuestionLabel } from '../../utils/questionStem'
@@ -331,6 +331,17 @@ const goEditOriginalQuestion = (item) => {
   try {
     const existing = await getGeneratedExamsByStudent(student.id, false).catch(() => [])
     const baseName = buildExamBaseName(validItems)
+    // P12 同名去重提醒：今日已有同名卷则弹确认，避免静默堆 -02/-03
+    const sameCount = countSameBaseToday(baseName, existing, student.id)
+    if (sameCount > 0) {
+      try {
+        await ElMessageBox.confirm(
+          `今日已为该学生生成 ${sameCount} 份同名卷「${baseName}」，新卷将自动编号为 -${String(sameCount + 1).padStart(2, '0')}。是否继续生成？`,
+          '同名卷提醒',
+          { confirmButtonText: '继续生成', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch { ElMessage.info('已取消生成'); return }
+    }
     const examName = buildExamNameWithSeq(baseName, existing, student.id)
     const exam = await createGeneratedExam({ student_id: student.id, name: examName, question_ids: questionIds })
     if (!exam?.id) throw new Error('创建重练卷失败')

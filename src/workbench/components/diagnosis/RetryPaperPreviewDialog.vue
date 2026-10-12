@@ -122,11 +122,11 @@
  *      这里是人手挑题组卷，老师明确勾的就是要练的，不受该限制。
  */
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getWrongQuestionsByStudent, fetchWrongQuestionsPage, createGeneratedExam, getGeneratedExamsByStudent, getStudentById } from '../../../services/apiService'
 import { exportWrongBookPDF } from '../../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../../utils/retryTaskUrl'
-import { buildExamBaseName, buildExamNameWithSeq } from '../../../domain/examNaming'
+import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../../domain/examNaming'
 import { normalizeWrongItems, inScope, pickDefaults, errorTypeTone, toExamQuestionIds, groupOf, missingScopeIds } from './retryPaperScope'
 
 const props = defineProps({
@@ -283,6 +283,17 @@ async function submit() {
     const existing = await getGeneratedExamsByStudent(props.studentId, false).catch(() => [])
     // 卷名基名从候选题取学科（错题行已归一化出 subject，与错题清单同一份数据）
     const baseName = buildExamBaseName(selectedItems.value)
+    // P12 同名去重提醒：今日已有同名卷则弹确认
+    const sameCount = countSameBaseToday(baseName, existing, props.studentId)
+    if (sameCount > 0) {
+      try {
+        await ElMessageBox.confirm(
+          `今日已为该学生生成 ${sameCount} 份同名卷「${baseName}」，新卷将自动编号为 -${String(sameCount + 1).padStart(2, '0')}。是否继续生成？`,
+          '同名卷提醒',
+          { confirmButtonText: '继续生成', cancelButtonText: '取消', type: 'warning' }
+        )
+      } catch { ElMessage.info('已取消生成'); creating.value = false; return }
+    }
     const examName = buildExamNameWithSeq(baseName, existing, props.studentId)
     const exam = await createGeneratedExam({ student_id: props.studentId, name: examName, question_ids: questionIds })
     if (!exam?.id) throw new Error('创建重练卷失败')

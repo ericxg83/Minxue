@@ -12,12 +12,21 @@ export const buildExamBaseName = (questions = []) => {
 }
 
 export const buildExamNameWithSeq = (baseName, existingExams = [], studentId) => {
+  const count = countSameBaseToday(baseName, existingExams, studentId)
+  return `${baseName}-${String(count + 1).padStart(2, '0')}`
+}
+
+/**
+ * 统计该学生今日已创建的同名卷数量（P12 同名去重提醒用）。
+ * 与 buildExamNameWithSeq 共享同一口径：同学号 + 当天 + 去 -NN 前缀相等。
+ * 调用方在组卷前用它检测「今日已有 N 份同名卷」，>0 时弹确认提示老师。
+ */
+export const countSameBaseToday = (baseName, existingExams = [], studentId) => {
   const today = dayjs().format('YYYY-MM-DD')
-  const sameBaseToday = (existingExams || []).filter(exam => {
+  return (existingExams || []).filter(exam => {
     if (studentId && exam.student_id !== studentId) return false
     const createdDay = exam.created_at ? dayjs(exam.created_at).format('YYYY-MM-DD') : null
     if (createdDay !== today) return false
     return (exam.name || '').replace(/-\d{2}$/, '') === baseName
   }).length
-  return `${baseName}-${String(sameBaseToday + 1).padStart(2, '0')}`
 }

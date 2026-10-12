@@ -205,11 +205,11 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Aim, ArrowLeft, ArrowRight, Loading, Refresh, User, WarningFilled } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam, getRetryQuestionIdsByKp } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import { isRetryPaperTask } from '../utils/retryPaperState'
-import { buildExamBaseName, buildExamNameWithSeq } from '../../domain/examNaming'
+import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../domain/examNaming'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -441,6 +441,17 @@ async function createExamFromItems(items, kpName = '') {
   if (!questionIds.length) { ElMessage.warning('该考点下暂无可组卷的待重练错题'); return }
   const existing = await getGeneratedExamsByStudent(student.value.id, false).catch(() => [])
   const baseName = buildExamBaseName(items)
+  // P12 同名去重提醒：今日已有同名卷则弹确认
+  const sameCount = countSameBaseToday(baseName, existing, student.value.id)
+  if (sameCount > 0) {
+    try {
+      await ElMessageBox.confirm(
+        `今日已为该学生生成 ${sameCount} 份同名卷「${baseName}」，新卷将自动编号为 -${String(sameCount + 1).padStart(2, '0')}。是否继续生成？`,
+        '同名卷提醒',
+        { confirmButtonText: '继续生成', cancelButtonText: '取消', type: 'warning' }
+      )
+    } catch { ElMessage.info('已取消生成'); return }
+  }
   const examName = buildExamNameWithSeq(baseName, existing, student.value.id)
   const exam = await createGeneratedExam({ student_id: student.value.id, name: examName, question_ids: questionIds })
   if (!exam?.id) throw new Error('创建重练卷失败')

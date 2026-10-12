@@ -6,6 +6,7 @@ import { useStudentStore, useWrongQuestionStore, useExamStore } from '../../stor
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
 import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
+import { countSameBaseToday } from '../../domain/examNaming'
 import dayjs from 'dayjs'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { saveFileToDevice } from '../../utils/nativeDownload'
@@ -293,6 +294,12 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         }
         // 计算 base 名（科目+日期），再追加当天序号
         const baseName = getBaseExamName()
+        // P12 同名去重提醒：今日已有同名卷则弹原生确认（移动端标准、零依赖）
+        const sameCount = countSameBaseToday(baseName, seqSource, currentStudent.id)
+        if (sameCount > 0) {
+          const ok = window.confirm(`今日已为该学生生成 ${sameCount} 份同名卷「${baseName}」，新卷将自动编号为 -${String(sameCount + 1).padStart(2, '0')}。是否继续生成？`)
+          if (!ok) { Toast.show({ content: '已取消生成', icon: 'fail' }); return }
+        }
         const examName = buildExamNameWithSeq(baseName, seqSource)
         setSavedExamName(examName)
 
