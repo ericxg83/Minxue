@@ -4,6 +4,8 @@ import './loadEnv.js'
 import dotenv from 'dotenv'
 import { dirname, resolve } from 'path'
 import { fileURLToPath } from 'url'
+// P15 修复（2026-10-12 R55）：/api/admin/* 鉴权中间件，防止公网无门槛调用 data-cleanup 全表删除
+import { adminAuth } from './middleware/adminAuth.js'
 import {
   pendingTaskRecovery,
   describeAutoRetry,
@@ -67,6 +69,7 @@ import { migrateWrongQuestionsIdentitySplit } from './migrations/059_wrongbook_i
 import { migrateTeachingMarks } from './migrations/060_teaching_marks.js'
 import { migrateKaofaMultiKp } from './migrations/061_kaofa_multi_kp.js'
 import { migrateKpRelations } from './migrations/062_kp_relations.js'
+import { migratePaperBankQuestions } from './migrations/063_paper_bank_questions.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -118,6 +121,7 @@ import weeklyReportRouter from './routes/weeklyReport.js'
 import shareCardRouter from './routes/shareCard.js'
 import worksheetsRouter from './routes/worksheets.js'
 import resourcesRouter from './routes/resources.js'
+import paperBankRouter from './routes/paperBank.js'
 import teachingRouter from './routes/teaching.js'
 import variantsRouter from './routes/variants.js'
 import teachingQuestionTypesRouter from './routes/teachingQuestionTypes.js'
@@ -256,6 +260,10 @@ app.use(cors({
 }))
 app.use(express.json({ limit: '500mb' }))
 app.use(express.urlencoded({ limit: '500mb', extended: true }))
+
+// P15 修复（2026-10-12 R55）：/api/admin/* 统一鉴权，防止公网无门槛调用 data-cleanup 全表删除
+// ADMIN_SECRET 已设 → 校验 x-admin-token；未设 → 只允许本地来源（生产公网来源被锁）
+app.use('/api/admin', adminAuth)
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -5015,6 +5023,10 @@ app.use('/api/weekly-report', weeklyReportRouter)
 app.use('/api/share-card', shareCardRouter)
 app.use('/api/worksheets', worksheetsRouter)
 app.use('/api/resources', resourcesRouter)
+// 试卷题库（2026-10-10）：纸质卷 → 结构化题目 → 跨卷勾题 → 讲义 PDF。
+// ⛔ 与 /api/resources 的「试卷答案库」共用 resources(type='exam') 行，但写的是
+//    resource_questions（题目）而非 resource_answers（答案），两条链互不干扰。
+app.use('/api/paper-bank', paperBankRouter)
 app.use('/api/teaching', teachingRouter)
 app.use('/api/variants', variantsRouter)
 // r137（负责人裁决）：「我的讲义」/「班级备课」属伪需求，
@@ -5135,7 +5147,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateWrongQuestionsIdentitySplit', migrateWrongQuestionsIdentitySplit],
         ['migrateTeachingMarks', migrateTeachingMarks],
         ['migrateKaofaMultiKp', migrateKaofaMultiKp],
-        ['migrateKpRelations', migrateKpRelations]
+        ['migrateKpRelations', migrateKpRelations],
+        ['migratePaperBankQuestions', migratePaperBankQuestions]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
