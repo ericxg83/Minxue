@@ -1,8 +1,9 @@
 ## 巡查轮次时间线（机器事实）
 
 <!-- PATROL_HEARTBEAT:start -->
-> ⏱ **最近心跳：R214 — 2026/10/12 10:13:02（✅ 全绿）**
+> ⏱ **最近心跳：R215 — 2026/10/12 10:22:26（✅ 全绿）**
 <!-- PATROL_HEARTBEAT:end -->
+
 
 
 
@@ -2321,6 +2322,23 @@
 | 214 | 2026-10-12T02:13:02 | tests=2380/0 | lint=0 | build=FAIL | server=ok | dirty=14 |
 
 ### R214 — 2026/10/12 10:13:02（daemon 自动报告）
+
+**体检**：tests **2380/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 14
+
+⚠️ 发现异常：build=FAIL；脏文件 14 个（ M server/index.js,  M server/routes/worksheets.js,  M src/services/apiService.js…）（需 agent 深修时下轮处理）
+    -  M server/index.js
+    -  M server/routes/worksheets.js
+    -  M src/services/apiService.js
+    -  M src/utils/serverPdfExporter.js
+    -  M src/workbench/components/layout/AppSidebar.vue
+    -  M src/workbench/router/index.js
+    -  M test/migrationLedger.test.mjs
+    - ?? server/migrations/063_paper_bank_questions.js
+    - ?? server/routes/paperBank.js
+    - ?? server/services/paperBankService.js
+| 215 | 2026-10-12T02:22:26 | tests=2380/0 | lint=0 | build=FAIL | server=ok | dirty=14 |
+
+### R215 — 2026/10/12 10:22:26（daemon 自动报告）
 
 **体检**：tests **2380/0** | lint 0 | build FAIL | server=ok  mobile-dev=ok | 冒烟 n/a | 脏 14
 
