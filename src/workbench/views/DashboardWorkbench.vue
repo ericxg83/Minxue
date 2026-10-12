@@ -177,7 +177,7 @@
                   variant="generic"
                   :title="`${t.studentName || '学生'} · ${t.originalName || '未命名作业'}`"
                   :description="`${t.subject || '未分类'} · ${formatElapsed(t.elapsedSec)}${t.isStalled ? ' · 已卡 5 分钟' : ''}`"
-                  :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} 正在批改`"
+                  :aria-label="`${t.studentName || '学生'} 的 ${t.originalName || '未命名作业'} 正在批改，已判 ${t.judgedCount || 0} / ${t.totalQuestions || 0} 题`"
                   @click="go('/grade')"
                 >
                   <template #leading>
@@ -187,6 +187,8 @@
                     </span>
                   </template>
                   <template #trailing>
+                    <!-- P13 进度气泡：已判 X/Y，与 StatusTag 并排 -->
+                    <span v-if="t.totalQuestions" class="progress-bubble">{{ t.judgedCount || 0 }}/{{ t.totalQuestions }}</span>
                     <StatusTag :tone="t.isStalled ? 'danger' : 'info'" :label="t.isStalled ? '卡住' : '批改中'" />
                   </template>
                 </ListRow>
@@ -933,6 +935,17 @@ onBeforeUnmount(() => {
 }
 .mini-avatar.is-primary { color: var(--wb-primary); background: var(--wb-primary-soft); }
 .mini-avatar.is-student { color: var(--wb-primary); background: var(--wb-primary-soft); }
+/* P13 批改进度气泡：已判 X/Y，info 软底 + tabular-nums 防跳动 */
+.progress-bubble {
+  font-size: var(--wb-fs-meta);
+  font-weight: var(--wb-fw-medium);
+  font-variant-numeric: tabular-nums;
+  color: var(--wb-info);
+  background: var(--wb-info-soft);
+  padding: 2px var(--wb-space-2);
+  border-radius: var(--wb-radius-pill);
+  white-space: nowrap;
+}
 .is-spinning { animation: cockpit-spin 1.4s linear infinite; }
 @keyframes cockpit-spin { to { transform: rotate(360deg); } }
 

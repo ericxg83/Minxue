@@ -902,7 +902,10 @@ app.get('/api/tasks/in-progress', async (req, res) => {
          t.started_at, t.updated_at, t.retry_count, t.last_error,
          s.name AS student_name,
          EXTRACT(EPOCH FROM (NOW() - COALESCE(t.started_at, t.updated_at, t.created_at)))::int AS elapsed_sec,
-         (COALESCE(t.updated_at, t.started_at, t.created_at) < NOW() - INTERVAL '300 seconds') AS is_stalled
+         (COALESCE(t.updated_at, t.started_at, t.created_at) < NOW() - INTERVAL '300 seconds') AS is_stalled,
+         -- P13 批改进度气泡：总题数 + 已判题数（review_status 非空即已判）
+         (SELECT COUNT(*) FROM ${TABLES.QUESTIONS} q WHERE q.task_id = t.id) AS total_questions,
+         (SELECT COUNT(*) FROM ${TABLES.QUESTIONS} q WHERE q.task_id = t.id AND q.review_status IS NOT NULL) AS judged_count
        FROM ${TABLES.TASKS} t
        LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
        WHERE t.status = $1 AND t.deleted_at IS NULL
@@ -926,6 +929,9 @@ app.get('/api/tasks/in-progress', async (req, res) => {
         lastError: t.last_error,
         elapsedSec: t.elapsed_sec,
         isStalled: t.is_stalled,
+        // P13 批改进度气泡
+        totalQuestions: Number(t.total_questions || 0),
+        judgedCount: Number(t.judged_count || 0),
       }))
     }
     inProgressCache = { data, timestamp: now }
