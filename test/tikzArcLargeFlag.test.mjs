@@ -70,3 +70,23 @@ test('源码级：largeArc 必须基于归一化 delta，不得裸差值比较',
   assert.ok(m, 'largeArc 必须由归一化 delta 判定')
   assert.ok(!/(?:endAngle - startAngle) > 180/.test(SRC.split('const delta')[0]), 'arc 分支不得残留裸差值比较')
 })
+
+// ── 双端闭环（2026-10-12 R26）：后端 geometryTikZ.js arcAngles 保证 end > start（可能 >360°），
+//    前端解析器 % 360 归一化必须兼容这类产物，两端自洽不得分叉 ──
+test('双端闭环：后端产物 end=550（330→550，跨0°补360大弧）必须 large-arc=1', () => {
+  const svg = tikzToSvg(
+    '\\begin{tikzpicture}\n\\draw (0,0) arc[start angle=330, end angle=550, radius=1];\n\\end{tikzpicture}',
+    false
+  )
+  assert.ok(svg, '应生成 path')
+  assert.equal(arcFlags(svg)[0], '1', '330→550（归一 delta=220°）应是大弧')
+})
+
+test('双端闭环：后端产物 end>360 整圈（0→660，实际 300°）必须 large-arc=1', () => {
+  const svg = tikzToSvg(
+    '\\begin{tikzpicture}\n\\draw (0,0) arc[start angle=0, end angle=660, radius=1];\n\\end{tikzpicture}',
+    false
+  )
+  assert.ok(svg, '应返回 path')
+  assert.equal(arcFlags(svg)[0], '1', '0→660（归一后 300°）应是大弧')
+})
