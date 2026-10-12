@@ -120,6 +120,13 @@ export default function WrongBookPage({
     if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
   }
 
+  // 卸载时清理长按定时器（P7 同口径）：长按进行中离开页面不残留定时器、不触碰已卸载组件
+  useEffect(() => {
+    return () => {
+      if (pressTimer.current) { clearTimeout(pressTimer.current); pressTimer.current = null }
+    }
+  }, [])
+
   // 触底加载下一页：服务端每页 100 条，Tab 计数是全量数字，
   // 不接回加载的话超过 100 条后新错题在移动端永远不可见。
   const sentinelRef = useRef(null)
