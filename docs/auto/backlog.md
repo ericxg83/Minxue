@@ -4510,3 +4510,26 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   `node scripts/dailyBackup.mjs`，即 r159 方案①），从待拍板列表移除。
 - 已写入巡查 automation prompt「每轮先核对的当前事实」（2026-10-12 负责人已拍板段），
   后续轮次不得再提案恢复已取消的两项。
+
+---
+
+## 提案 ㉙ 关闭 + ㉘ 状态订正（r272，2026-10-12 23:3x，commit `d283951`）
+
+负责人批示「㉘ 去修复 + ㉙ 合并做；㉚+㊴ 不修」，落地情况：
+
+- **㉘ 早已修复**（台账过期误挂「待拍板」）：`weeklyReport.js:10` 注明「2026-10-10 负责人拍板」，
+  周报三条链路读前自愈由 `2722556`（10-10）落地，共享实现
+  `server/services/questionCompletenessSync.js:healStaleCompletenessForPeriod`。
+  r272 探针实测闭环：全库陈旧行仅 140 条、其中动态口径判完整 **0/140**（r207 时近 30 天 264/141）
+  ⇒ 可捞回的已被历次自愈回写，剩下全是真残题。
+- **㉙ 本轮关闭**（commit `d283951`）：`shareCard.js` `fetchHasEverGraded` 取数前调
+  `healStaleCompletenessForPeriod(studentId, new Date(0), new Date(), {limit:500})`
+  （宽周期/按学生/失败不阻断，与周报同纪律同实现）。实测影响面：误判学生 **0/21**
+  （陈旧行 140 条可捞回 0 条）⇒ 修的是结构风险。新锁
+  `test/shareCardIsCompleteHeal.test.mjs` 2 条（源码契约 + 反向自检，HEAD 真旧版实证判红）。
+- **㉚+㊴ 移除待拍板列表**：负责人 10-12 明确「暂时不对分享卡过多修复」，不修。
+- ⚠️ 流程自省：65b502b（负责人拍板记录）不慎将 r271 未提交的 backlog 台账段一并提交
+  （`git add` 整个文件所致；内容为纯文档，r271 代码 WIP 未动）。教训：对他人正在改的文件，
+  追加前先 `git diff` 确认有无他人未提交改动；根本解法是等其提交后再动同文件，或写独立新文件。
+- 四道闸：npm test **2456/2456**｜lint 0 error｜构建/冒烟 ⛔ esbuild 23:2x 故障窗口
+  （winmm.dll，负责人批示暂不排查），本轮 0 个 src/ 文件前端产物零影响。
