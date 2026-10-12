@@ -430,3 +430,23 @@
 - 范围不变（见上表可写路径）；跨赛道（PC 工作台视图/store、白板、批改链路、几何管线、DB）仍只写提案。
 - 本轮落地：PC 通知中心那张「未读通知数」卡不再叫「待复核」（改「待确认」，与移动端同词）——
   详见 backlog 第 254 轮。
+
+## 第 r267 轮认领（2026-10-12 17:24–18:00，新日常巡查任务 · automation `4e9608a9`）
+
+- **机制**：旧 hourly automation `6423e285`（敏学巡检循环）已由负责人指令删除；新 automation「敏学日常巡查（开机持续运行，每小时一轮）」接管。后续每轮报告落 `docs/auto/reports/`，阶段总结唯一汇总文件 `docs/auto/每日巡查报告.md`。
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 门禁/巡检引擎 + 配套测试）。落地 `9d5d86b`：nightlyAudit 假绿修复（测试清单收敛 `scripts/testFileList.mjs`）。
+- 未触碰：并行 WIP 8 项（paperBank/handout 系列 + worksheets/apiService/serverPdfExporter/AppSidebar/router）。
+- 接手提示：① 本机 esbuild `winmm.dll` 故障未恢复前，构建/冒烟两闸不可执行（重启后复测）；② r247-① 已关闭勿翻；③ 服务端剩余 services 只读核查可继续（neonService/cjkFontState/optionText）。
+
+## 第 r268 轮认领（2026-10-12 18:29–19:0x，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 门禁/巡检引擎 + 测试套件清单 + 配套锁）—— 沿用 r267。
+- 落地 `dd42d91`（7 files, +95/−30）：**关闭 backlog ㊱** —— `server/tests/figureRegionRefiner.test.mjs`
+  自 2026-09-20 误提交进 b93c594 后三处入口（npm test / patrol / nightlyAudit）一个都不跑它，
+  单独跑 18 过 1 红。唯一失败用例期望的是 2026-09-21 修正前的旧行为（并集把图注并回输出），
+  与权威锁 `test/figureRegionRefiner.test.mjs:58` 直接矛盾；按现行产品规则改写 + 接线三处清单
+  （package.json / testFileList EXTRA 8→9 / testSuiteCoverageKit MUST_COVER+1、EXCLUDED 清空）。
+  反向自检：旧期望套现行实现判红、摘掉 package.json 条目门禁点名判红。
+- 未触碰：并行 WIP 8 项（paperBank/handout 系列 + worksheets/apiService/serverPdfExporter/AppSidebar/router）。
+- 环境：**r267-P-A（esbuild winmm.dll）重启后已恢复**，本轮构建+冒烟四件套全过。
+- 接手提示：① r268-P-D（figureRegionRefiner.js:427 注释措辞滞后，几何赛道）；② B 级拍板项清单见报告第四节。

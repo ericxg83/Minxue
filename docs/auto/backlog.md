@@ -4443,3 +4443,25 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   本就不可靠，**以 `loopGuard` 返回值为准、以提交内容区分**。
 - 下轮接第 255 轮：移动端赛道已归本会话，`lanes.md` 接手提示里的「首屏偶发 400（待观察）」
   「PullToRefresh 回归前查 manualChunks」可择机复核；B 级提案（㉘/㊸/㊴+㉚/r249-①/②/⑲/㊲/㊵）仍等拍板。
+
+## 第 r267 轮（2026-10-12 17:24–18:00，新日常巡查任务第一轮）已交付：nightlyAudit 单测口径漏跑 8 个 server 侧文件 65 条用例（假绿修复，commit `9d5d86b`）
+
+- 背景（机制切换，负责人指令）：旧 hourly automation「敏学巡检循环」`6423e285` 已删；OS daemon/计划任务三通道实测无残留；新 automation「敏学日常巡查（开机持续运行，每小时一轮）」`4e9608a9`（HOURLY;INTERVAL=1）接管。每轮报告 `docs/auto/reports/<日期>-r<NN>.md`，阶段总结唯一汇总文件 `docs/auto/每日巡查报告.md`。
+- 缺陷（实测）：`nightlyAudit.mjs` collectTests 裸 glob 只展开 `test/`，漏 `server/tests/`×6 + `server/utils/`×2（judgeChoiceAnswer/answerConsensus/repairAIJson/uploadValidatorHeic 等 65 条）。同刻对跑：nightlyAudit 2367 vs npm test/patrol 2432。
+- 修：新增 `scripts/testFileList.mjs`（清单唯一实现）；nightlyAudit 与 patrol 均改走它（patrol 行为不变）；锁 `test/nightlyAuditTestScope.test.mjs` 7 条（真旧版 git HEAD 版反向自检 3 红）。
+- 四道闸：npm test 2439/2439 ✅｜lint 4 文件 0 ✅｜构建/冒烟 ⛔ 本机 esbuild 二进制 `winmm.dll not found`（环境故障，见下）。
+- ✅ **r247-① 关闭复核**：`healthTrend.mjs` 机器分组实测**已修复**（r245 交付，输出头部点名「线上 83/目标没记 4/本机 1」并按机器分组）。下轮别再翻这条。
+- 提案 r267-P-A（观察·环境）：本机 esbuild 二进制 `winmm.dll not found`，bash/PowerShell/禁沙箱三通道 + esbuild API 最小复现（不经过 vite）+ `npm run build` 全复现；winmm.dll 本体正常（224,688B）。今日 10:40（R1）/16:18（R74）构建可过 ⇒ 期间系统状态变化，疑全局 hook/AppLocker 类注入；**重启后复测**，恢复前构建/冒烟两闸本机不可执行。
+- 提案 r267-P-B（B）：healthcheck/healthTrend/nightlyAudit/patrol 家族 package.json 无入口、无自动调用方（手动运维工具），去留待拍板。
+- 提案 r267-P-C（C，沿用 R1-P1）：线上 `0833d47` vs 本地 `9d5d86b`，需 Render 手动部署。
+
+## 第 r268 轮（2026-10-12 18:29–19:0x，新日常巡查任务）已交付：关闭 ㊱ —— 纳入从未执行的 figureRegionRefiner 测试并修正其过期期望（commit `dd42d91`）
+
+- 开工锁 `finished / 267`；他方 in-flight（paperBank/handout 系列 + worksheets/apiService/serverPdfExporter/AppSidebar/router）**全程没碰、没带进 commit**（路径级 add + `commit -- <paths>` 双保险）。
+- **发现（实测）**：全量对账 269 个跟踪测试文件 vs 三处入口 —— `server/tests/figureRegionRefiner.test.mjs` 三处都不覆盖（r267 同族缺陷第二枚），单独跑 **18 过 1 红**（「大框跨到隔壁（保住模型框完整覆盖）」）。
+- **定性（修正 r215 的记录）**：该红是**过期期望**不是产品缺陷 —— 期望编码 2026-09-21 修正前的旧行为（并集把图注带并回输出），与权威锁 `test/figureRegionRefiner.test.mjs:58`（09-21 起随套件全量跑、一直绿）直接矛盾。反向自检坐实：旧期望套现行实现（输出 `130,200 180x79`）判红。
+- **修**：期望改写为现行规则三断言（水平保住窄模型框 130..310／纵向收紧图形带 200..279／图注带不得并回）+ 删未用的 bandStats import + 文件头注来历；接线 package.json / testFileList（EXTRA 8→9）/ testSuiteCoverageKit（MUST_COVER+1、EXCLUDED 单字符串→数组并清空、不变量逐条化）；testSuiteCoverage 排除项测试改写 + 新增 ㊱ 闭环锁；nightlyAuditTestScope 8→9；patrol 注释同步。**零产品代码改动**。
+- 四道闸：npm test **2442/2442 fail 0**（基线 2439 +2 门禁 +1 入套件）｜lint 7 文件 **0e/0w**｜`dist_nightly_20261012r268` **34.55s**｜preview 5568 + cert_probe 零外联 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- ✅ **r267-P-A 关闭**：esbuild `winmm.dll` 故障重启后恢复（本轮构建正常产出）。
+- 提案 **r268-P-D**（B，几何赛道）：`server/utils/figureRegionRefiner.js:427` 注释「保证输出至少覆盖模型框完整范围」在 09-21 uniTrim 后已不成立（实例：模型框 190..300 → 输出 200..279），建议改措辞；**r268-P-B**（B，沿用 r267-P-B）：healthcheck 家族无自动调用方；**r268-P-C**（C，沿用）：Render 手动部署。
+- 下轮首选：r268-P-D（若指派回来）/ B 级拍板项 / 服务端剩余 services 只读核查（neonService/cjkFontState/optionText）。
