@@ -132,6 +132,9 @@
             <ActionButton :disabled="!selectedQuestions.length || creatingExam" @click="createRetry">
               生成重练卷{{ selectedQuestions.length ? `（${selectedQuestions.length}）` : '' }}
             </ActionButton>
+            <!-- P11 家长可读摘要图：复用周报同源的家长分享卡（含本周错题/掌握度/进步趋势），
+                 老师生成重练卷后一键再出一张可转发的成长摘要图。 -->
+            <GrowthCardButton :student-id="student?.id || ''" :student-name="student?.name || ''" />
           </template>
           <!-- ⛔ 第 91 轮曾删「全选本页」与勾选框（当时勾选无任何消费者 = 死 UI）。
                第 102 轮按负责人裁决接回「生成重练卷」按钮作为消费者，勾选框随之恢复；
@@ -194,6 +197,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowRight, CircleCheck, Reading, Search } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
+import GrowthCardButton from '../components/GrowthCardButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -365,7 +369,7 @@ const goEditOriginalQuestion = (item) => {
       console.error('[WrongBookCenter] 重练卷 PDF 生成失败:', paperError?.message || paperError)
       paperMessage = `PDF 生成失败：${paperError?.message || '未知错误'}（重练卷已创建，可从学生档案「最近重练」重打）`
     }
-    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}${paperMessage ? ' · ' + paperMessage : ''}`)
+    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}${paperMessage ? ' · ' + paperMessage : ''}。可点「家长分享卡」下载成长摘要图转发给家长`)
     wrongBookStore.clearSelection()
     emit('exam-created', exam)
     if (!embedded.value) router.push({ path: '/students/' + student.id, query: { tab: 'retry' } })
