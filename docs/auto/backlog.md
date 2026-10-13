@@ -4585,3 +4585,27 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   本轮 0 个 src/ 文件，前端产物零影响。
 - ⚠️ r267 的 nightlyAuditTestScope 锁随之作废（对象已删），其核心成果 testFileList 唯一实现
   仍活在 patrol；假绿修复的历史价值记录在 testFileList.mjs 头部，不丢。
+
+---
+
+## 提案 r249-①/② 闭环（2026-10-13 负责人八项批示之⑤「拆分批准」→ r275 落地，含 r248-① 一并闭环）
+
+- **病根**（r249 实测）：`/api/tasks/summary` 的 `failedTasks` 只数未读失败（SQL `AND notification_read_at IS NULL`）
+  ⇒ 老师点一次铃铛，永远批不成的作业从「失败任务」灯与待办总数里**永久消失**；且一个数字同时挂
+  「铃铛要未读」与「失败灯要总数」两件相反的事。
+- **修法**（拆分，一个数字不再挂两件事）：`failed_detail` 取**全集**（含已读）+ SELECT 补
+  `t.notification_read_at`；JS 派生 `failedTasks`（真失败总数，失败灯用）+ `failedUnread`（未读失败，
+  铃铛用，与 pendingReview 同口径）；`totalNotifications = pending_review + failedUnread`（⛔ 不许用
+  failedTasks 相加，否则已读失败圈进待办、角标永不归零）。前端三处：store 初始值、NotificationList
+  失败卡（读 failedTasks）、Dashboard failedCount；「没看的新作业」归「待确认」卡不变。
+- **测试锁 +29 行**（taskAutoRetry.test.mjs）：新派生链断言 + r275 专锁「failed_detail 必须取全集」——
+  断言前**剥 SQL 注释行**（r275 注释里刻意写了「去掉 notification_read_at IS NULL」，不剥会被自己的
+  注释判红）；SELECT 断言锚 `updated_at,\s*t\.notification_read_at` 而非宽松正则（旧版 WHERE 也有该串，
+  放宽则旧版判不出红）；真旧版两处判红验证通过。
+- **四道闸**：npm test **2341/2341 fail 0**（10-12 全量）｜lint 5 文件 **0 error**｜
+  构建 `dist_nightly_20261013r275` **36.75s exit 0**（10-12 esbuild 间歇故障窗口按批示未排查，
+  10-13 已恢复后补跑）｜真机三件套（bootAt 14:22:21 晚于 mtime 14:11:05 ⇒ 新代码在跑；
+  API 含 `failedUnread` 与 `recentTasks[].notificationReadAt`；DB 只读复核 failed 0/0/0 与 API 一致）。
+- 当前库中无 failed 任务 ⇒ **数字变化为零，修的是口径病根**：从此点多少次铃铛，真失败都稳亮失败灯。
+- 提交：代码+锁+前端+报告同一次提交（pathspec 六文件）；报告 `docs/auto/reports/2026-10-13-r275.md`；
+  探针 `_diag_r275_failedcount.mjs` 用后即删。

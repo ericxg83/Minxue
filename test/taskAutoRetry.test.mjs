@@ -370,11 +370,36 @@ test('重试响应文案：服务端说「已在处理」时，前端不能还�
 
 test('服务端下发：列表每行带 auto_retry，摘要按同一判据过滤', () => {
   assert.match(INDEX_SRC, /auto_retry: describeAutoRetry\(row\)/, '任务列表必须下发判定结果')
-  assert.match(INDEX_SRC, /const failedTasks = failedDetail\.filter\(\(d\) => !describeAutoRetry\(d\)\.willRetry\)\.length/,
-    '摘要里的失败数必须排除"还会自愈"的')
+  // r275（提案 r249-①/②，负责人批准拆分）：failed_detail 改为全集（含已读），
+  // JS 侧派生两个数——failedTasks（真失败总数，失败任务灯用）+
+  // failedUnread（未读失败，铃铛用）。⛔ 铃铛总数只许 pending_review + failedUnread：
+  // 拿 failedTasks（总数）相加会把已读失败也圈进「待办」，老师点开后角标永不归零。
+  assert.match(INDEX_SRC, /const failedReal = failedDetail\.filter\(\(d\) => !describeAutoRetry\(d\)\.willRetry\)/,
+    '摘要里的失败数必须排除"还会自愈"的（r275 起先取全集再派生）')
+  assert.match(INDEX_SRC, /const failedTasks = failedReal\.length/)
+  assert.match(INDEX_SRC, /const failedUnread = failedReal\.filter\(\(d\) => !d\.notification_read_at\)\.length/,
+    '未读失败数必须单列，不许拿 failedTasks 直接当铃铛数')
+  assert.match(INDEX_SRC, /totalNotifications: r\.pending_review \+ failedUnread/,
+    '待办总数必须是「未读 done + 未读失败」')
   assert.match(INDEX_SRC, /filter\(\(t\) => t\.status !== 'failed' \|\| !describeAutoRetry\(t\)\.willRetry\)/,
     '最近任务列表要滤掉还会自愈的失败行')
   assert.match(INDEX_SRC, /autoRetry: describeAutoRetry\(t\)/)
+})
+
+test('r275：failed_detail 必须取全集（含已读），否则点开铃铛后失败灯假消失', () => {
+  // 旧口径：WHERE ... AND t.notification_read_at IS NULL ⇒ 只数未读失败。
+  // r249 实测：老师点一次铃铛，永远批不成的作业从所有告警永久消失。
+  // ⛔ 窗口先剥 SQL 注释行再断言——r275 注释里刻意写了「去掉 notification_read_at IS NULL」
+  //    这句话，不剥注释判据会被自己的注释判红（nightlyAuditTestScope 踩过的同款坑）。
+  const failedSqlRaw = INDEX_SRC.slice(
+    INDEX_SRC.indexOf('AS failed_detail') - 800,
+    INDEX_SRC.indexOf('AS failed_detail')
+  )
+  const failedSql = failedSqlRaw.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
+  assert.ok(!/notification_read_at IS NULL/.test(failedSql),
+    'failed_detail 子查询不许再按已读过滤（失败清单必须是全集）')
+  assert.match(failedSql, /updated_at,\s*t\.notification_read_at/,
+    'SELECT 必须带上 notification_read_at（JS 侧才能派生 failedUnread）；⛔ 别放宽成 /t\\.notification_read_at/——旧版 WHERE 里也有这个串，那样旧版判不出红')
 })
 
 test('手动重试的防重复入队：必须在写库之前拦下，且不动 status / retry_count / last_error', () => {

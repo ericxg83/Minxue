@@ -27,6 +27,11 @@
       <div class="summary-card" @click="goRoute('failedTasks')">
         <div class="card-icon icon-red"><el-icon size="18"><WarningFilled /></el-icon></div>
         <div class="card-body">
+          <!-- r275（提案 r249-①/②，负责人批准拆分）：这张卡的数字是 summary.failedTasks =
+               **真失败总数**（不会自动重捞的，不限已读未读）。旧口径只数未读失败 ⇒ 老师点一次
+               铃铛，永远批不成的作业就从所有告警里永久消失（r249 实测复现）。「没看的新作业」
+               归左边「待确认」卡（pendingReview，未读 done），一个数字不再挂两件事。
+               铃铛/「全部待办」总数是未读口径：pendingReview + failedUnread，不受本卡影响。 -->
           <span class="card-num">{{ summary.failedTasks }}</span>
           <span class="card-label">失败任务</span>
         </div>

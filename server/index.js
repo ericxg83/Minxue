@@ -735,10 +735,16 @@ app.get('/api/tasks/summary', async (req, res) => {
          COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
          -- 第 90 轮：failed 任务的最终计数改在 JS 侧用 describeAutoRetry 过滤（见下方 failedTasks），
          -- 这里只取判定需要的四个字段。⛔ 不在 SQL 里重写一遍判据 —— 那会变成第二套口径。
+         -- r275（2026-10-13，提案 r249-①/②，负责人批准拆分）：**去掉 notification_read_at IS NULL**。
+         --   旧口径只数「未读失败」⇒ 老师点一次铃铛，永远批不成的作业就从所有告警里永久消失
+         --   （r249 实测复现）。现在失败清单取全集，JS 侧同时产出两个数：
+         --   failedTasks（真失败总数，失败任务这盏灯用，不再因已读塌缩）+
+         --   failedUnread（未读失败，铃铛/待办角标用，与 pendingReview 同口径）。
+         --   实测（r275 探针）：当前 failed_total=0 ⇒ 本次改动数字变化为零，修的是口径病根。
          COALESCE((SELECT json_agg(row_to_json(f)) FROM (
-           SELECT t.status, t.last_error, t.retry_count, t.created_at, t.updated_at
+           SELECT t.status, t.last_error, t.retry_count, t.created_at, t.updated_at, t.notification_read_at
            FROM ${TABLES.TASKS} t
-           WHERE t.status = $2 AND t.deleted_at IS NULL AND t.notification_read_at IS NULL
+           WHERE t.status = $2 AND t.deleted_at IS NULL
          ) f), '[]'::json) AS failed_detail,
          -- 今日新增错题（2026-10-09 负责人拍板，对齐周报 newWrongCount 口径）：
          --   上海自然日 + 不限生命周期（统计的是「今日批卷产生的错题总数」）。
@@ -804,8 +810,13 @@ app.get('/api/tasks/summary', async (req, res) => {
     // 第 90 轮：系统还会自己救回来的失败任务，不计入「识别异常」，也不进铃铛清单。
     // 它们几分钟后（配额类最晚第二天）会自己变成正常结果；提前报一次异常只会让老师白点一次，
     // 而且会与自动重捞撞车。⛔ 判据复用 describeAutoRetry，不在 SQL 里另写一套。
+    // r275（提案 r249-①/②）：failed_detail 现在是**全集**（含已读）——
+    //   failedTasks = 真失败总数（「失败任务」这盏灯，不再因点开铃铛消失）；
+    //   failedUnread = 其中未读的（铃铛/待办角标，与 pendingReview 同为「未读」口径）。
     const failedDetail = Array.isArray(r.failed_detail) ? r.failed_detail : []
-    const failedTasks = failedDetail.filter((d) => !describeAutoRetry(d).willRetry).length
+    const failedReal = failedDetail.filter((d) => !describeAutoRetry(d).willRetry)
+    const failedTasks = failedReal.length
+    const failedUnread = failedReal.filter((d) => !d.notification_read_at).length
     const recentTasks = (r.recent_tasks || [])
       .filter((t) => t.status !== 'failed' || !describeAutoRetry(t).willRetry)
       .map(mapTask)
@@ -829,9 +840,12 @@ app.get('/api/tasks/summary', async (req, res) => {
         pendingReview: r.pending_review,
         pendingReviewPapers: pendingReviewPapers == null ? r.pending_review : pendingReviewPapers,
         failedTasks,
+        // r275：未读失败数单列——铃铛/待办角标是「未读」口径（与 pendingReview 一致），
+        // 而 failedTasks 是「真失败总数」；两个数各归其位，不再一个数字挂两件事。
+        failedUnread,
         todayNewWrongQuestions: r.today_new_wrong,
         inProgressCount: r.in_progress_count,
-        totalNotifications: r.pending_review + failedTasks,
+        totalNotifications: r.pending_review + failedUnread,
         pendingTasks: (r.pending_tasks || []).map(mapTask),
         recentTasks
       }

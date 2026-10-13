@@ -10,6 +10,9 @@ export const useNotificationStore = defineStore('notification', () => {
     // 口径与批改中心 chip「待人工复核」同源，见 src/workbench/utils/pendingReviewCaliber.js
     pendingReviewPapers: 0,
     failedTasks: 0,
+    // r275（提案 r249-①/②）：failedTasks = 真失败总数（失败任务灯用，点开铃铛不消失）；
+    // failedUnread = 其中未读的（铃铛/待办角标用，与 pendingReview 同口径）。两个数各归其位。
+    failedUnread: 0,
     todayNewWrongQuestions: 0,
     inProgressCount: 0,
     totalNotifications: 0,

@@ -298,6 +298,9 @@ const greeting = computed(() => {
 const pendingCount = computed(
   () => notiStore.summary.pendingReviewPapers ?? notiStore.summary.pendingReview ?? 0
 )
+// r275（提案 r249-①/②）：failedTasks 口径改为**真失败总数**（不限已读）——
+// 旧口径只数未读，老师点一次铃铛「识别异常」就塌缩到 0，而那些作业永远批不成、还躺在那。
+// 「没看的新作业」归「待确认」（pendingReview），铃铛总数是 pendingReview + failedUnread。
 const failedCount = computed(() => notiStore.summary.failedTasks || 0)
 const wrongCount = computed(() => notiStore.summary.todayNewWrongQuestions || 0)
 const undigestedCount = computed(() => retryOverview.value?.undigested || 0)
