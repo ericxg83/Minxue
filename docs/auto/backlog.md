@@ -4609,3 +4609,22 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - 当前库中无 failed 任务 ⇒ **数字变化为零，修的是口径病根**：从此点多少次铃铛，真失败都稳亮失败灯。
 - 提交：代码+锁+前端+报告同一次提交（pathspec 六文件）；报告 `docs/auto/reports/2026-10-13-r275.md`；
   探针 `_diag_r275_failedcount.mjs` 用后即删。
+
+---
+
+## r278 提案（2026-10-13 18:35，日常巡查 automation `4e9608a9`，B 级只提案）
+
+- **r278-P-A（B）**：技能引用体检 ① 类「路径前缀写错」16 处存量——6 个技能文件把仓库文件写成裸路径
+  （`minxue-product-review` 的 `routes/examPdf.js` 等 6 处、`minxue-geom-label-diagnose` 5 处、
+  `minxue-judge-misjudge-fix` / `minxue-question-element-backfill` / `minxue-worksheet-parse-interrupt` 各 1-2 处），
+  实际都在 `server/` 下，未来会话照抄会 Cannot find module。属提示级不卡门禁（exit 仍 0），
+  但正是体检工具要防的那类伤害；纯文档改动、可由 `node scripts/check-skill-refs.mjs` ① 类归零回验。
+- **r278-P-B（B）**：体检 ④ 类同名歧义 32 处中 4 处源于 10-04 遗留临时目录——`_r113q_baddir/src/App.jsx`、
+  `_r113q_baddir/src/components/NotificationsPanel.jsx`、`_r113q_baddir/src/services/apiService.js`、
+  `_preview_kp|_seed-math-network` 下两个 json 各 1 处。目录删不掉（safe-delete fail-closed，
+  见 r278-P-C），建议负责人确认后清理或至少在 .gitignore/README 说明其来源，否则歧义提示长期噪声。
+- **r278-P-C（—，记录）**：`logs/_r278_reverse` 夹具目录删除被 safe-delete fail-closed 拦截
+  （trash 失败、拒绝兜底删）。logs/ 已被 .gitignore 排除、无仓库污染；按 r132 先例记录不深究，
+  但这是本机第 N 例「目录删不掉」，建议负责人择机核查 genie-trash 服务状态。
+- 本轮已关闭（只读核验，勿再提）：r271-④（技能文档失效引用，连同 ㊲ 新冒出的 2 处共 4 处已清零）、
+  r273-P-B（部署缺口 4 提交已全部在 origin/main）、r273-P-C 的载体部分（r269 三文件已由 `ec1c159` 代提交）。

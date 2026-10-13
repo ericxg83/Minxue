@@ -464,3 +464,32 @@
   「延后」不是「丢失」，但若关机前仍无目录且日志无 run start ⇒ 升级）；② 部署缺口 4 个提交未推
   （f17a718/65b502b/d283951/2fb8ce3，含产品码 d283951），待负责人拍板；③ r269 三个 WIP 文件
   （skillRefsKit/check-skill-refs/checkSkillRefsScope.test）已挂 16 小时，仍待负责人处置。
+
+## 第 r278 轮认领（2026-10-13 18:35–，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：流程沉淀与 skill 维护（技能引用体检）+ 仓库卫生与门禁基线。
+- 锁号说明：loopGuard round+1 会得 274，与负责人指令轮（r274 试卷题库 / r275 报告）撞号，
+  按 r273 先例手工认领 **r278**（下一个空号；r276/r277 亦被指令轮占用）。
+- 落地（**零仓库产品码**，改动全在本机技能库 `~/.workbuddy-ai/skills` 与 `~/.workbuddy/skills`，
+  三份 SKILL.md，均不在 git 内）：**技能引用体检 4 处错误级失效引用清零，exit 1 → 0**——
+  ① `.workbuddy-ai/skills/minxue-loop-handoff/SKILL.md:125`：`nightlyAuditVerdict.mjs` /
+  `healthDiskState.mjs` 已随提案㊲（负责人 10-13 批复）删除，原文仍写成「同处」的活文件 ⇒ 标注删除事实；
+  ② `.workbuddy/skills/ppt-master/SKILL.md:136`：`design_spec.md` 是目标项目工程产物、不在仓库 ⇒ 就地标注；
+  ③ `.workbuddy/skills/shadcn-ui/SKILL.md:155`：`tailwind.config.js` 同理（v3 目标项目配置）⇒ 就地标注。
+- 反向自检（`SKILLS_DIR=logs/_r278_reverse` 内联合成坏样本，用完即删）：去掉标注后同一批 4 个引用
+  **照样判错 exit 1** ⇒ 证明是标注在救场，门禁判据零放宽；`test/checkSkillRefsScope.test.mjs`
+  25 条随 npm test 全绿（npm test 2367/2367，与 r275 的 2341 不同是因指令轮 r274/r277 加了测试）。
+- 四道闸：npm test **2367/2367 fail 0**｜eslint **0 error / 122 warning**（与基线一致，本轮 0 仓库文件）｜
+  构建 `dist_nightly_20261013r278` **34.99s exit 0**｜preview 5575 单调用内起服 +
+  render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**，全 exit 0。
+  ⚠️ 环境实记：PowerShell run_in_background 起 preview 又被作业对象收走（5574 起服后
+  render_smoke 8/8 通过、sweep/text 连拒）⇒ 按 r273 先例改「单次 Bash 调用内 `&` 起服 + 同调用跑闸 + kill」全绿。
+- 关闭的历史提案（本轮只读核验）：r271-④（2 处技能文档失效引用，r278 连同新冒出的 2 处一并清零）、
+  r273-P-B（部署缺口：f17a718/65b502b/d283951/2fb8ce3 已全部在 origin/main，本地与远端平齐）、
+  r273-P-C 的载体部分（r269 三文件已由指令轮 `ec1c159` 代提交）。
+- 备份核验：`D:/Minxue_Backup/2026-10-13/` manifest `ok:true`、createdAt 13:30:04（13:00 档成功），
+  r273 接手提示①闭环，**无报警**。
+- 新提案：r278-P-A（B，① 类「路径前缀写错」16 处提示存量——6 个技能文件把 `server/` 前缀写成裸路径，
+  照抄会 Cannot find module；下轮可清）；r278-P-B（B，④ 类同名歧义 32 处里 4 处由 `_r113q_baddir/`
+  等 10-04 遗留临时目录造成——目录删不掉门禁在，建议确认后清）。
+- 未触碰：`.workbuddy-ai/memory/MEMORY.md`（他人在制，git status 唯一脏项）。
