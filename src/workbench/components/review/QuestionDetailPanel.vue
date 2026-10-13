@@ -656,8 +656,15 @@ const getAiStateText = (q) => getReviewStateLabel(q, store.confidenceThreshold)
 const unjudgedReason = computed(() => getUnjudgedReasonText(q.value, store.confidenceThreshold))
 
 // 「AI 答案存疑」原因 —— AI 已给出正误，但参考本身可能不可靠（图题视觉推理）。
-// 即使在 wrong 状态也展示，避免老师把"AI 错误"信以为真。纯展示，不参与判定。
-const aiAnswerRiskReason = computed(() => getAiAnswerRiskText(q.value))
+// 仅 wrong / pending 态展示：wrong 态避免老师把"AI 错误"信以为真；pending 态
+// 说明为何要人工确认。correct 态不展示（2026-10-13 裁决：判对+存疑不再进待处理，
+// 再显示「请人工核对」会与已放行自相矛盾；存疑明细仍留在库内，周末班讲题课件
+// 继续携带，需要溯源时查 DB）。纯展示，不参与判定。
+const aiAnswerRiskReason = computed(() => {
+  const state = getAiState(q.value)
+  if (state !== 'wrong' && state !== 'pending') return ''
+  return getAiAnswerRiskText(q.value)
+})
 
 // 用户手动覆盖：默认 false → 显示 TikZ（AI 重画的 clean_geometry_svg）；
 // true → 显示原图（geometry_image_url 裁剪原图）。这是临时 UI 状态，
