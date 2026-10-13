@@ -493,3 +493,22 @@
   照抄会 Cannot find module；下轮可清）；r278-P-B（B，④ 类同名歧义 32 处里 4 处由 `_r113q_baddir/`
   等 10-04 遗留临时目录造成——目录删不掉门禁在，建议确认后清）。
 - 未触碰：`.workbuddy-ai/memory/MEMORY.md`（他人在制，git status 唯一脏项）。
+
+## 第 r279 轮认领（2026-10-13 20:05–，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：流程沉淀与 skill 维护（技能引用体检）+ 仓库卫生与门禁基线——沿用 r278。
+- 锁号：`loopGuard acquire` 直得 **279**（r278 之后无撞号，未手工绕号）。
+- 落地（**零仓库产品码**，6 份 SKILL.md 均在本机技能库、不在 git）：**r278-P-A 关闭——体检 ① 类
+  「路径前缀写错」16 处清零 + 同族第 17 处**（`utils/serverPdfExporter.js#renderViaIframe` 因 `#` 后缀
+  躲过判据；先证存在发现真实位置是 `src/utils/` 而非 `server/utils/`，按实证改）。
+- ⚠️ 过程实记：两份技能库重名陷阱（`.workbuddy-ai/skills` 14 份 vs `.workbuddy/skills` 25 份，
+  `minxue-product-review` 两边内容不同）——对线输出必须 node 探针确认是哪一份，本轮最初对错文件。
+- 反向自检：16 处换回旧写法到隔离副本 ⇒ 体检重新判出 16 处、token 逐一命中 ⇒ 判据零放宽，PASS。
+- 四道闸：npm test **2367/2367 fail 0**｜eslint **0e/122w**（规范命令 `npx eslint .`；⛔ 勿加
+  `--ext`，ESLint 9 下会让 .vue 走 JS 解析器产出 59 个假 `Parsing error`）｜
+  `dist_nightly_20261013r279` **34.25s**｜preview 5581 单调用内起服：cert_probe exit 0 +
+  render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- 备份核验：10-13 13:30 ok:true（r278 一小时内刚核，无新档期），**无报警**。
+- 只读关闭/保持：r278-P-A 关闭；r278-P-B 仍开放（④ 类歧义 4 处涉遗留临时目录，待负责人）；
+  部署缺口本轮提交后推送归零（连带 r278 的 `486c007`）。
+- 未触碰：`.workbuddy-ai/memory/MEMORY.md`（他人在制）；④ 类 32 处未动。
