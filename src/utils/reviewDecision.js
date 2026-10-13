@@ -209,10 +209,17 @@ export const getAiAnswerRiskText = (question) => {
  * 的**唯一判据**（2026-10-10）。
  *
  * 与 6 态的关系：pending / exception / processing 三态天然需要老师处理。
- * 额外把「AI 已给出正误结论，但参考答案存疑」也纳入 —— 这类题在 6 态里是**终态**
- * （AI 判错 → wrong 红 X；AI 判对 → correct），旧口径下老师翻页即过，但题面明确写着
- * 「建议核对参考答案」，属于必须人工核对的事项。
- * （2026-10-10 负责人要求：这类题也要出现在题目列表的「待处理」里。）
+ * 「AI 已给出正误结论，但参考答案存疑」的处置按结论方向分流（2026-10-13 负责人裁决）：
+ *   · AI 判错 + 存疑 → 仍进待处理。全库证据：AI 判错的历史翻案率 25%~50%
+ *     （无标注 95/191、视觉存疑 3/12），参考答案可能真有错、学生可能其实对了，
+ *     这是人工核对价值最高的场景。
+ *   · AI 判对 + 存疑 → **不再进待处理**。全库证据：AI 判对 329/329 老师零翻案，
+ *     其中带存疑标注的 27 题（多路 5 / 视觉 20 / 其他 2）也全部维持判对，
+ *     逐题点确认是纯冗余。存疑文案仍在详情区展示（getAiAnswerRiskText 不动），
+ *     老师翻到该题依然看得见「参考答案存疑」，只是不再被强制确认。
+ *     多路投票按字面形式分票的噪音（如 2(b+c) vs 2b+2c、π-3 vs \pi-3 等价拆票）
+ *     也随此裁决不再骚扰老师。
+ *   · 未作答（blank）+ 存疑 → 不进待处理（未作答是终态，无可核对内容）。
  *
  * ⚠️ 人工已下结论（review_status 非空）或已排除的题不再计入。这不是可选项：
  * 后端只在「参考答案被人工改写」时才清 ai_answer_risk_reason
@@ -229,7 +236,10 @@ export const needsHumanAttention = (question, threshold = DEFAULT_CONFIDENCE_THR
   if (state === 'pending' || state === 'exception' || state === 'processing') return true
   // 走到这里说明是终态（correct / wrong / blank）：人工已下结论的不再打扰老师
   if (question.review_status) return false
-  return getAiAnswerRiskText(question) !== ''
+  // AI 判错 + 参考答案存疑：唯一保留人工核对的终态场景（判错翻案率高，见函数头注释）
+  if (state === 'wrong') return getAiAnswerRiskText(question) !== ''
+  // AI 判对 / 未作答 + 存疑：不进待处理（2026-10-13 负责人裁决，判对历史零翻案）
+  return false
 }
 
 /**

@@ -1,15 +1,19 @@
 /**
- * 复核页「待处理」口径锁（2026-10-10）
+ * 复核页「待处理」口径锁（2026-10-10 建立，2026-10-13 按负责人裁决收窄）
  *
  * 需求：PC 后台复核页左栏「题目列表 → 待处理」页签里，除 AI 没给出结论的三态
  * （pending / exception / processing）外，还要包含**「AI 已判出正误、但参考答案存疑」**
- * （ai_answer_risk_reason 非空，如「AI 视觉推理不擅长，建议核对参考答案」）的题 ——
- * 这类题在 6 态里是终态（AI 判错 → 红 X），旧口径下老师翻页即过，看不到要核对。
+ * （ai_answer_risk_reason 非空，如「AI 视觉推理不擅长，建议核对参考答案」）的题。
  *
- * 本文件锁两件事：
+ * 2026-10-13 裁决（全库数据驱动）：存疑标注只对 **AI 判错** 保留待处理 ——
+ * AI 判错翻案率 25%~50%（人工核对价值最高）；AI 判对 329/329 老师零翻案
+ * （含带存疑标注的 27 题），判对 + 存疑不再进待处理，存疑文案保留在详情区。
+ *
+ * 本文件锁三件事：
  *   1. 行为：needsHumanAttention 的判定边界（含「人工已复核后必须退出待处理」这条防死锁规则）
  *   2. 源码：reviewStore 的两个消费方（页签过滤 + 顶部「需处理 N」）必须共用同一函数，
  *      禁止任何一方再各写一套（本仓反复踩过的口径漂移）
+ *   3. 行为：判对 + 存疑放行、判对低置信仍进待处理（放行新规的两个方向都不许漏）
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -41,21 +45,34 @@ test('AI 没给出结论的三态仍然需要老师处理（行为不变）', ()
   }
 })
 
-test('AI 判错/判对但参考答案存疑 → 也要进「待处理」（本次需求核心）', () => {
+test('AI 判错 + 参考答案存疑 → 进「待处理」；AI 判对 + 存疑 → 放行（2026-10-13 裁决）', () => {
   const wrongWithRisk = {
     is_correct: false, confidence: 0.95, answer_source: 'recognized',
     ai_answer_risk_reason: IMAGE_RISK
   }
-  // 6 态仍是终态 wrong（红 X 照常显示），但它现在算「需要老师动手」
+  // 6 态仍是终态 wrong（红 X 照常显示），它算「需要老师动手」：
+  // AI 判错的历史翻案率 25%~50%（无标注 95/191、视觉存疑 3/12），人工核对价值最高
   assert.equal(getReviewState(wrongWithRisk), 'wrong')
   assert.equal(needsHumanAttention(wrongWithRisk), true)
 
+  // 2026-10-13 负责人裁决：AI 判对 + 存疑不再进待处理。
+  // 全库证据：AI 判对 329/329 老师零翻案，其中带存疑标注的 27 题（多路 5 / 视觉 20 /
+  // 其他 2）也全部维持判对 —— 逐题点确认是纯冗余。存疑文案仍在详情区展示。
   const correctWithRisk = {
     is_correct: true, confidence: 0.95, answer_source: 'recognized',
     ai_answer_risk_reason: IMAGE_RISK
   }
   assert.equal(getReviewState(correctWithRisk), 'correct')
-  assert.equal(needsHumanAttention(correctWithRisk), true)
+  assert.equal(needsHumanAttention(correctWithRisk), false)
+  assert.equal(getAnswerRiskPendingText(correctWithRisk), '')
+
+  // 边界：判对但置信度不足（<0.5）→ 6 态是 pending，照样进待处理（不因放行新规漏掉）
+  const lowConfCorrect = {
+    is_correct: true, confidence: 0.3, answer_source: 'recognized',
+    ai_answer_risk_reason: IMAGE_RISK
+  }
+  assert.equal(getReviewState(lowConfCorrect), 'pending')
+  assert.equal(needsHumanAttention(lowConfCorrect), true)
 
   // 没有存疑标注的普通判错题不受影响 —— 不能把所有判错题都推进待处理
   const plainWrong = { is_correct: false, confidence: 0.95, answer_source: 'recognized' }
