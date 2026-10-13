@@ -6,22 +6,26 @@ import ImagePreview from './ImagePreview'
 import { getExamGradingDetail } from '../services/apiService'
 import { normalizeOptions } from '../utils/optionText'
 
-// 组卷「批改详情」逐题卡片视图（2026-10-13 方案三定稿：逐题卡片为主，原卷降级为按需查看）：
-// 晚托班老师在手机上打开一份已出结果的重练卷，逐题看「学生答案 vs 参考答案 + 解析」讲题；
-// 需要对照答卷原卷时，从「看原卷」进全屏可缩放查看器（当前题加粗高亮）。
+// 组卷「批改详情」双视图（2026-10-13 方案四定稿：原卷优先，点框出卡）：
+// 晚托班老师讲错题的锚点是手里的纸质卷 —— 默认进「原卷」可缩放视图，点题目框/编号徽标
+// 弹出该题卡片（学生答案 vs 参考答案 + 解析）；「逐题」tab 保留卡片流，错题多时按序过一遍。
+// 无答卷页图（pages 空）时自动回退逐题视图并禁用原卷 tab。
 //
 // 纪律（几何/对位/判定口径与 PC PaperViewerPanel paper 模式同源，见 server/utils/gradingDetailView.js）：
 //   · 判定用 marks[].verdict（服务端人工复核优先口径），本组件只展示、不判题、
 //     不提供任何改判入口 —— 改判归 PC 复核台。
-//   · matchedBy='none'（图上无作答痕迹）的题只在顶部给事实提示 + 答案位文案说明，
+//   · matchedBy='none'（图上无作答痕迹）的题只给事实提示 + 答案位文案说明，
 //     不标注、不改判 —— 缺痕迹 ≠ 未作答，判定仍归老师。
 //   · marks[].question 是 questions 表权威内容（题干/选项/答案/解析），与几何对位解耦；
 //     查不到按「暂无题目内容」降级，绝不用 OCR 文本伪造题干。
-//   · 原卷查看器的定位框只认 retryAlign 答卷图坐标系（bbox 0-1000 归一化），框不准
-//     只是参考信息，不再阻塞主流程；无 retryAlign 的旧卷自然降级为纯看图。
+//   · 原卷叠加框只认 retryAlign 答卷图坐标系（bbox 0-1000 归一化），框只承担「定位入口」
+//     职责：点错了关掉即可，卡片段落里的题干文字负责确认是哪道题。对位错框（框画到别的
+//     题上）属上游识别质量，本层不修数据，靠弹卡兜底。
+//   · 徽标文字用 mark.label（卷面题号，如 4(2)），与印刷卷对照；叠加层渲染按
+//     (page, y, x) 排序，保证命中与遮挡顺序稳定（不解决上游错位框）。
 //
 // 交互复用移动端「批改复核」（src/pages/ExamReview/index.jsx）已验证模式：
-// 横向题号导航 + 左右滑动切题 + 答案双栏 + 解析折叠；滑动参数与其逐字一致。
+// 左右滑动切题 + 答案双栏 + 解析折叠；滑动参数与其逐字一致。
 
 const VERDICT_META = {
   correct: { fg: 'var(--success)', soft: 'var(--success-soft)', Icon: Check, label: '正确' },
@@ -81,7 +85,7 @@ function QuestionNav({ marks, currentIndex, onJump }) {
 }
 
 /** 逐题卡片：题干 / 选项 / 学生答案 vs 参考答案 / 解析（折叠）/ 看原卷入口 */
-function QuestionCard({ mark, index, hasPages, onViewPaper }) {
+function QuestionCard({ mark, index, hasPages, onViewPaper, hint = '左右滑动切题' }) {
   // 解析展开态挂在卡片上：父组件按 questionId 做 key，切题天然重置
   const [showAnalysis, setShowAnalysis] = useState(false)
   const meta = VERDICT_META[mark.verdict] || VERDICT_META.unjudged
@@ -204,7 +208,7 @@ function QuestionCard({ mark, index, hasPages, onViewPaper }) {
         )}
       </div>
 
-      {/* 看原卷：按需进入全屏查看器（当前题所在页，无页码回退第 1 页） */}
+      {/* 看原卷：切回原卷 tab 并定位到该题所在页（卡片弹层里则先收起弹层） */}
       <div className='mt-2.5 flex items-center justify-between'>
         <button
           type='button'
@@ -215,96 +219,111 @@ function QuestionCard({ mark, index, hasPages, onViewPaper }) {
         >
           <Eye size={13} />看原卷
         </button>
-        <span className='text-[11px]' style={{ color: 'var(--text-tertiary)' }}>左右滑动切题</span>
+        {hint && <span className='text-[11px]' style={{ color: 'var(--text-tertiary)' }}>{hint}</span>}
       </div>
     </div>
   )
 }
 
-/** 全屏原卷查看器：可缩放大图 + 当前题加粗高亮 + 翻页 */
-function PaperViewer({ pages, marks, page, currentIndex, onClose, onPageChange }) {
-  const current = marks[currentIndex]
+/** 原卷叠加框：bbox 定位 + 卷面题号徽标；框体/徽标都可点（命中区外扩 8px 好点中） */
+function PaperMarkBox({ mark, isCurrent, onTap }) {
+  const meta = VERDICT_META[mark.verdict] || VERDICT_META.unjudged
+  const { bbox } = mark
+  const label = mark.label || ''
   return (
-    <div className='fixed inset-0 z-[30000] flex flex-col' style={{ background: 'rgba(0,0,0,0.95)' }}>
-      <div className='flex items-center justify-between px-4 py-3'>
-        <span className='text-[13px]' style={{ color: 'rgba(255,255,255,0.75)' }}>
-          第 {page} 页<span style={{ color: 'rgba(255,255,255,0.45)' }}> / </span>共 {pages.length} 页
-        </span>
-        <span className='text-[11px]' style={{ color: 'rgba(255,255,255,0.5)' }}>双击放大 · 双指缩放 · 拖动查看</span>
-        <button
-          type='button'
-          onClick={onClose}
-          aria-label='关闭预览'
-          className='flex h-8 w-8 items-center justify-center rounded-full'
-          style={{ background: 'rgba(255,255,255,0.15)' }}
-        >
-          <X size={16} style={{ color: '#fff' }} />
-        </button>
+    <div
+      className='absolute'
+      style={{
+        left: `${bbox.x / 10}%`,
+        top: `${bbox.y / 10}%`,
+        width: `${bbox.width / 10}%`,
+        height: `${bbox.height / 10}%`,
+        border: `${isCurrent ? 2.5 : 1.5}px solid ${meta.fg}`,
+        borderRadius: 3,
+        opacity: isCurrent ? 1 : 0.7,
+        pointerEvents: 'none', // 视觉层不挡手势；命中交给下面的热区
+      }}
+    >
+      {/* 命中区：比可见框大一圈，缩放/平移后命中判定由浏览器按 transform 原生处理 */}
+      <div
+        aria-label={`第 ${label || ''} 题 · ${meta.label}`}
+        role='button'
+        className='absolute'
+        style={{ inset: -8, pointerEvents: 'auto', cursor: 'pointer' }}
+        onClick={e => { e.stopPropagation(); onTap(mark) }}
+      />
+      <span
+        role='button'
+        aria-label={`第 ${label || ''} 题 · ${meta.label}`}
+        className='absolute flex items-center justify-center whitespace-nowrap rounded-full font-semibold text-white'
+        style={{
+          minWidth: isCurrent ? 18 : 15,
+          height: isCurrent ? 18 : 15,
+          padding: '0 3px',
+          left: 0, top: 0, transform: 'translate(-50%, -50%)',
+          background: meta.fg, border: '1.5px solid #fff',
+          fontSize: isCurrent ? 10 : 9,
+          pointerEvents: 'auto', cursor: 'pointer',
+        }}
+        onClick={e => { e.stopPropagation(); onTap(mark) }}
+      >
+        {label}
+      </span>
+    </div>
+  )
+}
+
+/** 原卷视图（默认）：摘要条 + 可缩放原卷（点框出卡）+ 翻页 */
+function PaperPane({ pages, paperMarks, page, focusMark, onTapMark, onPageChange }) {
+  const meta = focusMark ? (VERDICT_META[focusMark.verdict] || VERDICT_META.unjudged) : null
+  return (
+    <>
+      <div className='relative flex' style={{ height: 'min(60vh, 560px)' }}>
+        <ImagePreview key={page} src={pages[page - 1]?.imageUrl}>
+          {paperMarks.map(m => (
+            m.page === page && m.bbox ? (
+              <PaperMarkBox
+                key={m.questionId}
+                mark={m}
+                isCurrent={m.questionId === focusMark?.questionId}
+                onTap={onTapMark}
+              />
+            ) : null
+          ))}
+        </ImagePreview>
       </div>
-      <ImagePreview src={pages[page - 1]?.imageUrl}>
-        {marks.map((m, i) => {
-          if (m.page !== page || !m.bbox) return null
-          const meta = VERDICT_META[m.verdict] || VERDICT_META.unjudged
-          const isCurrent = m.questionId === current?.questionId
-          return (
-            <div
-              key={m.questionId}
-              className='absolute'
-              style={{
-                left: `${m.bbox.x / 10}%`,
-                top: `${m.bbox.y / 10}%`,
-                width: `${m.bbox.width / 10}%`,
-                height: `${m.bbox.height / 10}%`,
-                border: `${isCurrent ? 2.5 : 1.5}px solid ${meta.fg}`,
-                borderRadius: 3,
-                opacity: isCurrent ? 1 : 0.75,
-                pointerEvents: 'none',
-              }}
-            >
-              <span
-                className='absolute flex items-center justify-center rounded-full font-semibold text-white'
-                style={{
-                  width: isCurrent ? 18 : 14, height: isCurrent ? 18 : 14,
-                  left: 0, top: 0, transform: 'translate(-50%, -50%)',
-                  background: meta.fg, border: '1.5px solid #fff',
-                  fontSize: isCurrent ? 10 : 9,
-                }}
-              >
-                {i + 1}
-              </span>
-            </div>
-          )
-        })}
-      </ImagePreview>
-      <div className='flex items-center justify-between px-4 pb-5 pt-2'>
+      <div className='flex items-center justify-between pt-1.5'>
         <button
           type='button'
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
           aria-label='上一页'
-          className='flex h-9 w-9 items-center justify-center rounded-lg disabled:opacity-30'
-          style={{ background: 'rgba(255,255,255,0.12)', color: '#fff' }}
+          className='flex h-8 w-8 items-center justify-center rounded-lg disabled:opacity-30'
+          style={{ background: 'var(--bg-mist)', color: 'var(--text-secondary)' }}
         >
-          <ChevronDown size={16} style={{ transform: 'rotate(90deg)' }} />
+          <ChevronDown size={15} style={{ transform: 'rotate(90deg)' }} />
         </button>
-        <span
-          className='rounded-full px-3 py-1.5 text-[12px] font-semibold'
-          style={{ background: '#fff', color: 'var(--text)' }}
-        >
-          {current?.page === page ? `第 ${currentIndex + 1} 题 · 重练答卷` : `第 ${page} 页`}
+        <span className='text-[12px] font-semibold' style={{ color: 'var(--text-secondary)' }}>
+          第 {page} 页 · 共 {pages.length} 页
+          {focusMark && focusMark.page === page && (
+            <span style={{ color: meta.fg }}> · 卷面第 {focusMark.label || ''} 题{meta.label}</span>
+          )}
         </span>
         <button
           type='button'
           onClick={() => onPageChange(page + 1)}
           disabled={page >= pages.length}
           aria-label='下一页'
-          className='flex h-9 w-9 items-center justify-center rounded-lg disabled:opacity-30'
-          style={{ background: 'rgba(255,255,255,0.12)', color: '#fff' }}
+          className='flex h-8 w-8 items-center justify-center rounded-lg disabled:opacity-30'
+          style={{ background: 'var(--bg-mist)', color: 'var(--text-secondary)' }}
         >
-          <ChevronDown size={16} style={{ transform: 'rotate(-90deg)' }} />
+          <ChevronDown size={15} style={{ transform: 'rotate(-90deg)' }} />
         </button>
       </div>
-    </div>
+      <p className='pb-1 pt-1.5 text-center text-[11px]' style={{ color: 'var(--text-tertiary)' }}>
+        双击 / 双指缩放 · 点题目框查看该题解析与答案
+      </p>
+    </>
   )
 }
 
@@ -355,14 +374,21 @@ function EmptyState({ hasAnswerSheet }) {
 
 export default function GradingDetailSheet({ exam, onClose }) {
   const [state, setState] = useState({ loading: true, error: null, detail: null })
-  const [currentIndex, setCurrentIndex] = useState(0)
-  const [viewerPage, setViewerPage] = useState(null)
+  const [mode, setMode] = useState('paper')            // 'paper'（默认原卷）| 'cards'（逐题）
+  const [paperPage, setPaperPage] = useState(null)     // 原卷页码；null = 跟随焦点题所在页
+  const [focusId, setFocusId] = useState(null)         // 原卷上高亮/最近查看的题
+  const [popupQid, setPopupQid] = useState(null)       // 原卷模式下点框弹出的题卡片
+  const [currentIndex, setCurrentIndex] = useState(0)  // 逐题模式的当前题
   const [dragX, setDragX] = useState(0)
 
   const load = () => {
     setState({ loading: true, error: null, detail: null })
     setCurrentIndex(0)
-    setViewerPage(null)
+    setPaperPage(null)
+    setFocusId(null)
+    setPopupQid(null)
+    setDragX(0)
+    setMode('paper')
     getExamGradingDetail(exam.id)
       .then(detail => setState({ loading: false, error: null, detail }))
       .catch(e => setState({ loading: false, error: e?.message || '网络异常', detail: null }))
@@ -372,6 +398,9 @@ export default function GradingDetailSheet({ exam, onClose }) {
   const detail = state.detail
   const marks = detail?.marks || []
   const pages = detail?.pages || []
+  const hasPages = pages.length > 0
+  // 实际生效模式：没有页图时原卷无从谈起，强制逐题
+  const effMode = hasPages ? mode : 'cards'
   const counts = marks.reduce(
     (acc, m) => { acc[m.verdict] = (acc[m.verdict] || 0) + 1; return acc },
     { correct: 0, wrong: 0, unjudged: 0 }
@@ -380,25 +409,80 @@ export default function GradingDetailSheet({ exam, onClose }) {
   // 题号用题单序号（与导航圆点、卡片「第 N 题」同一口径），不是过滤后数组的下标
   const noTraceLabels = []
   marks.forEach((m, i) => { if (m.matchedBy === 'none') noTraceLabels.push(i + 1) })
+
+  // 原卷叠加层：只画有框有页的题，按 (page, y, x) 排序 —— 徽标自上而下与卷面同序，
+  // 命中/遮挡顺序稳定。徽标文字用 mark.label（卷面题号），上游错位框本层不修。
+  const paperMarks = marks
+    .filter(m => m.bbox && m.page)
+    .sort((a, b) => (a.page - b.page) || (a.bbox.y - b.bbox.y) || (a.bbox.x - b.bbox.x))
+
+  // 原卷焦点题：显式 focusId 优先，否则默认第一道错题（老师最关心的），再退到第一题
+  const focusMark = (focusId && marks.find(m => m.questionId === focusId))
+    || paperMarks.find(m => m.verdict === 'wrong')
+    || paperMarks[0]
+    || null
+  const activePage = Math.max(1, Math.min(paperPage ?? focusMark?.page ?? 1, pages.length || 1))
+
   const current = marks[currentIndex] || null
+  const popupMark = popupQid ? marks.find(m => m.questionId === popupQid) : null
+  const popupIndex = popupMark ? marks.indexOf(popupMark) : 0
 
   const jumpTo = useCallback((i) => {
     setCurrentIndex(Math.max(0, Math.min(marks.length - 1, i)))
   }, [marks.length])
 
-  // ── 左右滑动切题（参数与 ExamReview 同款；纵向滚动优先，首末题撞墙阻尼） ──
+  // ── tab 切换：两边互相同步焦点（原卷焦点题 ↔ 逐题当前题） ──
+  const switchMode = useCallback((next) => {
+    if (next === 'paper' && !hasPages) return
+    setPopupQid(null)
+    if (next === 'paper') {
+      const cm = marks[currentIndex]
+      if (cm) {
+        setFocusId(cm.questionId)
+        if (cm.page) setPaperPage(cm.page)
+      }
+    } else if (focusMark) {
+      const idx = marks.findIndex(m => m.questionId === focusMark.questionId)
+      if (idx >= 0) setCurrentIndex(idx)
+    }
+    setMode(next)
+  }, [hasPages, marks, currentIndex, focusMark])
+
+  // 原卷翻页：焦点顺移到该页第一题，底部「卷面第 N 题」跟着走
+  const gotoPage = useCallback((p) => {
+    const next = Math.max(1, Math.min(p, pages.length))
+    setPaperPage(next)
+    const first = paperMarks.find(m => m.page === next)
+    if (first) setFocusId(first.questionId)
+  }, [pages.length, paperMarks])
+
+  // 点框出卡：同时设为焦点（关掉卡片后该框保持加粗高亮）
+  const tapMark = useCallback((m) => {
+    setFocusId(m.questionId)
+    setPopupQid(m.questionId)
+  }, [])
+
+  // 逐题卡片的「看原卷」：切 tab + 定位页码 + 高亮该题
+  const viewPaperFromCard = useCallback((m) => {
+    setPopupQid(null)
+    setFocusId(m.questionId)
+    if (m.page) setPaperPage(m.page)
+    setMode('paper')
+  }, [])
+
+  // ── 逐题模式：左右滑动切题（参数与 ExamReview 同款；纵向滚动优先，首末题撞墙阻尼） ──
   const swipeRef = useRef(null)
   const swallowClickRef = useRef(false)
 
   const handleTouchStart = useCallback((e) => {
     swallowClickRef.current = false
-    if (viewerPage != null || e.touches.length !== 1) {
+    if (e.touches.length !== 1) {
       swipeRef.current = null
       return
     }
     const t = e.touches[0]
     swipeRef.current = { x0: t.clientX, y0: t.clientY, t0: Date.now(), axis: null, dx: 0 }
-  }, [viewerPage])
+  }, [])
 
   const handleTouchMove = useCallback((e) => {
     const s = swipeRef.current
@@ -422,7 +506,7 @@ export default function GradingDetailSheet({ exam, onClose }) {
     if (!s || s.axis !== 'x') return
     const flick = Date.now() - s.t0 < SWIPE_FLICK_MS && Math.abs(s.dx) >= SWIPE_FLICK_PX
     if (Math.abs(s.dx) < SWIPE_COMMIT_PX && !flick) return
-    // 手势结束后浏览器仍会补发一次 click：吞掉，免横滑过「看原卷」顺手弹出查看器
+    // 手势结束后浏览器仍会补发一次 click：吞掉，免横滑过「看原卷」顺手切 tab
     swallowClickRef.current = true
     jumpTo(currentIndex + (s.dx * SWIPE_FORWARD_SIGN > 0 ? 1 : -1))
   }, [currentIndex, jumpTo])
@@ -434,51 +518,100 @@ export default function GradingDetailSheet({ exam, onClose }) {
     e.stopPropagation()
   }, [])
 
-  const openViewer = useCallback((page) => {
-    if (pages.length === 0) return
-    setViewerPage(Math.max(1, Math.min(pages.length, page || 1)))
-  }, [pages.length])
+  // 原卷模式不挂横滑手势（ImagePreview 自管捏合/双击/平移），逐题模式才挂
+  const bodyProps = effMode === 'cards'
+    ? {
+      onTouchStart: handleTouchStart,
+      onTouchMove: handleTouchMove,
+      onTouchEnd: handleTouchEnd,
+      onTouchCancel: handleTouchEnd,
+      onClickCapture: handleClickCapture,
+      style: {
+        touchAction: 'pan-y',
+        transform: dragX ? `translateX(${dragX}px)` : undefined,
+        transition: dragX ? 'none' : 'transform 0.18s ease-out',
+      },
+    }
+    : { style: { touchAction: 'pan-y' } }
+
+  const summaryKeys = ['correct', 'wrong', ...(counts.unjudged > 0 ? ['unjudged'] : [])]
 
   return (
     <BottomSheet
       title='批改详情'
       onClose={onClose}
       maxWidth={560}
-      titleAction={pages.length > 0 ? (
-        <button
-          type='button'
-          onClick={() => openViewer(current?.page)}
-          className='mr-1 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold'
-          style={{ background: 'var(--bg-mist)', color: 'var(--primary)' }}
-        >
-          <Eye size={13} />原卷
-        </button>
-      ) : null}
-      header={marks.length > 1 ? <QuestionNav marks={marks} currentIndex={currentIndex} onJump={jumpTo} /> : null}
-      bodyProps={{
-        onTouchStart: handleTouchStart,
-        onTouchMove: handleTouchMove,
-        onTouchEnd: handleTouchEnd,
-        onTouchCancel: handleTouchEnd,
-        onClickCapture: handleClickCapture,
-        style: {
-          touchAction: 'pan-y',
-          transform: dragX ? `translateX(${dragX}px)` : undefined,
-          transition: dragX ? 'none' : 'transform 0.18s ease-out',
-        },
-      }}
+      header={(
+        <div>
+          {/* 原卷 / 逐题 双 tab：原卷默认；无页图时禁用 */}
+          <div className='mx-5 mb-2 flex gap-1 rounded-full p-1' style={{ background: 'var(--bg-mist)' }}>
+            <button
+              type='button'
+              onClick={() => switchMode('paper')}
+              disabled={!hasPages}
+              aria-pressed={effMode === 'paper'}
+              className='flex-1 rounded-full py-1.5 text-[12px] font-semibold transition-all disabled:opacity-40'
+              style={effMode === 'paper'
+                ? { background: 'var(--primary)', color: '#fff' }
+                : { color: 'var(--text-secondary)' }}
+            >
+              原卷
+            </button>
+            <button
+              type='button'
+              onClick={() => switchMode('cards')}
+              aria-pressed={effMode === 'cards'}
+              className='flex-1 rounded-full py-1.5 text-[12px] font-semibold transition-all'
+              style={effMode === 'cards'
+                ? { background: 'var(--primary)', color: '#fff' }
+                : { color: 'var(--text-secondary)' }}
+            >
+              逐题
+            </button>
+          </div>
+          {effMode === 'cards' && marks.length > 1 && (
+            <QuestionNav marks={marks} currentIndex={currentIndex} onJump={jumpTo} />
+          )}
+        </div>
+      )}
+      bodyProps={bodyProps}
     >
       {state.loading && <LoadingState />}
       {!state.loading && state.error && <ErrorState message={state.error} onRetry={load} />}
       {!state.loading && !state.error && detail && (
         <>
-          {/* 结果摘要：语义色 soft 底计数格，即图例（正确/错误恒显，未判定有数才显） */}
-          {(() => {
-            const keys = ['correct', 'wrong', ...(counts.unjudged > 0 ? ['unjudged'] : [])]
-            const three = keys.length === 3
-            return (
-              <div className={`mb-3 grid gap-2.5 ${three ? 'grid-cols-3' : 'grid-cols-2'}`}>
-                {keys.map(key => {
+          {effMode === 'paper' ? (
+            <>
+              {/* 原卷模式摘要：紧凑 chip 行（大数字网格留在逐题模式） */}
+              <div className='mb-2 flex flex-wrap items-center gap-1.5'>
+                {summaryKeys.map(key => {
+                  const meta = VERDICT_META[key]
+                  const { Icon } = meta
+                  return (
+                    <span
+                      key={key}
+                      className='inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold'
+                      style={{ background: meta.soft, color: meta.fg }}
+                    >
+                      <Icon size={11} strokeWidth={3} />{counts[key]} {meta.label}
+                    </span>
+                  )
+                })}
+              </div>
+              <PaperPane
+                pages={pages}
+                paperMarks={paperMarks}
+                page={activePage}
+                focusMark={focusMark}
+                onTapMark={tapMark}
+                onPageChange={gotoPage}
+              />
+            </>
+          ) : (
+            <>
+              {/* 逐题模式：大数字摘要格（即图例） */}
+              <div className={`mb-3 grid gap-2.5 ${summaryKeys.length === 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+                {summaryKeys.map(key => {
                   const meta = VERDICT_META[key]
                   const { Icon } = meta
                   return (
@@ -492,11 +625,31 @@ export default function GradingDetailSheet({ exam, onClose }) {
                   )
                 })}
               </div>
-            )
-          })()}
+
+              {pages.length === 0
+                ? <EmptyState hasAnswerSheet={detail.hasAnswerSheet} />
+                : current && (
+                  <>
+                    <QuestionCard
+                      key={current.questionId}
+                      mark={current}
+                      index={currentIndex}
+                      hasPages
+                      onViewPaper={() => viewPaperFromCard(current)}
+                    />
+                    <p className='pb-1 pt-2.5 text-center text-[11px]' style={{ color: 'var(--text-tertiary)' }}>
+                      对错以老师复核结果为准
+                    </p>
+                  </>
+                )}
+              {pages.length > 0 && !current && (
+                <p className='py-10 text-center text-[13px]' style={{ color: 'var(--text-secondary)' }}>这份卷还没有题目</p>
+              )}
+            </>
+          )}
 
           {noTraceLabels.length > 0 && (
-            <div className='mb-3 flex items-start gap-2 rounded-2xl px-3.5 py-3' style={{ background: 'var(--warning-soft)' }}>
+            <div className='mb-1 mt-2 flex items-start gap-2 rounded-2xl px-3.5 py-3' style={{ background: 'var(--warning-soft)' }}>
               <AlertTriangle size={14} className='mt-0.5 shrink-0' style={{ color: 'var(--warning)' }} />
               <p className='text-[12px] leading-5' style={{ color: 'var(--text-secondary)' }}>
                 第 {noTraceLabels.join('、')} 题在答卷照片上没有找到作答痕迹，可能是漏拍或未作答，
@@ -504,38 +657,46 @@ export default function GradingDetailSheet({ exam, onClose }) {
               </p>
             </div>
           )}
-
-          {pages.length === 0
-            ? <EmptyState hasAnswerSheet={detail.hasAnswerSheet} />
-            : current && (
-              <>
-                <QuestionCard
-                  key={current.questionId}
-                  mark={current}
-                  index={currentIndex}
-                  hasPages
-                  onViewPaper={() => openViewer(current.page)}
-                />
-                <p className='pb-1 pt-2.5 text-center text-[11px]' style={{ color: 'var(--text-tertiary)' }}>
-                  对错以老师复核结果为准
-                </p>
-              </>
-            )}
-          {pages.length > 0 && !current && (
-            <p className='py-10 text-center text-[13px]' style={{ color: 'var(--text-secondary)' }}>这份卷还没有题目</p>
-          )}
         </>
       )}
 
-      {viewerPage != null && pages.length > 0 && (
-        <PaperViewer
-          pages={pages}
-          marks={marks}
-          page={viewerPage}
-          currentIndex={currentIndex}
-          onClose={() => setViewerPage(null)}
-          onPageChange={p => setViewerPage(Math.max(1, Math.min(pages.length, p)))}
-        />
+      {/* 原卷模式点框弹出的题卡片：底部面板，点遮罩关闭 */}
+      {effMode === 'paper' && popupMark && (
+        <div className='fixed inset-0 z-[21000] flex flex-col justify-end' onClick={() => setPopupQid(null)}>
+          <div className='absolute inset-0' style={{ background: 'rgba(0,0,0,0.45)' }} />
+          <div
+            className='relative mx-auto w-full px-3'
+            style={{ maxWidth: 560, paddingBottom: 'calc(12px + env(safe-area-inset-bottom, 0px))' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div
+              className='relative max-h-[70vh] overflow-y-auto rounded-3xl bg-white p-4'
+              style={{ boxShadow: '0 -8px 30px rgba(0,0,0,0.2)' }}
+            >
+              <button
+                type='button'
+                onClick={() => setPopupQid(null)}
+                aria-label='关闭题目卡片'
+                className='absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-full'
+                style={{ background: 'var(--bg-mist)' }}
+              >
+                <X size={14} style={{ color: 'var(--text-secondary)' }} />
+              </button>
+              <QuestionCard
+                key={popupMark.questionId}
+                mark={popupMark}
+                index={popupIndex}
+                hasPages
+                hint='关掉卡片可继续点其他题目框'
+                onViewPaper={() => {
+                  setPopupQid(null)
+                  setFocusId(popupMark.questionId)
+                  if (popupMark.page) setPaperPage(popupMark.page)
+                }}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </BottomSheet>
   )
