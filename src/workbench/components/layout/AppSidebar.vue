@@ -36,7 +36,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { Collection, DataAnalysis, DocumentChecked, Files, HomeFilled, MoreFilled, Notebook, Reading, Tickets, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, MoreFilled, Notebook, Reading, Tickets, User } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 
 const route = useRoute()
@@ -65,13 +65,22 @@ const navGroups = [
     items: [
       { label: '练习册管理', path: '/worksheets', icon: Notebook },
       { label: '试卷答案库', path: '/paper', icon: Tickets },
+      // 试卷题库（2026-10-10 负责人拍板「新增独立入口」）：纸质卷 → 结构化题目 → 跨卷勾题 → 讲义 PDF。
+      // 与「试卷答案库」共用 resources(type='exam') 行，但一个存题目、一个存答案；
+      // 负责人要求讲题素材与批改答案彻底分家，故与 /paper 平级而非合并。
+      { label: '试卷题库', path: '/paper-bank', icon: Grid },
       { label: '我的考法库', path: '/question-bank', icon: Collection },
       { label: '周末班课件', path: '/weekend-ppt', icon: Files }
     ]
   }
 ]
 
-const isActive = (path) => (path === '/' ? route.path === '/' : route.path.startsWith(path))
+// 高亮判定必须按「路径段边界」而不是裸前缀：
+// /paper 与 /paper-bank 是平级两个入口，裸 startsWith('/paper') 会让
+// 打开「试卷题库」时「试卷答案库」也一起高亮（2026-10-10 新增入口时发现）。
+const isActive = (path) => (
+  path === '/' ? route.path === '/' : (route.path === path || route.path.startsWith(path + '/'))
+)
 const go = (path) => { if (route.path !== path) router.push(path) }
 
 // 活数据徽标（r16x+2）：直接复用全局 notificationStore 轮询（AppHeader 已启动），不新增请求。

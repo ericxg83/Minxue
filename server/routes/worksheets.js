@@ -715,7 +715,8 @@ router.post('/:id/parse-images', imageUpload.array('files', 30), async (req, res
   }
 })
 
-async function parseImagesInBackground(worksheetId, files) {
+// 2026-10-10：导出给「试卷题库」复用（试卷答案也可拍照上传），同 parsePdfInBackground。
+export async function parseImagesInBackground(worksheetId, files) {
   const OVERALL_TIMEOUT = 10 * 60 * 1000
   let overallTimer
   const timeoutPromise = new Promise((_, reject) => {
@@ -767,7 +768,10 @@ async function doParseImages(worksheetId, files) {
   })
 }
 
-async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null, isCombined = false) {
+// 2026-10-10：导出给「试卷题库」(server/routes/paperBank.js) 复用 ——
+// 试卷的官方答案 PDF/照片要走**完全相同**的解析链（OCR → 答案库 resource_answers，
+// 标 official_verified），绝不另写一套。只加 export 关键字，行为零变化。
+export async function parsePdfInBackground(worksheetId, file, precomputedAnswers = null, isCombined = false) {
   // 不再设整体超时：大文件分批解析总时长可达数十分钟且无固定上界，固定整体超时会误杀。
   // 卡死防护改为三层：单页渲染/加载 30s 超时（pdfService.withTimeout）
   // + 单批 5 分钟超时（doParseOcrBatched 内 withBatchTimeout）

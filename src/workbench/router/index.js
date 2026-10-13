@@ -88,6 +88,16 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    // 试卷题库（2026-10-10 负责人拍板「新增独立入口」）：
+    // 与「试卷答案库」(/paper) 共用 resources(type='exam') 行，但数据面不同
+    // （题目 resource_questions vs 答案 resource_answers）。
+    // 负责人要求讲题素材与批改答案彻底分家，故与 /paper 平级、不合并。
+    path: '/paper-bank',
+    name: 'PaperBank',
+    component: () => import('../views/PaperBankWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/weekly-report',
     name: 'WeeklyReport',
     component: () => import('../views/WeeklyReportWorkbench.vue'),
