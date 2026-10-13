@@ -4546,3 +4546,16 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - 提案 **r273-P-B**（B，沿用 r271-③）：部署缺口 **6 个提交未推**（f17a718/65b502b/d283951/2fb8ce3/5334407/15a5e83，含产品码 d283951 分享卡读前自愈与 15a5e83 本地服务自启）——推送即触发 Render 自动部署，待负责人拍板。
 - 提案 **r273-P-C**（B，沿用 r271-①）：r269 遗留 3 个 WIP 文件（`scripts/skillRefsKit.mjs` / `scripts/check-skill-refs.mjs` / `test/checkSkillRefsScope.test.mjs`）已挂约 16 小时；npm test 全绿且含其 12 条用例 ⇒ 内容完好，待负责人确认代提或让 r269 自己收尾。
 - 四道闸：npm test **2456/2456 fail 0**（开工即跑，含 r269 WIP 测试文件）｜eslint 本轮 4 文件 0 error｜构建+冒烟见 r273 报告第二节。
+
+---
+
+## 提案 ㊸ 闭环（2026-10-13 负责人批复「删」· 实证早已删除）
+
+- **㊸（export-retry-pdf 留/删/接线）→ 代码早在 10-10 已删**：`server/routes/wrongQuestionsExport.js`
+  整文件（67 行）由 `14bee5d`（2026-10-10 10:00）删除，`test/apiDeadEndpoints.json` 登记册
+  同步销户（现存 6 条）。2026-10-13 负责人批复「删」时实测三处零引用：`server/index.js`
+  无该路由、`src/**` 无调用、`scripts/**` 无引用；`apiDeadEndpoint` 门禁测试 1/1 绿。
+- **同族台账滞后第二例**（第一例 ㉘，r272 订正）：backlog 挂「待拍板」但产物早已落地。
+  已在 `test/apiCallerAuditKit.mjs` r219 历史注释补闭环后记（「本条是历史档案，
+  不是它还活着的清单」），防下轮按档案重复施工。
+- 本轮改动仅注释（+6 行），零产品代码；门禁复跑 1/1。

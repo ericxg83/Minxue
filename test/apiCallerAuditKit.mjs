@@ -11,6 +11,10 @@
  *  - r219（本轮）：`POST /api/wrong-questions/export-retry-pdf`（服务端重练卷 PDF + 二维码）
  *    零调用方 —— 学生扫的二维码其实是手机端 `src/pages/PrintPreview` 现算的
  *    （`src/utils/retryTaskUrl.js`）。这条链路**跑一次错一次也永远不会报错**，因为压根没人跑。
+ *    ✅ **后记（2026-10-13，提案 ㊸ 闭环）**：该端点连同 `server/routes/wrongQuestionsExport.js`
+ *    整文件（67 行）已由 `14bee5d`（2026-10-10）删除，登记册同步销户；当日实测三处零引用
+ *    （server/index.js 无路由 / src 无调用 / scripts 无引用）。本条是 r219 的历史档案，
+ *    **不是「它还活着」的清单**——下轮排查别按这条去改代码。
  *  ⇒ 这类缺口读代码看不出来，只有「扫端点 + 扫调用方」才看得见。
  *
  * ⛔ 精度纪律（本轮自己踩）：调用方语料**只收 src/ + scripts/ + test/ + server/scripts/**，
