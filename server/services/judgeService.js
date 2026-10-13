@@ -319,6 +319,69 @@ function extractAnswerStatementResults(s) {
   return results
 }
 
+/**
+ * 全角 → 半角。judgeService 内部多处 inline 同一变换（含 ＝→=），
+ * 新代码统一走这个 helper；既有 inline 不动，保持最小修改。
+ */
+function toHalfWidth(s) {
+  return String(s ?? '').replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+}
+
+// 解声明右侧的"值"：到空白/等号/分隔符/行尾为止（LaTeX 值内部无空格时完整保留）
+const SOLUTION_VALUE_RE = '[^\\s=＝，,;；\\n]+'
+
+/**
+ * 从学生答案提取「方程解的集合」（2026-10-13 用户截图题 #11）：
+ *   学生 "x²-4x+4+x=2\nx²-3x+2=0\n(x-2)(x-1)=0\nx₁=2\nx₂=1" vs 参考 "x=1或x=2"
+ *   —— 最终解其实完全一致，但判等层三个通道全挂（详见 judgeAnswer 内注释），
+ *   整题被判主观题转人工。
+ *
+ * 两级形态，强形态优先，抓不到就返回空数组（通道不触发，行为与现状一致）：
+ *   ① 下标解声明 x₁=/x₂=/x1=/x2=（任意位置）——学生写最终答案的标准形态；
+ *      过程行不会误命中："x²-4x+4+x=2" 的 x 后跟 ²/+，"(x-2)(x-1)=0" 的 x 后跟 -，都不匹配；
+ *   ② 末 3 个非空行内的行首 x=（x 前只允许行首/空白/∴/标点），且**必须顶到行尾**——
+ *      排除 "…+x=2" 这类过程行尾残渣，也排除 "x = -m ± √k" / "y = -1/3(x+3)²"
+ *      这类公式型答案（答案本体是等式，x= 后面还有内容，锚定后不认）。
+ *      强形态不加行尾锚定：学生常把多个解写一行（"x₁=2，x₂=1"）。
+ */
+function extractStudentSolutionSet(s) {
+  const str = toHalfWidth(s)
+  if (!str) return []
+
+  const subscript = []
+  const subscriptRe = new RegExp(`(?:x|y)\\s*_?[12₁₂]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
+  let m
+  while ((m = subscriptRe.exec(str)) !== null) subscript.push(m[1].replace(/\$+/g, ''))
+  if (subscript.length > 0) return subscript
+
+  const tailLines = str.split(/\n/).map(l => l.trim()).filter(Boolean).slice(-3)
+  const lineStart = []
+  const lineStartRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:x|y)\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
+  for (const line of tailLines) {
+    lineStartRe.lastIndex = 0
+    while ((m = lineStartRe.exec(line)) !== null) lineStart.push(m[1].replace(/\$+/g, ''))
+  }
+  return lineStart
+}
+
+/**
+ * 从参考答案提取解集合：先按"或/和/与/及/、/逗号"拆段（"x=1或x=2" → 两段），
+ * 每段内抓 x=/x₁=/x₂= 声明，且**必须顶到段尾**（"x = 1 + √2" 这种带尾巴的
+ * 公式段不认，防止学生漏写尾巴也被放过去）。抓不到 → 空数组（通道不触发）。
+ */
+function extractReferenceSolutionSet(s) {
+  const str = toHalfWidth(s)
+  if (!str) return []
+  const vals = []
+  const re = new RegExp(`(?:x|y)\\s*(?:_?[12₁₂])?\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
+  for (const seg of str.split(/或|和|与|及|、|，|,|\|/)) {
+    re.lastIndex = 0
+    let m
+    while ((m = re.exec(seg)) !== null) vals.push(m[1].replace(/\$+/g, ''))
+  }
+  return vals
+}
+
 export function normalizeQuestionType(rawType, options = []) {
   const type = String(rawType || '').trim().toLowerCase()
   if (['choice', 'select', 'multiple_choice', 'single_choice', '\u9009\u62e9', '\u9009\u62e9\u9898', '\u5355\u9009', '\u5355\u9009\u9898', '\u591a\u9009', '\u591a\u9009\u9898'].includes(type)) return 'choice'
@@ -1602,6 +1665,46 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
           isMathEquivalent(stmtResults[i], rp)
       })
       if (allMatch) return { isCorrect: true, unrecognized: false }
+    }
+  }
+
+  // ── 方程「解集合」通道（2026-10-13，用户截图题 #11）────────────────────
+  // 学生写完整解题过程 + 最终解声明（x₁=2, x₂=1），参考只写 "x=1或x=2"：
+  //   两侧最终解其实完全一致，但判等层三个通道全挂——
+  //   ① narrowToFinalAnswer 把学生答案砍到最后一个 "=" 右侧只剩 "1"，丢掉 x₁=2；
+  //   ② 数字集合兜底要求学生过程数字 {0,1,2,3,4} ⊆ 参考 {1,2}，必然失败；
+  //   ③ extractAnswerStatementResults 只认"答:"句，学生没写"答:"。
+  //   ⇒ judgeAnswer 返回 false ⇒ 主观题分支只放行 true ⇒ 整题转人工，老师白点一遍。
+  //
+  // 本通道把「最终解」从过程里抠出来做**无序集合**比对（"x=1或x=2" 无顺序语义），
+  // 两侧集合非空、等大小、逐项配对成功才判 true；任一侧抓不到或数量不等都不出声，
+  // 权威结果仍是后面各路径。与主观题分支「只放行判对」的刻意不对称一致：
+  // 最坏情况只是假绿，不产生假红叉、不误入错题本。
+  // 防放水靠集合大小相等 + 逐项 judgeAnswer 配对（错一个解/漏解/符号翻转都配不上）。
+  {
+    const studentSolutions = extractStudentSolutionSet(studentAnswer)
+    const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
+    if (studentSolutions.length > 0 &&
+        studentSolutions.length === referenceSolutions.length) {
+      const paired = new Array(referenceSolutions.length).fill(false)
+      let allMatched = true
+      for (const sv of studentSolutions) {
+        let hit = -1
+        for (let i = 0; i < referenceSolutions.length; i++) {
+          if (paired[i]) continue
+          // sv/rv 都是 "=" 右侧的裸值（不含 x= 形态）⇒ 不会再次触发本通道，递归深度有界
+          if (judgeAnswer(sv, referenceSolutions[i], questionType).isCorrect === true) {
+            hit = i
+            break
+          }
+        }
+        if (hit < 0) {
+          allMatched = false
+          break
+        }
+        paired[hit] = true
+      }
+      if (allMatched) return { isCorrect: true, unrecognized: false }
     }
   }
 

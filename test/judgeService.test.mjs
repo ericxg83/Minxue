@@ -682,3 +682,59 @@ test('geometry prose conclusion is unverifiable in both directions', () => {
       `「${s}」不应被闸门拦`)
   }
 })
+
+// ── 方程「解集合」通道回归（2026-10-13 用户截图题 #11）──────────────────
+// 学生写完整解题过程 + 最终解声明（x₁=2, x₂=1），参考只写 "x=1或x=2"：
+// 最终解完全一致，旧判等层却三个通道全挂（收窄只剩 "1" / 过程数字不⊆参考 / 只认"答:"句）
+// ⇒ 判主观题转人工。新增解集合通道把最终解抠出来做无序集合比对，只判 true。
+test('equation solution-set channel: process-form student answers with final solutions are auto-judged', () => {
+  // 用户本题：过程 + x₁=2, x₂=1 vs x=1或x=2（参考正确、学生过程也对）
+  assert.deepEqual(
+    judgeAnswer('x²-4x+4+x=2\nx²-3x+2=0\n(x-2)(x-1)=0\nx₁=2\nx₂=1', 'x=1或x=2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 顺序颠倒：学生 x₁=-5,x₂=-1 vs 参考 x₁=-1，x₂=-5（"或"无顺序语义）
+  assert.deepEqual(
+    judgeAnswer('(x+5)(x+1)=0\nx₁=-5\nx₂=-1', 'x₁=-1，x₂=-5', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 中形态：无下标，末 3 行内的行首 x=（"(x-2)(x-1)=0" 的 x 前是括号，不得误抓）
+  assert.deepEqual(
+    judgeAnswer('解：\n(x-2)(x-1)=0\nx=2\nx=1', 'x=1或x=2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 单解 LaTeX 过程题：原本就能判对，行为不得变化
+  assert.deepEqual(
+    judgeAnswer('x = \\frac{2\\sqrt{2}}{\\sqrt{10}-2}', 'x=2(√5+√2)/3', 'answer'),
+    { isCorrect: true, unrecognized: false })
+})
+
+test('equation solution-set channel: never widens the pass gate', () => {
+  // 一个对一个错：x₁=2 对、x₂=3 错 → 集合配不上
+  assert.deepEqual(
+    judgeAnswer('x₁=2，x₂=3', 'x=1或x=2', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 两个解全错
+  assert.deepEqual(
+    judgeAnswer('x₁=5，x₂=6', 'x=1或x=2', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 符号写错：x₂=-1 vs 参考 x=-3（负号不丢失也配不上）
+  assert.deepEqual(
+    judgeAnswer('x₁=2，x₂=-1', 'x=2或x=-3', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 学生答 1,2,3 vs 参考 ±√2,±√3,±√5：参考侧无 x= 声明 → 通道不触发
+  assert.deepEqual(
+    judgeAnswer('x=1 x=2 x=3', '±√2, ±√3, ±√5', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 文字答案：两侧都抓不到解集合 → 不触发
+  assert.deepEqual(
+    judgeAnswer('可以 3√291=97', '不能', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 纯过程行、无任何最终解声明 → 不触发（"…+x=2" 的过程残渣不得被当成解）
+  assert.deepEqual(
+    judgeAnswer('x²-4x+4+x=2\nx²-3x+2=0', 'x=1或x=2', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 漏解（只写 x₁=1）：新通道要求两侧数量相等 ⇒ 不触发。
+  // 注意：此处仍为 true 是**既有放水**（extractAndCompare 数字集合兜底允许参考多 1 个值），
+  // 与本次通道无关；修复它要动 extractNumericValues，按既往教训会误杀长解答题，单独排期。
+  assert.deepEqual(
+    judgeAnswer('x₁=1', 'x=1或x=2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+})
