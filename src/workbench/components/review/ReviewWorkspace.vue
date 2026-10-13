@@ -344,7 +344,11 @@ onUnmounted(() => {
 .review-workspace {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  /* ⛔ 不能用 100vh：本页挂在 App 壳的 .workbench-content（100vh − 顶栏52 − 降级横幅）
+     里，写 100vh 会比父容器高出一截，底部被 overflow:hidden 裁掉 —— 右栏「标对/标错」
+     操作区只剩一条边点不到、中栏页码条整条消失（2026-10-13 负责人截图实锤）。
+     父容器 .unified-review-page 已是 height:100%，这里同样取 100% 即可精确贴合。 */
+  height: 100%;
   background: var(--wb-bg);
   overflow: hidden;
 }
