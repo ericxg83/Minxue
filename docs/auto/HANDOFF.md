@@ -142,9 +142,10 @@
   · `server/scripts/backfillStaleQuestionSvg.mjs` “completed 但展示层无 SVG”的三档安全回填器（默认演练）
   · `scripts/pruneDeadDeclarations.mjs` 死声明清理器（真 AST 判副作用，默认演练，内置裁决③硬名单）
   · `tmp/geo_montage.mjs` / `tmp/fig_crops_view.mjs` / `tmp/fig_fix_one.mjs` 肉眼比对与单题重裁范式
-- **预览实例**：后端 4000（`node server/index.js`）、前端 dev 3000（`npm run dev`）——**可能已死，接手后先 curl 探测**（r93 实测两者都活着；隔离产物预览在 5221-5225 段）。
+- **预览实例**：后端 4000（`node server/index.js`）、前端 dev 3000（`npm run dev`）——**2026-10-13 起开机自启**（计划任务 `MinxueLocalServices` 登录时拉起，`scripts/start-local.cmd`；Redis/Memurai 为系统服务自启）。若端口未监听，手动跑一次该 cmd 或查 `logs/local-boot.log`。
 - **数据备份**：`D:/Minxue_Backup/2026-10-10/`（最新 ok:true 快照）+ `scripts/dailyBackup.mjs`
-  （每日 12:00 由自动化「敏学每日数据备份」跑；2026-10-12 负责人由 03:00 改点，旧记的「21:30 自动」作废）。
+  （每日 13:00 由自动化「敏学每日数据备份」跑；2026-10-12 由 03:00 改 12:00、2026-10-13 再改 13:00，
+  旧记的「21:30 自动」作废。10-11/10-12 凌晨关机夜、10-13 12:51 开机均错过当天档位）。
 
 ## 五、未完成事项（按优先级）
 
@@ -334,7 +335,7 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 - **家长成长卡**：`GrowthCardButton.vue`（复用 weeklyReport 聚合；家长只看老师转发出去的图，不用系统）
 - **KPI 诚实化 + 真趋势**：`GrowthWorkbench.vue`（错题已掌握率正名 + 真实周环比）
 - **全局错误护栏**：工作台 `app.config.errorHandler` + 移动端 `ErrorBoundary`
-- **数据保险库**：`scripts/dailyBackup.mjs`（每日 12:00 自动化跑 + 可手动跑；2026-10-12 由 03:00 改点）
+- **数据保险库**：`scripts/dailyBackup.mjs`（每日 13:00 自动化跑 + 可手动跑；2026-10-12 由 03:00 改 12:00、2026-10-13 再改 13:00）
 - **审计工具**：`scripts/auditStoreContract.mjs`（store 契约审计，随时可跑）
 - **仓库治理**：1.1GB 历史垃圾已归档至 `D:/Minxue_Archive/`；lint 从 644 噪声 → 204 可信信号（本会话再降到 167）
 - **交互重构已落地**：批改中工作台 header 三合一 + 撤销 snackbar + ⌘K 命令面板
