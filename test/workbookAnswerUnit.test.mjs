@@ -255,3 +255,110 @@ test('两处 OCR 解析都要读取 lesson_code，并在 pageDataList 里带 raw
   const parseCount = [...WORKER_SRC.matchAll(/parsed\.lesson_code/g)].length
   assert.ok(parseCount >= 2, `两处解析都要读 parsed.lesson_code，实际 ${parseCount} 处`)
 })
+
+// ─────────────────────────────────────────────────────────────
+// 2026-10-13 事故：章级测试卷尾部页错锚（第20章测试(二) → 测试(一)，5 题参考答案全错）
+//
+// 现场四层叠加：
+//   ① 卷面是测试(二)的第 53 页（q20~q24），页眉只有跑马灯"第 20 章 二次根式 · 数学"，
+//      无 (一)/(二) 字样；
+//   ② 2026-09-16 定向重建的 第19章测试(二)/第21章测试(二) 两单元 unit_title=NULL；
+//   ③ 防御1 的 "xxx".includes("") 对空串恒真 → 跑马灯标题被误判"可信"放行；
+//   ④ 1a+) 章核心匹配按 unit_seq 盲选第一个 startsWith("第20章") 的单元 → 测试(一)。
+// ─────────────────────────────────────────────────────────────
+
+// 模拟上海作业第 20 章的真实形态：两个章级测试单元，题号 20~26，title 不含章节名
+const mkTestUnit = (unitKey, unitTitle, qNos) => {
+  const qmap = new Map()
+  for (const n of qNos) {
+    qmap.set(`Q${n}`, {
+      unit_key: unitKey,
+      unit_title: unitTitle,
+      answer: `${unitKey}-ans-${n}`,
+      question_no: n,
+    })
+  }
+  return new Map([['s1', qmap]])
+}
+
+const ch20Units = (titleA, titleB) => new Map([
+  ['第20章测试(一)', mkTestUnit('第20章测试(一)', titleA, [20, 21, 22, 23, 24])],
+  ['第20章测试(二)', mkTestUnit('第20章测试(二)', titleB, [20, 21, 22, 23, 24])],
+])
+
+// 跑马灯页眉 + 题干无课时号 + 学生答案与两边都对不上 → 无任何可用信号
+const tailQuestionsNoSignal = [20, 21, 22, 23, 24].map(n => ({
+  question_number: n,
+  content: '化简根式运算',
+  student_answer: `some-work-${n}`,
+}))
+
+test('空 unit_title 的单元不得让跑马灯标题绕过防御1（2026-10-13 事故核心）', () => {
+  const abu = ch20Units('第20章测试(一)', null) // (二) 的 title 为 NULL，复现 9-16 重建遗留
+  // 修复前：空串 includes 恒真 → 标题被当可信 → 1a+) 盲选第一个 → 错返 测试(一)
+  assert.equal(
+    pickAnswerUnit(abu, '第20章 二次根式 · 数学', tailQuestionsNoSignal, 1, null, null),
+    null,
+    '跑马灯区分不了 (一)/(二)，无答案信号时必须弃权（宁空勿错），绝不盲选 seq 在前的单元')
+})
+
+test('同章双测试单元 + 学生答案精确命中 → 反推裁决到正确单元', () => {
+  const abu = new Map([
+    ['第20章测试(一)', mkTestUnit('第20章测试(一)', '第20章测试(一)', [20, 21, 22, 23, 24])],
+    ['第20章测试(二)', mkTestUnit('第20章测试(二)', '第20章测试(二)', [20, 21, 22, 23, 24])],
+  ])
+  // 把 (二) 的 q21/q22 答案改成真实事故的值，学生答案与之精确全等（≥3 字符）
+  const secA = abu.get('第20章测试(一)').get('s1')
+  const secB = abu.get('第20章测试(二)').get('s1')
+  secA.get('Q21').answer = '0'
+  secA.get('Q22').answer = '2x-5'
+  secB.get('Q21').answer = '2xy²√x'
+  secB.get('Q22').answer = '2m-2n'
+  const qs = [20, 21, 22, 23, 24].map(n => ({
+    question_number: n,
+    content: '化简根式运算',
+    student_answer: n === 21 ? '2xy²√x' : (n === 22 ? '2m-2n' : `some-work-${n}`),
+  }))
+  assert.equal(
+    pickAnswerUnit(abu, '第20章 二次根式 · 数学', qs, 1, '第二十章二次根式', null),
+    '第20章测试(二)',
+    'q21/q22 学生答案与 (二) 全等（强证据）→ 应反推命中 (二)，不被子串巧合拖平')
+})
+
+test('章核心唯一命中时仍直接返回（1a+ 单命中行为不变）', () => {
+  // 只有一个测试单元的章：跑马灯页眉也应能靠章核心命中
+  const abu = new Map([
+    ['第20章测试(一)', mkTestUnit('第20章测试(一)', '第20章测试(一)', [20, 21, 22, 23, 24])],
+  ])
+  assert.equal(
+    pickAnswerUnit(abu, '第20章评价测试卷', tailQuestionsNoSignal, 1, null, null),
+    '第20章测试(一)',
+    '章核心唯一命中 → 直接返回（原有设计，不得被多命中改动波及）')
+  // 页眉精确等于 unit key 时同样直返
+  assert.equal(
+    pickAnswerUnit(abu, '第20章测试(一)', tailQuestionsNoSignal, 1, null, null),
+    '第20章测试(一)')
+})
+
+test('页眉精确等于某单元 key 时，别的空 title 单元不影响精确命中', () => {
+  const abu = new Map([
+    ['第20章测试(一)', mkTestUnit('第20章测试(一)', '第20章测试(一)', [20, 21, 22, 23, 24])],
+    ['第19章测试(二)', mkTestUnit('第19章测试(二)', null, [20, 21, 22, 23, 24])],
+  ])
+  assert.equal(
+    pickAnswerUnit(abu, '第20章测试(一)', tailQuestionsNoSignal, 1, null, null),
+    '第20章测试(一)',
+    '标题与 unit key 全等 → 防御1 应放行且 1a) 精确命中')
+})
+
+// 防复发线：锁住三处代码修复的存在
+test('锚定修复三件套必须在位（空ct守卫/多命中缩窄/精确证据裁决）', () => {
+  assert.match(WORKER_SRC, /\(ct && ct\.includes\(normPageTitle\)\)/,
+    '防御1 的 ct 两个分支必须带非空守卫（空串 includes 恒真事故）')
+  assert.match(WORKER_SRC, /collectCoreHits/,
+    '1a+) 必须收集章核心全部命中并只在唯一时返回')
+  assert.match(WORKER_SRC, /strongHits/,
+    '反推平局裁决必须跟踪精确命中强证据（strongHits）')
+  assert.match(WORKER_SRC, /同章的章级测试单元/,
+    '内容特征/章关键词缩窄必须保留同章测试单元')
+})

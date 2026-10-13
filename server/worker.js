@@ -3622,7 +3622,11 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       const ctRaw = sample.unit_title || ''
       const ck = normalizeTitleForMatch(ckRaw)
       const ct = normalizeTitleForMatch(ctRaw)
-      if (ck && (ck.includes(normPageTitle) || ct.includes(normPageTitle) || normPageTitle.includes(ck) || normPageTitle.includes(ct))) {
+      // 2026-10-13 守卫：ct 为空串时 includes 恒真（"xxx".includes("") === true），
+      // unit_title=NULL 的单元会把跑马灯标题误判为"可信"放行（实测 第19/21章测试(二)
+      // title 为 NULL 击穿防御1，致 第20章测试(二) 尾页错锚到 测试(一)，参考答案全错）。
+      // ct 两个分支必须要求非空。
+      if (ck && (ck.includes(normPageTitle) || (ct && ct.includes(normPageTitle)) || normPageTitle.includes(ck) || (ct && normPageTitle.includes(ct)))) {
         anyContain = true
         break
       }
@@ -3803,19 +3807,30 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     const chapterCoreMatch = normTitle.match(/^(第[一二三四五六七八九十\d]+[章节单元])/)
     if (chapterCoreMatch) {
       const core = chapterCoreMatch[1]
-      // 优先命中非试卷类的章级单元，避免 bare"第十九章"被试卷类 title 截胡
-      for (const c of candidates) {
-        const ck = normalizeTitleForMatch(c.unitKeyRaw)
-        const ct = normalizeTitleForMatch(c.unitTitle)
-        const matchCore = ck === core || ct === core || ck.startsWith(core) || ct.startsWith(core)
-        if (matchCore && !/^试卷/.test(ck)) return c.unitKey
-      }
-      for (const c of candidates) {
-        const ck = normalizeTitleForMatch(c.unitKeyRaw)
-        const ct = normalizeTitleForMatch(c.unitTitle)
-        if (ck === core || ct === core || ck.startsWith(core) || ct.startsWith(core)) {
-          return c.unitKey
+      // 2026-10-13 修复：同章核心命中【多个】单元（如"第20章测试(一)/(二)"）时，
+      // 原实现按顺序盲选第一个 —— 跑马灯标题（"第20章 二次根式"）本就区分不了 (一)/(二)，
+      // 盲选等于掷硬币（unit_seq 在前者恒胜，实测测试(二)尾页5题参考答案全错）。
+      // 现改为：唯一命中才 return；多命中缩窄 candidates，交给学生答案反推/答案覆盖率裁决。
+      const collectCoreHits = (preferNonPaper) => {
+        const hits = []
+        const seen = new Set()
+        for (const c of candidates) {
+          const ck = normalizeTitleForMatch(c.unitKeyRaw)
+          const ct = normalizeTitleForMatch(c.unitTitle)
+          const matchCore = ck === core || ct === core || ck.startsWith(core) || ct.startsWith(core)
+          if (!matchCore) continue
+          if (preferNonPaper && /^试卷/.test(ck)) continue
+          if (!seen.has(c.unitKey)) { seen.add(c.unitKey); hits.push(c) }
         }
+        return hits
+      }
+      // 优先命中非试卷类的章级单元，避免 bare"第十九章"被试卷类 title 截胡
+      let coreHits = collectCoreHits(true)
+      if (coreHits.length === 0) coreHits = collectCoreHits(false)
+      if (coreHits.length === 1) return coreHits[0].unitKey
+      if (coreHits.length > 1) {
+        console.warn(`[pickAnswerUnit] 章核心 "${core}" 命中 ${coreHits.length} 个单元 [${coreHits.map(h => h.unitKey).join(' | ')}]，标题无法区分 → 不盲选，缩窄候选交后续通道`)
+        candidates.splice(0, candidates.length, ...coreHits)
       }
     }
   }
@@ -3837,7 +3852,24 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
     if (keyMatches4.length === 1) return keyMatches4[0].unitKey
     // 多个候选命中：用 detectedChapter 缩窄 candidates（不替换为局部变量，透传下去给打分）
     if (titleMatches4.length > 1) {
-      candidates.splice(0, candidates.length, ...titleMatches4)
+      // 2026-10-13 修复：保留同章的章级测试单元。章级测试卷尾部页（页眉只有跑马灯）
+      // 的单元 title 不含章节名（"第20章测试(一)"），纯按 title 缩窄会把正确单元排除，
+      // 实测导致测试(二)尾页参考答案全错。章号取缩窄集 unit_key "N." 前缀的众数。
+      const chapCounts = new Map()
+      for (const c of titleMatches4) {
+        const m = (c.unitKeyRaw || '').match(/^(\d{1,2})\./)
+        if (m) chapCounts.set(m[1], (chapCounts.get(m[1]) || 0) + 1)
+      }
+      let chapNum = null
+      for (const [k, n] of chapCounts) {
+        if (!chapNum || n > chapCounts.get(chapNum)) chapNum = k
+      }
+      const kept = chapNum
+        ? candidates.filter(c => titleMatches4.includes(c) || new RegExp('^第0*' + chapNum + '章测试').test(c.unitKeyRaw || ''))
+        : titleMatches4
+      if (kept.length < candidates.length) {
+        candidates.splice(0, candidates.length, ...kept)
+      }
     } else if (keyMatches4.length > 1) {
       candidates.splice(0, candidates.length, ...keyMatches4)
     }
@@ -3857,11 +3889,30 @@ export function pickAnswerUnit(answersByUnit, pageTitle, questions, pageNumber, 
       { kw: '直角三角形', mustInTitle: /直角三角形|勾股|角平分线/ },
       { kw: '实数', mustInTitle: /实数/ },
     ]
+    // 2026-10-13 修复：按章关键词缩窄时必须保留同章的章级测试单元
+    // （"第20章测试(一)/(二)" 的 title 不含"二次根式"，仅按 mustInTitle 过滤会把它们
+    //  排除，测试卷尾部页将永远锚不进测试单元）。章核心从 chapterHint 抽取，
+    //  中文数字（第二十章）归一成阿拉伯（第20章）再比对。
+    const cnDigitMap = { 一: '1', 二: '2', 三: '3', 四: '4', 五: '5', 六: '6', 七: '7', 八: '8', 九: '9' }
+    const cnNumToArabic = (s) => {
+      if (/^\d+$/.test(s)) return s
+      if (s === '十') return '10'
+      const tenIdx = s.indexOf('十')
+      if (tenIdx < 0) return cnDigitMap[s] || ''
+      const tens = tenIdx === 0 ? '1' : (cnDigitMap[s[0]] || '')
+      const ones = tenIdx === s.length - 1 ? '0' : (cnDigitMap[s.slice(tenIdx + 1)] || '')
+      return tens + ones
+    }
+    const hintCoreRaw = (hintNorm.match(/第([一二三四五六七八九十\d]+)[章节单元]/) || [])[1] || null
+    const hintCore = hintCoreRaw ? `第${cnNumToArabic(hintCoreRaw)}` : null
     for (const { kw, mustInTitle } of CHAPTER_KEYWORDS) {
       if (hintNorm.includes(kw)) {
         const kwNarrowed = candidates.filter(c => {
           const ct = c.unitTitle || ''
-          return mustInTitle.test(ct)
+          if (mustInTitle.test(ct)) return true
+          if (!hintCore) return false
+          const ck = c.unitKeyRaw || c.unitKey || ''
+          return ck.startsWith(hintCore) || ct.startsWith(hintCore)
         })
         if (kwNarrowed.length >= 1 && kwNarrowed.length < candidates.length) {
           console.log(`[pickAnswerUnit] pageTitle 不可信 + chapterHint="${chapterHint}" 含"${kw}"，缩窄至 ${kwNarrowed.length} 个候选`)
@@ -5171,10 +5222,14 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
       }
       const found = searchByAnswerFingerprint(studentAnswer, qType, unitAnswers, new Set())
       if (found && found.score >= 0.7) {
-        if (!unitScores.has(unitKey)) unitScores.set(unitKey, { hits: 0, totalScore: 0 })
+        if (!unitScores.has(unitKey)) unitScores.set(unitKey, { hits: 0, totalScore: 0, strongHits: 0 })
         const s = unitScores.get(unitKey)
         s.hits++
         s.totalScore += found.score
+        // 2026-10-13：精确命中（完全/归一化全等，score>=0.95）且学生答案足够长（去空白>=3字
+        // 符，排除"0"/"1"这类平凡碰撞）记为强证据 —— 子串巧合（长作业串里含"2-√3"等公共
+        // 片段）只有 0.85 档，区分度差，不应与全等证据同权重。
+        if (found.score >= 0.95 && studentAnswer.replace(/\s+/g, '').length >= 3) s.strongHits++
       }
     }
   }
@@ -5205,7 +5260,14 @@ export function searchUnitByStudentAnswers(questions, answersByUnit, candidateUn
     if (second && second.totalScore > 0) {
       const gap = best.totalScore - second.totalScore
       // 绝对差 < 0.8（约 1 道 0.8 相似度的题）且命中数相同 → 无法区分
-      if (gap < 0.8 && best.hits <= second.hits + 1) hasAdvantage = false
+      if (gap < 0.8 && best.hits <= second.hits + 1) {
+        // 2026-10-13 例外：最佳含精确命中强证据、次佳没有时，精确证据裁决平局
+        // （实测 第20章测试(二) 尾页：q22 "2m-2n" 全等命中 (二)，(一) 的两处命中全是
+        //  长作业串子串巧合 0.85 档，分差 0.2 本会弃权 —— 但全等证据应当胜出）。
+        const bestStrong = (best.strongHits || 0) >= 1
+        const secondStrong = (second.strongHits || 0) >= 1
+        if (!(bestStrong && !secondStrong)) hasAdvantage = false
+      }
     }
     if (hasAdvantage) {
       return { unitKey: bestUnit, hits: best.hits, totalScore: best.totalScore }
