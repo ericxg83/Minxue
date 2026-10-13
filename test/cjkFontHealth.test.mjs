@@ -4,8 +4,13 @@
  * 锁三件事：
  *   ① 判定 `resolveCjkFontState()`：只有 ok 才合格，字段没回必须**明说没盯**（不许悄悄判合格）；
  *   ② 测量 `probeCjkFontAsset()`：本仓库真的有这份 woff2 资产（没有的话 /api/health 会一直报 missing）；
- *   ③ 接线：healthcheck 真的 import 了这个判定、renderFontFace 真的用 cjkFontState 的路径
+ *   ③ 接线：/api/health 真的用这个测量（index.js）、renderFontFace 真的用 cjkFontState 的路径
  *      （同一个资产路径两边各算一次 = 「同一事实两个写法」，r241 专门拆开过一次）。
+ *
+ * ⏳ 2026-10-13 变更（㊲）：原第 ③ 条锁的是「healthcheck import 这个判定」——
+ *   healthcheck 已随健康脚本家族删除，接地点换成 `server/index.js` 的 /api/health
+ *   （`cjkFont: probeCjkFontAsset()`）。resolveCjkFontState 的行为锁原样保留
+ *   （它是 r241 设计的判定层，纯函数无外部依赖）。
  *
  * ⛔ 反向自检要点（沿用 r233/r237 的规矩）：判据必须能自己判红。
  *    这里额外加了自证钩子 —— 先断言源码里**确实是**新写法，再断言行为；
@@ -19,7 +24,7 @@ import { fileURLToPath } from 'node:url'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const resolverSrc = readFileSync(path.join(here, '..', 'server', 'utils', 'cjkFontState.js'), 'utf8')
-const healthcheckSrc = readFileSync(path.join(here, '..', 'scripts', 'healthcheck.mjs'), 'utf8')
+const indexSrc = readFileSync(path.join(here, '..', 'server', 'index.js'), 'utf8')
 const renderFontFaceSrc = readFileSync(path.join(here, '..', 'server', 'services', 'renderFontFace.js'), 'utf8')
 
 const { resolveCjkFontState, probeCjkFontAsset, CJK_FONT_ASSET_PATH } = await import('../server/utils/cjkFontState.js')
@@ -28,8 +33,8 @@ const { resolveCjkFontState, probeCjkFontAsset, CJK_FONT_ASSET_PATH } = await im
 test('自证：判定模块与两个接线点都在源码里（防判据整体失效）', () => {
   assert.match(resolverSrc, /export function resolveCjkFontState/)
   assert.match(resolverSrc, /export function probeCjkFontAsset/)
-  assert.match(healthcheckSrc, /resolveCjkFontState/)
-  assert.match(healthcheckSrc, /家长卡片中文字/)
+  assert.match(indexSrc, /import \{ probeCjkFontAsset \} from '\.\/utils\/cjkFontState\.js'/)
+  assert.match(indexSrc, /cjkFont: probeCjkFontAsset\(\)/)
   assert.match(renderFontFaceSrc, /from '\.\.\/utils\/cjkFontState\.js'/)
 })
 

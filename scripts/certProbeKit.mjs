@@ -9,7 +9,8 @@
  * ⛔ 本文件**刻意放在 `scripts/` 而不是 `scripts/gate/`**：`test/gateBase.test.mjs`（r158）规定
  *   「scripts/gate 下每个 .mjs 都得走 base.mjs 的 BASE 解析」—— 那是给**闸门脚本**定的规矩，
  *   本文件是纯判据、根本不解析 BASE。放进去会让那把锁误判（实测：新加文件当场判红）。
- *   仓内同类 kit 也都放 `scripts/` 根：`backupKit.mjs`、`nightlyAuditVerdict.mjs`、`healthDiskState.mjs`。
+ *   仓内同类 kit 也都放 `scripts/` 根：`backupKit.mjs`（以上仍活着；
+ *   `nightlyAuditVerdict.mjs`、`healthDiskState.mjs` 已于 2026-10-13 随 ㊲ 删除）。
  *
  * ⛔ r246 修的是**假红**（不是假绿）：
  *   r224 把判据定成「外部 origin 必须为空」，当时是对的 —— 那时应用不拉任何外部资源。

@@ -4559,3 +4559,29 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   已在 `test/apiCallerAuditKit.mjs` r219 历史注释补闭环后记（「本条是历史档案，
   不是它还活着的清单」），防下轮按档案重复施工。
 - 本轮改动仅注释（+6 行），零产品代码；门禁复跑 1/1。
+
+---
+
+## 提案 ㊲ 闭环（2026-10-13 负责人批复「取消」· 夜间巡检脚本家族整体删除）
+
+负责人二选一里选「取消」：不补挂 03:30 夜间 lane，nightlyAudit / healthcheck 家族整体清理。
+
+- **删除 30 个文件**：scripts 侧 5（healthcheck.mjs / healthTrend.mjs / healthDiskState.mjs /
+  nightlyAudit.mjs / nightlyAuditVerdict.mjs）；test 侧 16（healthcheck* 锁 10 把 +
+  healthTrend×2 / nightlyAuditVerdict / nightlyAuditTestScope（r267 建，随对象消亡）/
+  healthDiskGuard / baselineScriptKit）；fixtures 9（healthcheck-baseline×8 + healthTrend-baseline×1）。
+- **刻意保留（都有活跃消费者，删了会误伤）**：`frontendHealth.mjs` + `certProbeKit.mjs`
+  （scripts/gate 冒烟闸家族与 certProbeExternalOrigin 测试在用）、`testFileList.mjs`
+  （r267 假绿修复产物，patrol 仍在用）、`server/utils/cjkFontState.js` / `diskUsage.js`
+  （生产模块：/api/health 与 renderFontFace 在用）、`scripts/patrol/**`（不在 ㊲ 范围）。
+- **`test/cjkFontHealth.test.mjs` 改写而非删除**：它守的是仍生产的 cjkFont 灯（/api/health），
+  原第③条锁「healthcheck import 判定」随对象消亡 ⇒ 接地点换成 `server/index.js:18/294`
+  （`cjkFont: probeCjkFontAsset()`）。反向自检：两个合成坏样本（摘接线/改 import 路径）均判红。
+- **6 处失实注释订正**：testFileList / patrol.mjs / certProbeKit / apiCallerAuditKit /
+  cjkFontState / diskUsage——「healthcheck 直接 import 它」这类话在删除后会变成假话，
+  按 dailyBackup doctrine（别靠注释声称不存在的事）统一改过去时。
+- 四道闸：npm test **2340/2340 fail 0**（删 17 测试文件后从 2456 降，符合预期；红线无新增失败）｜
+  eslint 7 文件 0 error｜构建/冒烟 ⛔ esbuild 间歇故障窗口（winmm.dll，负责人批示暂不排查）；
+  本轮 0 个 src/ 文件，前端产物零影响。
+- ⚠️ r267 的 nightlyAuditTestScope 锁随之作废（对象已删），其核心成果 testFileList 唯一实现
+  仍活在 patrol；假绿修复的历史价值记录在 testFileList.mjs 头部，不丢。

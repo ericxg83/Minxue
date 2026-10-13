@@ -19,8 +19,9 @@
  *   1) **测量** `probeCjkFontAsset()` —— 只在服务端跑一次，读文件、验 woff2 的 magic，
  *      结果缓存（每请求都读 968KB 没意义；`renderFontFace.js` 早就这么缓存了）。
  *   2) **判定** `resolveCjkFontState(value)` —— 纯函数，吃 `/api/health` 回的那个值，
- *      产出体检那盏灯要的「合格/不合格 + 说人话」。scripts/healthcheck.mjs 直接 import 它，
- *      ⛔ 不许在 healthcheck 里另写一套判定（r221「同一件事只准一个实现」）。
+ *      产出「合格/不合格 + 说人话」。2026-10-13 前由 scripts/healthcheck.mjs import
+ *      （该脚本已随 ㊲ 删除）；现在这个值经 `/api/health` 的 cjkFont 字段暴露，
+ *      本机排查直接 curl 读它即可。⛔ 判定逻辑只准这一份（r221「同一件事只准一个实现」）。
  *   3) 文案只讲**后果 + 下一步**，不甩字段名、不夸大（r198：夸大的告警比没告警更糟）。
  */
 import { readFileSync } from 'node:fs'

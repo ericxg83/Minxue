@@ -8,6 +8,9 @@
  *   而 patrol.mjs 与 package.json 的 `npm test` 用的本来就是完整清单 ⇒ 三处口径漂移。
  *   本模块把清单收敛成一处，patrol / nightlyAudit 都走它；`npm test` 是开发者
  *   手动入口，保持 package.json 原样（被 testSuiteCoverage 锁盯着，不反复改）。
+ *   ⏳ 后记（2026-10-13，㊲）：nightlyAudit.mjs 本体已随健康脚本家族删除
+ *   （负责人批复「取消」），现在本清单的唯一消费者是 patrol.mjs；
+ *   本模块保留——它是 r267 假绿事故的产物，也是测试口径的唯一实现。
  *
  * 与磁盘的关系：`test/` 目录每次现扫（新增 .test.mjs 自动纳入）；
  *   9 个 server 侧文件是显式清单（它们在 test/ 之外，glob 表达不了）。

@@ -8,6 +8,7 @@
  *  - 提案 19（2026-10-05）：`scripts/dailyBackup.mjs` 注释写着「每晚 21:30 自动」，全仓零调用方 ⇒
  *    三天零备份无人知晓。
  *  - r217：lanes.md 把 `scripts/nightlyAudit.mjs` 标成「🟢 常驻」，实测零调用方 + 近 7 天 0 次。
+ *    ✅ 后记（2026-10-13，㊲）：nightlyAudit / healthcheck / healthTrend 家族已整体删除。
  *  - r219（本轮）：`POST /api/wrong-questions/export-retry-pdf`（服务端重练卷 PDF + 二维码）
  *    零调用方 —— 学生扫的二维码其实是手机端 `src/pages/PrintPreview` 现算的
  *    （`src/utils/retryTaskUrl.js`）。这条链路**跑一次错一次也永远不会报错**，因为压根没人跑。
