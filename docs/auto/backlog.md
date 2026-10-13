@@ -4641,3 +4641,35 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   产出「每文件恰好 1 个、ruleId=None」的假 `Parsing error`，本轮实测 59 个）；② 两份技能库重名
   （`.workbuddy-ai/skills` 14 份 vs `.workbuddy/skills` 25 份）——对体检输出必须先探针确认是哪一份。
 - 无新提案。
+
+## r280 提案（2026-10-13 22:2x，日常巡查 automation `4e9608a9`，B/C 级只提案）
+
+- **r280-P-A（B/C，需负责人拍板）：「v2 答案库矩阵」两个分支自出生起就是死的——`review_status` 词汇表里
+  从来没有 'reviewed' / 'excluded' 这两个值**。
+  - 位置：`server/index.js` 两处——`syncDraftAnswerBank`（约 2140-2165 行）与
+    `POST /api/tasks/:taskId/save-as-answer-key`（约 1687-1711 行）。两者按同一份「v2 矩阵」注释
+    （index.js:2095-2100）分支：`reviewStatus === 'excluded'` / `reviewStatus === 'reviewed' && is_correct …`。
+  - 实证（r280 只读探针 `_diag_r280_reviewstatus.mjs`，生产库 3716 题）：`questions.review_status`
+    只有 5 个值——NULL 2982 / correct 517 / wrong 141 / exclude 57 / wrong_no_book 19；
+    **'reviewed' 0 行、'excluded' 0 行**。git 历史实证：该写法随 `b93c594`（09-20）与
+    syncDraftAnswerBank 一同出生，全仓历史 `review_status = 'reviewed'` 零出现；
+    前端唯一真相 `src/utils/reviewDecision.js` 的 REVIEW_STATUS 也只有 correct/wrong/wrong_no_book/exclude。
+    ⇒ 每个输入都落 else 分支，矩阵承诺的三件事（复核升 teacher_verified / 错题未修答案 DELETE /
+    排除标 excluded）**一次都没执行过**。
+  - 影响面已查清（本轮只读，无用户可见故障）：① 升级 per-question `teacher_verified` 是冗余的——
+    发布路径 `updateResourceAnswerStatus`（neonService.js:1941）会把整册所有行 blanket 升到
+    teacher_verified；② DELETE 分支失效只影响草稿库覆盖率（AI 参考答案多留了几行），发布闸
+    `findDirtyAnswers` + 资源级信任决策仍兜底；③ per-question `answer_status` 无 UI 消费。
+    但「注释承诺的矩阵从未执行」本身是 r221 同族缺陷（看着在盯，其实没盯），且两份实现
+    （index.js 两处）互相抄着死代码。
+  - 待负责人定的两条路（都涉及答案库写语义，本轮不擅动）：**甲** 把判据改到真实词汇表
+    （correct/wrong/wrong_no_book/exclude）让矩阵真正生效——会激活从未跑过的 DELETE 与
+    teacher_verified 写；**乙** 删死分支 + 把注释改成实际行为（else 恒执行）。
+    另注：`worker.js:8386` 注释提到的 `completeTaskReview` 函数全仓不存在（发布实际走
+    ExamWorkbench 的 PUT /resources/:id 与 PATCH /answers/status），该注释也一并待订正。
+- **r280-P-B（B，观察）**：发布自动沉淀草稿库的按钮态与信任链略有缺口——ExamWorkbench 发布按钮
+  对「status=draft 且 answer_status=ai_draft」禁用（`:disabled` 判据），老师必须先走答案详情页
+  PATCH /answers/status 升信任才能发布；而 PUT /api/tasks/:taskId 的完成复核只会把**资源级**
+  answer_status 升 teacher_verified（index.js:1056-1065），不动 per-question 行、也不推
+  resources.status='published'。属交互链路观察项，待 P-A 定版后一并评估。
+- 本轮已落地（勿再提）：四桶口径回归锁 `test/reviewBucketCaliber.test.mjs`（commit `f2b5f09`）。

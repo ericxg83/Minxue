@@ -512,3 +512,18 @@
 - 只读关闭/保持：r278-P-A 关闭；r278-P-B 仍开放（④ 类歧义 4 处涉遗留临时目录，待负责人）；
   部署缺口本轮提交后推送归零（连带 r278 的 `486c007`）。
 - 未触碰：`.workbuddy-ai/memory/MEMORY.md`（他人在制）；④ 类 32 处未动。
+
+## 第 r280 轮认领（2026-10-13 22:22–，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：仓库卫生与门禁基线（测试套件口径锁）+ 服务端基础设施（非批改）只读核查。
+- 锁号：`loopGuard acquire` 直得 **280**（r279 之后无撞号）。
+- 落地（commit `f2b5f09`，纯测试零产品码）：`test/reviewBucketCaliber.test.mjs` 8 条——taskStats 四桶
+  ↔ reviewDecision 6 态的文件头互称「严格镜像」但无任何行为锁；先证后锁（生产词汇表 600 组合
+  0 漂移才编码成文），150 组合全对账 + 分桶顺序 + 人工优先 + 0.5 边界 + 互斥穷尽。
+  反向自检三变异全红（M1 blank 顺序 / M2 阈值 / M3 前端 blank 归属），源文件 sha256 字节级还原。
+- 只读查出 r280-P-A（B/C）：index.js 两处 v2 答案库矩阵判据 `review_status==='reviewed'/'excluded'`
+  在生产词汇表 0 行（3716 题实证，随 b93c594 出生即死），矩阵三承诺从未执行；影响面查清无用户
+  可见故障 ⇒ 只提案。词汇表实证入册：review_status 只有 NULL/correct/wrong/exclude/wrong_no_book。
+- 四道闸：npm test **2375/2375 fail 0**｜eslint **0e/122w**｜`dist_nightly_20261013r280` **34.92s**｜
+  preview 5582 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- 备份 10-13 13:30 ok:true 无报警；未触碰他人在制 `.workbuddy-ai/memory/MEMORY.md`。
