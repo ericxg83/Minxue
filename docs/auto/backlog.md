@@ -4533,3 +4533,16 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   追加前先 `git diff` 确认有无他人未提交改动；根本解法是等其提交后再动同文件，或写独立新文件。
 - 四道闸：npm test **2456/2456**｜lint 0 error｜构建/冒烟 ⛔ esbuild 23:2x 故障窗口
   （winmm.dll，负责人批示暂不排查），本轮 0 个 src/ 文件前端产物零影响。
+
+## 第 r273 轮（2026-10-13 12:5x–13:1x，新日常巡查任务）已交付：备份调度事实校正 + 备份 automation 落空根因定位（commit `5334407`）
+
+- 开工锁 `finished / 269`（r270/r272 为负责人指令插入轮、r271 为只读审计轮，均未回写锁）⇒ 手工认领 **r273**（loopGuard 的 round+1 会得 270，与既有 `2026-10-12-r270.md` 撞号，故取「现存最大轮号 +1」）。
+- 🔴 **报警：备份已缺 2 天**（最新 = `2026-10-10` ok:true；缺 10-11/10-12；今日 10-13 已过 12:00 档仍无目录）。根因定位（只读取证，`~/.workbuddy/logs/automation.log`，未跑任何写生产脚本）：
+  - **10-12 09:57**（01:57:14Z）：backup automation `4175b19c` 自创建以来**唯一一次真实触发**，24 秒即失败——`[UNKNOWN] refusal … 429 Quota exceeded 额度已用尽`。即 **AI 会话没起来**，`node scripts/dailyBackup.mjs` 一行都没执行（无退出码、无 manifest，脚本自身无责）。同刻 `c05d897d`（慧慧云，已取消）同样 429。
+  - **10-13 12:00 档**：**主机不在线**（12:51:22 才开机，负责人在线会话事件日志实证；`automation.log` 佐证：巡查轮 12:52:49 才 dispatch）⇒ 12:00 档直接错过。开机后两 automation 同时变 due、巡查轮先占源，备份被**同源串行**挤掉——两个 automation 同 `sourceKey=3c6e857`（工作区级），调度器 `serialized, max 1`；本巡查轮 12:52:49 开工后，备份每 5 秒被 skip 一次（"keep due for next tick"，实测 98 条）⇒ **延后到本轮结束后补跑，不是丢失**。**下一轮必核 `D:/Minxue_Backup/2026-10-13/`**：若出现了 ⇒ 机制自愈；若仍无且日志无 run start ⇒ 额度仍耗尽或调度异常，升级。
+- 交付（A 级文档校正，4 文件 +39/−8，commit `5334407`；13:2x 补一条开机时间实证）：`scripts/dailyBackup.mjs` 头部（03:00→12:00 + 三种落空模式判障指引：主机不在线 / 429 额度 / 同源串行）/ `docs/auto/DECISIONS.md` ⑲（改点记录 + 遗留订正）/ `docs/auto/HANDOFF.md` 两处「21:30 自动」作废 / `docs/auto/lanes.md` r273 认领。**为什么值得改**：dailyBackup.mjs 头部正是「别再靠注释声称谁会调它」这条 doctrine 的原文所在，而它自己正在犯同一错（写 03:00，实际 12:00）。
+- 只读审计「无缺陷」记录（止损，防下轮重复排查）：`server/utils/optionText.js`（81 行整读：标号清洗/整组表决/JSON 串容错设计完备）；`server/services/neonService.js`（2033 行表面扫描：无空 catch、`.query(` 仅 8 处、`SELECT *` 仅 4 处）；`scripts/loopGuard.mjs`（103 行整读：写后回读校验完备；唯一边缘 case——`running` 但缺 `startedAt` 会被瞬间接管，实际写入必带 startedAt，不构成风险）。
+- 提案 **r273-P-A**（B）：**backup 与巡查两个 automation 同源串行**——12:00 档备份会被每小时一轮的巡查挤掉；若某轮巡查恰好横跨 12:00 且轮与轮之间无间隙，存在饿死风险。建议（负责人定）：备份 automation 改用独立 sourceKey，或把时间档挪到巡查轮不跑的冷门档（如 11:30/12:30）。
+- 提案 **r273-P-B**（B，沿用 r271-③）：部署缺口 **6 个提交未推**（f17a718/65b502b/d283951/2fb8ce3/5334407/15a5e83，含产品码 d283951 分享卡读前自愈与 15a5e83 本地服务自启）——推送即触发 Render 自动部署，待负责人拍板。
+- 提案 **r273-P-C**（B，沿用 r271-①）：r269 遗留 3 个 WIP 文件（`scripts/skillRefsKit.mjs` / `scripts/check-skill-refs.mjs` / `test/checkSkillRefsScope.test.mjs`）已挂约 16 小时；npm test 全绿且含其 12 条用例 ⇒ 内容完好，待负责人确认代提或让 r269 自己收尾。
+- 四道闸：npm test **2456/2456 fail 0**（开工即跑，含 r269 WIP 测试文件）｜eslint 本轮 4 文件 0 error｜构建+冒烟见 r273 报告第二节。
