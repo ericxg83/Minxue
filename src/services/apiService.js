@@ -733,6 +733,33 @@ export const searchWrongQuestions = async (q, { limit = 50 } = {}) => {
   }
 }
 
+// ── 错题组卷（2026-10-13 错题管理扩展 M4）──
+//
+// 老师要「按知识点把全班错题组一张专项训练卷」。后端**不需要新写聚合** ——
+// 考法库的 kp-ranking / kp-questions 已经把「题目 ↔ 知识点 ↔ 跨学生错次/错的人数」
+// 全聚好了（server/routes/teachingQuestionTypes.js:396 / :448）。
+// 本页只做两件后端没做的事：① 前端按「共错人数」重排（后端按错次排序，
+// 但「5 人各错 1 次」比「1 人错 5 次」更该全班讲）；② 勾选 + 出卷。
+//
+// ⛔ 不改 kp-questions 的排序：它同时被考法库页与周末班课件消费，
+//   改排序会连带影响那两处。排序差异在前端解决。
+export const getKpRanking = async ({ days = 30, limit = 0 } = {}) => {
+  const data = await apiRequest(`/teaching-question-types/kp-ranking?days=${encodeURIComponent(days)}&limit=${encodeURIComponent(limit)}`)
+  return { nodes: data.nodes || [], stats: data.stats || {} }
+}
+
+export const getKpQuestions = async ({ kpId, days = 0, limit = 200, includeChildren = true, onlyWrong = true } = {}) => {
+  const p = new URLSearchParams({
+    kpId: String(kpId || ''),
+    includeChildren: includeChildren ? '1' : '0',
+    onlyWrong: onlyWrong ? '1' : '0',
+    days: String(days),
+    limit: String(limit),
+  })
+  const data = await apiRequest(`/teaching-question-types/kp-questions?${p}`)
+  return { questions: data.questions || [], kp: data.kp || null, scope: data.scope || null }
+}
+
 export const getLatestJudgements = async (studentId, questionIds) => {
   return apiRequest('/judgements/latest', {
     method: 'POST',

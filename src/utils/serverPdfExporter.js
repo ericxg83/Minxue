@@ -48,13 +48,20 @@ export async function getKatexCssWithInlineFonts() {
 }
 
 /**
- * 渲染完整 HTML（含 KaTeX 字体 inline + KaTeX 公式 SVG 渲染 + 二维码注入）。
- * 暴露给周报生成器（weeklyReportGenerator）复用同一份渲染逻辑。
- * 与 PrintPreview 完全相同的渲染流程，保证 100% 视觉一致。
+ * 通用「iframe 渲染管线」：把一段 body HTML 送进隐藏 iframe，
+ * 跑 KaTeX auto-render + 二维码注入 + 字体预加载，再把渲染完的 DOM 序列化回来。
  *
+ * 为什么必须共用一条管线：KaTeX 的字体预加载与「等度量稳定」这几步是本文件
+ * 全部踩坑经验的落点（根号横线错位、分数线上标丢失、生产构建字体 404 出方块）。
+ * 任何新出口（如试卷题库讲义）都必须走这里，不能各写一份。
+ *
+ * @param {object} o
+ * @param {string} o.headCss   <head> 里的样式（通常 = 内联字体 CSS + buildPaperCSS()）
+ * @param {string} o.bodyHtml  <body> 内容
+ * @param {string} [o.qrContent]
  * @returns {Promise<string>} 完整 HTML 字符串
  */
-export async function renderFullHTML({ title, studentName, questions, showAnswers, qrContent, embedPaperCssInBody = false }) {
+async function renderViaIframe({ headCss, bodyHtml, qrContent }) {
   const inlinedCss = await getKatexCssWithInlineFonts()
 
   // 创建 hidden iframe（不能用 display:none，否则 KaTeX 渲染不出来）
@@ -72,15 +79,8 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
     const idoc = iwin.document
 
     // 写入完整 HTML（CSS 已内联字体）
-    // embedPaperCssInBody：把 buildPaperCSS 以 .minxue-exam 作用域形式内嵌进 body，
-    // 用于周报合并场景——mergeReportHTML 只搬 body 子节点，head 里的 CSS 会被丢弃；
-    // 内嵌 scoped 样式既保证再测卷排版与移动端「生成试卷」一致，又不会污染诊断报告的同名类。
     idoc.open()
-    const paperBody = buildPaperBody({ title, studentName, questions, showAnswers })
-    const scopedBody = embedPaperCssInBody
-      ? `<div class="minxue-exam"><style>${buildPaperCSS('.minxue-exam')}</style>${paperBody}</div>`
-      : paperBody
-    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${buildPaperCSS()}</style></head><body>${scopedBody}</body></html>`)
+    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${headCss}</style></head><body>${bodyHtml}</body></html>`)
     idoc.close()
 
     // 等 DOM ready
@@ -129,6 +129,33 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
 }
 
 /**
+ * 渲染完整 HTML（含 KaTeX 字体 inline + KaTeX 公式 SVG 渲染 + 二维码注入）。
+ * 暴露给周报生成器（weeklyReportGenerator）复用同一份渲染逻辑。
+ * 与 PrintPreview 完全相同的渲染流程，保证 100% 视觉一致。
+ *
+ * @returns {Promise<string>} 完整 HTML 字符串
+ */
+export async function renderFullHTML({ title, studentName, questions, showAnswers, showAnalysis, qrContent, embedPaperCssInBody = false }) {
+  // embedPaperCssInBody：把 buildPaperCSS 以 .minxue-exam 作用域形式内嵌进 body，
+  // 用于周报合并场景——mergeReportHTML 只搬 body 子节点，head 里的 CSS 会被丢弃；
+  // 内嵌 scoped 样式既保证再测卷排版与移动端「生成试卷」一致，又不会污染诊断报告的同名类。
+  const paperBody = buildPaperBody({ title, studentName, questions, showAnswers, showAnalysis })
+  const bodyHtml = embedPaperCssInBody
+    ? `<div class="minxue-exam"><style>${buildPaperCSS('.minxue-exam')}</style>${paperBody}</div>`
+    : paperBody
+  return renderViaIframe({ headCss: buildPaperCSS(), bodyHtml, qrContent })
+}
+
+/**
+ * 试卷题库「讲义」专用：自定义 body + 追加样式，走同一条 iframe 渲染管线。
+ * 2026-10-10 新增。讲义版式见 src/utils/handoutPdf.js
+ *（⛔ 它刻意不复用 buildPaperBody —— 那套会按题型重排重编号，会丢原卷题号）。
+ */
+export async function renderCustomBodyToHTML({ bodyHtml, extraCss = '' }) {
+  return renderViaIframe({ headCss: `${buildPaperCSS()}\n${extraCss}`, bodyHtml })
+}
+
+/**
  * 触发服务端 PDF 渲染（新主路径）。
  *
  * 支持两种调用模式：
@@ -149,12 +176,13 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
  * @param {Array}  [opt.questions]       - 已选题目 JSON（模式 A）
  * @param {string} [opt.html]            - 完整 HTML 字符串（模式 B，优先级最高）
  * @param {boolean} [opt.showAnswers=false]
+ * @param {boolean} [opt.showAnalysis=false] - 教师版：额外印解析与答案来源（不落库、不带二维码）
  * @param {string} [opt.qrContent]
  * @param {string} [opt.filename]        - 下载文件名（不含 .pdf）
  * @param {boolean} [opt.returnPdfBlob=false] - true 时返回 {pdfBlob}，不触发下载
  * @returns {Promise<{downloaded: true, pdfBytes: number, filename: string, pdfBlob?: Blob}>}
  */
-export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, qrContent, filename, returnPdfBlob = false }) {
+export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, showAnalysis = false, qrContent, filename, returnPdfBlob = false }) {
   let finalHtml = html
 
   // 模式 A：用 questions 构造 HTML（兼容老的错题卷主路径）
@@ -189,6 +217,7 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
       studentName: studentName || '',
       questions: qs,
       showAnswers,
+      showAnalysis,
       qrContent,
     })
 

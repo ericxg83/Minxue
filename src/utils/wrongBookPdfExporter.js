@@ -94,6 +94,10 @@ export async function exportWrongBookPDF({
   title,
   filename,
   showAnswers = false,
+  // 教师版（2026-10-13 错题管理扩展）：额外印「解析 + 答案来源」。
+  // ⛔ 教师版是**打印品**：调用方不得为它建 generated_exams、不得传 qrContent
+  //   （没有二维码 = 不会进批改链路 = 不污染「待批改」口径）。
+  showAnalysis = false,
   qrContent,
   orientation = 'portrait',
   forceServer = false,
@@ -145,6 +149,7 @@ export async function exportWrongBookPDF({
         studentName: name,
         questions: qs,
         showAnswers,
+        showAnalysis,
         qrContent,
         filename: baseFile,
         returnPdfBlob: true,       // 拿到 blob，自行 saveAs 触发下载
@@ -183,6 +188,7 @@ export async function exportWrongBookPDF({
       studentName: name,
       questions: qs,
       showAnswers,
+      showAnalysis,
       qrContent,
       orientation,
     })
@@ -196,7 +202,7 @@ export async function exportWrongBookPDF({
 /**
  * 按题目 ID 直接导出一份错题卷（快捷入口）。
  */
-export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, qrContent, orientation, forceServer, forceBrowser }) {
+export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, showAnalysis, qrContent, orientation, forceServer, forceBrowser }) {
   return exportWrongBookPDF({
     studentId,
     studentName,
@@ -204,6 +210,7 @@ export async function exportWrongBookPDFByIds({ studentId, studentName, question
     title,
     filename,
     showAnswers,
+    showAnalysis,
     qrContent,
     orientation,
     forceServer,

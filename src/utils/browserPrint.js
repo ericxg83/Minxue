@@ -132,14 +132,15 @@ async function _triggerIframePrint({ html, container, renderMath = true, qrConte
  * @param {string} opt.studentName
  * @param {Array}  opt.questions
  * @param {boolean} [opt.showAnswers=false]
+ * @param {boolean} [opt.showAnalysis=false] - 教师版：额外印解析与答案来源
  * @param {string} [opt.qrContent]
  * @returns {Promise<{printed: true, message: string}>}
  */
-export async function triggerBrowserPrint({ title, studentName, questions, showAnswers = false, qrContent }) {
+export async function triggerBrowserPrint({ title, studentName, questions, showAnswers = false, showAnalysis = false, qrContent }) {
   if (!questions || questions.length === 0) {
     throw new Error('没有题目可打印')
   }
-  const html = buildExamHTML({ title, studentName, questions, showAnswers })
+  const html = buildExamHTML({ title, studentName, questions, showAnswers, showAnalysis })
   return _triggerIframePrint({ html, renderMath: true, qrContent })
 }
 

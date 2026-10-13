@@ -11,6 +11,10 @@ import { resolveQuestionDisplayStem } from './questionStem'
 // 2026-09-13 事故：此前本文件自带分块/编号（且 judge 等题型因只认 choice/fill/answer
 // 而被整块漏掉），与判题侧的 question_ids 顺序不一致 → 卷面第 N 题 ≠ 判题第 N 题。
 import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from './retryPaperOrder'
+// 教师版「参考答案 + 解析」块的渲染决策（纯函数，回归锁跑的就是这一个）。
+// ⛔ 答案来源判定唯一收敛在 reviewDecision.js#getReferenceAnswerOrigin，
+//    本文件与页面都只消费它，不各写一套。
+import { resolveTeacherAnswerBlock, teacherOriginNote, ANSWER_MISSING_TEXT } from './teacherPaperExtras'
 
 
 // KaTeX 全部字体族。html2canvas 光栅化前必须显式预加载，否则会回退到
@@ -206,14 +210,26 @@ ${s}.fill-line{width:200px;border-bottom:1.5px solid #333;margin:5px 0 2px 32px;
 ${s}.ans-area{margin:4px 0 2px 32px}
 ${s}.ans-line{border-bottom:1px solid #d0d0d0;height:28px;margin-bottom:3px}
 ${s}.answer-key{font-size:12px;color:#4F46E5;margin-top:3px;padding-left:32px}
+${s}.answer-key.is-missing{color:#999}
+${s}.answer-note{font-size:11px;color:#8A8A8A;margin-top:1px;padding-left:32px}
+${s}.answer-analysis{font-size:12px;color:#0B7285;margin-top:2px;padding-left:32px;line-height:1.7}
+${s}.answer-analysis.is-empty{color:#999}
 ${s}.footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
 ${s}.qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
 ${s}.qr-canvas{width:130px;height:130px;display:block}
 ${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}`
 }
 
-/** 试卷主体 HTML（.page 内容），PDF 与预览共用 */
-export function buildPaperBody({ title, studentName, questions, showAnswers }) {
+/** 试卷主体 HTML（.page 内容），PDF 与预览共用
+ *
+ * @param {boolean} [opt.showAnswers]  是否印参考答案
+ * @param {boolean} [opt.showAnalysis] 是否印「解析 + 答案来源」（**教师版专用**）。
+ *   ⛔ 这是纯附加渲染分支：只在 showAnalysis=true 时多印两块，**绝不改动**
+ *      分块顺序、卷面编号、题干渲染 —— 那三样与判题侧（server/worker.js
+ *      processSlimGrading 依赖的 buildRetryPaperOrder）逐字同构，动了就会
+ *      让「卷面第 N 题」与「判题第 N 题」错位。默认 undefined = 行为完全不变。
+ */
+export function buildPaperBody({ title, studentName, questions, showAnswers, showAnalysis }) {
   // 排卷 + 卷面编号走唯一口径（src/utils/retryPaperOrder.js，与服务端同源）。
   // 分块只重排桶间顺序，桶内保持 questions 原本的相对顺序（= question_ids 顺序）。
   const paperOrder = buildRetryPaperOrder(questions)
@@ -280,8 +296,36 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
         for (let r = 0; r < lineCount; r++) html += `<div class="ans-line"></div>`
         html += `</div>`
       }
+      // 教师版决策（纯函数，默认关闭）：showAnalysis !== true 时全 false，
+      // 渲染产物与改动前逐字相同 —— 学生版/重练卷的卷面结构不能被动到。
+      const teacher = resolveTeacherAnswerBlock({
+        answer: q.answer,
+        analysis: q.analysis,
+        answerSource: q.answer_source,
+        showAnalysis,
+      })
       if (showAnswers && q.answer) {
         html += `<div class="answer-key">参考答案：${renderContent(q.answer)}</div>`
+        // ── 教师版附加块（2026-10-13）────────────────────────────
+        // ⛔ 只在 showAnalysis=true 时渲染。学生版 / 重练卷默认路径不经过这里。
+        if (teacher.enabled) {
+          const note = teacherOriginNote(teacher)
+          if (note) html += `<div class="answer-note">${escapeHtml(note)}</div>`
+          if (teacher.hasAnalysis) {
+            checkLoopDots(q.analysis, `${dotLabel}解析`)
+            html += `<div class="answer-analysis">解析：${renderContent(q.analysis)}</div>`
+          } else {
+            html += `<div class="answer-analysis is-empty">解析：暂无</div>`
+          }
+        }
+      } else if (teacher.answerMissing) {
+        // 教师版：答案为空时**明确写「未录入」**，不兜底填 AI 值
+        // （口径：宁可留空转人工，也不要写没验算过的值）
+        html += `<div class="answer-key is-missing">参考答案：${ANSWER_MISSING_TEXT}</div>`
+        if (teacher.hasAnalysis) {
+          checkLoopDots(q.analysis, `${dotLabel}解析`)
+          html += `<div class="answer-analysis">解析：${renderContent(q.analysis)}</div>`
+        }
       }
       html += `</div>`
     })
@@ -322,8 +366,8 @@ export function buildPaperBody({ title, studentName, questions, showAnswers }) {
  * clone 文档时，主文档的全局 katex.min.css 不会被复制过去，导致
  * 根号横线、分数线、上下标全部"散架"——预览页正常但 PDF 错乱的根因。
  */
-export function buildExamHTML({ title, studentName, questions, showAnswers }) {
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${katexCss}\n${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers })}</body></html>`
+export function buildExamHTML({ title, studentName, questions, showAnswers, showAnalysis }) {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${katexCss}\n${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, showAnswers, showAnalysis })}</body></html>`
 }
 
 // =============================================================================

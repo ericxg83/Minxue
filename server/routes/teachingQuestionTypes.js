@@ -482,6 +482,11 @@ router.get('/kp-questions', async (req, res) => {
        SELECT q.id AS question_id,
               q.content, q.options, q.answer, q.analysis,
               q.question_type, q.subject, q.difficulty, q.image_url,
+              -- [2026-10-13 错题组卷] 纯加字段，供「备课预览 / 教师版」使用：
+              --   answer_source  答案来源标注（唯一判定口径在前端 reviewDecision.js）
+              --   parent_stem    多小问共享题干 —— 漏了它，组卷 PDF 上的小问会「缺条件」
+              --   sub_no / question_number  卷面编号（连排小问靠它们归组）
+              q.answer_source, q.parent_stem, q.sub_no, q.question_number,
               COUNT(wq.id)::int AS wrong_count,
               COUNT(DISTINCT wq.student_id)::int AS student_count,
               COALESCE(array_agg(DISTINCT s.name) FILTER (WHERE s.name IS NOT NULL), '{}') AS students,
@@ -535,6 +540,14 @@ router.get('/kp-questions', async (req, res) => {
         subject: r.subject,
         difficulty: r.difficulty,
         imageUrl: r.image_url,
+        // [2026-10-13 错题组卷] 纯加字段（老消费方不读即可）：
+        //   answerSource  答案来源（前端 reviewDecision.js 判定为「答案库 / AI 解答」）
+        //   parentStem    多小问共享题干，喂给组卷 PDF 的 resolveQuestionDisplayStem
+        //   subNo / questionNumber  卷面编号，供连排小问归组
+        answerSource: r.answer_source,
+        parentStem: r.parent_stem,
+        subNo: r.sub_no,
+        questionNumber: r.question_number,
         wrongCount: r.wrong_count,
         studentCount: r.student_count,
         students: (r.students || []).slice(0, 30),

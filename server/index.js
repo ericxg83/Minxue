@@ -4040,11 +4040,19 @@ app.get('/api/wrong-questions/search', async (req, res) => {
     }
     // LIKE 通配符转义，防老师输入 % / _ 引发全表模糊
     const like = '%' + q.replace(/[\\%_]/g, (m) => '\\' + m) + '%'
+    // [2026-10-13 错题管理扩展] 纯加字段：analysis / answer_source / subject。
+    //   answer_source 是给「答案来源标注」用的 —— 老师必须能看出参考答案是练习册
+    //   答案库给的（'worksheet'）还是 AI 自动求解的（其余），判定口径唯一收敛在
+    //   前端 src/utils/reviewDecision.js#getReferenceAnswerOrigin，后端只透传原始列。
+    //   ⛔ 不改现有字段名与语义，移动端不读新字段即可（纯加法）。
     const { rows } = await query(
       `SELECT wq.id, wq.student_id, s.name AS student_name, wq.question_id,
          wq.lifecycle_status, wq.error_count, wq.practice_count, wq.added_at,
          COALESCE(NULLIF(q.content, ''), wq.content) AS content,
          COALESCE(NULLIF(q.answer, ''), wq.correct_answer) AS correct_answer,
+         q.analysis,
+         q.answer_source,
+         COALESCE(q.subject, wq.subject) AS subject,
          q.task_id
        FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
