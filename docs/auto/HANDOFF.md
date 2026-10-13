@@ -143,7 +143,8 @@
   · `scripts/pruneDeadDeclarations.mjs` 死声明清理器（真 AST 判副作用，默认演练，内置裁决③硬名单）
   · `tmp/geo_montage.mjs` / `tmp/fig_crops_view.mjs` / `tmp/fig_fix_one.mjs` 肉眼比对与单题重裁范式
 - **预览实例**：后端 4000（`node server/index.js`）、前端 dev 3000（`npm run dev`）——**可能已死，接手后先 curl 探测**（r93 实测两者都活着；隔离产物预览在 5221-5225 段）。
-- **数据备份**：`D:/Minxue_Backup/2026-10-02/`（5 表 8.5MB）+ `scripts/dailyBackup.mjs`（每晚 21:30 自动）。
+- **数据备份**：`D:/Minxue_Backup/2026-10-10/`（最新 ok:true 快照）+ `scripts/dailyBackup.mjs`
+  （每日 12:00 由自动化「敏学每日数据备份」跑；2026-10-12 负责人由 03:00 改点，旧记的「21:30 自动」作废）。
 
 ## 五、未完成事项（按优先级）
 
@@ -333,7 +334,7 @@ bundle 里 fetch 全变 `file:///...`）。已更新第二-1 条四道关规范�
 - **家长成长卡**：`GrowthCardButton.vue`（复用 weeklyReport 聚合；家长只看老师转发出去的图，不用系统）
 - **KPI 诚实化 + 真趋势**：`GrowthWorkbench.vue`（错题已掌握率正名 + 真实周环比）
 - **全局错误护栏**：工作台 `app.config.errorHandler` + 移动端 `ErrorBoundary`
-- **数据保险库**：`scripts/dailyBackup.mjs`（每晚 21:30 自动 + 可手动跑）
+- **数据保险库**：`scripts/dailyBackup.mjs`（每日 12:00 自动化跑 + 可手动跑；2026-10-12 由 03:00 改点）
 - **审计工具**：`scripts/auditStoreContract.mjs`（store 契约审计，随时可跑）
 - **仓库治理**：1.1GB 历史垃圾已归档至 `D:/Minxue_Archive/`；lint 从 644 噪声 → 204 可信信号（本会话再降到 167）
 - **交互重构已落地**：批改中工作台 header 三合一 + 撤销 snackbar + ⌘K 命令面板

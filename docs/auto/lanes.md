@@ -450,3 +450,17 @@
 - 未触碰：并行 WIP 8 项（paperBank/handout 系列 + worksheets/apiService/serverPdfExporter/AppSidebar/router）。
 - 环境：**r267-P-A（esbuild winmm.dll）重启后已恢复**，本轮构建+冒烟四件套全过。
 - 接手提示：① r268-P-D（figureRegionRefiner.js:427 注释措辞滞后，几何赛道）；② B 级拍板项清单见报告第四节。
+
+## 第 r273 轮认领（2026-10-13 12:5x，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**`）+ docs/auto 事实校正。落地：**备份调度事实校正**——
+  2026-10-12 负责人把备份 automation 从 03:00 改点为 12:00 后，仓库里 5 处文档仍写旧时间
+  （dailyBackup.mjs 头部 ×2 / DECISIONS.md ×3 / HANDOFF.md ×2 处的「21:30」），且 dailyBackup.mjs
+  头部正是「别再靠注释声称谁会调它」这条 doctrine 的原文所在；同时把本轮实证的两种落空模式
+  （429 额度耗尽 / 巡查轮同源串行挤掉 12:00 档）写进脚本头部与 DECISIONS.md。
+- 未触碰：并行 WIP 11 改 + 6 未跟踪（paperBank/handout 系列 + check-skill-refs/skillRefsKit（r269）
+  + apiService/serverPdfExporter/AppSidebar/router/worksheets/每日巡查报告.md）。
+- 接手提示：① 下轮先核 `D:/Minxue_Backup/2026-10-13/` 是否在本轮巡查结束后补跑成功（同源串行是
+  「延后」不是「丢失」，但若关机前仍无目录且日志无 run start ⇒ 升级）；② 部署缺口 4 个提交未推
+  （f17a718/65b502b/d283951/2fb8ce3，含产品码 d283951），待负责人拍板；③ r269 三个 WIP 文件
+  （skillRefsKit/check-skill-refs/checkSkillRefsScope.test）已挂 16 小时，仍待负责人处置。
