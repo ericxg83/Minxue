@@ -541,7 +541,7 @@ export default function GradingDetailSheet({ exam, onClose }) {
       title='批改详情'
       onClose={onClose}
       maxWidth={560}
-      header={(
+      header={(!state.loading && !state.error && detail) ? (
         <div>
           {/* 原卷 / 逐题 双 tab：原卷默认；无页图时禁用 */}
           <div className='mx-5 mb-2 flex gap-1 rounded-full p-1' style={{ background: 'var(--bg-mist)' }}>
@@ -573,7 +573,7 @@ export default function GradingDetailSheet({ exam, onClose }) {
             <QuestionNav marks={marks} currentIndex={currentIndex} onJump={jumpTo} />
           )}
         </div>
-      )}
+      ) : null}
       bodyProps={bodyProps}
     >
       {state.loading && <LoadingState />}
