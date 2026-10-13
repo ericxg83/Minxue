@@ -4427,6 +4427,8 @@ app.delete('/api/generated-exams/:id', async (req, res) => {
 //   · 判定：questions.is_correct/review_status，人工复核优先（classifyQuestionResult，
 //     与结算/移动端分数同一口径）。retryAlign 里自带的 isCorrect 只是当时快照，
 //     不采用 —— 老师复核改判后必须以 questions 表为准。
+//   · 题目内容：marks[].question 透出题干/选项/答案/解析（questions 表，与几何对位解耦），
+//     供移动端逐题卡片展示；查不到为 null，视图降级 —— 绝不用 OCR 文本伪造题干。
 //   · 多次交卷 / 分批上传：同一 questionId 出现在多行时，后写者覆盖（最新提交为准）。
 app.get('/api/generated-exams/:id/grading-detail', async (req, res) => {
   try {
@@ -4455,20 +4457,36 @@ app.get('/api/generated-exams/:id/grading-detail', async (req, res) => {
     // ── 页图展开 + 对位明细：几何/对位口径在 server/utils/gradingDetailView.js
     //      （唯一口径，test/gradingDetailView.test.mjs 锁死）──
     const verdictByQuestion = new Map()
+    const questionById = new Map()
     if (questionIds.length > 0) {
       const placeholders = questionIds.map((_, i) => `$${i + 1}`).join(',')
       const { rows: qRows } = await query(
-        `SELECT id, is_correct, review_status, answer_source FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
+        `SELECT id, is_correct, review_status, answer_source,
+                content, options, answer, analysis, question_type, question_number,
+                ai_self_check_passed, ai_self_check_issues
+         FROM ${TABLES.QUESTIONS} WHERE id IN (${placeholders})`,
         questionIds
       )
       for (const qr of qRows) {
         verdictByQuestion.set(qr.id, classifyQuestionResult(qr))
+        // 逐题卡片内容（题干/选项/答案/解析）随 marks 透出，查不到的题按 null 降级
+        questionById.set(qr.id, {
+          content: qr.content ?? '',
+          options: Array.isArray(qr.options) ? qr.options : [],
+          answer: qr.answer ?? '',
+          analysis: qr.analysis ?? '',
+          questionType: qr.question_type ?? null,
+          questionNumber: qr.question_number ?? null,
+          aiSelfCheckPassed: qr.ai_self_check_passed ?? null,
+          aiSelfCheckIssues: Array.isArray(qr.ai_self_check_issues) ? qr.ai_self_check_issues : [],
+        })
       }
     }
     const { pages, marks } = buildGradingDetailView(
       questionIds,
       sheetRows,
-      qid => verdictByQuestion.get(qid) || 'unjudged'
+      qid => verdictByQuestion.get(qid) || 'unjudged',
+      qid => questionById.get(qid) || null
     )
 
     res.json({

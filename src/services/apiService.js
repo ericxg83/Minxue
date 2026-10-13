@@ -843,8 +843,11 @@ export const getGeneratedExamById = async (examId) => {
   return data.exam
 }
 
-// 组卷「批改详情」只读数据源（移动端批改详情标注视图专用）。
-// 返回 { pages: [{page, imageUrl}], marks: [{questionId, label, verdict, matchedBy, page, bbox, studentAnswer}] }。
+// 组卷「批改详情」只读数据源（移动端批改详情逐题卡片视图专用）。
+// 返回 { pages: [{page, imageUrl}], marks: [{questionId, label, verdict, matchedBy, page, bbox,
+//        studentAnswer, question}] }。question = {content, options, answer, analysis,
+//        questionType, questionNumber, aiSelfCheckPassed, aiSelfCheckIssues}（questions 表权威内容，
+//        查不到为 null）。
 // 判定为人工复核优先口径（服务端 classifyQuestionResult），定位框只来自 retryAlign
 // 的答卷图坐标系 —— 与 PC PaperViewerPanel 同源，见 server/utils/gradingDetailView.js。
 export const getExamGradingDetail = async (examId) => {
@@ -1116,6 +1119,81 @@ export const uploadImages = async (id, files) => {
     timeout: 10 * 60 * 1000
   }, 1)
   return data
+}
+
+// ── 试卷题库（2026-10-10）：纸质卷 → 结构化题目 → 跨卷勾题 → 讲义 PDF ──
+// ⛔ 与「试卷答案库」共用 resources(type='exam') 行，但数据面不同（题目 vs 答案），互不干扰。
+export const getPaperBankPapers = async () => {
+  const data = await apiRequest('/paper-bank/papers')
+  return data.papers || []
+}
+
+export const getPaperBankStats = async () => apiRequest('/paper-bank/stats')
+
+export const createPaperBankPaper = async ({ name, grade, subject, examDate }) => {
+  const data = await apiRequest('/paper-bank/papers', {
+    method: 'POST',
+    body: JSON.stringify({ name, grade, subject, examDate }),
+  })
+  return data.paper
+}
+
+export const updatePaperBankPaper = async (id, patch) => {
+  const data = await apiRequest(`/paper-bank/papers/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  return data.paper
+}
+
+export const deletePaperBankPaper = (id) => apiRequest(`/paper-bank/papers/${id}`, { method: 'DELETE' })
+
+// 上传 PDF 或试卷照片触发解析。解析在服务端后台跑，本请求立即返回 ⇒ 不需要长超时。
+export const parsePaperBankPaper = async (id, files) => {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  return apiRequest(`/paper-bank/papers/${id}/parse`, { method: 'POST', body: fd }, 1)
+}
+
+// 上传**官方答案**（PDF 或照片）→ 复用练习册「预埋答案」链 → 答案库（标 official_verified）。
+// 与题目解析是两个独立入口：题目进 resource_questions，答案进 resource_answers，
+// 读的时候按 (resource_id, question_no, sub_no) 对上。
+export const parsePaperBankAnswers = async (id, files) => {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  return apiRequest(`/paper-bank/papers/${id}/parse-answers`, { method: 'POST', body: fd }, 1)
+}
+
+export const getPaperBankQuestions = async (resourceId) => {
+  const data = await apiRequest(`/paper-bank/papers/${resourceId}/questions`)
+  return data.questions || []
+}
+
+/**
+ * 跨卷筛选 —— 「所有第 19 题」「所有压轴题」走这里。
+ * @param {{resourceIds?:string[],questionNos?:number[],questionTypes?:string[],difficulties?:number[],tags?:string[],keyword?:string,limit?:number}} f
+ */
+export const searchPaperBankQuestions = async (f = {}) => {
+  const qs = new URLSearchParams()
+  const put = (k, v) => { if (Array.isArray(v) && v.length) qs.set(k, v.join(',')) }
+  put('resourceIds', f.resourceIds)
+  put('questionNos', f.questionNos)
+  put('questionTypes', f.questionTypes)
+  put('difficulties', f.difficulties)
+  put('tags', f.tags)
+  if (f.keyword) qs.set('keyword', f.keyword)
+  if (f.limit) qs.set('limit', String(f.limit))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  const data = await apiRequest(`/paper-bank/questions${suffix}`)
+  return data.questions || []
+}
+
+export const updatePaperBankQuestion = async (id, patch) => {
+  const data = await apiRequest(`/paper-bank/questions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  return data.question
 }
 
 export const clearAllCache = () => {

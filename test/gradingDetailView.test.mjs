@@ -179,3 +179,24 @@ test('label 缺失时按题单序号兜底；判定注入函数决定 verdict', 
   assert.deepEqual(marks.map(m => m.label), ['1', '2'])
   assert.deepEqual(marks.map(m => m.verdict), ['correct', 'wrong'])
 })
+
+// ── 题目内容透出（2026-10-13 方案三：移动端逐题卡片） ──
+
+test('questionOf 透出题目内容；查不到与不传均为 null，且不动几何/判定字段', () => {
+  const rows = [ROW('t1', [{ image_url: 'u1', page_number: 1 }], {
+    retryAlign: [
+      { questionId: 'a', label: '1', matchedBy: 'number', pageNumber: 1, text_bbox: B(1, 1, 2, 2), studentAnswer: 'B' },
+    ],
+  })]
+  const q = { content: '题干', options: ['A', 'B'], answer: 'A', analysis: '解析' }
+  const withQ = buildGradingDetailView(['a', 'b'], rows, () => 'wrong', qid => (qid === 'a' ? q : null))
+  assert.deepEqual(withQ.marks[0].question, q)
+  assert.equal(withQ.marks[1].question, null)
+  // 不传第四参：向后兼容，question 恒 null（老调用方不受影响）
+  const legacy = buildGradingDetailView(['a', 'b'], rows, () => 'wrong')
+  assert.ok(legacy.marks.every(m => m.question === null))
+  // 题目内容有无都不影响几何与判定字段
+  assert.deepEqual(withQ.marks[0].bbox, B(1, 1, 2, 2))
+  assert.equal(withQ.marks[0].verdict, 'wrong')
+  assert.equal(withQ.marks[0].studentAnswer, 'B')
+})

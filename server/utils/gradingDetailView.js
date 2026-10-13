@@ -49,12 +49,15 @@ export { parseBbox, unionBbox }
  * @param {Array<{id:string, images:any, result:any, image_url?:string|null}>} sheetRows
  *        答卷任务行，调用方必须按 created_at 升序传入
  * @param {(questionId: string) => 'correct'|'wrong'|'unjudged'} verdictOf 逐题判定（人工复核优先口径）
+ * @param {(questionId: string) => object|null} [questionOf] 逐题题目内容（题干/答案/解析，
+ *        供移动端逐题卡片展示）；不传或查不到时 mark.question = null，卡片按「无题目数据」降级。
  * @returns {{pages: Array<{page:number, imageUrl:string}>,
  *            marks: Array<{questionId:string, label:string, verdict:string,
  *                          matchedBy:string|null, page:number|null,
- *                          bbox:object|null, studentAnswer:string|null}>}}
+ *                          bbox:object|null, studentAnswer:string|null,
+ *                          question:object|null}>}}
  */
-export function buildGradingDetailView(questionIds, sheetRows, verdictOf) {
+export function buildGradingDetailView(questionIds, sheetRows, verdictOf, questionOf = () => null) {
   const ids = Array.isArray(questionIds) ? questionIds : []
   const rows = Array.isArray(sheetRows) ? sheetRows : []
 
@@ -120,6 +123,9 @@ export function buildGradingDetailView(questionIds, sheetRows, verdictOf) {
       page: m?.page ?? null,
       bbox: m?.bbox ?? null,
       studentAnswer: m?.studentAnswer ?? null,
+      // 题目内容（题干/选项/答案/解析）：与几何对位解耦，查不到就 null，
+      // 由视图按「无题目数据」降级 —— 绝不用 OCR 文本伪造题干
+      question: questionOf(qid) || null,
     }
   })
 
