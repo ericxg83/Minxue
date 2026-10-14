@@ -108,15 +108,18 @@ export function resolveRetryPaperState(exam, pages = []) {
   // [2026-09-17] exam.status 的语义变了：结算从「老师点完成复核时」提前到「AI 批完时」
   // （worker.js::processSlimGrading 批完即结算，与通用作业管线的 finalizeGradingBatch 对齐），
   // 所以 'graded' 不再等于"老师确认了"，只表示"结果已出"。
-  // 于是分三档：
+  // 于是分两档：
   //   · 老师已拍板（答卷 task 被标 reviewed）→ 已确认（终态，不再打扰老师）
-  //   · 还没拍板 + 还有未判定题 → 待确认（老师只需处理这几道）
-  //   · 还没拍板 + 没有未判定题 → 已确认
+  //   · 还没拍板（答卷 task 还是 done）→ 待确认（老师仍需进批改页点「完成复核」）
+  // 2026-10-14 修复：旧实现「没拍板 + 没有未判定题 → 已确认」，等于把「等老师确认」的
+  // 卷当成「已确认」藏掉 —— 答卷 task 仍是 done（老师从未点过完成复核），卷却从批改中心
+  // 待复核队列消失，侧栏徽标/首页 KPI/列表全部显示 0，与「明明有卷没确认」的实情对不齐
+  // （全库实证：4 卷答卷 done + exam graded + 未判定 0，全部被误判已确认）。
+  // 统一归 PENDING_CONFIRM：PC 端进待办（workflow → review，可进批改页结算），
+  // 移动端仍映射 RESULT（「批完即出结果」产品口径不变，见 retryExamStage.js）。
   if (exam?.status === 'graded') {
     if (taskStatus === 'reviewed') return RETRY_PAPER_STATE.REVIEWED
-    return Number(exam?.not_answered_count || 0) > 0
-      ? RETRY_PAPER_STATE.PENDING_CONFIRM
-      : RETRY_PAPER_STATE.REVIEWED
+    return RETRY_PAPER_STATE.PENDING_CONFIRM
   }
 
   // task.status='done' 且未结算：AI 批完但结算没成功（或历史数据）

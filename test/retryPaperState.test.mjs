@@ -27,12 +27,14 @@ import {
  *   1. 「交没交卷」只看 tasks.generated_exam_id 是否存在 —— 不看 exam.status
  *   2. [2026-09-17 更新] 结算已提前到「AI 批完时」（与通用作业管线的
  *      finalizeGradingBatch 对齐），所以 exam.status='graded' 的语义是「结果已出」，
- *      **不再等于**「老师确认了」。三分档：
+ *      **不再等于**「老师确认了」。两档：
  *        · 答卷 task 已 reviewed（老师拍板）→ REVIEWED
- *        · 未拍板 + 还有未判定题（exam.not_answered_count>0）→ PENDING_CONFIRM
- *        · 未拍板 + 没有未判定题 → REVIEWED
- *      少了 PENDING_CONFIRM 这一档，那几道 AI 给不出结论的题会随"已确认"
- *      一起从老师待办里消失（2026-09-17 之前的隐患）。
+ *        · 答卷 task 未拍板（done）→ PENDING_CONFIRM（进老师待办，
+ *          移动端仍映射 RESULT 出结果）
+ *      [2026-10-14 修复] 旧「未拍板 + 无未判定题 → REVIEWED」把等老师确认的卷
+ *      当成已确认藏掉，侧栏徽标/首页 KPI/列表全部归零（全库 4 卷实证）。
+ *      少了这一档，那些 AI 全判完但老师没点「完成复核」的卷会从待办里凭空消失
+ *      （2026-09-17 之前 PENDING_CONFIRM 缺失的隐患同理，见下方测试）。
  */
 
 const sheet = (status, createdAt) => ({
@@ -102,13 +104,18 @@ test('已结算：还有未判定题 → 待确认（老师仍要处理这几道
   assert.equal(RETRY_STATE_TO_WORKFLOW[confirm], 'review')
 })
 
-test('已结算且无未判定题 → 已确认（老师无需再动手）', () => {
-  const reviewed = resolveRetryPaperState({ status: 'graded', not_answered_count: 0 }, [sheet('done')])
-  assert.equal(reviewed, RETRY_PAPER_STATE.REVIEWED)
-  assert.equal(isReviewed(reviewed), true)
-  assert.equal(isPendingReview(reviewed), false)
-  assert.equal(canOpenReview(reviewed), true, '已确认的卷仍可只读查看')
-  assert.equal(canSettleReview(reviewed), false, '已确认的卷不该再结算一次')
+test('已结算但答卷未拍板（done）→ 待确认，进老师待办（即使无未判定题）', () => {
+  // 2026-10-14 修复：旧实现「无未判定题 → 已确认」，把「答卷 done 等老师点完成复核」
+  // 的卷当已确认藏掉 —— 侧栏徽标/首页 KPI/待处理列表全部归零，与实情对不齐
+  // （全库实证 4 卷）。答卷 task='done' 只说明 AI 批完，老师确认与否看 reviewed。
+  const pending = resolveRetryPaperState({ status: 'graded', not_answered_count: 0 }, [sheet('done')])
+  assert.equal(pending, RETRY_PAPER_STATE.PENDING_CONFIRM)
+  assert.equal(isReviewed(pending), false, '答卷未拍板，绝不能算已确认')
+  assert.equal(isPendingReview(pending), true, '待确认的卷必须进老师的待办队列')
+  assert.equal(canOpenReview(pending), true)
+  assert.equal(canSettleReview(pending), true, '待确认的卷必须允许老师点完成确认')
+  assert.equal(RETRY_STATE_TO_WORKFLOW[pending], 'review')
+  // 移动端「批完即出结果」不受影响（PENDING_CONFIRM → RESULT，锁在 retryExamStage）
 })
 
 test('老师拍板后（答卷 task 已 reviewed）→ 已确认，即使还有未判定题', () => {

@@ -87,14 +87,16 @@ test('重练卷·已布置待学生作答（无答卷）不计入', () => {
   assert.equal(isPendingReviewItem({ source: 'retry', retryState: 'issued', workflowStatus: 'retry' }), false)
 })
 
-test('重练卷：AI 已出结果且没有未判定题 → 已确认，不再打扰老师', () => {
+test('重练卷：AI 已出结果但答卷未拍板（done）→ 待确认，计入待复核（即使无未判定题）', () => {
+  // 2026-10-14 修复：旧实现无未判定题 → 已确认，把答卷 done（老师没点完成复核）
+  // 的卷从待办藏掉，侧栏徽标/首页 KPI/列表全部归零（全库 4 卷实证）。
   const examId = 'e1'
   const n = countPendingReviewPapers({
     tasks: [task({ task_type: 'wrong_retry', generated_exam_id: examId, status: 'done' })],
     exams: [{ id: examId, status: 'graded' }],
     unjudgedByExam: new Map([[examId, 0]]),
   })
-  assert.equal(n, 0)
+  assert.equal(n, 1, '答卷 done = AI 批完等老师确认，必须计入待办')
 })
 
 test('重练卷：AI 已出结果但仍有未判定题 → 待确认，计入', () => {
