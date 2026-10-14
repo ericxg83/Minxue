@@ -271,6 +271,41 @@ export const REFERENCE_ANSWER_ORIGIN = Object.freeze({
 })
 
 /**
+ * `questions.analysis` 是否是「占位串」而非真解析。
+ *
+ * 背景（2026-10-14 定位）：`server/_regrade_workbook_to_ai_0922.mjs` 的 `callEngine`
+ * 只返回引擎结果的 answer 字段，把引擎同时返回的 analysis 整个丢掉 ⇒ `newAnalysis`
+ * 恒为 null ⇒ 脚本把 `'AI重批生成 <日期>'` 当占位写进 `question_cache.analysis` 与
+ * `questions.analysis`。于是同一个脚本产出两种表现：
+ *   · 缓存里留下占位串的题 → 「解析」按钮亮着，**点开是一句废话**（全库 210 条 / 27 卷）
+ *   · 缓存里是 null 的题     → 「解析」按钮直接消失（老师看不到入口）
+ *
+ * 为什么必须识别而不是只判空：`hasAnalysis` 原本只判 `trim().length > 0`，占位串
+ * 非空 ⇒ 按钮照样点亮。这不是显示 bug，是**数据缺陷漏到了 UI**，因此判据要认得占位串。
+ *
+ * 口径：整串匹配才算占位（含日期后缀变体），不做包含匹配 —— 真实解析里完全可能出现
+ * 「AI重批生成」这几个字，误杀真解析比漏杀占位串更糟（老师看不到本来能看的解析）。
+ */
+const ANALYSIS_PLACEHOLDER_RE = /^AI重批生成\s*\d{4}-\d{2}-\d{2}$/
+
+export const isAnalysisPlaceholder = (analysis) => {
+  const t = String(analysis ?? '').trim()
+  return t.length > 0 && ANALYSIS_PLACEHOLDER_RE.test(t)
+}
+
+/**
+ * 这道题**有没有可看的解析**。解析入口（AnalysisSource）的唯一判据。
+ *
+ * ⛔ 不要退回成单纯的 `trim().length > 0`：那正是占位串能点亮按钮的原因。
+ * 本函数是「解析入口是否渲染」的唯一真相来源，PC 端与移动端都应走它。
+ */
+export const hasUsableAnalysis = (question) => {
+  const t = String(question?.analysis ?? '').trim()
+  if (!t.length) return false
+  return !isAnalysisPlaceholder(t)
+}
+
+/**
  * @returns {null | {key:string, label:string, hint:string, tone:'info'|'warning'}}
  *          null 表示无参考答案（异常态另有提示，这里不标来源）
  */

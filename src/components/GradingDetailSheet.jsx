@@ -5,6 +5,7 @@ import MathText from './MathText'
 import ImagePreview from './ImagePreview'
 import { getExamGradingDetail } from '../services/apiService'
 import { normalizeOptions } from '../utils/optionText'
+import { hasUsableAnalysis } from '../utils/reviewDecision'
 
 // 组卷「批改详情」双视图（2026-10-13 方案四定稿：原卷优先，点框出卡）：
 // 晚托班老师讲错题的锚点是手里的纸质卷 —— 默认进「原卷」可缩放视图，点题目框/编号徽标
@@ -197,7 +198,7 @@ function QuestionCard({ mark, index, hasPages, onViewPaper, hint = '左右滑动
                 </span>
               </div>
             )}
-            {q?.analysis ? (
+            {hasUsableAnalysis(q) ? (
               <div className='text-[13px] leading-6' style={{ color: 'var(--text)' }}>
                 <MathText content={q.analysis} />
               </div>

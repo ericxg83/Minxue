@@ -4,7 +4,7 @@ import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye,
 import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import { normalizeOptions } from '../../utils/optionText'
-import { getReferenceAnswerOrigin } from '../../utils/reviewDecision'
+import { getReferenceAnswerOrigin, hasUsableAnalysis } from '../../utils/reviewDecision'
 import MathText from '../../components/MathText'
 
 const formatOption = (opt, index) => `${String.fromCharCode(65 + index)}. ${opt}`
@@ -577,7 +577,7 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
                     </div>
                   )}
                 </div>
-                {currentQuestion?.analysis && (
+                {hasUsableAnalysis(currentQuestion) && (
                   <div style={{ padding: '16px 20px', borderTop: `1px solid ${COLORS.border}`, background: `${COLORS.success}08` }}>
                     <div style={{ fontSize: 'var(--fs-14)', fontWeight: 600, color: COLORS.success, marginBottom: '8px' }}>
                       解析

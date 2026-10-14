@@ -4673,3 +4673,26 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   answer_status 升 teacher_verified（index.js:1056-1065），不动 per-question 行、也不推
   resources.status='published'。属交互链路观察项，待 P-A 定版后一并评估。
 - 本轮已落地（勿再提）：四桶口径回归锁 `test/reviewBucketCaliber.test.mjs`（commit `f2b5f09`）。
+
+## 第 r282 轮（2026-10-14 13:0x，只读审计轮 · 锁被占 · 零提交）
+
+- 锁 `running/281` 且持锁方活跃在制（reviewStore/ReviewTopBar/ReviewWorkspace/ReviewCommandPalette
+  分钟级写入）⇒ 只读审计，未认领、未回写锁、零提交。报告 `docs/auto/reports/2026-10-14-r282.md`。
+- 备份无报警：`2026-10-14` 今日档 ok:true（createdAt 北京时间 12:06:42）。minor 记录：实际 12:06
+  与文档口径 13:00 差约 1 小时，仅记录不动调度。
+- 套件 2375/2375 绿｜技能体检 exit 0（错误 0/提示 32/豁免 70）｜部署缺口 0｜后端 bootAt 新于最新提交｜
+  esbuild 0.21.5 健康。
+- **死代码候选 ×2（A 级，下一工作轮可落，勿再重复排查）**：
+  ① `neonService.js:780-884` `findSimilarQuestion` + 内部助手 `calculateSimilarity/normalizeString/
+     levenshteinDistance`——零调用方（仅 worker.js:2333/2561 注释、迁移 023 注释、
+     docs/wrong-question-system.md:41 口径文档提及）。落地须同步订正该文档第 41 行那句
+     「现存同名的 calculateSimilarity…」。
+  ② `neonService.js:1521-1542` `batchInsertAnswers`——零调用方（routes/worksheets.js 未 import，
+     无测试无动态访问），且与现行单元感知写入路径不同代。
+- 只读无缺陷留档：neonService 约 700 行 / 14 函数抽样（updateTaskStatus、createQuestions、
+  batchUpdateQuestionTags、addWrongQuestions、addSelfContainedWrongQuestion、question_cache 占坑语义、
+  judgements、resource/worksheet 答案读写、getWorksheetAnswersBySection、deleteQuestionsByTaskId、
+  cleanupStaleParsingOnBoot）＋ answerCoverageService 183 行全读。
+- 只读确认关闭风险：nightlyAudit/healthcheck/healthDiskState/nightlyAuditVerdict 四脚本已不存在
+  ⇒ 提案 ㊲ 已落地（lanes.md 该 lane「空转」记载待择机订正，文档级）。
+- 无新 B/C 提案。仍开放：r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）。

@@ -36,6 +36,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
+import { hasUsableAnalysis } from '../../../utils/reviewDecision'
 import { Reading } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 
@@ -48,7 +49,14 @@ const q = computed(() => props.question || store.currentReviewQuestion)
 
 // 解析文本。trim 后为空视为「无解析」—— 后端偶有写空串的历史数据，
 // 空白解析点开只会是一张空白弹窗，不如不显示入口。
-const analysis = computed(() => String(q.value?.analysis || '').trim())
+// ⚠️ 判据走共享实现 utils/reviewDecision.hasUsableAnalysis，不要在此另写：
+//   本地曾只判 `trim().length > 0`，结果 2026-09-22 重批留下的占位串
+//   'AI重批生成 2026-09-22'（引擎解析被脚本丢弃后的占位，全库 210 条）照样点亮按钮，
+//   老师点开只看到一句废话。占位串识别与数据修复见 reviewDecision.js 注释。
+const analysis = computed(() => {
+  const t = String(q.value?.analysis || '').trim()
+  return hasUsableAnalysis(q.value) ? t : ''
+})
 const hasAnalysis = computed(() => analysis.value.length > 0)
 
 const viewerVisible = ref(false)
