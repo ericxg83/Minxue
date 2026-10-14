@@ -922,11 +922,9 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
-    // 自动进入下一份试卷；无则全部完成 → 空状态
-    const next = nextTask()
-    if (next) {
-      await selectTask(next)
-    } else {
+    // 自动进入下一份试卷（跨学生全局队列，不再限于当前学生）；全球都没有 → 空状态
+    const result = await goNextTaskGlobal()
+    if (!result.ok) {
       reviewAllDone.value = true
     }
   }
@@ -991,6 +989,48 @@ export const useReviewStore = defineStore('review', () => {
     }
   }
 
+  // 按 generated_exam_id 归拢答题卡页图（每张上传照片一行 task），按交卷时间升序。
+  // 这是判断「学生有没有交卷」的唯一依据 —— 不看 exam.status。
+  // loadStudentPapers 与跨学生待复核队列共用，避免两处各归拢一套。
+  const collectPagesByExam = (tasks) => {
+    const pagesByExam = {}
+    for (const t of (tasks || [])) {
+      const gid = t.generated_exam_id
+      if (!gid) continue
+      ;(pagesByExam[gid] = pagesByExam[gid] || []).push(t)
+    }
+    for (const gid of Object.keys(pagesByExam)) {
+      pagesByExam[gid].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    }
+    return pagesByExam
+  }
+
+  // generated_exam + 答卷 task 行 → 统一 studentTask 语义（纯函数）。
+  // loadStudentPapers 与跨学生待复核队列共用同一映射：paper 模式的队列归属
+  // （_reviewState）与可批改性判据只此一份，另写一套必然漂移。
+  const mapExamToStudentTask = (exam, pages) => {
+    const reviewState = resolveRetryPaperState(exam, pages)
+    return {
+      // 统一 task 语义（复用 topbar/缩略图/完成逻辑）
+      id: exam.id,
+      original_name: exam.name || '未命名练习卷',
+      status: RETRY_STATE_TO_TASK_STATUS[reviewState],
+      // 权威字段：paper 模式一律以 _reviewState 判定队列归属与可批改性，
+      // status 只是给下游排序/镜像用的派生值。
+      _reviewState: reviewState,
+      // 本卷还有几道 AI 给不出结论的题（口径：server/utils/questionResultCaliber.js
+      // 的 unjudged，与移动端分数同源）。老师拍板后据此区分「已确认 / 待确认」。
+      _unjudgedCount: Number(exam.not_answered_count || 0),
+      image_url: pages[0]?.image_url || '',
+      // paper 专属：题目 ID 列表 + 多页图任务
+      _questionIds: exam.question_ids || [],
+      _pageTasks: pages,
+      _isPaper: true,
+      // 「自动复核」派生标记：paper 模式标记落在其中一张答卷任务上
+      _autoReviewed: pages.some(readAutoReviewed),
+    }
+  }
+
   // paper 模式：加载练习卷（generated_exams），映射为统一 task 结构
   //
   // [2026-09-12 修复] 状态口径统一走 utils/retryPaperState.resolveRetryPaperState()：
@@ -1004,43 +1044,12 @@ export const useReviewStore = defineStore('review', () => {
         getGeneratedExamsByStudent(studentId, false),
         getTasksByStudent(studentId, false)
       ])
-      // 按 generated_exam_id 归拢答题卡页图（每张上传照片一行 task）。
-      // 这是判断「学生有没有交卷」的唯一依据 —— 不看 exam.status。
-      const pagesByExam = {}
-      for (const t of (tasks || [])) {
-        const gid = t.generated_exam_id
-        if (!gid) continue
-        ;(pagesByExam[gid] = pagesByExam[gid] || []).push(t)
-      }
-      for (const gid of Object.keys(pagesByExam)) {
-        pagesByExam[gid].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
-      }
+      const pagesByExam = collectPagesByExam(tasks)
       // 排序权重：待复核在前，已确认次之，其余沉底
       const sorter = { done: 0, reviewed: 1 }
-      studentTasks.value = (Array.isArray(exams) ? exams : []).map(exam => {
-        const pages = pagesByExam[exam.id] || []
-        const reviewState = resolveRetryPaperState(exam, pages)
-        const mappedStatus = RETRY_STATE_TO_TASK_STATUS[reviewState]
-        return {
-          // 统一 task 语义（复用 topbar/缩略图/完成逻辑）
-          id: exam.id,
-          original_name: exam.name || '未命名练习卷',
-          status: mappedStatus,
-          // 权威字段：paper 模式一律以 _reviewState 判定队列归属与可批改性，
-          // status 只是给下游排序/镜像用的派生值。
-          _reviewState: reviewState,
-          // 本卷还有几道 AI 给不出结论的题（口径：server/utils/questionResultCaliber.js
-          // 的 unjudged，与移动端分数同源）。老师拍板后据此区分「已确认 / 待确认」。
-          _unjudgedCount: Number(exam.not_answered_count || 0),
-          image_url: pages[0]?.image_url || '',
-          // paper 专属：题目 ID 列表 + 多页图任务
-          _questionIds: exam.question_ids || [],
-          _pageTasks: pages,
-          _isPaper: true,
-          // 「自动复核」派生标记：paper 模式标记落在其中一张答卷任务上
-          _autoReviewed: pages.some(readAutoReviewed),
-        }
-      }).sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
+      studentTasks.value = (Array.isArray(exams) ? exams : [])
+        .map(exam => mapExamToStudentTask(exam, pagesByExam[exam.id] || []))
+        .sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     } catch (e) {
       console.error('加载练习卷失败:', e)
       studentTasks.value = []
@@ -1146,6 +1155,9 @@ export const useReviewStore = defineStore('review', () => {
     currentPageIndex.value = 0
     reviewStatus.value = 'reviewing'
     reviewAllDone.value = false
+    // 手动选卷 = 队列状态未知（老师可能刚刷新过列表）→ 重置「全局已搜尽」，
+    // 否则顶栏「下一份」会带着上一轮搜尽的结论一直置灰。
+    globalQueueExhausted.value = false
     questionToTaskMap.value = {}
     // [P0-4 撤销诚实化 2026-09-27] 撤销栈只对当前卷的内存状态有意义：换卷即清空，
     // 避免上一卷的判定快照在跨卷后仍可"撤销"——那会回退到错误题甚至错误学生的数据。
@@ -1281,6 +1293,9 @@ export const useReviewStore = defineStore('review', () => {
   const resetReviewMode = () => {
     taskType.value = TASK_TYPE.HOMEWORK
     currentPageIndex.value = 0
+    // store 是单例：不重置会把「全局队列已搜尽」带进下一次进入，
+    // 顶栏「下一份」开局就是灰的（老师没有任何操作却点不了）。
+    globalQueueExhausted.value = false
   }
 
   // ── 「AI 重解析」在途任务表（2026-09-25）────────────────────────────
@@ -1504,25 +1519,135 @@ export const useReviewStore = defineStore('review', () => {
     allQuestions.value.filter((q) => needsHumanAttention(q, confidenceThreshold.value)).length
   )
 
-  // 跳到下一份试卷（仅在 done 的待复核试卷中导航）
-  const nextTask = () => {
-    if (!currentTask.value || pendingTasks.value.length === 0) return null
-    const idx = pendingTasks.value.findIndex(t => t.id === currentTask.value.id)
-    if (idx < pendingTasks.value.length - 1) {
-      return pendingTasks.value[idx + 1]
+  // ── 「下一份 / 上一份」跨学生队列（2026-10-14 负责人反馈）──────────────
+  // 原实现在当前学生的 pendingTasks 里导航：批改完一张卷再点「下一份」，
+  // 永远落在同一个学生的其他卷上 —— 待复核队列被「当前学生」这个隐形筛子
+  // 限制住了（负责人原话：「这里应该不限制具体某一个人」）。
+  // 现在：同一来源（作业批改走 tasks / 错题重练走 generated_exams）下跨全部
+  // 学生取「待复核」卷，顺序与批改中心列表同口径（同状态按上传/交卷时间新的在前）。
+  //
+  // 数据来源：当前学生直接用已加载的 studentTasks（completeTaskReview 会刷新，
+  // 是新鲜快照）；其余学生走 apiService 的 5~10 分钟缓存 —— 单用户系统里
+  // 别的学生的任务状态不会因本次复核变化，与批改中心每次进页面全量拉取同口径。
+  // ⛔ 判据不另写一套：作业批改复用 isPendingReviewTask + isRetryPaperTask，
+  //    重练复用 resolveRetryPaperState + mapExamToStudentTask（与 loadStudentPapers 同一映射）。
+
+  // 全局队列已搜尽（点过一次「下一份」一无所获）→ 顶栏按钮置灰，避免空转点击。
+  // 手动选卷（selectTask）会重置：老师可能刚刷新过列表，队列状态未知。
+  const globalQueueExhausted = ref(false)
+
+  // 队列内任务的时间权重：作业批改按上传时间，重练按最后一次交卷时间
+  // （与批改中心卡片 createdAt 同口径）。
+  const taskQueueTime = (t) => {
+    if (source.value === 'paper') {
+      const pages = Array.isArray(t._pageTasks) ? t._pageTasks : []
+      return new Date(pages[pages.length - 1]?.created_at || 0).getTime()
     }
-    return null // 已经是最后一份
+    return new Date(t.created_at || 0).getTime()
   }
 
-  // [B2-1 快捷键 T/Shift+T] 跳到上一份待复核试卷：与 nextTask 完全同口径的反向导航，
-  // 回看上一份不必再回到顶栏下拉重选。
-  const prevTask = () => {
-    if (!currentTask.value || pendingTasks.value.length === 0) return null
-    const idx = pendingTasks.value.findIndex(t => t.id === currentTask.value.id)
-    if (idx > 0) {
-      return pendingTasks.value[idx - 1]
+  // 跨学生待复核队列：[{ student, task }]，时间新的在前。
+  const buildGlobalPendingQueue = async () => {
+    if (students.value.length === 0) await loadStudents()
+    const queue = []
+    const currentStudentId = currentStudent.value?.id
+    const collect = (student, tasks) => {
+      for (const t of (tasks || [])) {
+        if (isPendingReviewTask(t)) queue.push({ student, task: t })
+      }
     }
-    return null // 已经是第一份
+    // 当前学生：studentTasks 已是最新鲜快照
+    if (currentStudent.value) collect(currentStudent.value, studentTasks.value)
+
+    const others = students.value.filter(s => String(s.id) !== String(currentStudentId))
+    // 并发上限 4：与批改中心同口径（Neon 连接池 max=10，全并行容易自我压垮）
+    for (let i = 0; i < others.length; i += 4) {
+      const chunk = others.slice(i, i + 4)
+      await Promise.all(chunk.map(async (student) => {
+        try {
+          if (source.value === 'paper') {
+            const [exams, tasks] = await Promise.all([
+              getGeneratedExamsByStudent(student.id, true),
+              getTasksByStudent(student.id, true)
+            ])
+            const pagesByExam = collectPagesByExam(tasks)
+            collect(student, (Array.isArray(exams) ? exams : [])
+              .map(exam => mapExamToStudentTask(exam, pagesByExam[exam.id] || [])))
+          } else {
+            const tasks = await getTasksByStudent(student.id, true)
+            // 与 loadStudentTasks 同口径：只取 done、排除重练卷答卷
+            collect(student, (tasks || []).filter(t => t.status === 'done' && !isRetryPaperTask(t)))
+          }
+        } catch (e) {
+          // 单个学生拉取失败不拖垮整条队列（该学生的卷这轮翻不到，下次点会重试）
+          console.warn('[globalQueue] 拉取学生任务失败:', student.id, e?.message || e)
+        }
+      }))
+    }
+
+    queue.sort((a, b) => taskQueueTime(b.task) - taskQueueTime(a.task))
+    return queue
+  }
+
+  // 当前卷在全局队列里的位置；不在队列（刚复核完 / 空态）返回 -1
+  const currentQueueIndex = (queue) => queue.findIndex(it =>
+    it.task.id === currentTask.value?.id &&
+    String(it.student.id) === String(currentStudent.value?.id)
+  )
+
+  // 把某名学生的某份卷设为当前卷。跨学生时先切换学生上下文（任务列表 + 错题本），
+  // 再用该学生新鲜列表里的同 id 任务选中，保证 paper 模式字段（_reviewState 等）齐全。
+  const openTaskForStudent = async (student, task) => {
+    if (String(student.id) !== String(currentStudent.value?.id)) {
+      setCurrentStudent(student)
+      await loadStudentTasks(student.id)
+      await loadWrongQuestions(student.id)
+      const fresh = studentTasks.value.find(t => String(t.id) === String(task.id))
+      await selectTask(fresh || task)
+    } else {
+      await selectTask(task)
+    }
+  }
+
+  // 「下一份」：全局队列里当前卷的下一份。契约是「给一份还没审的卷」——
+  // 只要队列里还有卷就不该回「已经是最后一份」，所以当前卷在队尾时循环回队首
+  // （老师从下拉框/深链打开一份较旧的卷时，队首可能有更新的未审卷）。
+  // 当前卷不在队列（刚复核完 / 空态）时取队列第一份（与旧实现 nextTask 的
+  // idx=-1 → pendingTasks[0] 同口径）。
+  // 返回 { ok:true, task, student, switched } 或 { ok:false, reason:'all-done'|'last' }。
+  const goNextTaskGlobal = async () => {
+    const queue = await buildGlobalPendingQueue()
+    const idx = currentQueueIndex(queue)
+    let target = idx >= 0 ? queue[idx + 1] : queue[0]
+    if (!target && idx === queue.length - 1) target = queue[0] // 队尾 → 循环回队首
+    // 队列里仅剩当前这一卷（打开着还没审）→ 没有"下一份"：
+    // 不能重载当前卷冒充跳转（界面看着没变化，老师以为按钮失灵）。
+    if (target && target.task.id === currentTask.value?.id &&
+        String(target.student.id) === String(currentStudent.value?.id)) {
+      target = null
+    }
+    if (!target) {
+      globalQueueExhausted.value = true
+      return { ok: false, reason: queue.length === 0 ? 'all-done' : 'last' }
+    }
+    globalQueueExhausted.value = false
+    const switched = String(target.student.id) !== String(currentStudent.value?.id)
+    await openTaskForStudent(target.student, target.task)
+    return { ok: true, task: target.task, student: target.student, switched }
+  }
+
+  // [B2-1 快捷键 T/Shift+T] 「上一份」：与 goNextTaskGlobal 完全同口径的反向导航，
+  // 回看上一份不必再回到顶栏下拉重选。当前卷不在队列（刚复核完）时无上一份 ——
+  // 已复核的卷可从试卷下拉手动回看。
+  const goPrevTaskGlobal = async () => {
+    const queue = await buildGlobalPendingQueue()
+    const idx = currentQueueIndex(queue)
+    const target = idx > 0 ? queue[idx - 1] : null
+    if (!target) return { ok: false, reason: 'first' }
+    globalQueueExhausted.value = false
+    const switched = String(target.student.id) !== String(currentStudent.value?.id)
+    await openTaskForStudent(target.student, target.task)
+    return { ok: true, task: target.task, student: target.student, switched }
   }
 
   // 持久化「完成复核」：按数据来源分支落库
@@ -1927,8 +2052,10 @@ export const useReviewStore = defineStore('review', () => {
     selectTask,
     loadTaskById,
     autoSelectPendingTask,
-    nextTask,
-    prevTask,
+    // 「下一份 / 上一份」跨学生全局队列（2026-10-14，不再限于当前学生）
+    goNextTaskGlobal,
+    goPrevTaskGlobal,
+    globalQueueExhausted,
     completeTaskReview,
     autoCompleteAndAdvance,
     otherPendingPages,

@@ -52,15 +52,17 @@
 <script setup>
 /**
  * [⑤ ⌘K 命令面板] Raycast 式统一键盘入口：跳题 / 上下份 / 完成复核 / 快捷键速查。
- * 只做「把已有动作收到一个搜索入口」——不新写业务、不改任何视觉 token，
- * 全部复用 reviewStore 现成方法（jumpToQuestion / nextTask / prevTask / shortcutsVisible）。
- * 「完成复核」带错题门禁，逻辑在 ReviewTopBar，这里 emit 出去由 ReviewWorkspace 转发。
+ * 只做「把已有动作收到一个搜索入口」——不新写业务、不改任何视觉token。
+ * 「下一份 / 上一份」与顶栏按钮、T/Shift+T 快捷键走同一出口（emit 经 ReviewWorkspace
+ * 转发到 ReviewTopBar 的 goNextTask/goPrevTask）：原来这里直接调 store.nextTask()，
+ * 只算了下一份却没有任何地方选中它 —— 命令面板里点这两项是空动作（2026-10-14 修）。
+ * 「完成复核」带错题门禁，逻辑同在 ReviewTopBar。
  */
 import { ref, computed, watch, nextTick } from 'vue'
 import { useReviewStore } from '../../stores/reviewStore'
 
 const store = useReviewStore()
-const emit = defineEmits(['run-complete'])
+const emit = defineEmits(['run-complete', 'run-next', 'run-prev'])
 
 const query = ref('')
 const activeIndex = ref(0)
@@ -72,8 +74,8 @@ const close = () => { store.commandPaletteVisible = false }
 // 命令表：动作命令（固定）+ 跳题命令（按当前卷题目动态生成）
 const commands = computed(() => {
   const list = [
-    { id: 'act-next', group: '导航', label: '下一份待复核', hint: 'T', run: () => store.nextTask() },
-    { id: 'act-prev', group: '导航', label: '上一份待复核', hint: '⇧T', run: () => store.prevTask() },
+    { id: 'act-next', group: '导航', label: '下一份待复核', hint: 'T', run: () => emit('run-next') },
+    { id: 'act-prev', group: '导航', label: '上一份待复核', hint: '⇧T', run: () => emit('run-prev') },
     { id: 'act-complete', group: '操作', label: '完成复核', hint: '⏎', run: () => emit('run-complete') },
     { id: 'act-shortcut', group: '操作', label: '快捷键速查', hint: '?', run: () => { store.shortcutsVisible = true } },
   ]

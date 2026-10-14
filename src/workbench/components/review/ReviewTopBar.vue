@@ -155,13 +155,16 @@
             </el-button>
           </span>
         </el-tooltip>
-        <el-button size="default"
-          :type="allConfirmed ? 'primary' : 'default'"
-          plain
-          :disabled="!canNextTask"
-          @click="goNextTask">
-          ▶ 下一份
-        </el-button>
+        <el-tooltip content="下一份不限制学生：按批改中心的待复核顺序，跨学生接着处理" placement="bottom">
+          <el-button size="default"
+            :type="allConfirmed ? 'primary' : 'default'"
+            plain
+            :disabled="!canNextTask"
+            :loading="taskNavLoading"
+            @click="goNextTask">
+            ▶ 下一份
+          </el-button>
+        </el-tooltip>
       </template>
     </div>
   </div>
@@ -444,14 +447,14 @@ watch(() => store.currentTask?.id, (id) => {
   selectedTaskId.value = id || ''
 }, { immediate: true })
 
+// [2026-10-14] 「下一份」不再限于当前学生（负责人：「这里应该不限制具体某一个人」）：
+// 本学生待复核已空（最后一份已复核 / 空态）时，全局队列里可能还有别的学生的卷 →
+// 按钮保持可点，点击跨学生续接；只有全局搜过一遍且一无所获才置灰。
 const canNextTask = computed(() => {
-  if (store.pendingTasks.length === 0) return false
-  if (!store.currentTask) return false
-  // 复核完后 currentTask.status='reviewed' 已不在 pendingTasks 中，
-  // 但老师仍可手动点"下一份"跳到下一份待复核试卷。
+  if (store.globalQueueExhausted) return false
+  if (!store.currentTask) return true
   if (store.currentTask.status === 'reviewed') return true
-  const idx = store.pendingTasks.findIndex(t => t.id === store.currentTask.id)
-  return idx >= 0 && idx < store.pendingTasks.length - 1
+  return store.pendingTasks.length > 0
 })
 
 // 「更多」下拉：命令分发到原有 handler，动作本身零改动
@@ -534,24 +537,47 @@ const onTaskChange = async (taskId) => {
   await store.selectTask(task)
 }
 
+// 「下一份」：跨学生全局队列导航（store.goNextTaskGlobal）。
+// 队列构建要拉其余学生的任务（走缓存，通常很快），期间按钮 loading 防重复点击。
+const taskNavLoading = ref(false)
+
 const goNextTask = async () => {
-  const next = store.nextTask()
-  if (next) {
-    selectedTaskId.value = next.id
-    await store.selectTask(next)
-  } else {
-    ElMessage.info('已处理完所有待复核试卷')
+  if (taskNavLoading.value) return
+  taskNavLoading.value = true
+  try {
+    const result = await store.goNextTaskGlobal()
+    if (result.ok) {
+      selectedTaskId.value = result.task.id
+      if (result.switched) {
+        ElMessage.success(`已切换到 ${result.student.name} 的「${result.task.original_name || '试卷'}」`)
+      }
+    } else if (result.reason === 'last') {
+      // 当前卷还没复核、且它是全局最后一份 → 不是「已处理完」，别给错结论
+      ElMessage.info('已经是最后一份待复核试卷')
+    } else {
+      ElMessage.info('已处理完所有待复核试卷')
+    }
+  } finally {
+    taskNavLoading.value = false
   }
 }
 
 // [B2-1] 上一份（Shift+T / 完成态按钮的对称导航）：与 goNextTask 同口径反向
 const goPrevTask = async () => {
-  const prev = store.prevTask()
-  if (prev) {
-    selectedTaskId.value = prev.id
-    await store.selectTask(prev)
-  } else {
-    ElMessage.info('这已经是第一份待复核试卷')
+  if (taskNavLoading.value) return
+  taskNavLoading.value = true
+  try {
+    const result = await store.goPrevTaskGlobal()
+    if (result.ok) {
+      selectedTaskId.value = result.task.id
+      if (result.switched) {
+        ElMessage.success(`已切换到 ${result.student.name} 的「${result.task.original_name || '试卷'}」`)
+      }
+    } else {
+      ElMessage.info('这已经是第一份待复核试卷')
+    }
+  } finally {
+    taskNavLoading.value = false
   }
 }
 
@@ -572,9 +598,13 @@ const doComplete = async () => {
   try {
     await store.completeTaskReview()
     ElMessage.success('试卷复核完成，已保存')
+    // 完成后的提示要如实：全局队列确实搜尽过才说"都处理完成"，否则告诉老师
+    // 可以去下一份续接其他学生的卷（2026-10-14 起下一份不限制学生）。
     const tip = store.pendingTasks.length > 0
       ? '可在「更多」菜单留底为答案库，或点「下一份」继续处理'
-      : '可在「更多」菜单留底为答案库；当前学生已无待复核试卷'
+      : store.globalQueueExhausted
+        ? '可在「更多」菜单留底为答案库；所有学生的待复核试卷都已处理完成'
+        : '可在「更多」菜单留底为答案库；当前学生已无待复核试卷，点「下一份」可接着处理其他学生的试卷'
     ElMessage.info(tip)
   } catch (err) {
     // 落库失败时绝不能提示成功：completeTaskReview 现在会把服务端错误原样抛出，

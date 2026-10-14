@@ -54,14 +54,20 @@
       />
     </div>
 
-    <!-- 全部复核完成（空状态） -->
+    <!-- 全部复核完成（空状态）
+         [2026-10-14] 区分两种「没有待复核」：只是当前学生没了（全局队列里别的学生
+         可能还有 → 引导用「下一份」续接），还是全局都处理完了（按钮已置灰）。 -->
     <div v-else-if="store.reviewAllDone && store.currentStudent" class="all-done-state">
       <el-icon size="56"><CircleCheck /></el-icon>
-      <div class="all-done-title">该名同学暂无要处理复核的试卷</div>
+      <div class="all-done-title">
+        {{ store.globalQueueExhausted ? '所有学生的待复核试卷都已处理完成' : '该名同学暂无要处理复核的试卷' }}
+      </div>
       <div class="all-done-sub">
         {{ store.reviewedTasks.length }} 份试卷已完成复核
       </div>
-      <div class="all-done-hint">可在上方切换其他学生继续处理</div>
+      <div class="all-done-hint">
+        {{ store.globalQueueExhausted ? '可在批改中心查看全部任务' : '可点上方「下一份」继续处理其他学生的待复核试卷' }}
+      </div>
       <div class="all-done-actions">
         <el-button type="primary" @click="goDashboard">工作台首页</el-button>
         <el-button plain @click="goToWrongBook">查看错题池</el-button>
@@ -87,8 +93,13 @@
       <button type="button" class="undo-snackbar__close" aria-label="关闭提示" @click="store.undoHint = null">×</button>
     </div>
 
-    <!-- [⑤ ⌘K 命令面板] 完成复核带错题门禁，逻辑在 ReviewTopBar，这里 emit 转发 -->
-    <ReviewCommandPalette @run-complete="reviewTopBarRef?.handleComplete?.()" />
+    <!-- [⑤ ⌘K 命令面板] 完成复核带错题门禁，逻辑在 ReviewTopBar，这里 emit 转发；
+         下一份/上一份同样转发到顶栏同一出口（跨学生全局队列，2026-10-14）。 -->
+    <ReviewCommandPalette
+      @run-complete="reviewTopBarRef?.handleComplete?.()"
+      @run-next="reviewTopBarRef?.goNextTask?.()"
+      @run-prev="reviewTopBarRef?.goPrevTask?.()"
+    />
 
     <!-- [B2-3 快捷键速查] ? 键与顶栏「更多 → 快捷键速查」打开同一浮层 -->
     <el-dialog v-model="store.shortcutsVisible" title="快捷键速查" width="440px" append-to-body>
