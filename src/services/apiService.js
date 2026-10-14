@@ -724,8 +724,15 @@ export const fetchWrongQuestionsPage = async (studentId, { limit = 100, offset =
 // 跨学生全库错题检索（r260 · 2026-10-10）：老师按题干关键字找一道题，不预设学生。
 // 只读搜索，免缓存（每次输入词不同，缓存无意义）；结果带 student_name + task_id/question_id
 // 供「去原卷编辑」直达。q 为空时后端返回空集。
-export const searchWrongQuestions = async (q, { limit = 50 } = {}) => {
-  const data = await apiRequest(`/wrong-questions/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+// [2026-10-14 移动端自由组卷] ⛔ studentId 为**可选**参数（纯加法）：
+//   不传 = 跨学生全库，PC 既有调用点（WrongBookSearch.vue:312）行为一字不变。
+//   传了 = 只搜该生错题。移动端错题本有 currentStudent 上下文，**必须**传 ——
+//   否则会把别的学生的题勾进这个学生的重练卷（组卷是 per-student 的）。
+//   后端对非法 studentId 直接 400，不会静默降级成全库搜。
+export const searchWrongQuestions = async (q, { limit = 50, studentId = '' } = {}) => {
+  const parts = [`q=${encodeURIComponent(q)}`, `limit=${limit}`]
+  if (studentId) parts.push(`studentId=${encodeURIComponent(studentId)}`)
+  const data = await apiRequest(`/wrong-questions/search?${parts.join('&')}`)
   return {
     items: data.items || [],
     total: data.total ?? 0,

@@ -966,6 +966,7 @@ export default function App() {
 
             {currentPage === 'wrongbook' && (
               <WrongBookPage key='page-wrongbook'
+                studentId={currentStudent?.id}
                 filteredWrongQuestions={filteredWrongQuestions}
                 bankCounts={bankCounts}
                 selectedQuestions={selectedQuestions}

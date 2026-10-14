@@ -4031,12 +4031,25 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
 // 正确答案一并参与匹配（辅助定位）。只读检索，全量搜（含已掌握），结果带学生名与
 // task_id/question_id，前端复用「去原题编辑」链路直达（/grade/task?studentId=&taskId=&q=）。
 // 数据规模实测（2026-10-10 探针）：1261 条错题，跨 join ILIKE 仅 73-75ms，无需索引。
+//
+// [2026-10-14 移动端自由组卷] ⛔ 新增 **可选** studentId 过滤：移动端错题本已有
+// currentStudent 上下文，「搜某题 → 勾选多道 → 组卷」必须限定在该生错题范围内，
+// 否则会把别的学生的题混进这个学生的重练卷。**不传 = 跨学生全库，PC 既有行为一字不变。**
+//     （studentId 校验用局部 studentIdRegex，与本文件其余 6 处路由同一惯例 —— ⛔ 不可提到模块作用域：
+//      本文件 :4623 已有模块级 const UUID_RE，重复声明会让整个后端 SyntaxError 起不来。）
 app.get('/api/wrong-questions/search', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim()
     const limit = Math.min(parseInt(req.query.limit) || 50, 200)
+    const studentId = String(req.query.studentId || '').trim()
     if (!q) {
       return res.json({ success: true, items: [], total: 0 })
+    }
+    // studentId 只在显式传入时生效；格式非法直接 400，绝不静默「忽略后按全库搜」——
+    // 那会让别的学生的题混进当前学生的重练卷，而前端毫无察觉。
+    const studentIdRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    if (studentId && !studentIdRegex.test(studentId)) {
+      return res.status(400).json({ error: 'studentId 格式非法', code: 'BAD_STUDENT_ID' })
     }
     // LIKE 通配符转义，防老师输入 % / _ 引发全表模糊
     const like = '%' + q.replace(/[\\%_]/g, (m) => '\\' + m) + '%'
@@ -4044,7 +4057,24 @@ app.get('/api/wrong-questions/search', async (req, res) => {
     //   answer_source 是给「答案来源标注」用的 —— 老师必须能看出参考答案是练习册
     //   答案库给的（'worksheet'）还是 AI 自动求解的（其余），判定口径唯一收敛在
     //   前端 src/utils/reviewDecision.js#getReferenceAnswerOrigin，后端只透传原始列。
-    //   ⛔ 不改现有字段名与语义，移动端不读新字段即可（纯加法）。
+    // [2026-10-14 移动端组卷] 再纯加字段：parent_stem / sub_no / question_number。
+    //   移动端错题卡片用 sub_no + question_number 渲染「第10题(2)」小标（与列表接口同源），
+    //   搜索结果若缺这三列，小标消失 = 同一道题在两个入口长得不一样。
+    // ⛔ 不改现有字段名与语义，PC 端不读新字段即可（纯加法）。
+    // ⛔ 口径对齐：与列表接口 /wrong-questions/student/:id 用同一条 is_complete 闸。
+    //   不加的话会搜出「列表里根本不显示」的残缺题，老师勾进组卷 → 卷面丢图丢选项，
+    //   同一个数据出现两个口径（这正是历次事故的通用形状）。
+    const params = [like]
+    const filters = [
+      `(COALESCE(NULLIF(q.content, ''), wq.content) ILIKE $1
+        OR COALESCE(NULLIF(q.answer, ''), wq.correct_answer) ILIKE $1)`,
+      `(q.is_complete = TRUE OR wq.question_id IS NULL)`,
+    ]
+    if (studentId) {
+      params.push(studentId)
+      filters.push(`wq.student_id = $${params.length}`)
+    }
+    const whereSql = filters.join(' AND ')
     const { rows } = await query(
       `SELECT wq.id, wq.student_id, s.name AS student_name, wq.question_id,
          wq.lifecycle_status, wq.error_count, wq.practice_count, wq.added_at,
@@ -4053,24 +4083,23 @@ app.get('/api/wrong-questions/search', async (req, res) => {
          q.analysis,
          q.answer_source,
          COALESCE(q.subject, wq.subject) AS subject,
+         q.parent_stem, q.sub_no, q.question_number,
          q.task_id
        FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
        JOIN ${TABLES.STUDENTS} s ON s.id = wq.student_id
-       WHERE COALESCE(NULLIF(q.content, ''), wq.content) ILIKE $1
-          OR COALESCE(NULLIF(q.answer, ''), wq.correct_answer) ILIKE $1
+       WHERE ${whereSql}
        ORDER BY wq.added_at DESC
-       LIMIT $2`,
-      [like, limit]
+       LIMIT $${params.length + 1}`,
+      [...params, limit]
     )
     // total 用相同条件再数一次（ LIMIT 前的命中总数，供结果区显示"共 N 条"）
     const { rows: countRows } = await query(
       `SELECT COUNT(*)::int AS total
        FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id
-       WHERE COALESCE(NULLIF(q.content, ''), wq.content) ILIKE $1
-          OR COALESCE(NULLIF(q.answer, ''), wq.correct_answer) ILIKE $1`,
-      [like]
+       WHERE ${whereSql}`,
+      params
     )
     res.json({
       success: true,
