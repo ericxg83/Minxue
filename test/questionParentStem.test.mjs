@@ -210,10 +210,24 @@ test('重练卷 PDF 渲染公共题干（连排去重 + 题组编号）', () => 
 //   但脚本里**从未定义 parentStem**（只 import 了 resolveQuestionDisplayStem 没有调用）
 //   ⇒ v-if 恒为 undefined ⇒ 批改页永远不显示 questions.parent_stem。
 //   老师看到的就是「题干只有 (3) 求证：BG·DF=2CE²」的无条件残缺题。
+//
+// 2026-10-15 第二形态（T4 英语语篇折叠，commit fdd1bba 重构模板后旧锁假红）：
+//   模板从单分支改成两支——英语题 `v-if="parentStem && isEnglishPassage"`（折叠框）
+//   + 其余题 `v-else-if="parentStem"`（原样直渲）。旧锁的字面量 `v-if="parentStem"`
+//   随之失踪，但锁要保护的语义全部完好（computed 定义在、唯一口径在、兜底分支在）。
+//   本锁改判**结构不变量**（不再锁某一版模板的字面量）：
+//     ① 每条渲染 parentStem 的模板分支，守卫里都必须含 parentStem 本身；
+//     ② 必须存在一条**只**以 parentStem 为守卫的兜底分支——否则 `v-if="parentStem && X"`
+//        独占时其余题的公共题干永不渲染，正是 09-23 事故「有条件才渲染」的复辟形态。
 
-test('PC 批改页题干区：模板引用的 parentStem 必须在脚本里有定义（且走唯一口径）', () => {
-  const panel = readFileSync(`${ROOT}src/workbench/components/review/QuestionDetailPanel.vue`, 'utf8')
-  assert.ok(panel.includes('v-if="parentStem"'), '题干区应渲染公共题干')
+/** 对「PC 批改页题干区」源码快照执行全部不变量断言（真实文件与合成样本共用同一函数，防判据漂移）。 */
+function assertPanelRendersParentStem(panel) {
+  // ① 至少一条渲染分支把 parentStem 写进守卫
+  const guarded = panel.match(/v-(?:else-)?if="[^"]*parentStem[^"]*"/g) || []
+  assert.ok(guarded.length >= 1, `题干区应有以 parentStem 为守卫的渲染分支，实际 ${guarded.length} 条`)
+  // ② 必须存在只以 parentStem 为条件的兜底分支（v-if="parentStem" 或 v-else-if="parentStem"）
+  assert.ok(/v-(?:else-)?if="parentStem"/.test(panel),
+    '必须存在只以 parentStem 为守卫的兜底渲染分支，否则附加条件分支会让其余题不显示公共题干')
   // 「模板用了但脚本没定义」是本事故的形态：必须同时断言定义存在
   assert.ok(/const\s+parentStem\s*=\s*computed\(/.test(panel),
     'parentStem 必须有 computed 定义，否则 v-if 恒 false，公共题干永远不显示')
@@ -222,6 +236,38 @@ test('PC 批改页题干区：模板引用的 parentStem 必须在脚本里有�
   // 唯一口径的 import 不能是死导入
   const uses = panel.split('resolveQuestionDisplayStem').length - 1
   assert.ok(uses >= 2, `resolveQuestionDisplayStem 必须被真正调用，实际出现 ${uses} 次（1 次=死导入）`)
+}
+
+test('PC 批改页题干区：模板引用的 parentStem 必须在脚本里有定义（且走唯一口径）', () => {
+  const panel = readFileSync(`${ROOT}src/workbench/components/review/QuestionDetailPanel.vue`, 'utf8')
+  assertPanelRendersParentStem(panel)
+})
+
+// 反向自检（常驻套件）：合成坏样本必须判红、T4 前的合法旧形态必须判绿。
+// 与上面的真实文件测试共用同一断言函数，不存在「探针与锁各写一套」的漂移。
+test('PC 批改页题干区锁反向自检：事故形态判红 / 合法重构判绿', () => {
+  // 样本 1：09-23 事故原形态——模板有守卫，脚本里没有 computed 定义
+  const accident = `<div v-if="parentStem" class="ops-q-stem"></div>
+<script setup>import { resolveQuestionDisplayStem } from './x'</script>`
+  assert.throws(() => assertPanelRendersParentStem(accident), /computed 定义/, '样本1 应判红')
+  // 样本 2：只有附加条件分支、无兜底（英语折叠独占）——09-23 事故「有条件才渲染」的复辟
+  const noFallback = `<div v-if="parentStem && isEnglishPassage"></div>
+<script setup>const parentStem = computed(() => 1)
+import { resolveQuestionDisplayStem } from './x'
+const s = resolveQuestionDisplayStem(q.value)</script>`
+  assert.throws(() => assertPanelRendersParentStem(noFallback), /兜底渲染分支/, '样本2 应判红')
+  // 样本 3：守卫写的不是 parentStem（渲染了别的变量，公共题干实际丢失）
+  const wrongGuard = `<div v-else-if="displayStem"></div>
+<script setup>const parentStem = computed(() => 1)
+import { resolveQuestionDisplayStem } from './x'
+const s = resolveQuestionDisplayStem(q.value)</script>`
+  assert.throws(() => assertPanelRendersParentStem(wrongGuard), /parentStem 为守卫/, '样本3 应判红')
+  // 样本 4：T4 之前的真实合法形态（单分支 v-if="parentStem"）——必须判绿，
+  // 证明锁盯的是不变量，不是某一版模板的字面量
+  const preT4 = `<div v-if="parentStem" class="ops-q-stem"></div>
+<script setup>import { resolveQuestionDisplayStem } from './x'
+const parentStem = computed(() => resolveQuestionDisplayStem(q.value).parentStem)</script>`
+  assertPanelRendersParentStem(preT4)
 })
 
 test('PC 批改页取题排序：小问并列行必须有确定性兜底（防 (3)(2)(1) 乱序）', () => {
