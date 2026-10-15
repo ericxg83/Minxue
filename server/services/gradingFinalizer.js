@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { query, transaction, TABLES, LIFECYCLE_STATUS, WRONG_STATUS } from '../config/neon.js'
+import { query, transaction, TABLES } from '../config/neon.js'
 import { addWrongQuestions, createJudgement } from './neonService.js'
 import { compensateWrongBook } from './wrongBookCompensation.js'
 import { syncQuestionsKnowledgeAndMastery, syncReviewResultsMastery } from './knowledgeMasteryService.js'
@@ -7,6 +7,10 @@ import { syncQuestionCompletenessQuietly } from './questionCompletenessSync.js'
 import { checkQuestionCompleteness } from '../utils/questionCompleteness.js'
 import { buildWrongQuestionSnapshotSql } from '../utils/wrongQuestionSnapshot.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from '../utils/geometryRequeueOnRejudge.js'
+// 重练结算的单题判定（含 getNextLifecycle）已抽成纯函数，见文件头注释与
+// test/retrySettlementEnrollGuard.test.mjs —— 抽出来的唯一目的是让「答对不得凭空入册」
+// 这条不变量能被真跑覆盖，而不是只靠 grep 源码。
+import { decideRetrySettlementItem, RETRY_SETTLE_ACTION, getNextLifecycle } from './retrySettlementDecision.js'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -360,28 +364,10 @@ export const finalizeRejudgeResult = async ({
  * 与前端展示层两份同构实现保持逐字一致：
  *   - 移动端 src/pages/Grading/index.jsx 的 getNextLifecycle（仅预览统计，结算仍走服务端）
  *   - PC 端 src/workbench/stores/lifecycleStore.js 的 processReviewResult
+ *
+ * 2026-10-15：实现体已移到 services/retrySettlementDecision.js（纯函数，可被真跑测试），
+ * 这里只做再导出，保持既有调用方（test/lifecycleQueue.test.mjs 等）不变。
  */
-const getNextLifecycle = (current, isCorrect) => {
-  if (isCorrect) {
-    switch (current) {
-      case LIFECYCLE_STATUS.NEW:
-      case LIFECYCLE_STATUS.REVIEW_2:
-        return LIFECYCLE_STATUS.REVIEW_1
-      case LIFECYCLE_STATUS.REVIEW_1:
-        return LIFECYCLE_STATUS.MASTERED
-      case LIFECYCLE_STATUS.MASTERED:
-        return LIFECYCLE_STATUS.MASTERED
-      default:
-        return LIFECYCLE_STATUS.REVIEW_1
-    }
-  }
-  if (current === LIFECYCLE_STATUS.MASTERED) return LIFECYCLE_STATUS.REVIEW_1
-  if (current === LIFECYCLE_STATUS.REVIEW_1 || current === LIFECYCLE_STATUS.REVIEW_2) {
-    return LIFECYCLE_STATUS.NEW
-  }
-  return current
-}
-
 export { getNextLifecycle }
 
 /**
@@ -441,52 +427,46 @@ export const finalizeGeneratedExamResults = async ({
 
   for (const result of pendingResults) {
     const existing = wqByQuestionId.get(result.questionId)
-    const currentLifecycle = existing?.lifecycle_status || LIFECYCLE_STATUS.NEW
-    const skipWrongBook = result.skipWrongBook && !result.isCorrect
 
-    if (!skipWrongBook) {
-      const nextLifecycle = getNextLifecycle(currentLifecycle, result.isCorrect)
-      let errorCountDelta = 0
+    // 单题判定收在纯函数里（services/retrySettlementDecision.js），本循环只负责落地。
+    // ★ 关键红线：答对 + 不在错题本 ⇒ action='skip'，不得凭空建行。
+    //   历史缺陷（全库 47 条「我没有做错过这道题」）见该文件头注释。
+    const decision = decideRetrySettlementItem({
+      existing,
+      isCorrect: result.isCorrect,
+      skipWrongBook: result.skipWrongBook
+    })
 
-      if (result.isCorrect) {
-        if (nextLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED) {
-          masteredCount++
-        } else if (nextLifecycle !== currentLifecycle) {
-          upgradedCount++
-        }
-      } else {
-        // 答错：review_1 退回 new、mastered 退回 review_1 均计入 reset；error_count 一定 +1
-        errorCountDelta = 1
-        if (nextLifecycle !== currentLifecycle) resetCount++
-      }
+    if (decision.countsAs === 'mastered') masteredCount++
+    else if (decision.countsAs === 'upgraded') upgradedCount++
+    else if (decision.countsAs === 'reset') resetCount++
 
-      const status = nextLifecycle === LIFECYCLE_STATUS.MASTERED
-        ? WRONG_STATUS.MASTERED
-        : WRONG_STATUS.PENDING
-
-      if (!existing) {
-        insertedRows.push({
-          questionId: result.questionId,
-          status,
-          lifecycleStatus: nextLifecycle,
-          errorCount: result.isCorrect ? 0 : 1
-        })
-      } else {
-        updatedRows.push({
-          id: existing.id,
-          status,
-          lifecycleStatus: nextLifecycle,
-          errorCount: (existing.error_count || 1) + errorCountDelta
-        })
-      }
-
-      lifecycleChanges.push({
+    if (decision.action === RETRY_SETTLE_ACTION.INSERT) {
+      insertedRows.push({
         questionId: result.questionId,
-        previous: currentLifecycle,
-        current: nextLifecycle
+        status: decision.status,
+        lifecycleStatus: decision.nextLifecycle,
+        errorCount: decision.errorCount
+      })
+    } else if (decision.action === RETRY_SETTLE_ACTION.UPDATE) {
+      updatedRows.push({
+        id: existing.id,
+        status: decision.status,
+        lifecycleStatus: decision.nextLifecycle,
+        errorCount: decision.errorCount
       })
     }
 
+    if (decision.action !== RETRY_SETTLE_ACTION.SKIP) {
+      lifecycleChanges.push({
+        questionId: result.questionId,
+        previous: decision.previousLifecycle,
+        current: decision.nextLifecycle
+      })
+    }
+
+    // 无论是否入册，学生这次的判定结论都要落回 questions.is_correct
+    // （skip 分支只跳过错题本写入，不跳过题目判定回写）。
     updateQuestionIds.push(result.questionId)
     updateQuestionValues.push(result.isCorrect)
   }
