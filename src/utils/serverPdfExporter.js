@@ -30,6 +30,8 @@ import {
 } from './pdfGenerator'
 import { KATEX_CSS_WITH_FONTS } from './katexCssWithFonts'
 import { getQuestionsByIds } from '../services/apiService'
+// 排卷字段完整性判据（2026-10-15 事故防御）：缺排卷字段时强制拉全量补齐
+import { isMissingRetryLayoutFields } from './retryPaperOrder'
 
 /**
  * 字体已内联的 KaTeX CSS。
@@ -193,9 +195,12 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
     }
 
     // 拉取完整题目数据（缺 options 等字段时）
+    // [2026-10-15 事故防御] 排卷四字段（task_id/page_number/question_number/sub_no）
+    // 任一「不存在」也强制补全量：错题本白名单漏过 page_number → 打印连排分叉、
+    // 编号与判题整体错位。batch 接口 SELECT q.* 字段齐全，null 合法值不触发。
     let qs = questions.slice()
     const ids = qs.map(q => q?.id).filter(Boolean)
-    const needsFullData = qs.some(q => !Array.isArray(q.options))
+    const needsFullData = qs.some(q => !Array.isArray(q.options) || isMissingRetryLayoutFields(q))
     if (ids.length > 0 && needsFullData) {
       try {
         const fullQs = await getQuestionsByIds(ids, studentId)

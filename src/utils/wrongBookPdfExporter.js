@@ -3,6 +3,8 @@ import { saveAs } from 'file-saver'
 import { getQuestionsByIds } from '../services/apiService'
 import { triggerBrowserPrint } from './browserPrint'
 import { exportServerPDF } from './serverPdfExporter'
+// 排卷字段完整性判据（2026-10-15 事故防御）：缺排卷字段时强制拉全量补齐
+import { isMissingRetryLayoutFields } from './retryPaperOrder'
 
 /**
  * 错题卷 PDF 公共导出引擎（WrongBookPdfExporter）
@@ -124,7 +126,9 @@ export async function exportWrongBookPDF({
       : (Array.isArray(questionIds) ? questionIds : [])
   ).filter(Boolean)
 
-  const needsFullData = qs ? qs.some(q => !Array.isArray(q.options)) : true
+  const needsFullData = qs
+    ? qs.some(q => !Array.isArray(q.options) || isMissingRetryLayoutFields(q))
+    : true
   if (ids.length > 0 && needsFullData) {
     try {
       const fullQs = await getQuestionsByIds(ids, studentId)

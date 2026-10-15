@@ -24,6 +24,9 @@ import {
   normalizeRetryPaperLabel,
   retryPaperBucketOf,
   difficultyStars,
+  findQuestionsMissingLayoutFields,
+  isMissingRetryLayoutFields,
+  RETRY_LAYOUT_FIELDS,
 } from '../server/utils/retryPaperOrder.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -170,6 +173,50 @@ test('编号映射：重复编号只保留卷面靠前的一项', () => {
   const map = buildRetryPaperLabelMap(order)
   assert.equal(map.size, 2)
   assert.equal(map.get('1').question.id, 'a')
+})
+
+test('连排分组键必须含页码：不同页的同题号「整题行+小问行」绝不连排（2026-10-15 事故回归）', () => {
+  // 事故实锤（数学-1014-01）：原作业13题的「整题行」在 pg4、「(1)小问行」在 pg2。
+  // 打印链路拿到缺 page_number 的数据 → 分组键退化成 task+题号 → 两行被误判同组
+  // 连排 → 小问行印成「13(1)」不占新号 → 打印编号整体少 1，与判题端分叉，
+  // 学生从该题起的所有作答全部错位判给别的题。
+  const qs = [
+    mkQ('whole', 'answer', { task_id: 'task-A', page_number: 4, question_number: 13, sub_no: null }),
+    mkQ('sub1', 'answer', { task_id: 'task-A', page_number: 2, question_number: 13, sub_no: '1' }),
+    mkQ('next', 'answer', { task_id: 'task-B', page_number: 3, question_number: 14, sub_no: null }),
+  ]
+  const order = buildRetryPaperOrder(qs)
+  // 页码不同 → 不同组 → 小问行必须独立占号，绝不连排。
+  // 独立占号的小问行 label 仍带小问号「2(1)」（与事故实锤的判题编号 14(1) 同形态）；
+  // 分叉事故里的错误形态是「13(1)」——连排到整题行的号、整体少 1。
+  assert.equal(order[1].isContinuation, false, '不同页的同题号行不得连排')
+  assert.deepEqual(order.map((it) => it.label), ['1', '2(1)', '3'])
+  // 对照组：同 task 同页同题号才允许连排
+  const samePage = buildRetryPaperOrder([
+    mkQ('w2', 'answer', { task_id: 'task-A', page_number: 2, question_number: 13, sub_no: null }),
+    mkQ('s2', 'answer', { task_id: 'task-A', page_number: 2, question_number: 13, sub_no: '1' }),
+  ])
+  assert.equal(samePage[1].isContinuation, true, '同 task 同页同题号的小问行应连排')
+  assert.deepEqual(samePage.map((it) => it.label), ['1', '1(1)'])
+})
+
+test('排卷字段完整性检测：字段「不存在」才报警，null 是合法值不误伤', () => {
+  // 完整数据（null 合法）：自包含题无 task_id、历史题无页码，都是合法存储值
+  const complete = {
+    id: 'q-ok', task_id: null, page_number: null, question_number: 13, sub_no: null,
+  }
+  assert.equal(isMissingRetryLayoutFields(complete), false, 'null 值不算缺失')
+  assert.deepEqual(findQuestionsMissingLayoutFields([complete]), [])
+
+  // 事故形态：错题本白名单漏 page_number（字段压根不存在）→ 必须报出
+  const missingPg = { id: 'q-bad', task_id: 't', question_number: 13, sub_no: null }
+  assert.equal(isMissingRetryLayoutFields(missingPg), true)
+  const report = findQuestionsMissingLayoutFields([complete, missingPg, null])
+  assert.equal(report.length, 1)
+  assert.equal(report[0].id, 'q-bad')
+  assert.deepEqual(report[0].missing, ['page_number'])
+  // 判据字段集合与 getQuestionGroupKey 实际读取的字段保持一致
+  assert.deepEqual([...RETRY_LAYOUT_FIELDS].sort(), ['page_number', 'question_number', 'sub_no', 'task_id'])
 })
 
 test('双端同构：server/utils/retryPaperOrder.js 与 src/utils/retryPaperOrder.js 代码主体必须逐字一致', () => {

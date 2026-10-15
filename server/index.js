@@ -2788,6 +2788,49 @@ async function lookupWorksheetAnswerForRecompute(questionId) {
   return { answer, unit: picked.unit_key, questionNo: picked.question_no }
 }
 
+// ── 重解析 / 解析补全 共享通道链（2026-10-15 从 recompute-answer 提取为模块级）──────
+// 「AI 重解析」（/recompute-answer）与「解析补全」（/ensure-analysis）是同一件事的两个入口，
+// 必须走同一组实测合格的强模型通道 —— 同一件事只准一个实现，各写一份将来改配置必然分叉。
+//
+// ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
+//    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
+//    **deepseek-flash 禁止用于解析答案**：它只适合批改/OCR/探活这类不写库的场景。
+//
+// ── 顺序 = 付费在前、免费在后（2026-09-24 用户拍板反转）────────────────────
+// 原顺序是「免费 kimi-k3 在前」以省额度，但实测 kimi-k3 作为**同步接口的第一级**
+// 频繁撞 429（tpm/rpm 限流），触发 `RETRY_DELAYS_429=[3000,5000]` 退避 ——
+// 老师点一下按钮要白等 8s 才开始算，之后还要再等它 22–74s，体验不可接受。
+// ⚠️ 关键区分：**429 退避在异步批改链路里无所谓（后台跑），在同步交互里是致命的**。
+//   故同步接口把付费快通道提为主链；批改链路（generateMissingAnswers）不受影响。
+//   ① Bailian:qwen3.8-flash —— 付费（Token Plan 套餐内≈0 边际成本）、约 9.5s、
+//      实测 68 次调用零 429、质量与 kimi-k3 并列 71%。
+//   ② SenseNova:kimi-k3 —— 免费、JSON 健康率 100%、对不可判题诚实返回「待人工补充」，
+//      但慢（22–74s）且易 429 ⇒ 退为备份，只在主链没给出答案时才用。
+// 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
+// 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
+// ⚠️ 超时预算：纯文字两级 120s + 55s = 175s；带图题视觉单级 150s；两者均须留在
+//    各端点的 DEADLINE_MS=210s 总兜底内（不变量：单级/两级串行 < 总兜底）。
+// 提成 env 便于换通道/回滚，不必改代码。
+const RECOMPUTE_ENGINE_TIMEOUT_MS = 120_000       // 主通道单次超时（难题实测 p90≈122s，45s 会当场掐死多数难题）
+const RECOMPUTE_SLOW_ENGINE_TIMEOUT_MS = 55_000   // 备用通道（kimi-k3 出答案 22–74s，给太短等于没备用）
+const RECOMPUTE_VISION_TIMEOUT_MS = Number(process.env.ANSWER_ENGINE_RECOMPUTE_VISION_TIMEOUT_MS) || 150_000
+const RECOMPUTE_CHAIN = [
+  {
+    vendor: process.env.ANSWER_ENGINE_RECOMPUTE_VENDOR || 'Bailian',
+    model: process.env.ANSWER_ENGINE_RECOMPUTE_MODEL || 'qwen3.8-flash',
+    timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_TIMEOUT_MS) || RECOMPUTE_ENGINE_TIMEOUT_MS
+  },
+  {
+    vendor: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_VENDOR || 'SenseNova',
+    model: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_MODEL || 'kimi-k3',
+    timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_TIMEOUT_MS) || RECOMPUTE_SLOW_ENGINE_TIMEOUT_MS
+  }
+]
+// 硬闸：deepseek-flash **禁止**出现在重解析/解析补全通道链里（铁律 40）。
+// 配错了当场炸出来，绝不静默放行 —— 静默的后果是老师拿到 33% 正确率的答案，
+// 还拿它当标准答案去判学生。日志同步报错，方便在服务端一眼看到是谁配错的。
+const RECOMPUTE_BLOCKED_MODELS = ['deepseek-flash']
+
 // 教师工作台「AI 重解析」按钮（2026-09-23 临时功能）：
 // 老师在批改页遇到参考答案缺失时手动触发，调答案引擎重算这一题的标准答案并写库。
 // 默认仅在现有 answer 为空时写入，避免无脑覆盖老师已经填好的答案；force=true 时强制覆盖。
@@ -2813,44 +2856,10 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
   //   · 备用通道 55s —— kimi-k3 慢是**固有特性**（拒绝约 25–30s，出答案 22–74s），
   //     给太短等于没备用。
   // 两级串行最坏 120s + 55s = 175s，仍在 210s 总兜底内（留 35s 余量给读题/写库/结算）。
-  const ENGINE_TIMEOUT_MS = 120_000
-  const SLOW_ENGINE_TIMEOUT_MS = 55_000
-  // 带配图题的视觉求解单次超时（2026-09-24 接入读图）：视觉推理比纯文字慢
-  // （实测整页 OCR p50≈72s、p90≈145s，单题裁剪图更快）。同步接口对带图题
-  // **只跑付费强通道一级**（不串行等备用、不触发多路投票），故单级预算取 150s，
-  // 加上取图下载 + 读题/写库/结算 DB 往返仍在 DEADLINE_MS=210s 内（不变量：视觉单级 < 总兜底）。
-  const VISION_ENGINE_TIMEOUT_MS = Number(process.env.ANSWER_ENGINE_RECOMPUTE_VISION_TIMEOUT_MS) || 150_000
-  // ── 重解析的通道链（2026-09-24 换模型；同日二次调整：主备互换）──────────────
-  // ⚠️ 绝不能沿用答案引擎全局主模型 SenseNova:deepseek-flash —— 它可判正确率仅 33%，
-  //    且 10 道里 2 次返回非 JSON（`_三模型对比-缺答案求解-20260923.md`）。
-  //    **deepseek-flash 禁止用于解析答案**：它只适合批改/OCR/探活这类不写库的场景。
-  //
-  // ── 顺序 = 付费在前、免费在后（2026-09-24 用户拍板反转）────────────────────
-  // 原顺序是「免费 kimi-k3 在前」以省额度，但实测 kimi-k3 作为**同步接口的第一级**
-  // 频繁撞 429（tpm/rpm 限流），触发 `RETRY_DELAYS_429=[3000,5000]` 退避 ——
-  // 老师点一下按钮要白等 8s 才开始算，之后还要再等它 22–74s，体验不可接受。
-  // ⚠️ 关键区分：**429 退避在异步批改链路里无所谓（后台跑），在同步交互里是致命的**。
-  //   故本接口把付费快通道提为主链；批改链路（generateMissingAnswers）不受本改动影响。
-  //   ① Bailian:qwen3.8-flash —— 付费（Token Plan 套餐内≈0 边际成本）、约 9.5s、
-  //      实测 68 次调用零 429、质量与 kimi-k3 并列 71%。
-  //   ② SenseNova:kimi-k3 —— 免费、JSON 健康率 100%、对不可判题诚实返回「待人工补充」，
-  //      但慢（22–74s）且易 429 ⇒ 退为备份，只在主链没给出答案时才用。
-  // 两级各自走 strictPrimary（只打自己那一个通道、不降级），上一级没答案才让位下一级 ——
-  // 这与「降级到弱模型」是两回事：链内两个通道都是实测合格的强模型。
-  // ⚠️ 超时预算：纯文字两级 120s + 55s = 175s；带图题视觉单级 150s；两者均留在 210s 总兜底内（主通道预算依据见上方 ENGINE_TIMEOUT_MS 注释）。
-  // 提成 env 便于换通道/回滚，不必改代码。
-  const RECOMPUTE_CHAIN = [
-    {
-      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_VENDOR || 'Bailian',
-      model: process.env.ANSWER_ENGINE_RECOMPUTE_MODEL || 'qwen3.8-flash',
-      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_TIMEOUT_MS) || ENGINE_TIMEOUT_MS
-    },
-    {
-      vendor: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_VENDOR || 'SenseNova',
-      model: process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_MODEL || 'kimi-k3',
-      timeoutMs: Number(process.env.ANSWER_ENGINE_RECOMPUTE_FALLBACK_TIMEOUT_MS) || SLOW_ENGINE_TIMEOUT_MS
-    }
-  ]
+  // ⚠️ 单次引擎调用超时 / 视觉预算 / 通道链 / 禁用模型名单已于 2026-10-15 提取为模块级
+  //    共享常量（RECOMPUTE_CHAIN 等，见端点定义上方）——「解析补全」/ensure-analysis
+  //    与本接口必须走同一组通道，完整依据注释在模块级定义处。
+  const VISION_ENGINE_TIMEOUT_MS = RECOMPUTE_VISION_TIMEOUT_MS
   let finished = false
   const deadlineTimer = setTimeout(() => {
     if (finished) return
@@ -2933,10 +2942,8 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     // 顺带解决 150s 超时：原实现复用批改口径，降级后 3 路投票被 429 信号量压成串行
     // （单题 140–230s）必然撞穿兜底。严格模式不降级 ⇒ 不触发投票，等待可控。
 
-    // 硬闸：deepseek-flash **禁止**出现在重解析通道链里（铁律 40）。
-    // 配错了当场炸出来，绝不静默放行 —— 静默的后果是老师拿到 33% 正确率的答案，
-    // 还拿它当标准答案去判学生。日志同步报错，方便在服务端一眼看到是谁配错的。
-    const RECOMPUTE_BLOCKED_MODELS = ['deepseek-flash']
+    // 硬闸：RECOMPUTE_BLOCKED_MODELS（deepseek-flash，模块级共享）检查 ——
+    // 配错当场炸出来，绝不静默放行（注释见模块级定义处）。
     for (const ch of RECOMPUTE_CHAIN) {
       if (RECOMPUTE_BLOCKED_MODELS.includes(ch.model)) {
         console.error(`[AI 重解析] 通道链配置了禁用模型 ${ch.model}，拒绝执行`)
@@ -3213,6 +3220,220 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
       }))
     }
     console.error('AI 重算失败:', error)
+    done(() => res.status(500).json({ error: msg || '服务器内部错误' }))
+  }
+})
+
+// 题干行「解析」按钮的按需补全（2026-10-15 方案 A，负责人拍板）：
+// 题库大量练习册/答案库管线的题只有参考答案、没有解析 —— 答案库表（worksheet_answers /
+// resource_answers）本就没有 analysis 列，批改管线为省额度刻意跳过引擎。旧口径
+// 「无解析就不渲染按钮」（AnalysisSource 的 hasUsableAnalysis 判据）让按钮时有时无，
+// 老师误以为这道题「不该有解析」。现在按钮恒亮：点开时若库里没有可用解析，现场调
+// 引擎把题解一遍并落库。
+//
+// ⛔ 唯一写库点：**只写 questions.analysis 一列** —— answer / is_correct / ai_answer /
+//    answer_exception / 判题结论（judgements）一律不碰。参考答案以答案库/原判定为准
+//    （官方/教师审核的可信级别高于 AI），对错判定不重算，错题本/掌握度零扰动。
+//    引擎解出的答案与库中参考答案不一致时不阻断，响应带 answer_mismatch 由前端提示，
+//    裁决权在老师。
+// 已有可用解析（非空且非「AI重批生成 YYYY-MM-DD」占位串，判据与前端
+// src/utils/reviewDecision.hasUsableAnalysis 同口径）→ 秒回不烧引擎；占位串视为
+// 无解析，点开重新生成正好覆盖修复（0922 重批脚本的历史缺陷，全库 210 条）。
+app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
+  // 与 recompute-answer 同预算（视觉单级 150s / 纯文字两级 175s + DB 往返 ≤ 210s）。
+  // 前端 ensureQuestionAnalysis 的 timeout 必须严格大于本值，改这里必须同步改前端。
+  const DEADLINE_MS = 210_000
+  let finished = false
+  const deadlineTimer = setTimeout(() => {
+    if (finished) return
+    finished = true
+    console.error(`[解析补全] 超时 ${DEADLINE_MS / 1000}s 未完成 q=${req.params?.id}`)
+    if (!res.headersSent) {
+      res.status(503).json({
+        error: 'timeout',
+        message: `生成解析超过 ${DEADLINE_MS / 1000} 秒仍未完成（答案引擎响应过慢），请稍后重试`
+      })
+    }
+  }, DEADLINE_MS)
+  const done = (fn) => {
+    if (finished) return
+    finished = true
+    clearTimeout(deadlineTimer)
+    fn()
+  }
+  try {
+    const { id } = req.params
+
+    const { rows } = await query(
+      `SELECT id, student_id, answer, analysis, question_type,
+              content, parent_stem, options, geometry_image_url
+       FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    if (rows.length === 0) return done(() => res.status(404).json({ error: '题目不存在' }))
+    const q = rows[0]
+
+    const existingAnalysis = String(q.analysis || '').trim()
+    const existingIsUsable = existingAnalysis.length > 0
+      && !/^AI重批生成\s*\d{4}-\d{2}-\d{2}$/.test(existingAnalysis)
+    if (existingIsUsable) {
+      return done(() => res.json({ success: true, analysis: existingAnalysis, generated: false }))
+    }
+
+    // 与 worker.js 批改链路 / recompute-answer 逐字同构：parent_stem + content + options
+    //（缺其中任一项都会被引擎判为缺条件 → 永远解不出）。
+    const content = [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
+    const options = Array.isArray(q.options) ? q.options : []
+    const fullContent = options.length > 0
+      ? `${content}\n选项：${formatOptionsForPrompt(options)}`
+      : content
+    if (!content || !content.trim()) {
+      return done(() => res.status(400).json({
+        error: 'empty-question-content',
+        message: '这道题的题干内容为空，AI 无法生成解析，请先补齐题干'
+      }))
+    }
+
+    // 硬闸与预判闸全部与 recompute-answer 同口径（同一件事只准一个实现）：
+    // 禁用模型名单 / 缺配图闸 / 作图题闸。闸的完整依据见 recompute-answer 内注释。
+    for (const ch of RECOMPUTE_CHAIN) {
+      if (RECOMPUTE_BLOCKED_MODELS.includes(ch.model)) {
+        console.error(`[解析补全] 通道链配置了禁用模型 ${ch.model}，拒绝执行`)
+        return done(() => res.status(500).json({
+          error: 'blocked-model-config',
+          message: `解析通道链配置了禁用的模型「${ch.model}」，拒绝执行，请检查服务端配置`
+        }))
+      }
+    }
+    if (isFigurePreflightSkipEnabled() && hasFigureReference(q) &&
+        !(q.geometry_image_url && String(q.geometry_image_url).trim())) {
+      return done(() => res.status(400).json({
+        error: 'figure-missing',
+        message: '这道题的题干要求配图，但系统没有采集到配图，AI 只读文字题干无法写出解析。请先补上配图后重试',
+        has_figure: false
+      }))
+    }
+    const hasFigure = !!(q.geometry_image_url && String(q.geometry_image_url).trim())
+    const solveChain = hasFigure ? RECOMPUTE_CHAIN.slice(0, 1) : RECOMPUTE_CHAIN
+    if (hasFigure && isConstructionQuestion(q)) {
+      return done(() => res.status(400).json({
+        error: 'ai-declined',
+        message: '这道题是作图题，答案是画在图中的图形，AI 写不出可核对的文字解析。请参考原卷图自行讲解',
+        reason: 'construction-manual',
+        has_figure: true
+      }))
+    }
+
+    // 引擎求解：与 recompute-answer 逐字同口径（strictPrimary 不降级、逐级让位、
+    // validateAIAnswer 拦「AI 自述不会」）。解析必须跟着一道**真解出来**的题走 ——
+    // 「待人工补充」配的解析是废话，落库只会骗老师；analysis 为空的产出同样不收。
+    let result = null
+    let solvedAnswer = ''
+    let rejectReason = null
+    for (const ch of solveChain) {
+      if (finished) break // 已经超时了，别再烧额度
+      const r = await generateAnswerForQuestion(fullContent, 0, hasFigure ? {
+        // 带图：视觉单级、不降级（同 recompute-answer）
+        imageUrl: q.geometry_image_url,
+        visionVendorChain: [{ vendor: ch.vendor, model: ch.model }],
+        timeoutMs: RECOMPUTE_VISION_TIMEOUT_MS,
+        maxRetries: 0
+      } : {
+        vendorOverride: ch.vendor,
+        modelOverride: ch.model,
+        strictPrimary: true,
+        timeoutMs: ch.timeoutMs,
+        maxRetries: 0
+      })
+      result = r
+      // 题干为空是终态：换哪个模型都一样，别再往下试第二级。
+      if (r.source === 'empty-input') break
+      const rawAnswer = extractAnswerFromAnalysis(r.answer || '', r.analysis || '', options)
+      const normalized = normalizeGeneratedAnswer({ question_type: q.question_type, options }, rawAnswer || '')
+      const check = normalized && normalized.trim()
+        ? validateAIAnswer(normalized, r.analysis || '')
+        : { isValid: false, reason: '答案为空' }
+      const analysisText = String(r.analysis || '').trim()
+      if (check.isValid && analysisText) {
+        solvedAnswer = normalized
+        break
+      }
+      rejectReason = check.reason || (analysisText ? null : '引擎未返回解析文本')
+      console.warn(`[解析补全] ${ch.vendor}:${ch.model} 产出不可用（${rejectReason || '未知原因'}），让位给下一通道`)
+    }
+
+    if (!solvedAnswer || !(result?.analysis && String(result.analysis).trim())) {
+      if (result?.source === 'empty-input') {
+        return done(() => res.status(400).json({
+          error: 'empty-question-content',
+          message: '这道题的题干内容为空，AI 无法生成解析，请先补齐题干'
+        }))
+      }
+      if (rejectReason === 'AI标记需要人工补充') {
+        return done(() => res.status(400).json({
+          error: 'ai-declined',
+          message: hasFigure
+            ? '这道题带配图，已走视觉读图求解仍无法写出可信解析（可能图不清晰或条件不足）。请参考原卷图自行讲解'
+            : 'AI 判断这道题无法给出确定的解答（可能缺少配图或条件不足），因此没有可写的解析。这是终态，重复点击不会有结果',
+          engine: result?.engine,
+          reason: rejectReason
+        }))
+      }
+      return done(() => res.status(503).json({
+        error: 'primary-model-unavailable',
+        message: `答案引擎（${RECOMPUTE_CHAIN.map(c => `${c.vendor}:${c.model}`).join(' → ')}）这次都没能给出可信解析，请稍后重试`,
+        engine: result?.engine,
+        reason: rejectReason
+      }))
+    }
+
+    // 超时后不能再写库（与 recompute-answer 同款防护）：兜底 timer 只负责先回 503，
+    // 中断不了在途引擎调用；响应发出后返回的结果没人认领，直接放弃。
+    if (finished) {
+      console.warn(`[解析补全] 引擎在超时后才返回，放弃写库 q=${id}`)
+      return
+    }
+
+    // ⛔ 唯一写库点：只写 analysis 列（2026-10-15 方案 A 的硬承诺）。
+    await query(
+      `UPDATE ${TABLES.QUESTIONS}
+          SET analysis = $1, updated_at = NOW()
+        WHERE id = $2 AND deleted_at IS NULL`,
+      [String(result.analysis), id]
+    )
+
+    // 与参考答案的一致性提示（不阻断、不覆盖）：字符串相等或数值相等视为一致，
+    // 判不等只是提示「请自行核对」，宁可多提示也不悄悄吞掉矛盾。
+    const storedAnswer = String(q.answer || '').trim()
+    const engineAnswer = String(solvedAnswer || '').trim()
+    const sameAnswer = !!storedAnswer && (
+      storedAnswer === engineAnswer
+      || (Number.isFinite(parseFloat(storedAnswer)) && Number.isFinite(parseFloat(engineAnswer))
+          && parseFloat(storedAnswer) === parseFloat(engineAnswer))
+    )
+    console.log(`[解析补全] q=${String(id).slice(0, 8)} 解析已落库（engine=${result.engine}${storedAnswer ? (sameAnswer ? '，与参考答案一致' : `，⚠️ 引擎答案「${engineAnswer}」与参考答案「${storedAnswer}」不一致`) : '，本题无参考答案'}）`)
+
+    done(() => res.json({
+      success: true,
+      analysis: String(result.analysis),
+      generated: true,
+      engine: result.engine,
+      answer_mismatch: !!(storedAnswer && !sameAnswer),
+      engine_answer: engineAnswer,
+      existing_answer: storedAnswer || null
+    }))
+  } catch (error) {
+    // 数据库不可用与「引擎算不出来」分开报（口径同 recompute-answer，注释见彼处）。
+    const msg = String(error?.message || error || '')
+    const isDbDown = /connection terminated|timeout exceeded when trying to connect|ECONNRESET|ETIMEDOUT|ECONNREFUSED|terminating connection/i.test(msg)
+    if (isDbDown) {
+      console.error(`[解析补全] 数据库不可用 q=${req.params?.id}:`, msg)
+      return done(() => res.status(503).json({
+        error: 'db-unavailable',
+        message: '数据库暂时连不上（不是 AI 的问题），请稍后重试'
+      }))
+    }
+    console.error('解析补全失败:', error)
     done(() => res.status(500).json({ error: msg || '服务器内部错误' }))
   }
 })
@@ -3974,6 +4195,12 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
              'difficulty', q.difficulty,
              -- 多小问（题组）：公共题干 + 小问号 + 原题号，供错题卡片补回被拆行丢掉的公共条件
              'parent_stem', q.parent_stem, 'sub_no', q.sub_no, 'question_number', q.question_number,
+             -- 原卷页码（2026-10-15 事故修复）：排卷连排分组键 = task_id + page_number + question_number
+             -- （utils/retryPaperOrder.js getQuestionGroupKey）。缺了页码，键退化成 task+题号，
+             -- 「整题行」与不同页的「小问行」会被误判同组连排 → 打印卷编号整体少 1，
+             -- 与判题端（worker 实时查库有页码）分叉，学生照卷面作答全部错位判给别的题
+             -- （数学-1014-01 实锤：卷面 17 的作答判给了卷面 16 的题、18 的作答串到 13 号位）。
+             'page_number', q.page_number,
              -- 配图显示链（getGeometryDisplayUrl 入参）：干净产物 + 几何资产状态。
              -- 2026-09-26 补：缺了这几列学生端只能看到整页原图或模糊裁片，干净 SVG/描摹产物永远下不去
              'clean_geometry_svg', q.clean_geometry_svg, 'clean_geometry_image_url', q.clean_geometry_image_url,

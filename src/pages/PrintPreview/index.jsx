@@ -22,6 +22,9 @@ import {
 // 本地卷面 HTML 渲染（KaTeX 已展开、字体 data-URL 内联），供原生打印使用
 import { renderFullHTML } from '../../utils/serverPdfExporter'
 import { KATEX_CSS_WITH_FONTS as katexCss } from '../../utils/katexCssWithFonts'
+// 排卷字段完整性判据（2026-10-15 事故防御）：错题本快照缺排卷字段时必须补全量，
+// 否则打印卷连排分叉、编号与判题错位（详见 utils/retryPaperOrder.js 文件尾注释）
+import { isMissingRetryLayoutFields } from '../../utils/retryPaperOrder'
 
 const USE_MOCK_DATA = false
 
@@ -72,7 +75,11 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   // 后者是「错题本勾选组卷 → 预览无星级、组卷历史重打 → 有星级」的兜底：
   // 旧版错题本接口白名单不带 difficulty，缓存/历史数据仍可能缺该字段，
   // 这里主动 getQuestionsByIds 拉全量（SELECT q.* 含 difficulty）对齐两条链路。
-  const needsFullData = (qs) => qs.length > 0 && qs.some(q => !Array.isArray(q.options) || q.difficulty == null)
+  // [2026-10-15 事故防御] 再加排卷四字段（task_id/page_number/question_number/sub_no）
+  // 的存在性判据：错题本白名单一旦再漏字段（实锤漏过 page_number → 打印编号与判题
+  // 编号分叉、全卷错位判题），这里会强制走 getQuestionsByIds 补全量（SELECT q.* 字段齐全），
+  // 不再依赖上游白名单的完整性。null 是合法值不算缺失，只拦「字段压根不存在」。
+  const needsFullData = (qs) => qs.length > 0 && qs.some(q => !Array.isArray(q.options) || q.difficulty == null || isMissingRetryLayoutFields(q))
 
   const ensureEnriched = async () => {
     const qs = previewRef.current

@@ -192,3 +192,44 @@ export const difficultyStars = (difficulty) => {
   if (d === 3) return '★★☆'
   return '★★★'
 }
+
+/**
+ * 排卷输入「字段完整性」防御（2026-10-15 数学-1014-01 事故沉淀）。
+ *
+ * 【事故】错题本接口的 question JSON 白名单漏了 page_number，移动端组卷打印链路
+ *   拿到的题没有页码 → getQuestionGroupKey 从 task+页+题号 退化成 task+题号 →
+ *   「整题行」与【另一页】的「小问行」被误判同组连排 → 打印卷编号整体少 1，
+ *   与判题端（worker 实时查库，字段齐全）分叉。学生照卷面作答后，OCR 按判题
+ *   编号对位，从分叉点起全部错位：17 号的作答判给 16 号的题、18 号的作答串到
+ *   13 号位、真正的 18/19 号位被判「未作答→错」入错题本。
+ *
+ * 【判据】只判字段【存在性】（k in q），不判值——null 是合法存储值（worksheet
+ *   自包含题可无 task_id、历史题可无 page_number）。只要两端拿到的是同一行的
+ *   同一套字段，分组键怎么退化都【不会分叉】；分叉的充要条件是「两端看到的
+ *   字段集合不同」。因此这里的职责是暴露「数据被白名单/映射层削掉了字段」，
+ *   而不是替业务判断 null 对错。
+ *
+ * 消费方：
+ *   - src/utils/pdfGenerator.js buildPaperBody：渲染前告警（不阻断——两端一致
+ *     时编号仍一致，阻断反而卡死合法打印，但必须留下排查线索）；
+ *   - src/pages/PrintPreview / src/utils/serverPdfExporter 的 needsFullData：
+ *     缺字段时触发 getQuestionsByIds 全量补齐（batch 接口 SELECT q.* 字段齐全）。
+ */
+
+/** 排卷/连排判定必需的字段（getQuestionGroupKey 与 buildRetryPaperOrder 直接读取） */
+export const RETRY_LAYOUT_FIELDS = ['task_id', 'page_number', 'question_number', 'sub_no']
+
+/** 单题判据：任一排卷字段「不存在」（被白名单削掉 / 未取到）即 true。null 不算缺失。 */
+export const isMissingRetryLayoutFields = (q) =>
+  !q || RETRY_LAYOUT_FIELDS.some((k) => !(k in q))
+
+/** 批量版：返回 [{ id, missing: string[] }]，供渲染前一次性告警。 */
+export function findQuestionsMissingLayoutFields(questions) {
+  const list = Array.isArray(questions) ? questions.filter(Boolean) : []
+  const missing = []
+  for (const q of list) {
+    const absent = RETRY_LAYOUT_FIELDS.filter((k) => !(k in q))
+    if (absent.length > 0) missing.push({ id: q.id == null ? null : String(q.id), missing: absent })
+  }
+  return missing
+}

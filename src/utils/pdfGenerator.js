@@ -10,7 +10,7 @@ import { resolveQuestionDisplayStem } from './questionStem'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
 // 2026-09-13 事故：此前本文件自带分块/编号（且 judge 等题型因只认 choice/fill/answer
 // 而被整块漏掉），与判题侧的 question_ids 顺序不一致 → 卷面第 N 题 ≠ 判题第 N 题。
-import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars } from './retryPaperOrder'
+import { buildRetryPaperOrder, RETRY_PAPER_BLOCKS, difficultyStars, findQuestionsMissingLayoutFields } from './retryPaperOrder'
 // 教师版「参考答案 + 解析」块的渲染决策（纯函数，回归锁跑的就是这一个）。
 // ⛔ 答案来源判定唯一收敛在 reviewDecision.js#getReferenceAnswerOrigin，
 //    本文件与页面都只消费它，不各写一套。
@@ -230,6 +230,20 @@ ${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-sp
  *      让「卷面第 N 题」与「判题第 N 题」错位。默认 undefined = 行为完全不变。
  */
 export function buildPaperBody({ title, studentName, questions, showAnswers, showAnalysis }) {
+  // 排卷输入字段完整性告警（2026-10-15 数学-1014-01 事故防御）：
+  // 白名单/映射层把排卷必需字段（task_id/page_number/question_number/sub_no）削掉时，
+  // 连排分组键会退化 → 打印编号与判题编号分叉（事故里整体差 1，学生作答全部错位判题）。
+  // 这里只告警不阻断：两端拿到同一套字段时编号必然一致，阻断会卡死合法打印；
+  // 但必须留下足够排查线索（缺哪些字段、哪些题）。
+  const missingLayout = findQuestionsMissingLayoutFields(questions)
+  if (missingLayout.length > 0) {
+    console.error(
+      `[buildPaperBody] ⛔ 排卷输入缺字段，卷面编号可能与判题编号分叉！` +
+      ` ${missingLayout.length}/${(questions || []).length} 题缺字段：` +
+      missingLayout.slice(0, 5).map((m) => `${String(m.id || '?').slice(0, 8)} 缺[${m.missing.join(',')}]`).join('；') +
+      ` —— 请检查数据源白名单（错题本接口 / questions/batch）是否带全 task_id/page_number/question_number/sub_no`
+    )
+  }
   // 排卷 + 卷面编号走唯一口径（src/utils/retryPaperOrder.js，与服务端同源）。
   // 分块只重排桶间顺序，桶内保持 questions 原本的相对顺序（= question_ids 顺序）。
   const paperOrder = buildRetryPaperOrder(questions)
