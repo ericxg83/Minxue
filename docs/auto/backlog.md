@@ -4764,3 +4764,29 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   `dist_nightly_20261015r287` **64s**｜preview 5592：cert_probe exit 0 + render_smoke
   **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - 无新 B/C 提案。仍开放：r280-P-A/P-B、r278-P-B、r285-P-A/P-B。
+
+## 第 r289 轮（2026-10-15 16:49–17:1x，日常巡查 automation `4e9608a9`，锁陈旧接管）
+
+- **锁**：`running/288` 持锁 237 分钟（≥3h 崩溃规则）⇒ 接管认领 r289。持锁方消亡四实证：
+  无报告（reports/ 无 r288 且 13-16 点各档亦无）、未释放、无提交、静默 2.4h
+  （最后写入 14:23，机器同时段活跃）。备份无报警（今日档 13:33 ok:true）。
+- **已落地（零产品码，2 commit 已推送，四道闸全过）**：
+  ① `9cf2591` `test/questionParentStem.test.mjs`——T4（`fdd1bba`）重构 PC 批改页题干区
+     模板（英语折叠 `v-if="parentStem && isEnglishPassage"` + 直渲 `v-else-if="parentStem"`）
+     后字面量 `v-if="parentStem"` 失踪 ⇒ 套件红在 HEAD（非 WIP：目标文件不在 git status）。
+     定性锁过期（computed 定义/唯一口径/兜底分支语义全完好），改判结构不变量 +
+     常驻反向自检（3 坏样本判红 / T4 前形态判绿）。npm test 2447/2448 → **2449/2449**。
+  ② `25a5357` `server/config/neon.js`——`48597b3` 出网探针 :40 空 catch 触发 no-empty
+     （lint 基线 0e→1e），补注释恢复 **0 error**（零行为改动）。
+- **r288 遗留只读核查（未代提交，全部实测通过）**：`test/pcEditJudgementStudentIdGuard.test.mjs`
+  （r288，4/4）、`test/jsonbEmptyStringGuard.test.mjs`（r288，2/2）、
+  `test/todoJumpAndDefaultTab.test.mjs`（待补入会话，6/6）、`test/e2e_todoJump.cjs`
+  （待补入会话，数据相关手跑脚本，OVERALL PASS）。**他人 WIP 不代提**，授权见 r289-P-B。
+- **r289-P-A（B，待拍板：备份覆盖）**：`scripts/dailyBackup.mjs` 只备 5/29 张表
+  （backupKit.mjs TABLES：students/tasks/wrong_questions/questions/knowledge_mastery）。
+  10-15 Neon 迁移实证代价：老项目停机不可读 ⇒ 缺的 24 表（练习册/资源/判题审计/
+  知识点关联/考法库等）只能等 11-1 回填。实测备份 IO 仅 12MB，补全成本极低。
+  建议补全 24 表 + manifest 表清单行数自检。属数据安全决策，只提案不动手。
+- **r289-P-B（待拍板：代提授权）**：上述 4 个未提交测试文件均为纯测试/手跑脚本、
+  对当前树全绿，待负责人授权后显式 pathspec 代提（r271→r273-P-C→`ec1c159` 先例）。
+- 仍开放：r285-P-A（C）、r285-P-B（B）、r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）。

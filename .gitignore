@@ -10,6 +10,7 @@ lerna-debug.log*
 node_modules
 dist
 dist-app
+dist-app-apk
 dist-ssr
 *.local
 
