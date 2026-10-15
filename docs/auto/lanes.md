@@ -39,6 +39,7 @@
 |---|---|---|---|
 | **移动端 App 体验 + 打印/PDF 产出物** | `src/App.jsx`、`src/pages/**`、`src/components/**`、`src/hooks/**`、`src/utils/**`（含 `pdfGenerator.js`、`imageEnhancer.js`、`nativeDownload.js`）、`src/services/apiService.js`、`src/domain/**`、`vite.config.js` 分包、`server/routes/**` 中仅导出/PDF 相关端点 | **每小时兜底脉冲会话（2026-10-10 起，负责人明确「移动端赛道你也一起负责」）** ＋ Quest 会话（2026-10-04 名义认领；其定时任务实测**不存在**，见第 217 轮勘误） | 🟢 已认领 |
 | **服务端基础设施（非批改）** | `server/config/**`、`server/utils/**`（除 `geom/**`、`areaModel*`、`numberAxis*`、`functionGraph*`）、`server/queue.js` 的队列/连接配置、`server/index.js` 的非批改部分、数据库查询与索引健康、进程内存/句柄、定时任务、日志与可观测性、**家长可见产出物的服务端渲染**（`server/services/shareCard*.js`、`server/routes/{shareCard,weeklyReport}.js`） | 常驻巡检会话（2026-10-04 认领，定时任务「敏学常驻巡检循环」每日 21:30） | 🟢 已认领 |
+| **仓库卫生与门禁基线（r285 认领）** | 仅 `server/services/neonService.js` 两处零调用导出删除 + `docs/wrong-question-system.md` 订正（r282 死代码候选落地） | 日常巡查 automation `4e9608a9`（r285，2026-10-15 08:25，锁陈旧接管） | ✅ 已收线（commit `e7a07f4`，四道闸全过；索引 lineage 发现转 backlog r285-P-A/P-B） |
 
 **第 132 轮（2026-10-05，本赛道）已交付：家长分享卡「基本掌握」层（commit `d3a899d`）**
 - 分享卡 = 老师**唯一转发给家长**的输出物，但它只从 stats 取 `masteredCount`，

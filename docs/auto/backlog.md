@@ -4696,3 +4696,35 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - 只读确认关闭风险：nightlyAudit/healthcheck/healthDiskState/nightlyAuditVerdict 四脚本已不存在
   ⇒ 提案 ㊲ 已落地（lanes.md 该 lane「空转」记载待择机订正，文档级）。
 - 无新 B/C 提案。仍开放：r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）。
+
+## 第 r285 轮（2026-10-15 08:25–09:0x，日常巡查 automation `4e9608a9`）
+
+- **锁：陈旧接管**。`running/281` 持锁 21.7 小时（loopGuard ≥3h 崩溃规则 + 持锁方随昨夜
+  关机消亡：仓库写入止于 10-14 23:12、今晨 08:19 才开机、git 干净、r283/r284 从未回写锁）。
+  按撞号先例手工认领 r285。备份无报警（最新 `2026-10-14`，今日 08:22 早于 13:00 档）。
+- **已落地（r282 两项死代码候选，A 级，commit `e7a07f4`，−129 行）**：
+  ① `findSimilarQuestion` + `calculateSimilarity/normalizeString/levenshteinDistance`
+     （neonService.js 原 780-884）——全仓零调用方，worker 09-21 起直走 AI 调用（注释实证），
+     `docs/wrong-question-system.md:41` 失效描述已同步订正 ⇒ **r282-① 关闭，勿再排查**；
+  ② `batchInsertAnswers`（原 1521-1542）——零调用方且与现行单元感知写入路径不同代
+     ⇒ **r282-② 关闭，勿再排查**。
+  保留：迁移 023 与 worker.js 历史注释（非代码引用）。
+- 四道闸：npm test **2381/2381 fail 0**｜eslint **0e/119w**（基线 122w）｜
+  `dist_nightly_20261015r285` **58.40s**｜preview 5590：cert_probe exit 0 + render_smoke **8/8**
+  + route_sweep **0/16** + text_audit **0/14**。
+- **⚠️ 并行会话在制（未碰未提交）**：08:43 发现另一交互会话实时写入
+  `scripts/dev/keep_local_services.mjs`（新看门狗）、`start-local.cmd`/`start-local-hidden.vbs`、
+  `server/services/retrySettlementDecision.js`、`gradingFinalizer.js`、
+  `server/scripts/cleanup-zero-error-wrong-questions.mjs`、`test/retrySettlementEnrollGuard.test.mjs`
+  （r284 待复核归零方向延续）。本轮提交均用显式路径，串车防护实测通过（提交前暂存区为空）。
+- **r285-P-A（C，DB 索引，待拍板）**：`question_cache` 三索引 0 扫描
+  （`idx_question_cache_content_type_subject` 56kB / `idx_question_cache_phash` 72kB /
+  `idx_question_cache_use_count` 40kB；`pg_stat_user_indexes` 自 09-15 建库未重置 ⇒ 约一个月
+  生产零使用）。`use_count` 与已删 findSimilarQuestion 同族；phash 不影响
+  `ON CONFLICT (question_fingerprint, parser_version)`（走 281 scans 的 fingerprint_version 索引）。
+  建议 DROP 并以 `.js` 迁移收口。
+- **r285-P-B（B，仓库 lineage，待拍板）**：`023_add_performance_indexes.sql` 四索引在当前库
+  全部不存在（台账 54 条全是 `.js` 迁移、`.sql` 无执行入口、neon_schema.sql 也没有），
+  指名用户 `findSimilarQuestion` 已死。建议正式退役该 .sql，或把 judgements/questions/
+  wrong_questions 三查询索引移植进 `.js` 迁移环。当前数据量下无实际危害，不急。
+- 仍开放：r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）、r285-P-A（C）、r285-P-B（B）。
