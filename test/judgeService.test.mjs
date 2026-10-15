@@ -386,6 +386,22 @@ test('latex delimiters, judge-word forms, han-only separators are normalized', (
     { isCorrect: false, unrecognized: false })
 })
 
+// 多小问分段比对通道（2026-10-15）：学生 (1)/(2)/… 编号换行作答、参考一行顿号串。
+test('multi-part numbered answers are compared segment by segment', () => {
+  // c82389d5 实测形态：学生编号换行 vs 参考「依次为」+顿号串
+  assert.deepEqual(
+    judgeAnswer('(1) 17\n(2) 2/3\n(3) 5/2\n(4) 4\n(5) 0.021', '依次为 17，2/3，5/2，4，0.021', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 值不同必须判错
+  assert.deepEqual(
+    judgeAnswer('(1) 17\n(2) 2/3\n(3) 5/2\n(4) 4\n(5) 0.021', '依次为 17，2/3，5/2，4，0.022', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 含变量的括号 (x+1) 不得被当组号误切
+  assert.deepEqual(
+    judgeAnswer('(x+1)(x+5)\nx₁=-1, x₂=-5', '-1, -5', 'fill'),
+    { isCorrect: true, unrecognized: false })
+})
+
 // 答案层：答案库把「答案 + 解析」粘成一串（'-1/4 解析：设直线 AB…'），
 // 整串逐串比对必然判错。sanitizeReferenceAnswer 在第一个解析标记处截断，
 // 四道闸门保证不把正常长答案切坏、也不让纯叙述残句变成"答案"。
