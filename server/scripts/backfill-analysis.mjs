@@ -163,8 +163,30 @@ async function solveShared(fp, fn) {
   return p
 }
 
-// 答案比对：归一化后比对，不一致只告警不覆盖（答案归老师/判分链路所有）
-const norm = (s) => String(s ?? '').replace(/\s+/g, '').replace(/[，。、,.;；]$/,'').toLowerCase()
+// 答案比对：归一化后比对，不一致只告警不覆盖（答案归老师/判分链路所有）。
+// ⚠️ 两级归一（2026-10-15 修正）：库里 answer 大量是 KaTeX 记法（`$\frac{\sqrt{10}}{99}$`、
+//   `$2b$`），引擎输出纯文本（`√10/99`、`2b`）—— 数学同解、记法不同。第一版 norm 只剥
+//   空白和标点 ⇒ 把记法差异误判成「答案不一致」跳过补解析（首测 3 题误杀 2）。
+//   strict 不过时走 loose（再剥括号与除号的结构差异）兜底；loose 档打日志留痕。
+//   loose 仍不一致才是真分歧（如 2b vs 3b、正负号差），保持跳过交人工。
+const latexLite = (s) => {
+  let t = String(s ?? '')
+  for (let i = 0; i < 4; i++) {
+    const before = t
+    t = t.replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, '($1)/($2)')
+    t = t.replace(/\\sqrt\{([^{}]*)\}/g, '√($1)')
+    if (t === before) break
+  }
+  return t.replace(/[{}$\\]/g, '')
+}
+const normStrict = (s) => latexLite(s).replace(/\s+/g, '').replace(/[，。、,.;；]$/, '').toLowerCase()
+const normLoose = (s) => normStrict(s).replace(/[()（）/]/g, '')
+const sameAnswer = (a, b) => {
+  const x = normStrict(a), y = normStrict(b)
+  if (x === y) return { equal: true, via: 'strict' }
+  if (x && y && normLoose(a) === normLoose(b)) return { equal: true, via: 'loose' }
+  return { equal: false, via: 'none' }
+}
 
 // ── 逐题回填（固定 CONC 个 worker 轮转消费队列，不用链式 tail ——
 //   链式写法每题都要等前一题结束，并发度实际退化成 1，长题会把整批拖到超时）──
@@ -185,11 +207,18 @@ async function runOne(q) {
       rec.verdict = 'NO_ANALYSIS'; stat.noAnalysis++; detail.push(rec); return
     }
     // 只在引擎没给 answer 时才没有交叉校验能力，仍照填解析（解析本身不参与判分）
-    if (r.answer && q.answer && norm(r.answer) !== norm(q.answer)) {
-      rec.verdict = 'ANSWER_MISMATCH'; rec.engineAnswer = r.answer
-      stat.answerMismatch++; detail.push(rec)
-      console.log(`  ⚠ ${rec.no} 答案不一致：库="${String(q.answer).slice(0, 30)}" 引擎="${String(r.answer).slice(0, 30)}" → 跳过，交人工`)
-      return
+    if (r.answer && q.answer) {
+      const cmp = sameAnswer(r.answer, q.answer)
+      if (!cmp.equal) {
+        rec.verdict = 'ANSWER_MISMATCH'; rec.engineAnswer = r.answer
+        stat.answerMismatch++; detail.push(rec)
+        console.log(`  ⚠ ${rec.no} 答案不一致：库="${String(q.answer).slice(0, 30)}" 引擎="${String(r.answer).slice(0, 30)}" → 跳过，交人工`)
+        return
+      }
+      if (cmp.via === 'loose') {
+        rec.note = '记法差异（KaTeX vs 纯文本），loose 档视为同解'
+        console.log(`  · ${rec.no} 记法差异视为同解：库="${String(q.answer).slice(0, 30)}" 引擎="${String(r.answer).slice(0, 30)}"`)
+      }
     }
     rec.verdict = 'FILLED'; rec.newAnalysis = r.analysis.slice(0, 200)
     stat.filled++
