@@ -38,7 +38,7 @@ stem:{归一化题干}                        -- 以上两者都缺时的兜底
 - 合并时取组内最高 `lifecycle_status`，一条 `mastered` 会让同组真实未掌握的错题从错题本消失；
 - OCR 漏字造成的编辑距离与真实不同题的编辑距离区间完全重叠，字符距离无法区分二者。
 
-因此 OCR 漏字导致的重复错题属于 OCR 侧问题，应在识别与拆题环节治理，或提供复核台人工合并，不得在读取侧用相似度兜底。（原 `src/utils/questionDedup.js` 及其 `calculateSimilarity` **已随 2026-10-02 死代码清理删除**；现存同名的 `calculateSimilarity` 是 `server/services/neonService.js` 内部的**非导出**函数，只用于缓存命中判断，与本口径无关，⛔ 不得接入自动去重路径。）
+因此 OCR 漏字导致的重复错题属于 OCR 侧问题，应在识别与拆题环节治理，或提供复核台人工合并，不得在读取侧用相似度兜底。（原 `src/utils/questionDedup.js` 及其 `calculateSimilarity` **已随 2026-10-02 死代码清理删除**；`server/services/neonService.js` 内的同族死代码 `findSimilarQuestion` 及助手 `calculateSimilarity/normalizeString/levenshteinDistance` **已于 2026-10-15（r285）作为零调用方死导出清除**——清除前它们已无任何调用方（worker 自 09-21 起直走 AI 调用），全仓不再存在任何相似度计算实现，⛔ 不得新增基于相似度的自动去重路径。）
 
 该口径下错题条数可能多于旧实现，这是把此前被误合并隐藏的错题还原，不是缺陷。
 
