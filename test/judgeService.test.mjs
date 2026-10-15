@@ -351,6 +351,41 @@ test('per-segment sign-only mismatch in multi-blank answers is judged wrong', ()
     { isCorrect: true, unrecognized: false })
 })
 
+// 判等器形态增强（2026-10-15，全库漂移清查沉淀的三个能力缺口）：
+// ① normalizeAnswer 剥 $/\(...\)/\[...\] 定界符；② 判断题 √/× 与 正确/错误 形态映射；
+// ③ 纯汉字列举分隔符归一（甲乙 vs 甲、乙）。
+test('latex delimiters, judge-word forms, han-only separators are normalized', () => {
+  // ① $ 定界符：同值答案不得因 $ 判错
+  assert.deepEqual(
+    judgeAnswer('$\\sqrt{x}-\\sqrt{y}$', '\\sqrt{x}-\\sqrt{y}', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // ② 判断题形态：√ vs 正确
+  assert.deepEqual(
+    judgeAnswer('√', '“正确”', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('×', '错误', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 含 × 的算式不得被子串映射误伤（映射只作用于整串单字符形态）
+  assert.deepEqual(
+    judgeAnswer('3×4=12', '12', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 注：'2×3' vs '2+3' 经既有 extractAndCompare 数字集合通道判对（数字集合不含运算符
+  // 语义），属判等器既有待改进项（清单第 7 条），不在本用例范围。
+  // ③ 纯汉字列举分隔符
+  assert.deepEqual(
+    judgeAnswer('甲乙', '甲、乙', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 有数字的串不适用（防 "3.5"="35" 型粘连）：『3人，5人』vs『35人』必须仍判错
+  assert.deepEqual(
+    judgeAnswer('3人，5人', '35人', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  // 真值不同的汉字串不得放水
+  assert.deepEqual(
+    judgeAnswer('甲丙', '甲、乙', 'fill'),
+    { isCorrect: false, unrecognized: false })
+})
+
 // 答案层：答案库把「答案 + 解析」粘成一串（'-1/4 解析：设直线 AB…'），
 // 整串逐串比对必然判错。sanitizeReferenceAnswer 在第一个解析标记处截断，
 // 四道闸门保证不把正常长答案切坏、也不让纯叙述残句变成"答案"。

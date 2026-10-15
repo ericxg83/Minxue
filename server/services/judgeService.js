@@ -473,6 +473,11 @@ function normalizeAnswer(str) {
   if (str === null || str === undefined) return ''
   let s = String(str)
 
+  // LaTeX 定界符与 $ 剥离（2026-10-15）：学生/参考两侧常带 $...$、\(...\)、\[...\] 包裹，
+  // 不剥则同值答案因定界符判错（全库漂移清查实测 10+ 条：a7f0d817/4261eea7/086c3fd6 等）。
+  // 两侧同剥，纯形态归一，无数值语义变化。
+  s = s.replace(/\$|\\\(|\\\)|\\\[|\\\]/g, '')
+
   // Full-width to half-width (includes letters, digits, punctuation)
   s = s.replace(/[！-～]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
 
@@ -1305,6 +1310,30 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     const lightStudent = lightLiteral(studentAnswer)
     if (lightStudent && lightStudent === lightLiteral(referenceAnswer) &&
         LITERAL_MEANINGFUL_RE.test(lightStudent)) {
+      return { isCorrect: true, unrecognized: false }
+    }
+
+    // 判断题形态映射（2026-10-15）：学生卷面答 √/×，参考答「正确/错误」——同一语义两种形态，
+    // 整串恰好是单字符对错标记时归一后再比（全库漂移 2 条实测：ef85b049/655ab30f）。
+    // ⚠️ 仅映射「整串就是 √/×/✓/✗」的极端形态，不做子串替换，防误伤含 × 的算式。
+    const mapJudgeWord = (t) => {
+      if (/^[√✓]$/.test(t)) return '正确'
+      if (/^[×✗✘]$/.test(t)) return '错误'
+      return t
+    }
+    const lsJudge = mapJudgeWord(lightStudent)
+    const lrJudge = mapJudgeWord(lightLiteral(referenceAnswer))
+    if (lsJudge !== lightStudent && lsJudge === lrJudge) {
+      return { isCorrect: true, unrecognized: false }
+    }
+
+    // 纯汉字列举分隔符（2026-10-15）：「甲乙」vs「甲、乙」——两侧均为纯汉字+分隔符
+    // （无数字/字母/数学符号，剥掉分隔符不会造成数值粘连）时剥除后再比（4a50d73e 实测）。
+    // ⚠️ 字符集刻意排除数字/字母：有数字的串走既有通道，剥分隔符会造成 "3.5"="35" 型误判。
+    const HAN_ONLY_RE = /^[\u4e00-\u9fa5、，,;；。：:]+$/
+    const stripHanSep = (t) => String(t || '').replace(/[、，,;；。：:]/g, '')
+    if (HAN_ONLY_RE.test(lightStudent) && HAN_ONLY_RE.test(lightLiteral(referenceAnswer)) &&
+        stripHanSep(lightStudent) && stripHanSep(lightStudent) === stripHanSep(lightLiteral(referenceAnswer))) {
       return { isCorrect: true, unrecognized: false }
     }
 
