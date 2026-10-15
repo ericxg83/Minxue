@@ -225,8 +225,17 @@
             </div>
             <!-- 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
                  公共条件挂在这一列。批改页不显示它，老师看到的就是无条件的残缺题
-                 （重练卷引用的原题尤其明显）。 -->
-            <div v-if="parentStem" class="ops-q-stem"><MathRender :content="parentStem" autoDetect /></div>
+                 （重练卷引用的原题尤其明显）。
+                 英语语篇题（T4 2026-10-15）：parent_stem 是整篇文章（数百字），
+                 平铺会淹没题干 → 默认收起、点开查看语境；数学公共题干保持平铺原样。 -->
+            <div v-if="parentStem && isEnglishPassage" class="ops-q-stem ops-passage-box">
+              <button type="button" class="ops-passage-toggle" @click="passageOpen = !passageOpen">
+                <span>语篇原文{{ passageOpen ? '' : `（${parentStem.length} 字 · 点开查看语境）` }}</span>
+                <span>{{ passageOpen ? '收起 ▲' : '展开 ▼' }}</span>
+              </button>
+              <MathRender v-if="passageOpen" :content="parentStem" autoDetect />
+            </div>
+            <div v-else-if="parentStem" class="ops-q-stem"><MathRender :content="parentStem" autoDetect /></div>
             <div v-if="q.content" class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
             <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
@@ -581,6 +590,12 @@ const misjudgeAskThisSession = ref(true)
 // parent_stem 的历史数据不重复渲染，与错题卡片 / 重练卷 / 移动端完全同源。
 const displayStem = computed(() => resolveQuestionDisplayStem(q.value))
 const parentStem = computed(() => displayStem.value.parentStem)
+
+// 英语语篇原文折叠（英语语法重练 T4，2026-10-15）：英语题 parent_stem 是语篇全文，
+// 默认收起；数学公共题干（一两行）保持平铺。判据用 subject 而非长度——
+// 长度判据会把数学长题干也折叠，破坏「数学展示行为原样」约束。
+const isEnglishPassage = computed(() => q.value?.subject === '英语')
+const passageOpen = ref(false)
 
 // 题型中文映射表（question_type 字段合法值）
 const TYPE_MAP = { choice: '选择题', fill: '填空题', answer: '解答题', judge: '判断题' }
@@ -1982,6 +1997,26 @@ const handleRetryGeometry = async () => {
   padding-left: 8px;
   border-left: 3px solid var(--wb-border, #e2e8f0);
   margin-bottom: 4px;
+}
+/* 英语语篇原文折叠条（T4）：默认只显示一行入口，展开才渲染全文 */
+.ops-passage-box {
+  padding-left: 0;
+  padding-right: 8px;
+}
+.ops-passage-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--wb-text-tertiary, #94a3b8);
+}
+.ops-passage-toggle:hover {
+  color: var(--wb-text-secondary);
 }
 
 /* 选项 */

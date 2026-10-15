@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { AlertCircle, CheckCircle2, RotateCcw } from 'lucide-react'
 import dayjs from 'dayjs'
 import MathText from './MathText'
@@ -36,6 +36,11 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
     : null
   // 题干展示口径：content 自身已含 parent_stem 时 parentStem 为空串，不会重复渲染
   const displayStem = resolveQuestionDisplayStem(q)
+  // 英语语篇原文折叠（英语语法重练 T4，2026-10-15）：英语题 parent_stem 是语篇全文
+  //（数百字），平铺会淹没题干 → 默认收起、点开看语境；数学公共题干保持平铺原样。
+  // 判据用 subject 而非长度——长度会把数学长题干也折叠，破坏「数学展示原样」约束。
+  const isEnglishPassage = q.subject === '英语'
+  const [passageOpen, setPassageOpen] = useState(false)
   const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
   const status = statusMap[wq.lifecycle_status || 'new'] || statusMap.new
   const StatusIcon = status.icon
@@ -57,12 +62,25 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
         </div>
 
         {/* 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
-            公共条件挂在这一列。不显示它，学生看到的就是一道无条件的残缺题。 */}
-        {displayStem.parentStem && (
+            公共条件挂在这一列。不显示它，学生看到的就是一道无条件的残缺题。
+            英语语篇题：parent_stem 是整篇文章 → 折叠展示（默认收起）。 */}
+        {displayStem.parentStem && (isEnglishPassage ? (
+          <div className='mt-4 rounded-lg text-[13px]' style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', borderLeft: '3px solid var(--border)' }}>
+            <button type='button' onClick={() => setPassageOpen(v => !v)} className='flex w-full items-center justify-between px-3 py-2' style={{ color: 'var(--text-secondary)' }}>
+              <span>语篇原文{passageOpen ? '' : `（${displayStem.parentStem.length} 字 · 点开查看语境）`}</span>
+              <span>{passageOpen ? '收起 ▲' : '展开 ▼'}</span>
+            </button>
+            {passageOpen && (
+              <div className='px-3 pb-2' style={{ lineHeight: 1.7 }}>
+                <MathText content={displayStem.parentStem} />
+              </div>
+            )}
+          </div>
+        ) : (
           <div className='mt-4 rounded-lg px-3 py-2 text-[13px]' style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', lineHeight: 1.7, borderLeft: '3px solid var(--border)' }}>
             <MathText content={displayStem.parentStem} />
           </div>
-        )}
+        ))}
 
         {/* 题干 */}
         <div className={displayStem.parentStem ? 'mt-2' : 'mt-4'} style={{ fontSize: 'var(--fs-14)', lineHeight: 1.7, color: 'var(--text)' }}>
