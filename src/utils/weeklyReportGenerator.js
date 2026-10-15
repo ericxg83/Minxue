@@ -1438,6 +1438,9 @@ export async function generateWeeklyReport(studentId, { mode = 'week', offset = 
       questions: [],                    // 已合并到 html，传空数组避免被当成模式 A
       showAnswers: false,
       returnPdfBlob: true,              // 返回 blob，由调用方 saveAs 触发下载
+      // 周报合并了「诊断报告 + 错题再测卷」，两者都可能多页 ⇒ 每页页脚加页码，
+      // 老师/家长翻页时能对上「第几页」。
+      pageNumbers: true,
     })
     return { mode: 'download', pdfBlob: result.pdfBlob, filename }
   } catch (e) {

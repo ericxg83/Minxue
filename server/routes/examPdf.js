@@ -14,13 +14,16 @@ const router = express.Router()
 
 /**
  * POST /api/exam-pdf
- * Body: { html: string, filename?: string, pdfOptions?: Object }
+ * Body: { html: string, filename?: string, pdfOptions?: Object, pageNumbers?: boolean }
  * Response: application/pdf (binary)
+ *
+ * pageNumbers=true → 每页页脚印「第 X 页 / 共 Y 页」（错题重练卷）。
+ * 不传/false 时行为与历史一致（周报、试卷库讲义等出口不受影响）。
  */
 router.post('/', async (req, res) => {
   const t0 = Date.now()
   try {
-    const { html, filename = 'exam.pdf', pdfOptions } = req.body || {}
+    const { html, filename = 'exam.pdf', pdfOptions, pageNumbers = false } = req.body || {}
     if (!html || typeof html !== 'string') {
       return res.status(400).json({ error: 'html 不能为空（须为 buildExamHTML 生成的完整 HTML）' })
     }
@@ -37,7 +40,7 @@ router.post('/', async (req, res) => {
     // puppeteer-core 的 page.pdf() 在部分版本返回 Uint8Array；必须显式转成
     // Node Buffer，否则 Express 会把它按普通对象序列化成 {"0":...}，
     // 前端拿到的就不是合法 PDF，下载和打印都会停在"生成 PDF"阶段。
-    const pdfBuffer = Buffer.from(await renderExamPDF({ html, filename, pdfOptions }))
+    const pdfBuffer = Buffer.from(await renderExamPDF({ html, filename, pdfOptions, pageNumbers }))
 
     const dt = Date.now() - t0
     console.log(`[examPdf] 渲染完成 ${dt}ms, PDF ${pdfBuffer.length} bytes`)

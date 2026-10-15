@@ -417,7 +417,10 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, include
     qrSvg,
   })
   const filename = `${examName}.pdf`
-  const pdfBuffer = await renderExamPDF({ html, filename })
+  // pageNumbers：每页页脚印「第 X 页 / 共 Y 页」。
+  // PC 错题中心「一键导出重练卷」是**独立于前端导出引擎的后端路径**（不经 exportServerPDF），
+  // 必须在这里单独开；页码画在底部 margin 空白区，不改内容区高度 ⇒ 分页与加页码前一致。
+  const pdfBuffer = await renderExamPDF({ html, filename, pageNumbers: true })
 
   return { pdfBuffer, examId, qrContent, studentName, count: active.length, filename }
 }

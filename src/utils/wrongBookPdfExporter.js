@@ -45,6 +45,9 @@ import { exportServerPDF } from './serverPdfExporter'
  * @param {string} [opt.orientation] 'portrait' | 'landscape'（保留以兼容旧调用，实际由 PDF 引擎决定）
  * @param {boolean} [opt.forceServer]  强制走服务端 Playwright（仅开发/测试用）
  * @param {boolean} [opt.forceBrowser] 强制走浏览器原生打印（仅开发/测试用）
+ * @param {boolean} [opt.pageNumbers=true] 每页页脚印「第 X 页 / 共 Y 页」。
+ *   错题卷/重练卷默认开启（卷子多页时老师与学生都要按页码对齐讲评）；
+ *   页码由服务端 Chromium 按真实分页回填，不占内容区 ⇒ 不影响卷子分页。
  * @returns {Promise<{downloaded|printed: true, filename: string, message?: string, mode: string} | null>}
  *   - 成功：返回 { downloaded/printed: true, filename, message, mode: 'server'|'browser' }
  *   - 失败：返回 null
@@ -103,6 +106,9 @@ export async function exportWrongBookPDF({
   forceServer = false,
   forceBrowser = false,
   returnPdfBlob = false,
+  // 错题重练卷：每页页脚印「第 X 页 / 共 Y 页」。四处生成（移动端错题本 / PC 错题中心 /
+  // 周报再测卷 / 后台自动重练卷）共用本引擎 ⇒ 默认开启，一处覆盖全部出口。
+  pageNumbers = true,
 }) {
   // 0. 环境检测
   const isProd = detectProductionEnv()
@@ -153,6 +159,7 @@ export async function exportWrongBookPDF({
         qrContent,
         filename: baseFile,
         returnPdfBlob: true,       // 拿到 blob，自行 saveAs 触发下载
+        pageNumbers,               // 页码页脚（见函数签名注释）
       })
       // 触发浏览器下载
       if (!returnPdfBlob) saveAs(result.pdfBlob, `${baseFile}.pdf`)
@@ -202,7 +209,7 @@ export async function exportWrongBookPDF({
 /**
  * 按题目 ID 直接导出一份错题卷（快捷入口）。
  */
-export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, showAnalysis, qrContent, orientation, forceServer, forceBrowser }) {
+export async function exportWrongBookPDFByIds({ studentId, studentName, questionIds, title, filename, showAnswers, showAnalysis, qrContent, orientation, forceServer, forceBrowser, pageNumbers = true }) {
   return exportWrongBookPDF({
     studentId,
     studentName,
@@ -215,5 +222,6 @@ export async function exportWrongBookPDFByIds({ studentId, studentName, question
     orientation,
     forceServer,
     forceBrowser,
+    pageNumbers,
   })
 }

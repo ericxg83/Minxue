@@ -180,9 +180,10 @@ export async function renderCustomBodyToHTML({ bodyHtml, extraCss = '' }) {
  * @param {string} [opt.qrContent]
  * @param {string} [opt.filename]        - 下载文件名（不含 .pdf）
  * @param {boolean} [opt.returnPdfBlob=false] - true 时返回 {pdfBlob}，不触发下载
+ * @param {boolean} [opt.pageNumbers=false] - 每页页脚印「第 X 页 / 共 Y 页」（错题重练卷用）
  * @returns {Promise<{downloaded: true, pdfBytes: number, filename: string, pdfBlob?: Blob}>}
  */
-export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, showAnalysis = false, qrContent, filename, returnPdfBlob = false }) {
+export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, showAnalysis = false, qrContent, filename, returnPdfBlob = false, pageNumbers = false }) {
   let finalHtml = html
 
   // 模式 A：用 questions 构造 HTML（兼容老的错题卷主路径）
@@ -241,6 +242,8 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
       body: JSON.stringify({
         html: finalHtml,
         filename: `${filename || '错题重练'}.pdf`,
+        // 页码交给后端 Chromium 的 displayHeaderFooter 生成（前端估不准真实页数）
+        pageNumbers: pageNumbers === true,
         pdfOptions: {
           format: 'A4',
           printBackground: true,
