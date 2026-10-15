@@ -4728,3 +4728,35 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   指名用户 `findSimilarQuestion` 已死。建议正式退役该 .sql，或把 judgements/questions/
   wrong_questions 三查询索引移植进 `.js` 迁移环。当前数据量下无实际危害，不急。
 - 仍开放：r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）、r285-P-A（C）、r285-P-B（B）。
+
+## 第 r287 轮（2026-10-15 09:59–10:3x，日常巡查 automation `4e9608a9`，锁撞号避让认领）
+
+- **锁**：`finished/285` 释放；loopGuard round+1 得 286，与并行会话 08:49 提交 `1eea748`
+  （消息头 r286）撞号 ⇒ 手工认领 **r287**（286 被占、287 空位，`git log --all --grep` 实证；
+  remoteAhead=0）。备份无报警（最新 `2026-10-14`，今日 09:59 早于 13:00 档）。
+- **套件唯一红的归属鉴定（本轮主项，零代码改动）**：红位随并行会话迭代而移动——
+  09:58 红 `judgeService.test.mjs` 缺陷 6 测试（只存在于未提交 diff 的新测试）；
+  10:20 红 `recomputeAnswerTimeout.test.mjs`（已提交源码锁：WIP 把
+  `ENGINE_TIMEOUT_MS/SLOW_ENGINE_TIMEOUT_MS` 提升到模块作用域并改名 `RECOMPUTE_*`，
+  值未变 120s/55s/210s ⇒ 路由体内正则失配报 NaN/NaN/210000）。
+  **HEAD 为绿三层证据**：① `git show HEAD:server/index.js` 三常量在路由体内
+  （2802/2816/2817）；② index.js 最后提交 b88d1dc 早于 r285 的 2381/2381 全绿跑；
+  ③ 其余 2413 条全过（WIP 是 HEAD 测试超集）。
+- **r287-记录（待观察，勿重复排查）**：recomputeAnswerTimeout 锁 vs WIP 常量提升不同步，
+  待并行会话收口；若其提交时未同步更新锁，下一轮将红在 HEAD，按「锁过期 vs 改口径」处理
+  （现有证据倾向锁过期：值未变、仅作用域/名变）。
+- **只读探针过程贡献**（`server/_diag_r287_wip.mjs`，用完已删）：09:58–10:12 之间对方
+  段级符号闸缺「分隔符统一」，实证 7 条中断言 1/3/4 失守（非对称切分跳过逐段循环 ⇒
+  落回窄化后整串 `extractAndCompare` 数值兜底翻盘）；对方 10:12 版本已补「整串早退闸 +
+  `;`→`,` 统一」，重跑 7/7。全程未碰对方 15 个 WIP 文件。
+- **服务端只读核查无缺陷留档**：autoReviewService.js 全读 169 行（口径注释完整）；
+  neonService.js 补读 652-742（答案异常标记族）/1313-1428（单元 upsert + dedupeByDbKey）/
+  1766-1904（资源答案族）/1019-1133（几何资产写入）——均为硬化路径；疑点
+  `replaceResourceAnswers:1787` 静默写 NULL 经读 resolveUnitIds 排除（map 由同一批
+  answers 构建，必然命中，`|| null` 不可达）。
+- **落地一件（A 级文档）**：lanes.md「夜间只读巡检」lane 空转记载改为已收线
+  （㊲ 已落地、四脚本已不存在，r282 只读确认）+ r287 认领行。
+- 四道闸：npm test **2413/2414**（唯一红=对方 WIP，证据如上）｜eslint **0e/119w**｜
+  `dist_nightly_20261015r287` **64s**｜preview 5592：cert_probe exit 0 + render_smoke
+  **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- 无新 B/C 提案。仍开放：r280-P-A/P-B、r278-P-B、r285-P-A/P-B。

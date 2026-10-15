@@ -13,7 +13,7 @@
 | **PC 工作台信息架构与数据页** | `src/workbench/views/**`（除白板）、`src/workbench/components/**`、`src/workbench/stores/**` | 第 91-92、103-104 轮 | 🟡 活跃（数据页合并、入口可达性闸、分享卡品牌化、错题中心一致性；第 104 轮修 lifecycle 回滚 + 筛选泄漏，第 105 轮深审 reviewStore 中） |
 | **批改链路与任务自愈** | `server/worker.js`、`server/queue.js`、`server/services/**` 批改相关 | 第 90、103 轮 | 🟡 活跃（自愈已存在→不立项；前端直调 AI 已移除） |
 | **仓库卫生与门禁基线** | 死模块/死声明清理、lint 棘轮、`scripts/pruneDeadDeclarations.mjs`、`scripts/gate/**` | 第 82-83、94-96 轮 | 🟡 活跃（lint 基线 14→9 errors） |
-| **夜间只读巡检（A 层）** | 只写 `docs/auto/**`；禁止改业务码与 git 写操作 | ⛔ **2026-10-06 实测：这条自动化不存在**（见下方「第 217 轮勘误」）｜认领方暂记为「常驻巡检会话」 | 🟠 空转（引擎 `scripts/nightlyAudit.mjs` 零调用方） |
+| **夜间只读巡检（A 层）** | 只写 `docs/auto/**`；禁止改业务码与 git 写操作 | ⛔ **2026-10-06 实测：这条自动化不存在**（见下方「第 217 轮勘误」）｜认领方暂记为「常驻巡检会话」 | ✅ 已收线（提案㊲ 2026-10-13 负责人批复落地：nightlyAudit/healthcheck 脚本家族已删除，r282 只读确认四脚本不存在；本行此前的「空转」记载自 10-06 起挂了 9 天，r287 订正） |
 
 ## ⚠️ 第 217 轮勘误（2026-10-06 实测，本表此前记的自动化与实际不符）
 
@@ -528,3 +528,25 @@
 - 四道闸：npm test **2375/2375 fail 0**｜eslint **0e/122w**｜`dist_nightly_20261013r280` **34.92s**｜
   preview 5582 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - 备份 10-13 13:30 ok:true 无报警；未触碰他人在制 `.workbuddy-ai/memory/MEMORY.md`。
+
+## 第 r287 轮认领（2026-10-15 09:59–10:3x，新日常巡查任务 · automation `4e9608a9`）
+
+- **本轮赛道**：仓库卫生与门禁基线（docs/auto 台账订正）+ 服务端基础设施（非批改）只读核查。
+- **锁号**：loopGuard round+1 得 286，与并行会话 08:49 提交 `1eea748`（消息头 r286）撞号，
+  按 r273/r278/r285 先例手工认领 **r287**（`git log --all --grep` 实证 286 被占、287 空位；
+  acquire 时 remoteAhead=0）。
+- **落地（A 级文档，零产品码）**：本表「夜间只读巡检（A 层）」赛道行此前的「🟠 空转」记载
+  改为「✅ 已收线」——提案㊲（负责人 2026-10-13 批复）已落地，nightlyAudit/healthcheck
+  脚本家族已删除（r282 只读确认四脚本不存在）；该过期状态自 10-06 起挂了 9 天，
+  会让后来者误以为该赛道有人守。
+- **本轮主项（零代码改动）**：套件唯一红的归属鉴定——红位随并行会话迭代移动
+  （judgeService 缺陷 6 测试 → recomputeAnswerTimeout 源码锁），三层证据证明 HEAD 为绿、
+  红全部来自对方未提交 WIP（详见 `docs/auto/reports/2026-10-15-r287.md`）。
+- **只读无缺陷留档**：autoReviewService.js 全读 169 行；neonService.js 补读 4 段
+  （652-742 答案异常标记族 / 1313-1428 单元 upsert+dedupeByDbKey / 1766-1904 资源答案族 /
+  1019-1133 几何资产写入）；`replaceResourceAnswers:1787` 静默写 NULL 疑点排除（不可达防御）。
+- **未触碰**：并行会话 15 个 WIP 文件（ensure-analysis + retryPaperOrder + judgeService
+  缺陷 6 + 看门狗三件）零动；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- 四道闸：npm test **2413/2414**（唯一红=对方 WIP，HEAD 绿有实证）｜eslint **0e/119w**｜
+  `dist_nightly_20261015r287` **64s**｜preview 5592：cert_probe exit 0 + render_smoke
+  **8/8** + route_sweep **0/16** + text_audit **0/14**。
