@@ -37,7 +37,7 @@ function _egressRecord(sql, res) {
 function _egressFlush() {
   try {
     let prev = { aggregates: {} }
-    try { prev = JSON.parse(fs.readFileSync(EGRESS_REPORT, 'utf8')) } catch { }
+    try { prev = JSON.parse(fs.readFileSync(EGRESS_REPORT, 'utf8')) } catch { /* 无报告或已损坏：从空聚合起步 */ }
     const merged = prev.aggregates || {}
     for (const [k, v] of Object.entries(_egressAgg)) {
       if (!merged[k]) merged[k] = { count: 0, bytes: 0, rows: 0, last: '' }
