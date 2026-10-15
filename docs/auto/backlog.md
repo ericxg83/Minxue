@@ -4790,3 +4790,19 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r289-P-B（待拍板：代提授权）**：上述 4 个未提交测试文件均为纯测试/手跑脚本、
   对当前树全绿，待负责人授权后显式 pathspec 代提（r271→r273-P-C→`ec1c159` 先例）。
 - 仍开放：r285-P-A（C）、r285-P-B（B）、r280-P-A（B/C）、r280-P-B（B）、r278-P-B（B）。
+
+## r289 附注：并行会话提交裹走暂存文件（流程教训，2026-10-15 17:15）
+
+- **事件**：本轮 4 个 docs 文件 `git add` 后未立即 commit，并行会话 17:15:30 的
+  `1c5cf9e`（其本意只提交 .gitignore 一行）把暂存区里我的 4 文件一并裹入
+  ⇒ 我的 `git commit -- <pathspecs>` 报 "no changes added"（内容已进对方提交）。
+  我方随后的 push 又与对方 push 竞速被拒（non-ff）。
+- **处置（零内容损失）**：`git diff HEAD origin/main` 实证两边树一致 ⇒
+  `git reset --soft origin/main` 采用远端历史（soft 不动工作区，并行 WIP 零风险），
+  本地冗余副本丢弃。内容全部在远端（代码 2 提交归属正确；docs 4 文件在 1c5cf9e 内，
+  归属不完美但可经 `git log --follow` 追溯）。⛔ 未 force-push 改写已推送历史。
+- **教训（写给后续轮次）**：① 暂存后**立即** commit（skill「改完立刻提交」的镜像面：
+  不只防回滚，也防被裹走）；② commit 后 `git log --oneline -1` 核实归属再 push；
+  ③ push 被拒先 `git log HEAD..origin/main` 看清再动，勿默认 pull --rebase；
+  ④ `reset --soft` 是「采用远端、丢弃本地冗余提交」的安全工具（不动工作区文件），
+  但 `reset --hard` 在本仓库永慎用（会连他人未提交 WIP 一起毁）。
