@@ -218,7 +218,7 @@
   <el-dialog v-model="pendingGateVisible" title="待补入错题本的题（自动放行留痕）" width="720px">
     <div class="pending-gate-tip">
       这些错题被记为「本次不加入」（系统放行，非老师否决）。缺元素的补全并保存后会自动加入错题本；
-      低置信的按口径需老师拍板（标错即强入，标对即翻篇）。点按钮直接定位到题。
+      低置信的按口径需老师拍板（标错即强入，标对即翻篇）。点按钮直接定位到题；题目已删除/被排除/作业已重跑的失效欠账会在定位时自动清理。
     </div>
     <div v-if="pendingGateLoading" class="pending-gate-loading">加载中…</div>
     <template v-else>
@@ -740,6 +740,12 @@ const handleFigureRecrop = async () => {
 // 点按钮：复用 loadTaskById（反查学生 → 切学生 → 选卷，与 Dashboard 深链同口径）。
 // 题目数据由 selectTask 重拉，gate_auto_skipped 标记随后端返回，不依赖清单旧快照。
 // 缺元素题直接打开编辑面板（补图入口）；低置信/待补入题只定位，由老师就地拍板。
+// [2026-10-15 失效欠账自动清理] 清单是拉取时快照：弹窗开着期间题可能在库侧失效
+// （作业重跑硬删题行重建换 id / 人工排除 / 标对或强入已入册）。此时题不在卷面，
+// 旧文案「请在原卷中确认」是死胡同且死链欠账继续挂徽标。现在发现不在卷面时先
+// 重拉清单以库为准再处置（防止把 loadQuestions 失败的空列表误判成已删）：
+//   重拉后该条消失 ⇒ 库侧确已失效 → 当场清账（清单/徽标随重拉自动更新）；
+//   重拉后仍在   ⇒ 只是本次卷面加载异常，不清（界面说清了库里还在，比不清更坏）。
 const goGateItem = async (it) => {
   gateJumpLoading.value = it.questionId
   try {
@@ -761,8 +767,15 @@ const goGateItem = async (it) => {
       } else {
         store.jumpToQuestion(idx)
       }
+      return
+    }
+    await store.loadGatePending()
+    const stillPending = store.pendingGateGroups.some(g =>
+      g.items.some(p => p.questionId === it.questionId))
+    if (stillPending) {
+      ElMessage.warning('题目状态与清单不一致，清单已刷新，请重试')
     } else {
-      ElMessage.warning('该题不在当前卷的题目列表中（可能已被删除或排除），请在原卷中确认')
+      ElMessage.success('该题已不在卷中（已删除、被排除或作业已重跑），这条待补入欠账已自动清理')
     }
   } finally {
     gateJumpLoading.value = ''
