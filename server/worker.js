@@ -1317,25 +1317,54 @@ export function classifyEnglishPage(pageQuestions) {
   return looksSelfSufficient ? 'self-sufficient' : 'pending'
 }
 
-/** 拼图上限：一次合并识别最多拼 3 页（更高拼图会压得字太小，超出按批拆分） */
-export const ENGLISH_STITCH_MAX_PAGES = 3
+/** 拼图上限：一次合并识别最多拼 6 页（一篇语篇的现实页数上限；4 页连续跨页场景见 selectEnglishMergePages） */
+export const ENGLISH_STITCH_MAX_PAGES = 6
+
+/**
+ * 选出需要合并重识别的页（T5 修正，2026-10-15 晚）。
+ *
+ * 【为什么要整组合并而不能只挑挂起页】负责人实拍推演：4 页连续跨页（第 1 页连着
+ * 第 2 页、第 2 连着第 3、第 3 连着第 4），选项表在第 4 页末尾。此时第 1-3 页
+ * （有挖空缺选项）判 pending，但第 4 页（有挖空且选项齐全）判 self-sufficient——
+ * 只挑挂起页会让第 4 页掉队：合并组里没有选项表，拼出的题依然缺选项，语篇断成两截。
+ *
+ * 因此口径是：同任务存在任一挂起页 ⇒ 语篇处于分离/跨页形态 ⇒ 同任务所有
+ * 【含英语挖空题】的页全部并入合并组。无挖空的自足英语页（老考法单句选择题）
+ * 不并入——它们与语篇无关。
+ */
+export function selectEnglishMergePages(pageResults) {
+  const kinds = (Array.isArray(pageResults) ? pageResults : []).map(r => ({
+    r,
+    kind: classifyEnglishPage(r?.pageQuestions),
+  }))
+  const hasPending = kinds.some(k => k.kind === 'pending')
+  if (!hasPending) return []
+  return kinds
+    .filter(k => k.kind === 'pending' || (k.kind === 'self-sufficient' && (k.r?.pageQuestions || []).some(ENGLISH_HAS_BLANK)))
+    .map(k => k.r)
+}
 
 /**
  * 多页压缩 buffer 垂直拼接成一张大图（sharp composite，顶部白隔条分隔）。
  * 供英语挂起页合并识别：AI 一眼看到完整文章 + 选项表。
+ * 拼接前每页统一压到 1280 宽——多页纵拼后总高容易超视觉模型的有效分辨率，
+ * 不压会导致远端页文字缩糊（4 页 ≈ 5300px 高）。
  */
 export async function stitchPageBuffers(buffers) {
   const list = (Array.isArray(buffers) ? buffers : []).filter(Boolean)
   if (list.length === 0) throw new Error('stitchPageBuffers: 空 buffer 列表')
   if (list.length === 1) return list[0]
-  const metas = await Promise.all(list.map(b => sharp(b).metadata()))
+  const normalized = await Promise.all(
+    list.map(b => sharp(b).resize({ width: 1280, withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer())
+  )
+  const metas = await Promise.all(normalized.map(b => sharp(b).metadata()))
   const width = Math.max(...metas.map(m => m.width || 0))
   const gap = 24
   const totalHeight = metas.reduce((s, m) => s + (m.height || 0), 0) + gap * (list.length - 1)
   const composites = []
   let y = 0
-  for (let i = 0; i < list.length; i++) {
-    composites.push({ input: list[i], top: y, left: 0 })
+  for (let i = 0; i < normalized.length; i++) {
+    composites.push({ input: normalized[i], top: y, left: 0 })
     y += (metas[i].height || 0) + gap
   }
   return sharp({
@@ -8145,7 +8174,7 @@ export const processTask = async (job) => {
     // subject 注入、校验闸全部现成）；合并结果无挖空（如漏拍文章只拍了选项表）
     // 或识别失败时，保留原第一遍结果并打 is_suspicious，绝不静默丢题。
     {
-      const pendingPages = pageResults.filter(r => classifyEnglishPage(r.pageQuestions) === 'pending')
+      const pendingPages = selectEnglishMergePages(pageResults)
       if (pendingPages.length > 0) {
         console.log(`   [英语页组] ${pendingPages.length} 页挂起（语篇分离/跨页），合并重识别: 第 ${pendingPages.map(p => p.pageNumber).join(',')} 页`)
         const mergedByPage = new Map()

@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
-import { classifyEnglishPage, stitchPageBuffers, ENGLISH_STITCH_MAX_PAGES } from '../server/worker.js'
+import { classifyEnglishPage, stitchPageBuffers, selectEnglishMergePages, ENGLISH_STITCH_MAX_PAGES } from '../server/worker.js'
 
 const enStemQ = (n, opts) => ({
   question_number: n, subject: '英语', question_type: 'choice',
@@ -79,6 +79,34 @@ test('stitchPageBuffers：两页 buffer 拼接尺寸正确、单页原样返回'
   await assert.rejects(() => stitchPageBuffers([]))
 })
 
-test('每批最多 3 页（ENGLISH_STITCH_MAX_PAGES）', () => {
-  assert.equal(ENGLISH_STITCH_MAX_PAGES, 3)
+test('每批最多 6 页（ENGLISH_STITCH_MAX_PAGES，覆盖一篇语篇的页数上限）', () => {
+  assert.equal(ENGLISH_STITCH_MAX_PAGES, 6)
+})
+
+test('4 页连续跨页：带选项表的末页不被判"自足"掉队（负责人实拍推演）', () => {
+  // 第 1-3 页：有挖空缺选项（pending）；第 4 页：有挖空且选项齐全（self-sufficient）
+  const page1 = { pageNumber: 1, pageQuestions: [enStemQ(1, []), enStemQ(2, [])] }
+  const page2 = { pageNumber: 2, pageQuestions: [enStemQ(3, []), enStemQ(4, [])] }
+  const page3 = { pageNumber: 3, pageQuestions: [enStemQ(5, []), enStemQ(6, [])] }
+  const page4 = { pageNumber: 4, pageQuestions: [enStemQ(7), enStemQ(8)] } // options 齐全
+  const selected = selectEnglishMergePages([page1, page2, page3, page4])
+  assert.deepEqual(selected.map(p => p.pageNumber), [1, 2, 3, 4], '四页必须全部进入合并组，末页不得掉队')
+})
+
+test('无挂起页时（全部自足）不触发合并', () => {
+  const pages = [
+    { pageNumber: 1, pageQuestions: [enStemQ(1), enStemQ(2)] },
+    { pageNumber: 2, pageQuestions: [enPlainChoice(1), enPlainChoice(2)] },
+  ]
+  assert.deepEqual(selectEnglishMergePages(pages), [])
+})
+
+test('挂起 + 无挖空自足页混合：只并挖空页，单句选择页不并入', () => {
+  const pages = [
+    { pageNumber: 1, pageQuestions: [enStemQ(1, [])] },          // pending
+    { pageNumber: 2, pageQuestions: [enPlainChoice(1)] },        // 自足，无挖空
+    { pageNumber: 3, pageQuestions: [enStemQ(2)] },              // 自足，有挖空
+  ]
+  const selected = selectEnglishMergePages(pages)
+  assert.deepEqual(selected.map(p => p.pageNumber), [1, 3])
 })
