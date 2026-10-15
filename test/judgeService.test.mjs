@@ -314,6 +314,43 @@ test('sign-only mismatches are judged wrong (sign swallowing closed)', () => {
     { isCorrect: true, unrecognized: false })
 })
 
+// 缺陷 6（2026-10-15）：**多空逐段比对的符号放水** —— 整串符号闸（缺陷 5 修复）在
+// 多空场景失灵：两侧分隔符不同（学生"；" vs 参考"，"）→ noSign(整串) 不相等 → 不触发，
+// 落进 extractAndCompare 逐段数值比对，而 extractNumericValues 不认符号，
+// "3/5" 与 "-3/5" 提出的数值集合同为 [0.6] → 整题判对。
+// 真实案例 10491c62：「-1 2/3的相反数是__，倒数是__」学生 "1 2/3；3/5"（第二空漏负号）、
+// 参考 "1 2/3，-3/5" → 判对 → 该进错题本的题没进。
+// 修法：段级 signOnlyMismatch 闸（判据与整串闸逐字同构），三个逐段循环共用。
+test('per-segment sign-only mismatch in multi-blank answers is judged wrong', () => {
+  // 事故原题：第二空漏负号，必须判错
+  assert.deepEqual(
+    judgeAnswer('1 2/3；3/5', '1 2/3，-3/5', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  // 其他分隔符组合同族：空格、分号、全角逗号
+  assert.deepEqual(
+    judgeAnswer('1 2/3 3/5', '1 2/3 -3/5', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('5/3;-3/5', '5/3,3/5', 'fill'),
+    { isCorrect: false, unrecognized: false })
+  // 两个空都只差符号，同样判错
+  assert.deepEqual(
+    judgeAnswer('-2/3,3/2', '2/3,-3/2', 'fill'),
+    { isCorrect: false, unrecognized: false })
+
+  // 不得误杀：真值相等的两空答案（写法差异、分隔符差异）仍判对
+  assert.deepEqual(
+    judgeAnswer('1 2/3；-3/5', '5/3，-3/5', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('-2/3, 3/2', '-2/3，3/2', 'fill'),
+    { isCorrect: true, unrecognized: false })
+  // 段内等价移位（noSign 不等）不受闸影响
+  assert.deepEqual(
+    judgeAnswer('5-m, 3', '-m+5, 3', 'fill'),
+    { isCorrect: true, unrecognized: false })
+})
+
 // 答案层：答案库把「答案 + 解析」粘成一串（'-1/4 解析：设直线 AB…'），
 // 整串逐串比对必然判错。sanitizeReferenceAnswer 在第一个解析标记处截断，
 // 四道闸门保证不把正常长答案切坏、也不让纯叙述残句变成"答案"。

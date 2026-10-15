@@ -1485,6 +1485,27 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return [str]
   }
 
+  // 段级符号定向闸（2026-10-15）：多空逐段比对时 "3/5" vs "-3/5" 会被放水 ——
+  // extractAndCompare 的 extractNumericValues **不认符号**（有意设计，见上方 9-22 注释），
+  // 两段提出的数值集合同为 [0.6] → 该段判对。真实案例 10491c62：
+  //   「-1 2/3的相反数是__，倒数是__」学生 "1 2/3；3/5"（第二空漏负号）、参考 "1 2/3，-3/5"
+  //   → 逐段数值比对全等 → 整题判对 → 该进错题本的题没进。
+  // 9-22 的**整串**符号闸在多空场景失灵：两侧分隔符不同（；vs ，），noSign(整串) 不相等
+  // → 不触发。修法：同一判据（归一不等 + 去符号后相等 + 负号数不同 + 含非零数字）下沉到段级。
+  // ⚠️ 归一后必须先统一分隔符（; → ,）：normalizeAnswer 不互转分号/逗号，不统一则
+  // "2/3;3/5" 与 "2/3,-3/5" 的 noSign 永不相等，段级闸同样形同虚设（实测踩到）。
+  const signOnlyMismatch = (sAns, rAns) => {
+    const sAll = normalizeAnswer(sAns).replace(/;/g, ',')
+    const rAll = normalizeAnswer(rAns).replace(/;/g, ',')
+    if (!sAll || !rAll || sAll === rAll) return false
+    const noSign = (t) => String(t || '').replace(/[+\-−–—]/g, '')
+    const minusCount = (t) => (String(t || '').match(/[-−–—]/g) || []).length
+    const sBare = noSign(sAll)
+    return Boolean(sBare) && sBare === noSign(rAll) &&
+      /[1-9]/.test(sBare) &&
+      minusCount(sAll) !== minusCount(rAll)
+  }
+
   // 宽松切分：把"和/与/及"也当分隔符。
   // AI 生成的多空答案常写成 "5√3 和 (5√6)/2"，学生写成 "5√3, (5/2)√6"——
   // 标点切分只能把参考答案切成 1 段，逐项比对根本进不去，整题判错。
@@ -1562,11 +1583,37 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   const studentParts = splitAnswers(studentAnswer)
   const refParts = splitAnswers(referenceAnswer)
 
+  // ── 多空符号早退闸（2026-10-15，10491c62 终极收口）──────────────────────
+  // 为什么必须在逐段循环**之前**独立成闸：下方的数值兜底层全是「剥了再比」——
+  //   · extractAndCompare / extractNumericValues 不认符号；
+  //   · parseValueWithUnit 把分隔符剥掉后数字**直接拼接**（"2/3;3/5" 与 "2/3,-3/5"
+  //     都变成 "23/35"，eval 同值）；
+  //   · isMathEquivalent 整串兜底同样翻盘（"5/3;-3/5" vs "5/3,3/5" 实测判等）。
+  // 逐段循环里的 signOnlyMismatch 只能拦「本循环自己的 true」，拦不住后面
+  // 别的兜底通道重新判对。故这里一旦认定「某对应段只差符号」或「统一分隔符后
+  // 整串只差符号」，直接判错收口，不再给任何兜底翻盘机会。
+  // 触发条件刻意收窄：仅双方都多段且段数相等（多空题形态），单值场景走原有
+  // 整串符号闸（1363 行附近），行为零变化。
+  if (studentParts.length > 1 && studentParts.length === refParts.length) {
+    const unified = (t) => normalizeAnswer(t).replace(/;/g, ',')
+    const sU = unified(studentAnswer)
+    const rU = unified(referenceAnswer)
+    const noSign = (t) => String(t || '').replace(/[+\-−–—]/g, '')
+    const minusCount = (t) => (String(t || '').match(/[-−–—]/g) || []).length
+    const sBare = noSign(sU)
+    const wholeSignOnly = Boolean(sBare) && sBare === noSign(rU) &&
+      /[1-9]/.test(sBare) && minusCount(sU) !== minusCount(rU)
+    if (wholeSignOnly || studentParts.some((sp, i) => signOnlyMismatch(sp, refParts[i]))) {
+      return { isCorrect: false, unrecognized: false }
+    }
+  }
+
   // 多答案场景：逗号/分号分隔，逐个比较
   if (refParts.length > 1 && studentParts.length > 1) {
     if (studentParts.length === refParts.length) {
       const allCorrect = studentParts.every((sp, i) => {
         const rp = refParts[i]
+        if (signOnlyMismatch(sp, rp)) return false
         return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
       })
       if (allCorrect) return { isCorrect: true, unrecognized: false }
@@ -1590,6 +1637,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
           narrowedParts.length !== studentParts.length) {
         const allCorrect = narrowedParts.every((sp, i) => {
           const rp = refParts[i]
+          if (signOnlyMismatch(sp, rp)) return false
           return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
         })
         if (allCorrect) return { isCorrect: true, unrecognized: false }
@@ -1597,8 +1645,12 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     }
   }
 
-  // 多答案场景：学生或标准只有一方有逗号，仍然尝试数值整体比较
-  if (refParts.length > 1 || studentParts.length > 1) {
+  // 多答案场景：学生或标准只有一方有逗号，仍然尝试数值整体比较。
+  // ⚠️ 2026-10-15 收窄为「恰好一方多段」：原条件 `||` 让**双方都多段**的题也进这里，
+  // 用无符号的数值集合整串比对翻盘 —— 段级 signOnlyMismatch 判 false 的
+  // "5/3;-3/5" vs "5/3,3/5"（数值集合同为 [0.6,1.667]）在这里被判回 true
+  // （10491c62 同源放水通道）。注释本意本就是「只有一方有逗号」，按本意改异或。
+  if ((refParts.length > 1) !== (studentParts.length > 1)) {
     if (extractAndCompare(studentAnswer, referenceAnswer)) {
       return { isCorrect: true, unrecognized: false }
     }
@@ -1611,6 +1663,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
       studentSpaceParts.length === refSpaceParts.length) {
     const allCorrect = studentSpaceParts.every((sp, i) => {
       const rp = refSpaceParts[i]
+      if (signOnlyMismatch(sp, rp)) return false
       return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
     })
     if (allCorrect) return { isCorrect: true, unrecognized: false }
@@ -1621,6 +1674,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
       studentParts.length === refSpaceParts.length) {
     const allCorrect = studentParts.every((sp, i) => {
       const rp = refSpaceParts[i]
+      if (signOnlyMismatch(sp, rp)) return false
       return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
     })
     if (allCorrect) return { isCorrect: true, unrecognized: false }
@@ -1633,6 +1687,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
       studentSpaceParts.length === refParts.length) {
     const allCorrect = studentSpaceParts.every((sp, i) => {
       const rp = refParts[i]
+      if (signOnlyMismatch(sp, rp)) return false
       return normalizeAndCompare(sp, rp) || extractAndCompare(sp, rp)
     })
     if (allCorrect) return { isCorrect: true, unrecognized: false }
@@ -1641,10 +1696,14 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // 多答案场景：一侧用"和/与/及"连接（"5√3 和 (5√6)/2" vs "5√3, (5/2)√6"）。
   // 只用 normalizeAndCompare 逐项比，不接 extractAndCompare 的数字集合兜底——
   // 切分本身已经放宽了，再叠一层宽松兜底会把答错的题判对。
+  // ⚠️ 仍需段级符号闸：normalizeAndCompare 内的 isNumericEquivalent 靠
+  // parseValueWithUnit，剥前导运算符时连负号一起剥掉（9-22 已知），"3/5" vs "-3/5"
+  // 会在此判对（2026-10-15 实测），必须先用 signOnlyMismatch 拦下。
   const studentLooseParts = splitAnswersLoose(studentAnswer)
   const refLooseParts = splitAnswersLoose(referenceAnswer)
   if (refLooseParts.length > 1 && studentLooseParts.length === refLooseParts.length) {
-    if (studentLooseParts.every((sp, i) => normalizeAndCompare(sp, refLooseParts[i]))) {
+    if (studentLooseParts.every((sp, i) =>
+      !signOnlyMismatch(sp, refLooseParts[i]) && normalizeAndCompare(sp, refLooseParts[i]))) {
       return { isCorrect: true, unrecognized: false }
     }
   }
