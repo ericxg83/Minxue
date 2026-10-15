@@ -547,6 +547,8 @@
   1019-1133 几何资产写入）；`replaceResourceAnswers:1787` 静默写 NULL 疑点排除（不可达防御）。
 - **未触碰**：并行会话 15 个 WIP 文件（ensure-analysis + retryPaperOrder + judgeService
   缺陷 6 + 看门狗三件）零动；`.workbuddy-ai/memory/MEMORY.md` 零动。
-- 四道闸：npm test **2413/2414**（唯一红=对方 WIP，HEAD 绿有实证）｜eslint **0e/119w**｜
-  `dist_nightly_20261015r287` **64s**｜preview 5592：cert_probe exit 0 + render_smoke
-  **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- 四道闸：npm test 轮中 **2413/2414**（唯一红=对方 WIP，HEAD 绿有实证）、**收尾复跑
+  2414/2414 fail 0**（对方 10:14/10:18/10:21 三提交收口：判题闸 / page_number 防御 /
+  ensure-analysis + 锁同步更新）｜eslint **0e/119w**｜`dist_nightly_20261015r287` **64s**｜
+  preview 5592：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16**
+  + text_audit **0/14**。
