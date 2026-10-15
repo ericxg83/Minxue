@@ -1280,6 +1280,69 @@ export function validateEnglishPassageSplit(questions, pageSubject) {
   return { applicable: true, ok: issues.length === 0, issues }
 }
 
+/** 挖空形态检测（英语语篇页判定用，与 validateEnglishPassageSplit 同一形态口径） */
+const ENGLISH_HAS_BLANK = (q) => /_{1,}\s*\d{1,2}\s*_{1,}/.test(String(q?.content ?? '') + ' ' + String(q?.parent_stem ?? ''))
+
+/**
+ * 英语页分类（英语语法重练 T5 两遍法，2026-10-15）。
+ *
+ * 背景：英语作业拍照常见「文章与选项表分离」「文章跨页」。逐页独立 OCR 时：
+ *   文章页拆得出空句但 options 拿不到 → 废题；选项表页被普通规则乱拆 → 垃圾题。
+ * 本函数只做分类，不改变数据——挂起页由调用方合并重识别后替换结果。
+ *
+ * @param {Array<Object>} pageQuestions 该页 OCR 出的题目（含 subject）
+ * @returns {'non-english'|'self-sufficient'|'pending'}
+ *   non-english     非英语页（数学链路零影响）
+ *   self-sufficient 单页自足：老考法单句选择题页，或同页含文章+选项表的语篇页 → 直接落库
+ *   pending         挂起：有挖空但缺选项（分离的文章页/跨页片段），或疑似选项表页
+ */
+export function classifyEnglishPage(pageQuestions) {
+  const qs = Array.isArray(pageQuestions) ? pageQuestions : []
+  const enQs = qs.filter(q => String(q?.subject ?? '') === '英语')
+  if (enQs.length === 0) return 'non-english'
+
+  const blankQs = enQs.filter(ENGLISH_HAS_BLANK)
+  if (blankQs.length > 0) {
+    // 语篇页：所有挖空题 options 齐全 = 同页含选项表（自足）；否则缺选项表（挂起）
+    const missingOptions = blankQs.some(q => !Array.isArray(q.options) || q.options.length === 0)
+    return missingOptions ? 'pending' : 'self-sufficient'
+  }
+
+  // 无挖空英语页：自足选择题页（每题有像样题干 + 选项）vs 疑似选项表页/垃圾拆行
+  // 判据从宽：不像自足的一律挂起——宁多一次合并识别，不让垃圾直接进错题本
+  const looksSelfSufficient = enQs.every(q =>
+    Array.isArray(q.options) && q.options.length >= 2
+    && String(q?.content ?? '').replace(/\s+/g, '').length >= 20
+  )
+  return looksSelfSufficient ? 'self-sufficient' : 'pending'
+}
+
+/** 拼图上限：一次合并识别最多拼 3 页（更高拼图会压得字太小，超出按批拆分） */
+export const ENGLISH_STITCH_MAX_PAGES = 3
+
+/**
+ * 多页压缩 buffer 垂直拼接成一张大图（sharp composite，顶部白隔条分隔）。
+ * 供英语挂起页合并识别：AI 一眼看到完整文章 + 选项表。
+ */
+export async function stitchPageBuffers(buffers) {
+  const list = (Array.isArray(buffers) ? buffers : []).filter(Boolean)
+  if (list.length === 0) throw new Error('stitchPageBuffers: 空 buffer 列表')
+  if (list.length === 1) return list[0]
+  const metas = await Promise.all(list.map(b => sharp(b).metadata()))
+  const width = Math.max(...metas.map(m => m.width || 0))
+  const gap = 24
+  const totalHeight = metas.reduce((s, m) => s + (m.height || 0), 0) + gap * (list.length - 1)
+  const composites = []
+  let y = 0
+  for (let i = 0; i < list.length; i++) {
+    composites.push({ input: list[i], top: y, left: 0 })
+    y += (metas[i].height || 0) + gap
+  }
+  return sharp({
+    create: { width, height: totalHeight, channels: 3, background: { r: 255, g: 255, b: 255 } }
+  }).composite(composites).jpeg({ quality: 85 }).toBuffer()
+}
+
 // forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
 //   因为 callVisionCompletion 不传 model 时会按 VL_MODELS 顺序轮询，
 //   直接递归重试只会再次命中同一个模型、拿到同样畸形的输出。
@@ -8075,6 +8138,51 @@ export const processTask = async (job) => {
     })
 
     const pageResults = await Promise.all(pageTasks)
+
+    // ── 英语语篇页组聚合（英语语法重练 T5 两遍法，2026-10-15）──────────────
+    // 分离/跨页场景兜底：文章页缺选项、选项表页被乱拆。挂起页拼图合并重识别，
+    // 数学页与自足英语页零影响。合并识别复用 recognizeQuestions（提示词英语分支、
+    // subject 注入、校验闸全部现成）；合并结果无挖空（如漏拍文章只拍了选项表）
+    // 或识别失败时，保留原第一遍结果并打 is_suspicious，绝不静默丢题。
+    {
+      const pendingPages = pageResults.filter(r => classifyEnglishPage(r.pageQuestions) === 'pending')
+      if (pendingPages.length > 0) {
+        console.log(`   [英语页组] ${pendingPages.length} 页挂起（语篇分离/跨页），合并重识别: 第 ${pendingPages.map(p => p.pageNumber).join(',')} 页`)
+        const mergedByPage = new Map()
+        for (let i = 0; i < pendingPages.length; i += ENGLISH_STITCH_MAX_PAGES) {
+          const batch = pendingPages.slice(i, i + ENGLISH_STITCH_MAX_PAGES)
+          try {
+            const stitched = await stitchPageBuffers(batch.map(b => b.compressedBuffer))
+            const merged = await recognizeQuestions(bufferToBase64(stitched), taskId)
+            let mergedQs = (merged?.questions || []).map(q => ({
+              ...q,
+              page_number: batch[0].pageNumber,
+              // 拼图坐标相对合并图，对原图定位是错的——置空胜过错位（英语页 OCR
+              // 的 bbox 实测本就是均匀占位，无损失）；前端原卷定位退化为整页
+              block_coordinates: null,
+              text_bbox: null,
+              image_bbox: null,
+            }))
+            const hasBlankMerged = mergedQs.some(ENGLISH_HAS_BLANK)
+            if (!hasBlankMerged || mergedQs.length === 0) {
+              // 这批不是语篇（漏拍文章只拍选项表）或识别为空：原结果打标保留，不丢题
+              console.warn(`   [英语页组] 第 ${batch.map(b => b.pageNumber).join(',')} 页合并识别无语篇形态，原结果标记 is_suspicious`)
+              for (const b of batch) for (const q of b.pageQuestions) q.is_suspicious = true
+              continue
+            }
+            console.log(`   [英语页组] 第 ${batch.map(b => b.pageNumber).join(',')} 页合并识别出 ${mergedQs.length} 题（拼合语篇全文）`)
+            for (const b of batch) mergedByPage.set(b.pageNumber, mergedQs)
+          } catch (mergeError) {
+            console.warn(`   [英语页组] 第 ${batch.map(b => b.pageNumber).join(',')} 页合并识别失败（原结果标记 is_suspicious 保留）: ${mergeError.message}`)
+            for (const b of batch) for (const q of b.pageQuestions) q.is_suspicious = true
+          }
+        }
+        for (const r of pageResults) {
+          if (mergedByPage.has(r.pageNumber)) r.pageQuestions = mergedByPage.get(r.pageNumber)
+        }
+      }
+    }
+
     let ocrPageTitle = null
     for (const r of pageResults) {
       pageBuffers.set(r.pageNumber, r.compressedBuffer)
