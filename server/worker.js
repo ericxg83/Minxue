@@ -1196,6 +1196,90 @@ function normalizeSubNo(raw) {
   return s === '' ? null : s
 }
 
+// ============================================================
+// 英语语篇拆题校验闸（英语语法重练 T3，2026-10-15）
+//
+// 背景：OCR 提示词的英语分支要求「语篇按空拆题 + 选项逐字转录」，但实测
+//   模型存在两类高频事故（2026-10-15 upcycling 语篇 A/B 实验）：
+//   ① 选项"顺手纠正"：卷面印 might 读成 can、threw away 读成 throw away
+//      （B/C 变重复项）——选项正文失真会让重练卷教学生错的原文；
+//   ② 漏空/空号错乱：10 空只拆出 9 题、空号不连续。
+// 校验只拦【结构性违规】，不判语法对错；不过 → 重试一次 → 仍不过
+// → 违规题打 is_suspicious 照常落库（不阻断批改，复核页兜底）。
+// ============================================================
+
+/** 挖空标记形态：__1__ / _1_ / __ 1 __（下划线包数字，容错空格与长度） */
+const ENGLISH_BLANK_RE = /_{1,}\s*(\d{1,2})\s*_{1,}/g
+
+/** 选项归一化比较（识别 B/C 重复用）：小写 + 去非字母，"throw away" 与 "threw away" 不同串 */
+const normEnglishOption = (s) => String(s ?? '').toLowerCase().replace(/[^a-z]/g, '')
+
+/**
+ * 英语语篇拆题结构校验（纯函数，供回归测试）。
+ *
+ * @param {Array<Object>} questions 解析出的 questions 数组
+ * @param {string|null} pageSubject 页面级学科（'英语' 才校验）
+ * @returns {{ applicable: boolean, ok: boolean, issues: string[] }}
+ *   applicable=false：不是英语语篇形态（无挖空标记），本闸不适用
+ *   issues：每条是可读的违规说明，供重试提示与日志
+ */
+export function validateEnglishPassageSplit(questions, pageSubject) {
+  const list = Array.isArray(questions) ? questions : []
+  const issues = []
+  const hasBlank = list.some(q => {
+    const c = String(q?.content ?? '')
+    const p = String(q?.parent_stem ?? '')
+    return ENGLISH_BLANK_RE.test(c) || ENGLISH_BLANK_RE.test(p)
+  })
+  ENGLISH_BLANK_RE.lastIndex = 0
+  if (pageSubject !== '英语' || !hasBlank) {
+    return { applicable: false, ok: true, issues: [] }
+  }
+
+  // ① 空号覆盖：parent_stem（语篇全文）中的空号全集 vs questions 拆出的空号集合
+  const stemBlanks = new Set()
+  for (const q of list) {
+    ENGLISH_BLANK_RE.lastIndex = 0
+    const stem = String(q?.parent_stem ?? '')
+    let m
+    while ((m = ENGLISH_BLANK_RE.exec(stem)) !== null) stemBlanks.add(Number(m[1]))
+  }
+  const nums = list.map(q => Number(q?.question_number)).filter(n => Number.isFinite(n))
+  const numSet = new Set(nums)
+  const expected = []
+  if (stemBlanks.size > 0) {
+    const maxBlank = Math.max(...stemBlanks)
+    for (let i = 1; i <= maxBlank; i++) expected.push(i)
+    const missing = expected.filter(n => !numSet.has(n))
+    const extra = [...numSet].filter(n => !stemBlanks.has(n))
+    if (missing.length > 0) issues.push(`语篇含 ${maxBlank} 个挖空，但缺少空号: ${missing.join(',')}`)
+    if (extra.length > 0) issues.push(`question_number 与语篇挖空不匹配，多出: ${extra.join(',')}`)
+    if (nums.length !== numSet.size) issues.push('question_number 存在重复')
+  }
+
+  // ② 逐题校验：options 数量/重复、answer 字母、content 含自身空号
+  for (const q of list) {
+    const n = q?.question_number
+    const label = `空${n}`
+    const opts = Array.isArray(q?.options) ? q.options : []
+    if (opts.length === 0) {
+      issues.push(`${label} options 为空`)
+    } else {
+      if (opts.length !== 3) issues.push(`${label} options 数量为 ${opts.length}（英语语篇三选项卷式应为 3）`)
+      const uniq = new Set(opts.map(normEnglishOption).filter(Boolean))
+      if (uniq.size !== opts.length) issues.push(`${label} options 存在重复项（疑似转录时"顺手纠正"了原文）: [${opts.join(' | ')}]`)
+    }
+    const ans = String(q?.answer ?? '').trim().toUpperCase()
+    if (!['A', 'B', 'C'].includes(ans)) issues.push(`${label} answer 非合法选项字母(英语语篇三选项卷式应为 A/B/C): ${JSON.stringify(q?.answer)}`)
+    ENGLISH_BLANK_RE.lastIndex = 0
+    const content = String(q?.content ?? '')
+    if (!ENGLISH_BLANK_RE.test(content)) issues.push(`${label} content 缺少挖空标记`)
+    ENGLISH_BLANK_RE.lastIndex = 0
+  }
+
+  return { applicable: true, ok: issues.length === 0, issues }
+}
+
 // forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
 //   因为 callVisionCompletion 不传 model 时会按 VL_MODELS 顺序轮询，
 //   直接递归重试只会再次命中同一个模型、拿到同样畸形的输出。
@@ -1226,7 +1310,10 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       const res = await callVisionCompletion({
         imageDataURL: imageUrl,
         systemPrompt: prompt,
-        userText: '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
+        // 英语校验闸重试（T3）：把首轮结构违规说明带进 userText，让模型针对性重看图片
+        userText: opts.englishValidationHint
+          ? `请识别这张作业图片中的所有题目，并返回JSON格式结果。⚠️ 上一轮识别存在以下问题，请重新仔细查看图片原图并修正（尤其注意：选项必须逐字照抄卷面印刷体，禁止同义词替换或动词原形还原）：${opts.englishValidationHint}`
+          : '请识别这张作业图片中的所有题目，并返回JSON格式结果。',
         temperature: 0.3,
         maxTokens: 8192,
         // 通用批改显式链（2026-09-24）：deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜 +
@@ -1312,8 +1399,10 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     // 页面级学科下发到每题（英语语法重练 T2，2026-10-15）：提示词要求输出 subject(数学/英语)，
     // 落库消费点在下方 q.subject（兜底'数学'保持不变，历史行为兼容）。
     // 纯数组返回形态（无包裹对象）时没有页面级字段 → 不注入，走每题兜底。
-    if (!Array.isArray(result) && typeof result?.subject === 'string' && result.subject.trim()) {
-      const pageSubject = result.subject.trim()
+    const pageSubject = (!Array.isArray(result) && typeof result?.subject === 'string' && result.subject.trim())
+      ? result.subject.trim()
+      : null
+    if (pageSubject) {
       for (const q of questionsArray) {
         if (!q.subject) q.subject = pageSubject
       }
@@ -1321,6 +1410,24 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     }
 
     normalizeBlockBoxSemantics(questionsArray)
+
+    // ── 英语语篇拆题校验闸（英语语法重练 T3，2026-10-15）──────────────────
+    // 首轮结构违规（B/C 重复 / 漏空 / answer 非字母）→ 带问题说明重试一次；
+    // 重试后仍违规（或 prefetchedContent 双路合并结果不可重试）→ 本页英语题全部
+    // 打 is_suspicious 照常落库，不阻断批改，转人工复核兜底（保守方向：
+    // 多标复核好过失真原文混进重练卷）。数学页不经过本闸。
+    const englishCheck = validateEnglishPassageSplit(questionsArray, pageSubject)
+    if (englishCheck.applicable && !englishCheck.ok) {
+      const issueText = englishCheck.issues.join('；')
+      if (retryCount === 0 && opts.prefetchedContent == null) {
+        console.warn(`   [英语校验闸] 发现 ${englishCheck.issues.length} 处结构违规，带问题说明重试一次: ${issueText}`)
+        return recognizeQuestions(imageBase64, taskId, 1, null, { englishValidationHint: issueText })
+      }
+      console.warn(`   [英语校验闸] 校验未通过（不阻断，本页英语题标记 is_suspicious 转复核）: ${issueText}`)
+      for (const q of questionsArray) {
+        if (q && typeof q === 'object' && q.subject === '英语') q.is_suspicious = true
+      }
+    }
 
     const questions = questionsArray.map((q) => {
       // 模型对多解题会把 student_answer 输出成数组，原样传给 pg 会被序列化成
@@ -1392,6 +1499,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         //   coerceAIText 与 neonService.createQuestions 的口径保持一致。
         sub_no: normalizeSubNo(q.sub_no),
         parent_stem: coerceAIText(q.parent_stem ?? q.shared_stem) || null,
+        // 英语校验闸（T3）：英语语篇页结构违规时整页英语题被标 is_suspicious，
+        // PC 复核页消费该标记突出显示（与答案库链路 7520 行同名列同语义）。
+        is_suspicious: q.is_suspicious === true,
         text_bbox: q.text_bbox || null,
         image_type: q.image_type || null,
         image_bbox: q.image_bbox || null,
