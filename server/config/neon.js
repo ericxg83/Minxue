@@ -1,6 +1,87 @@
-import { Pool } from 'pg'
+import pgPkg from 'pg'
+const { Pool } = pgPkg
 import dns from 'node:dns'
+import fs from 'node:fs'
+import path from 'node:path'
 import { recordDegraded } from '../services/quotaSentinel.js'
+
+// ── 出网流量探针（2026-10-15，临时诊断工具，出网瘦身验收后删除）──
+// 背景：老 Neon 项目免费层出网 5.52GB/5GB 被停机；新项目同款烧速 ~370MB/天，约 13 天见底。
+// 本探针在 pg 客户端层统计每个查询拉回的字节数，按 SQL 形态聚合落盘，定位流量大户。
+// ⛔ 约束：只记录、绝不改变查询行为与返回值；探针自身任何异常全部吞掉。
+const EGRESS_REPORT = path.join(import.meta.dirname, '..', '_egress_probe_report.json')
+const EGRESS_FLUSH_MS = 60 * 1000
+let _egressAgg = {}
+let _egressLastFlush = Date.now()
+
+function _egressRecord(sql, res) {
+  try {
+    let bytes = 0
+    if (res && res.rows) bytes = Buffer.byteLength(JSON.stringify(res.rows))
+    const key = String(sql || '').replace(/\s+/g, ' ').trim().slice(0, 110) || '__unknown__'
+    for (const k of ['__total__', key]) {
+      const agg = _egressAgg[k] || (_egressAgg[k] = { count: 0, bytes: 0, rows: 0, last: '' })
+      agg.count++
+      agg.bytes += bytes
+      agg.rows += (res && res.rowCount) || 0
+      agg.last = new Date().toISOString()
+    }
+    if (bytes >= 100 * 1024) console.warn('[egress-probe] ' + (bytes / 1024).toFixed(0) + 'KB ← ' + key.slice(0, 90))
+    if (Date.now() - _egressLastFlush > EGRESS_FLUSH_MS) {
+      _egressLastFlush = Date.now()
+      _egressFlush()
+    }
+  } catch { /* 探针失败绝不外抛 */ }
+}
+
+function _egressFlush() {
+  try {
+    let prev = { aggregates: {} }
+    try { prev = JSON.parse(fs.readFileSync(EGRESS_REPORT, 'utf8')) } catch { }
+    const merged = prev.aggregates || {}
+    for (const [k, v] of Object.entries(_egressAgg)) {
+      if (!merged[k]) merged[k] = { count: 0, bytes: 0, rows: 0, last: '' }
+      merged[k].count += v.count
+      merged[k].bytes += v.bytes
+      merged[k].rows += v.rows
+      merged[k].last = v.last
+    }
+    fs.writeFileSync(EGRESS_REPORT, JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      since: prev.since || new Date().toISOString(),
+      aggregates: merged
+    }, null, 2))
+    _egressAgg = {}
+  } catch { /* 探针失败绝不外抛 */ }
+}
+
+function _installEgressProbe() {
+  try {
+    const proto = pgPkg.Client.prototype
+    if (proto.query.__egressPatched) return
+    const origQuery = proto.query
+    proto.query = function (...args) {
+      const sql = typeof args[0] === 'string' ? args[0] : (args[0] && args[0].text) || ''
+      const maybeCb = args[args.length - 1]
+      if (typeof maybeCb === 'function') {
+        args[args.length - 1] = function (err, res) {
+          if (!err) _egressRecord(sql, res)
+          return maybeCb.call(this, err, res)
+        }
+        return origQuery.apply(this, args)
+      }
+      const p = origQuery.apply(this, args)
+      return Promise.resolve(p).then(
+        (res) => { _egressRecord(sql, res); return res },
+        (e) => { throw e }
+      )
+    }
+    proto.query.__egressPatched = true
+    process.on('exit', () => _egressFlush())
+  } catch { /* 探针失败绝不外抛 */ }
+}
+_installEgressProbe()
+// ── 出网流量探针结束 ──
 
 let _pool = null
 
