@@ -830,6 +830,11 @@ function expandLatexCommands(input, depth = 0) {
  */
 function prepareMathExpr(input) {
   let s = String(input ?? '')
+  // $/\(...\)/\[...\] 定界符剥离（2026-10-15）——⚠️ 必须与 normalizeAnswer 各补一份：
+  // prepareMathExpr 不在 normalizeAnswer 下游（isMathEquivalent 直接收原始答案串），
+  // 残留的 $ 会让 new Function 抛 SyntaxError → 数学等价分支恒 false
+  // （9351e223/086c3fd6 实测，同 851 行 ×/÷ 的「各补一份」教训）。
+  s = s.replace(/\$|\\\(|\\\)|\\\[|\\\]/g, '')
   // Strip equation prefix: "y = 2x - 4" → "2x - 4", "f(x)=..." → "..."
   const eqIdx = s.indexOf('=')
   if (eqIdx > 0) s = s.substring(eqIdx + 1)
@@ -1611,6 +1616,51 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   const studentParts = splitAnswers(studentAnswer)
   const refParts = splitAnswers(referenceAnswer)
+
+  // ── 多小问分段比对通道（2026-10-15）──────────────────────────────────────
+  // 学生按 (1)/(2)/… 编号或换行分步作答、参考一行顿号串（「依次为 17，2/3，5/2」）：
+  // splitAnswers 切不开学生的编号+换行结构，逐段比对进不去，整题判错
+  // （全库漂移 15 条：c82389d5/52e82d51/827803b7/93d06efb/41393c41/1c05a0ad/df9d5080 等）。
+  // 提取规则：按换行或 (N) 组号切组（(x+1) 这类含变量的括号不误切，组号只认纯数字），
+  // 每组剥组号前缀、narrow 到最后一个 = 右侧；参考段剥「依次为/分别是」类引导词。
+  // 窄化约束：两侧值序列都 ≥2、段数相等、逐段 normalizeAndCompare/extractAndCompare
+  // 全部成立才判对——过程数字污染会撑大序列导致段数不齐，天然进不了本通道。
+  const extractMultiPartValues = (s) => {
+    const text = String(s || '')
+    if (!/\n/.test(text) && !/[（(]\d+[)）]/.test(text)) return []
+    const rawParts = text.split(/\n+|(?=[（(]\d+[)）])/).map(x => x.trim()).filter(Boolean)
+    if (rawParts.length < 2) return []
+    const vals = []
+    for (let p of rawParts) {
+      const cleaned = p
+        .replace(/^[（(]\d+[)）][.、：:]?\s*/, '')
+        .replace(/^[①-⑳][.、：:]?\s*/, '')
+      const narrowed = narrowToFinalAnswer(cleaned) || cleaned
+      const norm = normalizeAnswer(narrowed)
+      if (norm) vals.push(norm)
+    }
+    return vals
+  }
+  {
+    const studentMp = extractMultiPartValues(studentAnswer)
+    if (studentMp.length >= 2) {
+      const refShellStripped = referenceAnswer.replace(/^(?:依次为|分别是|分别为|顺序为)\s*/, '')
+      const refMp = extractMultiPartValues(refShellStripped)
+      const refSegs = splitAnswers(refShellStripped).map(a => a.trim()).filter(Boolean)
+      // 参考侧优先用编号提取；参考无编号时按顿号/逗号切段
+      const target = refMp.length === studentMp.length ? refMp
+        : (refSegs.length === studentMp.length ? refSegs : null)
+      if (target) {
+        const prefixShell = (t) => String(t || '').replace(/^(?:依次为|分别是|分别为|顺序为)\s*/, '')
+        const allMatch = studentMp.every((sv, i) => {
+          const rv = prefixShell(target[i])
+          if (signOnlyMismatch(sv, rv)) return false
+          return normalizeAndCompare(sv, rv) || extractAndCompare(sv, rv)
+        })
+        if (allMatch) return { isCorrect: true, unrecognized: false }
+      }
+    }
+  }
 
   // ── 多空符号早退闸（2026-10-15，10491c62 终极收口）──────────────────────
   // 为什么必须在逐段循环**之前**独立成闸：下方的数值兜底层全是「剥了再比」——
