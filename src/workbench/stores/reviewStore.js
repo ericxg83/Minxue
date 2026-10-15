@@ -1401,6 +1401,16 @@ export const useReviewStore = defineStore('review', () => {
     q.answer_source = 'ai'
   }
 
+  // 「解析补全」（2026-10-15 方案 A）生成成功后的本地同步：**只写 analysis**，
+  // 与 applyRecomputeAnswer 同款「按 ID 现查」防切学生误写；列表里找不到就不改
+  // 本地对象（弹窗自己的 localAnalysis 兜底展示），结果已在库里，回来重新拉题自然可见。
+  const applyGeneratedAnalysis = (questionId, analysis) => {
+    if (!analysis) return
+    const q = allQuestions.value.find(item => String(item.id) === String(questionId))
+    if (!q) return
+    q.analysis = analysis
+  }
+
   /**
    * 「离开页面再回来」时续上在途的重解析（2026-10-10）。
    *
@@ -2110,6 +2120,7 @@ export const useReviewStore = defineStore('review', () => {
     finishRecomputeJob,
     resumeRecomputeJobs,
     applyRecomputeAnswer,
+    applyGeneratedAnalysis,
     // 多页试卷查看
     currentPageIndex,
     currentPaperPages,

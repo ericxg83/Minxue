@@ -145,6 +145,19 @@ assert.equal(
 // ── ④ 重解析路由本体 ─────────────────────────────────────────────────────────
 const body = routeBody(indexSrc, "app.post('/api/questions/:id/recompute-answer'")
 
+// 2026-10-15：通道链 / 超时预算 / 禁用模型名单从 recompute-answer 端点内提取为模块级
+// 共享常量（「解析补全」/ensure-analysis 与本接口必须同链同预算，防配置分叉）。
+// 链组成类断言改在「模块级常量块 + 路由体」的合并范围上做；路由体独有的断言
+// （DEADLINE / strictPrimary / 写库语义等）仍只看路由体。
+const moduleBlockStart = indexSrc.indexOf('const RECOMPUTE_ENGINE_TIMEOUT_MS')
+assert.ok(moduleBlockStart >= 0, '未找到模块级共享通道链常量（RECOMPUTE_ENGINE_TIMEOUT_MS）')
+const blockedAt = indexSrc.indexOf('const RECOMPUTE_BLOCKED_MODELS', moduleBlockStart)
+assert.ok(blockedAt >= 0, '未找到模块级 RECOMPUTE_BLOCKED_MODELS')
+const moduleBlock = stripComments(
+  indexSrc.slice(moduleBlockStart, indexSrc.indexOf('\n', blockedAt) + 1)
+)
+const scope = moduleBlock + '\n' + body
+
 assert.ok(
   /strictPrimary:\s*true/.test(body),
   '重解析必须走严格模式（只打主模型），拿不到就失败，不接受弱模型答案'
@@ -161,10 +174,11 @@ assert.ok(/timeoutMs:\s*ch\.timeoutMs/.test(body), '每级必须用自己那级�
   //      实测出答案耗时 67.2s / 116.7s，批量 p50≈70s、p90≈122s。
   //      原设 45s 依据「正常档 9–13s」是错的（那只是简单题）⇒ 难题会被当场掐断，
   //      再掉回易撞 429 的免费慢通道，**等于主备互换白做**。
-  const num = (re) => { const m = body.match(re); return m ? Number(m[1].replace(/_/g, '')) : NaN }
-  const primary = num(/ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
-  const fallback = num(/SLOW_ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
-  const deadline = num(/DEADLINE_MS\s*=\s*([\d_]+)/)
+  // 2026-10-15 常量提取后常量定义在模块级块（scope 前段），预算不变量改在 scope 上断言。
+  const num = (src, re) => { const m = src.match(re); return m ? Number(m[1].replace(/_/g, '')) : NaN }
+  const primary = num(scope, /RECOMPUTE_ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
+  const fallback = num(scope, /RECOMPUTE_SLOW_ENGINE_TIMEOUT_MS\s*=\s*([\d_]+)/)
+  const deadline = num(scope, /DEADLINE_MS\s*=\s*([\d_]+)/)
   assert.ok(
     Number.isFinite(primary) && Number.isFinite(fallback) && Number.isFinite(deadline),
     `三个超时常量必须都能解析出来，实际 ${primary}/${fallback}/${deadline}`
@@ -215,17 +229,18 @@ assert.ok(
 // ── ⑤ 换模型：点名实测合格的强模型，deepseek-flash 必须被硬拦 ────────────────
 // 依据 `_三模型对比-缺答案求解-20260923.md`：deepseek-flash 可判正确率 33%（+2/10 非 JSON），
 // kimi-k3 与 qwen3.8-flash 并列 71%（排除歧义题 100%）。
-assert.ok(/RECOMPUTE_CHAIN\s*=\s*\[/.test(body), '重解析必须显式定义通道链，不能沿用全局主模型')
-assert.ok(/'qwen3\.8-flash'/.test(body), '重解析首选必须是 qwen3.8-flash（付费快通道）')
-assert.ok(/'kimi-k3'/.test(body), '重解析兜底必须是 kimi-k3（免费慢通道）')
+// 2026-10-15：链定义在模块级，以下断言全部跑在 scope（模块块 + 路由体）上。
+assert.ok(/RECOMPUTE_CHAIN\s*=\s*\[/.test(scope), '重解析必须显式定义通道链，不能沿用全局主模型')
+assert.ok(/'qwen3\.8-flash'/.test(scope), '重解析首选必须是 qwen3.8-flash（付费快通道）')
+assert.ok(/'kimi-k3'/.test(scope), '重解析兜底必须是 kimi-k3（免费慢通道）')
 {
   // 付费在前、免费在后（2026-09-24 用户拍板反转）：
   // 原顺序「免费在前」是为省额度，但 kimi-k3 作为**同步接口第一级**频繁撞 429，
   // 触发 RETRY_DELAYS_429=[3000,5000] 退避 —— 老师点按钮要白等 8s 才开始算，
   // 之后还要再等它 22–74s，体验不可接受。
   // ⚠️ 429 退避在异步批改链路里无所谓（后台跑），在同步交互里是致命的。
-  const kimiAt = body.indexOf("'kimi-k3'")
-  const qwenAt = body.indexOf("'qwen3.8-flash'")
+  const kimiAt = scope.indexOf("'kimi-k3'")
+  const qwenAt = scope.indexOf("'qwen3.8-flash'")
   assert.ok(
     kimiAt >= 0 && qwenAt >= 0 && qwenAt < kimiAt,
     'qwen3.8-flash（付费快通道）必须排在 kimi-k3（免费、易撞 429 退避）之前'
@@ -234,14 +249,15 @@ assert.ok(/'kimi-k3'/.test(body), '重解析兜底必须是 kimi-k3（免费慢�
 {
   // 硬闸：deepseek-flash 禁止用于解析答案（用户明确要求记录并拦住）
   assert.ok(
-    /RECOMPUTE_BLOCKED_MODELS\s*=\s*\[\s*'deepseek-flash'\s*\]/.test(body),
+    /RECOMPUTE_BLOCKED_MODELS\s*=\s*\[\s*'deepseek-flash'\s*\]/.test(scope),
     '必须显式声明 deepseek-flash 为禁用模型（实测可判正确率仅 33%）'
   )
   assert.ok(/blocked-model-config/.test(body), '命中禁用模型必须报错拒绝执行，绝不静默放行')
-  // 链体内不得出现 deepseek-flash（body 已剥注释，不会被注释里的反例污染）
-  const chainStart = body.indexOf('RECOMPUTE_CHAIN = [')
+  // 链体内不得出现 deepseek-flash（scope 已剥注释，不会被注释里的反例污染）；
+  // 链体切片取「RECOMPUTE_CHAIN = [」到「RECOMPUTE_BLOCKED_MODELS」之间，模块级定义天然有界。
+  const chainStart = scope.indexOf('RECOMPUTE_CHAIN = [')
   assert.ok(chainStart >= 0, '未找到 RECOMPUTE_CHAIN 定义')
-  const chain = body.slice(chainStart, body.indexOf('\n  ]', chainStart) + 4)
+  const chain = scope.slice(chainStart, scope.indexOf('RECOMPUTE_BLOCKED_MODELS', chainStart))
   assert.equal(
     /'deepseek-flash'/.test(chain),
     false,
@@ -295,9 +311,10 @@ assert.ok(
   assert.ok(/imageUrl:\s*q\.geometry_image_url/.test(body), '带图题重解析必须把配图 URL 交给求解链路')
   assert.ok(/visionVendorChain:/.test(body), '带图题重解析必须显式点名视觉通道链（单级、不降级）')
   // 不变量：视觉单级预算 < 总兜底（否则带图题必然撞穿 DEADLINE）
-  const m = body.match(/VISION_ENGINE_TIMEOUT_MS[\s\S]{0,120}?\|\|\s*([\d_]+)/)
+  // 2026-10-15：视觉预算常量提取到模块级（RECOMPUTE_VISION_TIMEOUT_MS），路由体仅别名引用。
+  const m = scope.match(/RECOMPUTE_VISION_TIMEOUT_MS\s*=\s*Number\(process\.env\.[^)]*\)\s*\|\|\s*([\d_]+)/)
   const deadline = body.match(/DEADLINE_MS\s*=\s*([\d_]+)/)
-  assert.ok(m && deadline, 'VISION_ENGINE_TIMEOUT_MS 与 DEADLINE_MS 必须都能解析')
+  assert.ok(m && deadline, 'RECOMPUTE_VISION_TIMEOUT_MS 与 DEADLINE_MS 必须都能解析')
   const vision = Number(m[1].replace(/_/g, ''))
   const dl = Number(deadline[1].replace(/_/g, ''))
   assert.ok(vision < dl, `视觉单级 ${vision / 1000}s 必须小于总兜底 ${dl / 1000}s（留余量给取图/写库/结算）`)
@@ -314,4 +331,63 @@ assert.ok(
   )
 }
 
-console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型链 + 带图题视觉求解 + deepseek-flash 硬拦 + 批改链路零回归）')
+// ── ⑦ 解析补全端点（2026-10-15 方案 A）：与重解析同链同闸，但只写 analysis 列 ──
+// 题干行「解析」按钮改为恒亮：库里没解析时点开现场生成。核心承诺（负责人确认的方案）：
+// 引擎结果**只把解析写进 questions.analysis**，answer / is_correct / 判题结论一律不碰 ——
+// 参考答案以答案库/原判定为准（可信级别高于 AI），对错判定不重算，错题本/掌握度零扰动。
+{
+  const anaBody = routeBody(indexSrc, "app.post('/api/questions/:id/ensure-analysis'")
+  // 同链：不得在端点内另起炉灶重新定义通道链（必须引用模块级共享常量，防配置分叉）
+  assert.equal(
+    /RECOMPUTE_CHAIN\s*=\s*\[/.test(anaBody),
+    false,
+    'ensure-analysis 不得在端点内重新定义通道链 —— 必须引用模块级共享常量（同链同预算）'
+  )
+  assert.ok(/strictPrimary:\s*true/.test(anaBody), '解析补全必须走严格模式（只打主模型），不接受弱模型产出')
+  assert.ok(/maxRetries:\s*0/.test(anaBody), '解析补全必须关闭整轮递归重试（HTTP 层 429 退避保留）')
+  assert.ok(
+    /validateAIAnswer\(normalized/.test(anaBody),
+    '解析必须跟着一道真解出来的题走：validateAIAnswer 拦「待人工补充」，其解析是废话不得落库'
+  )
+  assert.ok(/ai-declined/.test(anaBody), 'AI 自述不会时必须返回 ai-declined（终态），别让老师反复重试白烧额度')
+  assert.ok(/blocked-model-config/.test(anaBody), '命中禁用模型必须报错拒绝执行，绝不静默放行')
+  assert.ok(/empty-question-content/.test(anaBody), '题干为空必须单独识别并给可行动文案')
+  // ⛔ 核心承诺：唯一写库点只写 analysis 列
+  assert.ok(
+    /SET\s+analysis\s*=\s*\$1,\s*updated_at\s*=\s*NOW\(\)/.test(anaBody),
+    '解析补全唯一写库点必须只写 analysis 列（SET analysis = $1, updated_at = NOW()）'
+  )
+  // 绝不触碰参考答案 / 判题结论相关写入（anaBody 已剥注释，按关键字扫违规）
+  const forbiddenWrites = ['answer =', 'is_correct', 'ai_answer', 'answer_exception', 'judgements', 'judgeAnswer', 'finalizeRejudgeResult']
+  for (const kw of forbiddenWrites) {
+    assert.equal(
+      anaBody.includes(kw),
+      false,
+      `解析补全端点不得触碰「${kw}」——只写 analysis 是方案 A 的硬承诺，动了就是改判题结论`
+    )
+  }
+  // 引擎答案与参考答案打架时：不覆盖、只提示（不悄悄吞掉矛盾）
+  assert.ok(
+    /answer_mismatch/.test(anaBody),
+    '引擎答案与参考答案不一致时必须返回 answer_mismatch 供前端提示，不得静默'
+  )
+  // 超时后不得写库（与重解析同款防护）
+  assert.ok(
+    /if\s*\(finished\)\s*\{[\s\S]{0,200}?放弃写库/.test(anaBody),
+    '解析补全写库前必须拦截已超时的请求'
+  )
+  // 前端 timeout 必须严格大于本端点 DEADLINE（否则前端先断开、后端还在跑并可能已写库）
+  const anaApiSrc = stripComments(readFileSync(join(here, '..', 'src', 'services', 'apiService.js'), 'utf8'))
+  const anaFn = anaApiSrc.slice(
+    anaApiSrc.indexOf('ensureQuestionAnalysis'),
+    anaApiSrc.indexOf('ensureQuestionAnalysis') + 700
+  )
+  const feAna = Number((anaFn.match(/timeout:\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''))
+  const beAna = Number((anaBody.match(/DEADLINE_MS\s*=\s*([\d_]+)/) || [])[1]?.replace(/_/g, ''))
+  assert.ok(
+    Number.isFinite(feAna) && Number.isFinite(beAna) && feAna > beAna,
+    `前端 ensureQuestionAnalysis timeout(${feAna}) 必须严格大于后端 DEADLINE_MS(${beAna})`
+  )
+}
+
+console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型链 + 带图题视觉求解 + deepseek-flash 硬拦 + 批改链路零回归 + 解析补全只写 analysis）')

@@ -588,6 +588,19 @@ export const getRecomputeAnswerStatus = async (questionId) => {
   return apiRequest(`/questions/${questionId}/recompute-answer/status`)
 }
 
+// 题干行「解析」按钮的按需补全（2026-10-15 方案 A）：解析缺失时点开现场生成。
+// 后端只写 questions.analysis，绝不动参考答案 / is_correct / 判题结论。
+// 超时口径与 recomputeQuestionAnswer 完全一致：后端 DEADLINE_MS=210s，前端必须严格
+// 大于它（240s）且禁重试（attempts=1，防 POST 重放重复烧引擎额度）。
+export const ensureQuestionAnalysis = async (questionId) => {
+  return apiRequest(`/questions/${questionId}/ensure-analysis`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+    timeout: 240_000
+  }, 1)
+}
+
 export const retryGeometry = async (questionId) => {
   return apiRequest(`/questions/${questionId}/retry-geometry`, {
     method: 'POST',
