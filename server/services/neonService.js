@@ -411,6 +411,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
         page_number: q.page_number ?? null,
         content: q.content ?? '',
         question_type: q.question_type ?? null,
+        subject: q.subject ?? null,
         block_coordinates: (q.block_coordinates && typeof q.block_coordinates === 'object') ? q.block_coordinates : null
       })
     }
@@ -419,7 +420,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
   if (missingEnrich.length > 0) {
     try {
       const { rows: enrichRows } = await query(
-        `SELECT id, task_id, question_number, page_number, content, question_type, block_coordinates
+        `SELECT id, task_id, question_number, page_number, content, question_type, subject, block_coordinates
            FROM ${TABLES.QUESTIONS} WHERE id = ANY($1::uuid[])`,
         [missingEnrich]
       )
@@ -430,6 +431,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
           page_number: r.page_number ?? null,
           content: r.content ?? '',
           question_type: r.question_type ?? null,
+          subject: r.subject ?? null,
           block_coordinates: r.block_coordinates || null
         })
       }
@@ -459,9 +461,13 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
       .map(([id]) => id)
   )
   const params = [studentId]
-  // 每行 10 个位置参数：question_id, is_blank, error_type, source_type, question_no,
-  //                          page_number, content, question_type, block_coordinates, last_wrong_task_id
-  const ROW_PARAM_COUNT = 10
+  // 每行 11 个位置参数：question_id, is_blank, error_type, source_type, question_no,
+  //                          page_number, content, question_type, subject,
+  //                          block_coordinates, last_wrong_task_id
+  // subject（2026-10-15 英语语法重练 T2）：错题行带上学科快照，错题池分科筛选
+  // （英语语法/句法重练）依赖它；此前只有 addSelfContainedWrongQuestion 写 subject，
+  // 普通批改错题行恒为 NULL，会被学科筛选漏掉。
+  const ROW_PARAM_COUNT = 11
   const values = newIds.map((id, i) => {
     const base = i * ROW_PARAM_COUNT + 2
     const isBlank = blankIds.has(id)
@@ -477,6 +483,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
       en.page_number ?? null,
       en.content ?? '',
       en.question_type ?? null,
+      en.subject ?? null,
       en.block_coordinates ? JSON.stringify(en.block_coordinates) : null,
       en.task_id ?? null
     ]
@@ -484,11 +491,12 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
     // 列序必须与上面 INSERT 的列清单逐位对齐：
     //   $1=student_id | $base=question_id | status/error_count/added_at/last_wrong_at/created_at
     //   为字面量（列序上夹在 question_id 与 is_blank 之间）| $base+1.. = is_blank, error_type,
-    //   source_type, question_no, page_number, content, question_type, block_coordinates,
-    //   last_wrong_task_id（共 9 个）
+    //   source_type, question_no, page_number, content, question_type, subject,
+    //   block_coordinates, last_wrong_task_id（共 10 个）
     // 2026-09-20 修复：09-18 扩列时漏掉中间 5 个字面量 → 16 列对 11 值 → 每次调用必抛
     //   42601 INSERT has more target columns than expressions，作业批改/重批改/答案库批改/
     //   补偿四条链路的错题入册全部失败（实测 09-19 10:53 后 24 小时入册为 0）。
+    //   2026-10-15 扩 subject 列（10→11 参数）时保持同一逐位对齐纪律。
     const tail = row.slice(1).map((_, j) => `$${base + 1 + j}`).join(', ')
     return `($1, $${base}, 'pending', 1, NOW(), NOW(), NOW(), ${tail})`
   }).join(',')
@@ -497,7 +505,7 @@ export const addWrongQuestions = async (studentId, questionIds, questionConfiden
     `INSERT INTO ${TABLES.WRONG_QUESTIONS}
        (student_id, question_id, status, error_count, added_at, last_wrong_at, created_at,
         is_blank, error_type, source_type, question_no, page_number, content, question_type,
-        block_coordinates, last_wrong_task_id)
+        subject, block_coordinates, last_wrong_task_id)
      VALUES ${values}
      ON CONFLICT (student_id, question_id)
        WHERE question_id IS NOT NULL

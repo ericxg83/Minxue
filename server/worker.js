@@ -1309,6 +1309,17 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       console.warn(`⚠️  解析出 0 道题（result 类型: ${Array.isArray(result) ? 'array' : typeof result}，keys: ${result && !Array.isArray(result) ? Object.keys(result).join(',') : 'N/A'}）`)
     }
 
+    // 页面级学科下发到每题（英语语法重练 T2，2026-10-15）：提示词要求输出 subject(数学/英语)，
+    // 落库消费点在下方 q.subject（兜底'数学'保持不变，历史行为兼容）。
+    // 纯数组返回形态（无包裹对象）时没有页面级字段 → 不注入，走每题兜底。
+    if (!Array.isArray(result) && typeof result?.subject === 'string' && result.subject.trim()) {
+      const pageSubject = result.subject.trim()
+      for (const q of questionsArray) {
+        if (!q.subject) q.subject = pageSubject
+      }
+      if (pageSubject !== '数学') console.log(`   [subject] 页面级学科=${pageSubject}，已下发 ${questionsArray.length} 题`)
+    }
+
     normalizeBlockBoxSemantics(questionsArray)
 
     const questions = questionsArray.map((q) => {
@@ -5616,6 +5627,15 @@ export const processWorkbookGrading = async (job) => {
           for (const q of questions) {
             if (q && typeof q === 'object') q._lesson_code = lessonCode
           }
+        }
+        // 页面级学科下发到每题（英语语法重练 T2，2026-10-15）：与 chapter_hint 同款模式。
+        // 落库消费点读 q.subject（兜底'数学'不变）。
+        const pageSubject = typeof parsed.subject === 'string' ? parsed.subject.trim() : null
+        if (pageSubject) {
+          for (const q of questions) {
+            if (q && typeof q === 'object' && !q.subject) q.subject = pageSubject
+          }
+          if (pageSubject !== '数学') console.log(`   [Workbook] 页面级学科=${pageSubject}，已下发 ${questions.length} 题`)
         }
       }
     } catch (e) {
