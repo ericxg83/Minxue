@@ -203,6 +203,12 @@ export const createQuestions = async (questions) => {
       page_number: q.page_number ?? null,
       confidence: q.confidence ?? 0,
       is_complete: checkQuestionCompleteness(q).isComplete,
+      // ⚠️ 2026-10-16 晚场修复：此前本对象**没有** is_suspicious 键 ⇒ INSERT 列动态生成时
+      // 该列永远走 DEFAULT FALSE，worker 在内存里打的所有标记（英语校验闸 / V 句型转换
+      // 复核兜底 / 页归属低置信 / 合并失败兜底）在落库一刻全部蒸发——典型的静默丢字段。
+      // 列自 init-db 起就存在（DEFAULT FALSE），fix-* 脚本也一直在写它，补上零行为变化
+      // （未标记的行依旧 false），仅让「标了记」的行真正落库。
+      is_suspicious: q.is_suspicious === true,
       created_at: new Date().toISOString()
     }
   })

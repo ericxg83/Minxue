@@ -1308,6 +1308,83 @@ const ENGLISH_HAS_BLANK = (q) => /_{1,}\s*\d{1,2}\s*_{1,}/.test(String(q?.conten
 export const ENGLISH_SINGLE_BLANK_KINDS = new Set(['word_bank', 'word_form'])
 export const isEnglishSingleBlankKind = (q) => ENGLISH_SINGLE_BLANK_KINDS.has(String(q?.english_kind || ''))
 
+/** content 里的**编号挖空**形态（__3__ / _3_），与 ENGLISH_HAS_BLANK 同口径但只查 content 自身 */
+const ENGLISH_NUMBERED_BLANK_IN_CONTENT = (q) => /_{1,}\s*\d{1,2}\s*_{1,}/.test(String(q?.content ?? ''))
+
+/**
+ * 英语「单空语篇题」**内容判据**（2026-10-16 晚场；不依赖 english_kind 标签）。
+ *
+ * 为什么需要它：english_kind 是 OCR 内存态、模型时贴时不贴。实测同一次真卷回归里，
+ * 4 道 III/IV 题的标签丢失或被误贴成 choice_passage ⇒「不喂 parent_stem」与
+ * 「多空答案闸」全部静默失效，整篇多答案原样落库（与修复前同一病灶复发）。
+ * 标签判据管「模型守规矩时」，本判据管「模型不守规矩时」，调用方取并集。
+ *
+ * 判据（全部满足）：
+ *   · 英语题；
+ *   · content 自身含**编号挖空**（__3__ 形态）；
+ *   · 有共享短文 parent_stem（III/IV 拆题后每空共享同一篇）；
+ *   · **无选项**——有选项的是真选择题（II choice_passage，照旧喂整篇）。
+ * V 句型转换无 parent_stem、II 有 options，均被自然排除，行为零变化。
+ */
+export const isEnglishBlankPassageQuestion = (q) => {
+  if (!q || String(q?.subject ?? '') !== '英语') return false
+  if (Array.isArray(q.options) && q.options.length > 0) return false
+  if (!String(q?.parent_stem ?? '').trim()) return false
+  return ENGLISH_NUMBERED_BLANK_IN_CONTENT(q)
+}
+
+/** 单空题总判据：标签（模型守规矩）∨ 内容（模型不守规矩） */
+export const isEnglishSingleBlankQuestion = (q) => isEnglishSingleBlankKind(q) || isEnglishBlankPassageQuestion(q)
+
+/** 强 IPA 特征字符（长度号/重音/非拉丁 IPA 字母）——用于把 "/iːtʃ/" 与 "and/or" 区分开 */
+const IPA_STRONG_CHAR = /[ːˈˌɪʊæɑɔəʌŋðθʃʒ]/
+
+/**
+ * I 语音拼写题**内容判据**（2026-10-16 晚场；不依赖 english_kind 标签）。
+ *
+ * 提示词对 I 的定义原文：「根据音标写单词，题干含 /.../ 国际音标」。
+ * 实测模型会把 I 语音题贴成 word_form 混进 keep 集（如 "Each student can have
+ * a bowl of soup. /iːtʃ/" 被判成 fill 还生成了答案）。
+ * 判据：题干出现 `/…/` 片段且片段内含强 IPA 字符。
+ * 保守边界：and/or、1/2、2026/10/16、https:// 均不含强 IPA 字符 ⇒ 不误伤。
+ */
+export const isEnglishPhoneticQuestion = (q) => {
+  const c = String(q?.content ?? '')
+  if (!c.includes('/')) return false
+  const segments = c.match(/\/([^/\n]{1,24})\//g)
+  if (!segments) return false
+  return segments.some(seg => IPA_STRONG_CHAR.test(seg))
+}
+
+/**
+ * 英语综合卷 keep-only-II-V 过滤（T1.5）+ 内容兜底（2026-10-16 晚场）。
+ *
+ * 两层判据：
+ *   1) 标签层：english_kind ∈ {choice_passage, word_bank, word_form, sentence_transform}；
+ *   2) 内容层（标签不可靠时的兜底，判据直接对应提示词里这两类的定义原文）：
+ *      · I 语音拼写 = 题干含 /.../ 国际音标 → 剔除；
+ *      · VI 阅读理解 = 开放式问答题（question_type=answer 且无编号挖空）→ 剔除。
+ * 数学页 / 非英语页不进入本过滤（调用方已按 pageSubject 把住门）。
+ *
+ * @returns {{kept: Array<object>, dropped: Record<string, number>}} dropped 的键含剔除原因
+ */
+export function filterEnglishExamQuestions(questionsArray) {
+  const KEEP_KINDS = new Set(['choice_passage', 'word_bank', 'word_form', 'sentence_transform'])
+  const kept = []
+  const dropped = {}
+  const bump = (k) => { dropped[k] = (dropped[k] || 0) + 1 }
+  for (const q of questionsArray) {
+    const k = q?.english_kind || '(无)'
+    if (!KEEP_KINDS.has(k)) { bump(k); continue }
+    if (isEnglishPhoneticQuestion(q)) { bump('I语音(内容判据)'); continue }
+    if (String(q?.question_type || '') === 'answer' && !ENGLISH_NUMBERED_BLANK_IN_CONTENT(q)) {
+      bump('VI阅读(内容判据)'); continue
+    }
+    kept.push(q)
+  }
+  return { kept, dropped }
+}
+
 const WORD_BOX_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 /**
@@ -1571,21 +1648,16 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
     // IV 词形填空(word_form) / V 句型转换(sentence_transform)。其余一律剔除：
     //   · I 语音拼写(phonetic)
     //   · VI 书面·情景表达(writing)
-    //   · VI 实际常为阅读理解（开放式 answer 题，english_kind 为 null/其它）→ 同样剔除
+    //   · VI 实际常为阅读理解（开放式 answer 题）→ 同样剔除
     // 剔除发生在建 questions 记录之前（不污染错题本），计数留日志供复核对账。
     // 数学页 / 非英语页不进入本过滤。
+    // ⚠️ 2026-10-16 晚场：标签层之外加内容兜底（filterEnglishExamQuestions 内），
+    //    因为实测模型会把 I 语音题贴成 word_form、VI 阅读题贴成 keep 类混过标签层。
     {
       if (pageSubject === '英语') {
-        const KEEP_KINDS = new Set(['choice_passage', 'word_bank', 'word_form', 'sentence_transform'])
-        const kept = []
-        const dropBreakdown = {}
-        for (const q of questionsArray) {
-          const k = q?.english_kind || '(无)'
-          if (KEEP_KINDS.has(k)) { kept.push(q); continue }
-          dropBreakdown[k] = (dropBreakdown[k] || 0) + 1
-        }
+        const { kept, dropped } = filterEnglishExamQuestions(questionsArray)
         if (questionsArray.length !== kept.length) {
-          const detail = Object.entries(dropBreakdown).map(([k, n]) => `${k} ${n} 题`).join('、')
+          const detail = Object.entries(dropped).map(([k, n]) => `${k} ${n} 题`).join('、')
           console.log(`   [英语过滤] 已剔除非 II-V 题型（keep-only-II-V）：${detail}（剩 ${kept.length} 题待落库）`)
           questionsArray.length = 0
           Array.prototype.push.apply(questionsArray, kept)
@@ -1608,6 +1680,40 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       console.warn(`   [英语校验闸] 校验未通过（不阻断，本页 choice_passage 题标记 is_suspicious 转复核）: ${issueText}`)
       for (const q of questionsArray) {
         if (q && typeof q === 'object' && q.subject === '英语' && (q.english_kind || 'choice_passage') === 'choice_passage') q.is_suspicious = true
+      }
+    }
+
+    // ── III 词框按篇恢复 + 标签修复（2026-10-16 晚场）────────────────────────────────
+    // 病灶：模型对同一篇选词填空里**有的空**捕了词框、有的空没捕（标签也可能丢/误贴）。
+    // 没捕词框的空 ⇒ options 为空 ⇒ 学生写的字母无法归一（判等必然错）、
+    // 「答案必须在词框内」闸也失效。词框是**整篇公共**的（不是每空一套），
+    // 故向同篇（parent_stem 逐字相同）且带词框的 word_bank 兄弟题借，并顺手把
+    // english_kind 补成 word_bank——标签修好后，字母归一/入框闸/单空口径全部复活。
+    // 保守边界：
+    //   · 只向 **word_bank 标签**的兄弟题借（II choice_passage 的 A/B/C 选项绝不是词框）；
+    //   · 本题必须是无选项 + 有编号挖空 + parent_stem 与兄弟题逐字相同；
+    //   · content 形如 "__3__ (add)" 的**词形填空(IV)**不借（它天生无选项）。
+    if (pageSubject === '英语') {
+      const boxByStem = new Map()
+      for (const q of questionsArray) {
+        if (q?.english_kind === 'word_bank' && Array.isArray(q.options) && q.options.length > 0) {
+          const stem = String(q.parent_stem ?? q.shared_stem ?? '').trim()
+          if (stem && !boxByStem.has(stem)) boxByStem.set(stem, q.options)
+        }
+      }
+      if (boxByStem.size > 0) {
+        for (const q of questionsArray) {
+          if (Array.isArray(q.options) && q.options.length > 0) continue
+          if (!ENGLISH_NUMBERED_BLANK_IN_CONTENT(q)) continue
+          if (/_{1,}\s*\d{1,2}\s*_{1,}\s*\([A-Za-z]+\)/.test(String(q?.content ?? ''))) continue // IV 词形填空形态
+          const stem = String(q.parent_stem ?? q.shared_stem ?? '').trim()
+          const box = stem && boxByStem.get(stem)
+          if (box) {
+            q.options = box
+            if (!q.english_kind) q.english_kind = 'word_bank'
+            console.log(`   [III词框] 按篇恢复词框(${box.length} 项)+补标签: ${String(q.content).slice(0, 42)}`)
+          }
+        }
       }
     }
 
@@ -1658,7 +1764,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       // ⇒ 模型把**整篇短文的答案**一并吐了回来（实测 IV 每题都被写成
       // "surprise，pieces，added，Finally，tasty"）。这类答案写进库必然判不出，
       // 置空交给答案引擎按「只答本空」重解（该路径已带单空指令 + 多空拒收闸）。
-      if (isEnglishSingleBlankKind(q) && /[，,、;；]/.test(String(standardAnswer).trim())) {
+      // 判据取「标签 ∨ 内容」并集（isEnglishSingleBlankQuestion）：标签会丢/会被误贴，
+      // 只认标签时漏掉的那些题正是脏答案的来源（2026-10-16 晚场实测）。
+      if (isEnglishSingleBlankQuestion(q) && /[，,、;；]/.test(String(standardAnswer).trim())) {
         console.log(`   [英语单空闸] 丢弃整篇并列答案: "${String(standardAnswer).slice(0, 60)}" → 转答案引擎按本空重解`)
         standardAnswer = ''
       }
@@ -1712,10 +1820,13 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         //   coerceAIText 与 neonService.createQuestions 的口径保持一致。
         sub_no: normalizeSubNo(q.sub_no),
         parent_stem: coerceAIText(q.parent_stem ?? q.shared_stem) || null,
-        // 英语校验闸（T3）：英语语篇页结构违规时本页 choice_passage 题被标 is_suspicious，
-        // PC 复核页消费该标记突出显示（与答案库链路 7520 行同名列同语义）。
-        // T1.5：sentence_transform（句型转换）同样标记复核——其答案靠文本精确匹配易误判，
+        // 英语校验闸（T3）：英语语篇页结构违规时本页 choice_passage 题被标 is_suspicious；
+        // T1.5：sentence_transform（句型转换）同样标记——其答案靠文本精确匹配易误判，
         // 保守路由到人工复核，避免错判污染错题本。
+        // ⚠️ 2026-10-16 晚场更正：原注释称「PC 复核页消费该标记」**不实**——全仓 grep 证实
+        // src/ 与 routes/ 均无 is_suspicious 读取方；且 createQuestions 的插入对象此前**没有**
+        // 这一键，标记在落库一刻即被 DEFAULT FALSE 吞掉（已随本轮修复补上落库）。
+        // 现状：标记如实落库，但「标了记 ⇒ 自动进复核队列」的消费端尚未接线（待产品决策）。
         is_suspicious: q.is_suspicious === true || q.english_kind === 'sentence_transform',
         // 英语分题型标记（2026-10-16）：仅内存透传给 Step 7 答案生成阶段，**不落库**
         // （questions 表无此列，createQuestions 只取白名单字段）。
@@ -2604,7 +2715,8 @@ const resolveCopiedAnswerViaTextOnly = async (q, original = {}) => {
   // 英语 III/IV 单空题同样不能把整篇短文喂进去（同主链路的理由，见 generateMissingAnswers）：
   // 引擎会按整篇作答、返回全部空的答案。buildTextOnlyResolveInput 是多调用方共用工具
   // （数学重解也要 parent_stem），故不改它，改在**本调用点**按题型选口径。
-  const singleBlankKind = isEnglishSingleBlankKind(q)
+  // 判据同主链路：标签 ∨ 内容并集（isEnglishSingleBlankQuestion）。
+  const singleBlankKind = isEnglishSingleBlankQuestion(q)
   const textOnlyInput = singleBlankKind
     ? [q?.content, (Array.isArray(q?.options) && q.options.length > 0) ? `选项：${q.options.map(o => String(o ?? '').trim()).filter(Boolean).join('、')}` : null]
       .filter(s => s && String(s).trim()).join('\n').trim()
@@ -2781,6 +2893,9 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
    * 英语 III/IV 单空答案闸：答案里出现并列分隔符 ⇒ 引擎又按整篇作答了。
    * 不做「挑一个词」的猜测（无判据，猜错比留白更坏）⇒ 拒收并转人工。
    * III 另有一道更严的闸：答案必须落在 options 词框内。
+   * 判据取「标签 ∨ 内容」并集（isEnglishSingleBlankQuestion）——2026-10-16 晚场实测：
+   * 模型把 4 道 III/IV 题的 english_kind 丢成/误贴成 choice_passage，只认标签时
+   * 本闸静默失效，整篇多答案原样落库。
    */
   const isMultiBlankAnswer = (answer) => /[，,、;；]/.test(String(answer || '').trim())
 
@@ -2799,7 +2914,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
 
   /** @returns {string|null} 违规原因；null = 通过 */
   const checkEnglishSingleBlankAnswer = (q, answer) => {
-    if (!isEnglishSingleBlankKind(q)) return null
+    if (!isEnglishSingleBlankQuestion(q)) return null
     const a = String(answer || '').trim()
     if (!a) return null
     if (isMultiBlankAnswer(a)) {
@@ -2901,7 +3016,10 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
       //   · III 选词填空：本空答案 = 从 options（词框）里挑一个，content 已含该空所在整句；
       //   · IV 词形填空：content 已含「该空 + 括号里给的原词」，变形即可定；
       // 两者都不需要同篇其它空。故**不喂 parent_stem**，并显式下达「单空作答」指令。
-      const isEnglishSingleBlank = ENGLISH_SINGLE_BLANK_KINDS.has(String(q.english_kind || ''))
+      // ⚠️ 2026-10-16 晚场：判据从「只认 english_kind 标签」扩为「标签 ∨ 内容」并集
+      //（isEnglishSingleBlankQuestion）——标签丢失/误贴时旧判据静默失效，引擎拿整篇
+      // 短文作答返回全套并列答案，正是本轮要根除的病灶。
+      const isEnglishSingleBlank = isEnglishSingleBlankQuestion(q)
       const content = isEnglishSingleBlank
         ? [q.content].filter(s => s && String(s).trim()).join('\n')
         : [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
