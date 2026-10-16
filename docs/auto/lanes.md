@@ -605,3 +605,15 @@
 - **四道闸**：npm test **2481/2481 fail 0**｜eslint **0e/122w**｜`dist_nightly_20261016r296` **36.28s**｜preview 5650 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：今日 13:00 档 `2026-10-16` ok:true 正点，**无报警**（仍 5/29 表 = r289-P-A）。
 - **接手提示**：① daemon.mjs 引擎去留拍板后落地（批「删」则删引擎 + `test/patrolPortCaliber.test.mjs` 锁延伸，A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ 若负责人批「存档区可清理」，server/scripts 一次性件治理列方案（B）。
+
+## 第 r297 轮认领（2026-10-16 17:2x–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/296` 正常释放约 1 小时，`loopGuard acquire` 直得 **297** 无撞号（`git log --all --grep r297` 空、remoteAhead=0）。
+- **本轮赛道**：仓库卫生与门禁基线（死代码清理 + 配套回归锁）——沿用 r293/r294/r295/r296。
+- **落地（A 级，commit `cfb2288`，已推送，部署缺口 0）**：删除两个「证伪实验」模块 `server/services/pageRuler.js`（叠刻度无收益，2026-09-20 实测）+ `server/utils/figureCompleteness.js`（证伪像素启发式，2026-09-23 结论可删），均自出生起全仓零导入方。新锁 `test/falsifiedExperimentGuard.test.mjs` 3 条（文件不得复活 + server/scripts/test 活代码剔注释禁导出令牌；反向自检双层：内联合成 + `git show HEAD:` 文件级真实旧版判红 3 条）。
+- **新普查手法**：全仓零导入方模块扫描（server/(services|utils|routes|config) + server/*.js 共 171 个跟踪模块；探针必须兼容 CJS require + ESM from + 动态 import 三形态）。回验留档：tasks.js 是 gitignore 占位件；7 个手跑一次性件零导入方是设计形态。
+- **未触碰**：并行会话 8 个已修改 + 7 个未跟踪文件（含 keep_local_services 家族 / neonBackfill1101 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2484/2484 fail 0**｜eslint **0e/122w**（基线）｜`dist_nightly_20261016r297` **35.06s**｜preview 5660 单调用内起服：cert_probe exit 0（唯一外联=OSS 图片桶）+ render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 `2026-10-16` ok:true 正点，**无报警**。
+- **过程教训**：`git add` 对已 `git rm` 的删除路径报 "pathspec did not match any files" ⇒ 删除已暂存时只 add 新文件。
+- **接手提示**：① daemon.mjs 引擎去留拍板后落地（批「删」则删引擎 + 锁延伸，A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ 存档区治理（7 个手跑一次性件 + server/scripts ~150 件）建议合并为一个 B 级方案待拍板。

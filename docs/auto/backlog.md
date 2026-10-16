@@ -4858,3 +4858,13 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **只读无缺陷留档**（四项，防下轮重复排查）：① scripts/** 28 个跟踪文件逐个核调用方，无新死代码候选（lintReportKit=patrol.mjs:26+锁 / frontendHealth、pruneDeadDeclarations、git-doctor、auditStoreContract=文档化手跑入口 / build-app=package.json build:app / certProbeKit=双消费 / skillRefsKit=双消费）；daemon.mjs 引擎与 wipe-neon.mjs 去留待拍板未动。② neonService 剩余未读段 757–982 / 1184–1334 / 1684–1814 / 1848–1917 全为硬化路径无缺陷（含 getResourceAnswersBySection「后写覆盖前写」与 ORDER BY created_at ASC 的一致性论证）。③ 门禁五件套+base.mjs+patrol.mjs+smoke.mjs 整读，r152 exit code / r158 BASE 单一口径 / r246 资源类型分流 / r236 lint 报告两道闸 / r293 端口口径各加固在位。④ 套件 2481/2481（+12 来自并行会话英语测试 fe3db38 等）、eslint 基线、esbuild 0.21.5 探针、后端 bootAt 15:31:58 晚于全部 WIP mtime，均正常；`server/_diag_*` 数百个历史探针均被 gitignore（server/_*），仅本机存档未动。
 - **四道闸**：npm test **2481/2481 fail 0**｜eslint **0e/122w**（基线 123w，−1 为本轮修复）｜`dist_nightly_20261016r296` **36.28s**｜preview 5650 单调用内起服：cert_probe exit 0（唯一外联=OSS 图片静态资源）+ render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。已推送，部署缺口 0。
 - **提案**：无新增 B/C；待拍板清单不变。
+
+## 第 r297 轮（2026-10-16 17:2x–，日常巡查 automation `4e9608a9`，锁正常释放认领，commit `cfb2288` 已推送）
+
+**已交付（A 级死代码清理，−180 行零产品码）**：删除两个「证伪实验」模块——`server/services/pageRuler.js`（45 行，b93c594 2026-09-20 生；2026-09-20 实测「叠刻度供模型读刻度不提升精度/无收益」，.workbuddy-ai/memory/2026-09-20.md:69 + topics/bbox-contract.md:24）与 `server/utils/figureCompleteness.js`（136 行，1b26340 2026-09-24 入库；2026-09-23 结论「证伪的像素启发式，未上生产，可删可留作记录」，.workbuddy/memory/2026-09-23.md:547）。两模块自出生起全仓零导入方（`git log -S` 全史仅 patrol 文档提及——R29/R61/R62 三轮审计只描述功能未查调用方，属 r216「门禁看着在其实没在」同型）。回归锁 `test/falsifiedExperimentGuard.test.mjs` 3 条（文件不得复活 + server/scripts/test 活代码剔注释禁导出令牌，扫描范围不含 server/_* 存档区与 .vue）；反向自检双层（内联合成 + `git show HEAD:` 文件级真实旧版判红 3 条）⇒ 非空锁。四道闸：npm test 2484/2484 fail 0｜eslint 0e/122w｜`dist_nightly_20261016r297` 35.06s｜preview 5660 cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
+
+**新普查手法入册**：全仓零导入方模块扫描（`server/(services|utils|routes|config)/**` + `server/*.js`，探针需兼容 CJS `require(` + ESM `from` + 动态 `import(` 三种形态，只认 `from` 会误报 1386 个）。本轮回验结论：`server/routes/tasks.js` 是 .gitignore:86 显式忽略的 0 字节本机占位件（非仓库内容）；`analyze_env/check_env/test_oss/auto_debug/init-db/migrate/retryPendingTasks` 7 个手跑一次性件零导入方是设计形态（非死代码）⇒ **存档区治理（手跑一次性件 + server/scripts ~150 件）建议合并为一个 B 级方案待拍板**（r296 提示④延续）。
+
+**留档（非缺陷）**：两个本机探针 `server/_probe_ruler_measure.mjs` / `server/_diag_figcomplete_calib_0923.mjs`（gitignored 实验标定存档）因指向已删模块不能再跑，保留作历史记录，无需处理。
+
+**无新增 B/C 提案**；待拍板清单不变（r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A / r285-P-B / r280-P-A / r280-P-B / r278-P-B）。
