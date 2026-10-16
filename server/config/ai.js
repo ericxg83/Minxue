@@ -2436,11 +2436,16 @@ ${legacy ? `【答案字段强约束（防止串行污染与算术幻觉）】
    ⚠️ 你只应给下方「必做」四类题打 kind；其它任何英语大题一律不打 kind、也不输出（见第 3 条）。
 2. 必做（输出为单题，按空/按小题拆）：
    - II 短文挖空选 A/B/C：english_kind="choice_passage"，按上方【英语语篇语法选择题分支】拆题。
-   - III 选词填空（短文挖空，每空从词框里挑一个词）：english_kind="word_bank"，question_type="fill"，
-     options=[]（词框是整篇公共语境，不要按空拆成选项数组），answer=该空应填入的词框中的那个词（逐字照抄卷面词框原文），
+   - III 选词填空（短文挖空，每空从词框里挑一个词）：english_kind="word_bank"，question_type="choice"，
+     ⚠️ **词框必须逐字写进 options**（如 ["presents","rocket","glass","hot","basketball","taste"]，
+     按卷面 A/B/C… 顺序，去掉字母标号但保留词本身）。这是「拆成独立选择题」的必要条件：
+     options 为空 ⇒ 学生答的字母（A/B/C…）无法与答案对齐，判题必然对不上。
+     answer=该空应填入的那个词（options 里的某一项，逐字照抄，不要写字母、不要写多个词）。
      parent_stem=短文全文（挖空标记 __N__ 原样保留），content=该空所在完整句（含挖空标记）。
    - IV 词形填空（短文挖空，每空给一个词、需变成适当形式）：english_kind="word_form"，question_type="fill"，
-     options=[]，answer=该空应填的变形词（逐字照抄卷面，禁止"顺手纠正"：卷面印 haven 就填其变形，不要改成 have），
+     options=[]，answer=**仅该空**应填的变形词（逐字照抄卷面，禁止"顺手纠正"：卷面印 haven 就填其变形，不要改成 have），
+     ⚠️ answer 只能是「一个词」：括号里给了原词（surprising/add/piece/final/taste），就只输出这一空变形后的那个词，
+        绝不可把同一短文其它空的答案一起输出（用逗号并列多个词 = 错误）。
      parent_stem=短文全文，content=该空所在完整句。
    - V 句型转换（每小题一句改写/合并/提问，题号独立）：english_kind="sentence_transform"，question_type="fill"，
      options=[]，answer=该题的标准改写句（逐字照抄卷面印出的参考答案），content=该小题完整指令+原句

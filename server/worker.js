@@ -1293,6 +1293,50 @@ export function validateEnglishPassageSplit(questions, pageSubject) {
 const ENGLISH_HAS_BLANK = (q) => /_{1,}\s*\d{1,2}\s*_{1,}/.test(String(q?.content ?? '') + ' ' + String(q?.parent_stem ?? ''))
 
 /**
+ * 英语 III/IV「单空题」判据（2026-10-16）。
+ *
+ * 这两类题拆题后**每空一道、各自独立**，只是共享同一篇短文（parent_stem）。
+ * 因此答案必须只针对本空：
+ *   · III word_bank 选词填空 —— 本空答案 = 从词框(options)里挑一个；
+ *   · IV  word_form 词形填空 —— content 已含「该空 + 括号里给的原词」，变形即可定。
+ * 两者都不需要同篇其它空，故**不喂 parent_stem**；引擎若仍按整篇作答会返回
+ * 「surprise，pieces，added，Finally，tasty」这种全套并列答案，逐行写库后判等全对不上。
+ *
+ * 判据只有 OCR 内存态的 english_kind 有（questions 表无此列），故定义在模块级，
+ * 供「答案输入口径」「多空答案闸」两处共用，避免口径漂移。
+ */
+export const ENGLISH_SINGLE_BLANK_KINDS = new Set(['word_bank', 'word_form'])
+export const isEnglishSingleBlankKind = (q) => ENGLISH_SINGLE_BLANK_KINDS.has(String(q?.english_kind || ''))
+
+const WORD_BOX_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+
+/**
+ * III 选词填空：把学生写的**词框字母**换算成**词框里的那个词**（2026-10-16）。
+ *
+ * 卷面形态是「词框 A. presents  B. rocket …」+ 学生在横线上写 "E"，
+ * 而参考答案天然是单词 "basketball"。判等层是形态敏感的（选择题走严格字母匹配），
+ * 不归一就必然判错。这里在**落库前**把字母换成词，之后判等、
+ * Step 7 重判、错题重练三处读到的都是同一个词，口径一致。
+ *
+ * 保守边界（防误改）：
+ *   · 只有「整串就是单个字母」才换（带括号/空格先剥一层）；
+ *   · 字母下标必须落在词框长度内（词框 6 项时不接受 "H"）；
+ *   · 学生若已经直接写了词（或写了多个字母），一律原样返回，不猜。
+ * @returns {string} 归一后的学生答案；无法归一时**原样返回**入参
+ */
+export const wordBoxLetterToWord = (value, options) => {
+  const v = String(value ?? '').trim()
+  if (!v || !Array.isArray(options) || options.length === 0) return value
+  // 已经是词框里的某个词 → 不动
+  if (options.some(o => String(o ?? '').trim().toLowerCase() === v.toLowerCase())) return value
+  const letter = v.replace(/^[（(\s]+|[)）\s]+$/g, '').toUpperCase()
+  if (letter.length !== 1) return value
+  const idx = WORD_BOX_LETTERS.indexOf(letter)
+  if (idx < 0 || idx >= options.length) return value
+  return String(options[idx] ?? '').trim() || value
+}
+
+/**
  * 英语页分类（英语语法重练 T5 两遍法，2026-10-15）。
  *
  * 背景：英语作业拍照常见「文章与选项表分离」「文章跨页」。逐页独立 OCR 时：
@@ -1573,7 +1617,20 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
       const rawStudentAnswer = coerceAIText(q.student_answer)
       const answerSource = determineAnswerSource(rawStudentAnswer)
       const aiAnswer = rawStudentAnswer
-      const cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
+      let cleanedStudentAnswer = answerSource === 'blank' ? '' : rawStudentAnswer
+
+      // 英语 III 选词填空：学生写的是**词框字母**（A/B/C…），而参考答案是**单词**。
+      // 两边形态不一致 ⇒ 判等层永远对不上（实测学生写 "E"、参考 "basketball" 判错）。
+      // 在落库前把字母按 options 词框归一为单词，让判等两边都是词：
+      // 写字母的学生能判对，直接写单词的学生原样通过（两种笔迹都覆盖）。
+      // ⚠️ 只在「单字母 + 该字母在词框下标范围内」时才改写，其余形态一律原样保留。
+      if (q?.english_kind === 'word_bank' && Array.isArray(q.options) && q.options.length > 0 && cleanedStudentAnswer) {
+        const mapped = wordBoxLetterToWord(cleanedStudentAnswer, q.options)
+        if (mapped && mapped !== cleanedStudentAnswer) {
+          console.log(`   [III词框] 学生答案字母归一: "${cleanedStudentAnswer}" → "${mapped}"`)
+          cleanedStudentAnswer = mapped
+        }
+      }
 
       // P2 硬闸门：OCR 模型可能把老师红笔批语("计算错误"等)当成标准答案抄进 answer。
       // 这类值不是答案，命中即丢弃置空，交给后续 AI 生成路径从题目本身重解出参考答案。
@@ -1595,6 +1652,24 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         && isSameAnswerText(standardAnswer, cleanedStudentAnswer)) {
         console.log(`   [P3] 丢弃与学生答案雷同的OCR答案（疑似抄写污染）: "${standardAnswer}" → 转后续答案链路`)
         standardAnswer = ''
+      }
+
+      // 英语 III/IV 单空闸（OCR 阶段，2026-10-16）：单空题的答案里出现并列分隔符
+      // ⇒ 模型把**整篇短文的答案**一并吐了回来（实测 IV 每题都被写成
+      // "surprise，pieces，added，Finally，tasty"）。这类答案写进库必然判不出，
+      // 置空交给答案引擎按「只答本空」重解（该路径已带单空指令 + 多空拒收闸）。
+      if (isEnglishSingleBlankKind(q) && /[，,、;；]/.test(String(standardAnswer).trim())) {
+        console.log(`   [英语单空闸] 丢弃整篇并列答案: "${String(standardAnswer).slice(0, 60)}" → 转答案引擎按本空重解`)
+        standardAnswer = ''
+      }
+      // III 落成 choice 后，OCR 也可能回**字母**（词框编号）。字母是合法形态，
+      // 统一归一成单词再落库，保证与学生答案侧同形态、判等可比。
+      if (q?.english_kind === 'word_bank' && Array.isArray(q.options) && q.options.length > 0 && standardAnswer) {
+        const ansMapped = wordBoxLetterToWord(standardAnswer, q.options)
+        if (ansMapped && ansMapped !== standardAnswer) {
+          console.log(`   [III词框] 参考答案字母归一: "${standardAnswer}" → "${ansMapped}"`)
+          standardAnswer = ansMapped
+        }
       }
 
       const gradingResult = resolveGradingResult({
@@ -1642,6 +1717,11 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         // T1.5：sentence_transform（句型转换）同样标记复核——其答案靠文本精确匹配易误判，
         // 保守路由到人工复核，避免错判污染错题本。
         is_suspicious: q.is_suspicious === true || q.english_kind === 'sentence_transform',
+        // 英语分题型标记（2026-10-16）：仅内存透传给 Step 7 答案生成阶段，**不落库**
+        // （questions 表无此列，createQuestions 只取白名单字段）。
+        // 用途：III 选词填空 / IV 词形填空的答案必须「按空求解」而不是「按篇求解」，
+        // 判据只有这里有 —— OCR 落库后 english_kind 即丢失，答案引擎无法再区分题型。
+        english_kind: q.english_kind || null,
         text_bbox: q.text_bbox || null,
         image_type: q.image_type || null,
         image_bbox: q.image_bbox || null,
@@ -2521,7 +2601,14 @@ const solveAnswerShared = (fingerprint, solver) => {
  * @param {{answer?: string, analysis?: string, engine?: string|null}} original 原求解结果
  */
 const resolveCopiedAnswerViaTextOnly = async (q, original = {}) => {
-  const textOnlyInput = buildTextOnlyResolveInput(q, q?.options)
+  // 英语 III/IV 单空题同样不能把整篇短文喂进去（同主链路的理由，见 generateMissingAnswers）：
+  // 引擎会按整篇作答、返回全部空的答案。buildTextOnlyResolveInput 是多调用方共用工具
+  // （数学重解也要 parent_stem），故不改它，改在**本调用点**按题型选口径。
+  const singleBlankKind = isEnglishSingleBlankKind(q)
+  const textOnlyInput = singleBlankKind
+    ? [q?.content, (Array.isArray(q?.options) && q.options.length > 0) ? `选项：${q.options.map(o => String(o ?? '').trim()).filter(Boolean).join('、')}` : null]
+      .filter(s => s && String(s).trim()).join('\n').trim()
+    : buildTextOnlyResolveInput(q, q?.options)
   if (!textOnlyInput) return { adopted: false, why: 'no_stem' }
 
   let retryResult
@@ -2690,6 +2777,52 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
     return notes
   }
 
+  /**
+   * 英语 III/IV 单空答案闸：答案里出现并列分隔符 ⇒ 引擎又按整篇作答了。
+   * 不做「挑一个词」的猜测（无判据，猜错比留白更坏）⇒ 拒收并转人工。
+   * III 另有一道更严的闸：答案必须落在 options 词框内。
+   */
+  const isMultiBlankAnswer = (answer) => /[，,、;；]/.test(String(answer || '').trim())
+
+  /**
+   * 英语单空题答案形态归一（落库前）。
+   *
+   * III 落成 choice 后，答案引擎按**选择题**习惯回字母（实测回 "B"），
+   * 而卷面词框本身是 A/B/C… 编号 —— 字母在这里是**正确形态**，
+   * 不能因为「不是词」就判它非法（那会把正确答案误杀成需人工）。
+   * 与学生答案侧用同一个 wordBoxLetterToWord 归一，保证判等两边同形态。
+   */
+  const normalizeEnglishBlankAnswer = (q, value) => {
+    if (q?.english_kind !== 'word_bank' || !Array.isArray(q.options) || q.options.length === 0) return value
+    return wordBoxLetterToWord(value, q.options)
+  }
+
+  /** @returns {string|null} 违规原因；null = 通过 */
+  const checkEnglishSingleBlankAnswer = (q, answer) => {
+    if (!isEnglishSingleBlankKind(q)) return null
+    const a = String(answer || '').trim()
+    if (!a) return null
+    if (isMultiBlankAnswer(a)) {
+      return `单空题返回了多空答案（"${a}"）——引擎按整篇作答，本题只该有一个词`
+    }
+    // III 选词填空：答案必须来自词框，否则是模型自造词。
+    const opts = Array.isArray(q.options) ? q.options : []
+    if (q.english_kind === 'word_bank' && opts.length > 0) {
+      const hit = opts.some(o => String(o).trim().toLowerCase() === a.toLowerCase())
+      if (!hit) return `选词填空答案 "${a}" 不在词框 ${JSON.stringify(opts)} 内`
+    }
+    return null
+  }
+
+  const rejectEnglishSingleBlankAnswer = async (q, answer, analysis, reason) => {
+    await updateQuestionAnswer(q.id, '', analysis, true)
+    q.answer = ''
+    if (analysis) q.analysis = analysis
+    exceptionCount++
+    await markAnswerException(q.id, reason)
+    console.warn(`     题目 ${q.id.substring(0, 8)}: ⛔ ${reason} → 转人工复核`)
+  }
+
   // ⏳ 进度条中间状态：80% 打在这里后会跑这个批次循环，单个 batch 可能耗时分钟级
   // （AI 生成答案 / 缓存回填），期间 result.progress 一直停 80 → 前端"批改中"看着像卡死。
   // 按 batch 完成度把 80→84 拆细，让前端能看到推进。
@@ -2756,9 +2889,33 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
       //   拼上 parent_stem → "2-√2，2，-3"，解析完整且与学生答案一致。
       //   拼成完整题干后，答案引擎输入 / validateArithmeticAnswer / 缓存指纹三者口径一致；
       //   无 parent_stem 时（普通单问）结果与原先逐字相同，零回归。
-      const content = [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
+      //
+      // ═══ 英语 III/IV 单空口径（2026-10-16）═══
+      // 上面那条「拼 parent_stem」规则对数学多小问是对的，但对英语选词填空(III)/
+      // 词形填空(IV) 是**错的**：这两类拆题后每道子题共享同一篇短文，
+      // 拼上 parent_stem 等于把整篇 5 空交给引擎，引擎就按「整篇」作答，
+      // 把 5 个答案一起吐回来（实测 answer="surprise，pieces，added，Finally，tasty"
+      // 被原样写进该篇的每一行 ⇒ 每题都是多答案 ⇒ 判题全对不上、堆积「需人工」）。
+      //
+      // 正确口径：**只问本空**。III/IV 的本空语义完全自足——
+      //   · III 选词填空：本空答案 = 从 options（词框）里挑一个，content 已含该空所在整句；
+      //   · IV 词形填空：content 已含「该空 + 括号里给的原词」，变形即可定；
+      // 两者都不需要同篇其它空。故**不喂 parent_stem**，并显式下达「单空作答」指令。
+      const isEnglishSingleBlank = ENGLISH_SINGLE_BLANK_KINDS.has(String(q.english_kind || ''))
+      const content = isEnglishSingleBlank
+        ? [q.content].filter(s => s && String(s).trim()).join('\n')
+        : [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
       const options = q.options || []
-      const fullContent = options.length > 0 ? `${content}\n选项：${formatOptionsForPrompt(options)}` : content
+      // 单空指令：与题干一起进 userText，明确「只答这一空、只输出一个词」。
+      // ⚠️ 措辞必须点明「本句里的空格」而不是泛泛的「这题」，否则引擎会去解整篇。
+      const singleBlankDirective = isEnglishSingleBlank
+        ? `\n\n⚠️ 本题只考上面句子里的**一个**空格：请只给出这**一个**空应填的词。
+只输出这个词本身（如 "surprise" / "gifts"），不要输出解释、不要输出同篇其它空的答案、不要用逗号并列多个词。`
+        : ''
+      const basePromptContent = options.length > 0 ? `${content}\n选项：${formatOptionsForPrompt(options)}` : content
+      const fullContent = basePromptContent + singleBlankDirective
+      // 指纹只用题干本体（不含指令）：指令是每次拼装的固定话术，
+      // 混进指纹会让「同一空、不同措辞」缓存互相错开。
       const fingerprint = generateTextFingerprint(content, options, q.question_type)
 
       // 缓存查找
@@ -2776,6 +2933,14 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           // 落到下面重新生成（新答案仍会再过一次闸）。
           const rescuedFromCache = tryRescueReferenceAnswer(finalAnswer, cached.analysis, q)
           if (rescuedFromCache) finalAnswer = rescuedFromCache
+          // 英语 III/IV 单空闸同样覆盖缓存路径：历史缓存里存过「整篇多答案」，
+          // 复用会把脏答案再写回库里（且会经 question_cache 传染给所有同题学生）。
+          const cacheSingleBlankViolation = checkEnglishSingleBlankAnswer(q, normalizeEnglishBlankAnswer(q, finalAnswer))
+          if (cacheSingleBlankViolation) {
+            await rejectEnglishSingleBlankAnswer(q, finalAnswer, cached.analysis, cacheSingleBlankViolation)
+            return
+          }
+          finalAnswer = normalizeEnglishBlankAnswer(q, finalAnswer)
           const cacheAnswerStillBad = isObjectiveForAnswerGate(q) && isNarrativeAnswer(finalAnswer)
           if (cacheAnswerStillBad) {
             console.warn(`     题目 ${q.id.substring(0, 8)}: 缓存答案疑似叙述残句且救不回来 ${JSON.stringify(String(finalAnswer).slice(0, 24))}，放弃缓存改用答案引擎`)
@@ -2967,6 +3132,15 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         const oldAnswer = q.answer
         let finalAnswer = extractAnswerFromAnalysis(result.answer, result.analysis, q.options)
         finalAnswer = normalizeGeneratedAnswer(q, finalAnswer)
+        // 英语 III/IV 单空闸：引擎偶尔仍无视「只答本空」指令、按整篇作答，
+        // 把同篇全部空的答案并列返回。写进库里就是「每题多答案」⇒ 判等永远对不上。
+        // 拒收转人工（不猜哪个词才对）——宁可留白让老师填，也不写脏答案。
+        const singleBlankViolation = checkEnglishSingleBlankAnswer(q, normalizeEnglishBlankAnswer(q, finalAnswer))
+        if (singleBlankViolation) {
+          await rejectEnglishSingleBlankAnswer(q, finalAnswer, result.analysis, singleBlankViolation)
+          return
+        }
+        finalAnswer = normalizeEnglishBlankAnswer(q, finalAnswer)
         // 叙述型残句：先救回；救不回来才清空转人工
         if (isObjectiveForAnswerGate(q) && isNarrativeAnswer(finalAnswer)) {
           const rescued = tryRescueReferenceAnswer(finalAnswer, result.analysis, q)
