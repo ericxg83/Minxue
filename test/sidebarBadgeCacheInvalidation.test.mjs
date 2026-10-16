@@ -78,7 +78,6 @@ test('源码锁：侧栏徽标不得用未读通知数兜底（防 2026-10-09 �
   // 徽标一旦 `?? pendingReview` 兜底，接口少下发一个字段就静默退化成另一个语义，
   // 表现为「徽标 1 / 页面 7」——正是 2026-10-09 那次口径漂移事故。
   const src = flatSource(read('src/workbench/components/layout/AppSidebar.vue'))
-  const fails = []
   const start = src.indexOf('constbadgeFor=(path)=>{')
   assert.ok(start >= 0, 'AppSidebar.badgeFor 锚点不在——源码改过请先同步本锁')
   const block = src.slice(start, start + 220)
