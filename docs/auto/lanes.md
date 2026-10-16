@@ -594,3 +594,14 @@
 - **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
 - **⚠️ 提交裹走事件（r289 同型第二例）**：`git rm` 暂存后并行会话 14:34 抢跑 `39ac2b4` 把三处删除裹入其英语拆题产品码提交；内容无损、未重写他人提交，归属说明见 `0564a4b` message。教训：暂存后立即 commit。
 - **接手提示**：① `scripts/patrol/daemon.mjs` 引擎去留待负责人口径（自启已退役、停摆 4 天、与本 automation 职责重叠；批「删」则删引擎+锁延伸属 A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ neonService 剩余未读段（约 300 行）只读核查。
+
+## 第 r296 轮认领（2026-10-16 16:0x–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/295` 正常释放约 1 小时，`loopGuard acquire` 直得 **296** 无撞号（`git log --all --grep r296` 空、remoteAhead=0）。
+- **本轮赛道**：仓库卫生与门禁基线（scripts/** 死声明清理 + 配套测试 + 门禁引擎整读）+ 服务端基础设施（非批改）只读核查——沿用 r293/r294/r295。
+- **落地（A 级，commit `00d342a`，已推送）**：`test/sidebarBadgeCacheInvalidation.test.mjs:81` 删除复制残留的未用 `const fails = []`（−1 行）。线索来自本赛道门禁 `pruneDeadDeclarations.mjs --check`（报 2 条可删）；逐条肉眼验真死后删此条，另一条 `server/scripts/backfill-analysis.mjs:46` 按 HANDOFF:903「一次性件刻意存档不动」保留。验证：node --check + 本文件 4/4 + 门禁复跑 test/ 候选消失；顺带消除 lint 基线 1 条 unused 警告（123w→122w）。
+- **只读无缺陷留档**：scripts/** 28 文件逐个核调用方无新死代码候选；neonService 剩余未读段（757–982 / 1184–1334 / 1684–1814 / 1848–1917）无缺陷；门禁五件套 + base + patrol + smoke 整读无缺陷。详见 `docs/auto/reports/2026-10-16-r296.md`。
+- **未触碰**：并行会话 11 改 + 7 未跟踪（含 keep_local_services 家族 / neonBackfill1101 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2481/2481 fail 0**｜eslint **0e/122w**｜`dist_nightly_20261016r296` **36.28s**｜preview 5650 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 `2026-10-16` ok:true 正点，**无报警**（仍 5/29 表 = r289-P-A）。
+- **接手提示**：① daemon.mjs 引擎去留拍板后落地（批「删」则删引擎 + `test/patrolPortCaliber.test.mjs` 锁延伸，A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ 若负责人批「存档区可清理」，server/scripts 一次性件治理列方案（B）。
