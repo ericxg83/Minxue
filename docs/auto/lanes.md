@@ -628,3 +628,13 @@
 - **四道闸**：npm test **2522/2522 fail 0**（2484+38）｜eslint **0e/122w**（基线）｜`dist_nightly_20261016r298` **35.77s**｜preview 5661 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
 - **接手提示**：① r292-P-A 拍板后落地看门狗三缺陷 ② 备份 10-17 档 13:00 后核验 ③ 前端扫描判据已知边界（字符串路由/defineAsyncComponent/glob 动态 import）下轮复用前先读 r298 报告 2.1。
+
+## 第 r299 轮认领（2026-10-16 20:2x–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/298` 正常释放约 1 小时，`loopGuard acquire` 直得 **299** 无撞号（`git log --all --grep r299` 空、remoteAhead=0）。
+- **本轮赛道**：仓库卫生与门禁基线（server 侧可达性门禁建设 + 配套测试）——沿用 r293–r298。
+- **落地（A 级，commit `ffea0f5`，零产品码 +490）**：**server 侧模块可达性门禁**——src/ 自 r94 有可达性闸、server 侧只有路由级 r219，模块级闸缺失（r297 探针扫出 2 个零导入方死模块后探针即删，同类缺陷可复发）。判据唯一实现 `test/serverModuleReachabilityKit.mjs`（引用=可解析路径字符串：import/require/动态 import + `node server/x.js` spawn 形态；注释与 .md 不算引用；server/scripts 存档区与 migrations 不在候选范围但在语料内；自引用与门禁自文件不算引用方；HAND_RUN 登记簿一条一由）+ 门禁 `test/serverModuleReachability.test.mjs` 15 条。先证后锁：真实树 187 个候选模块、10 个零引用全部可解释（9 手跑件登记 + 0 字节占位件按规则排除）；反向自检三层（内联合成 15/15 + 文件级真死模块判红精确点名、删除复绿 + 真实数据+合成坏样本）。
+- **未触碰**：并行会话 10 改 + 7 未跟踪（休眠 30h+）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2537/2537 fail 0**｜eslint **0e/122w**（基线）｜`dist_nightly_20261016r299` **35.49s**｜preview 5665 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 ok:true，**无报警**。
+- **接手提示**：① r299-P-A（simple-server.js 去留）拍板后落地 ② r292-P-A 拍板后落地看门狗三缺陷（本轮复核三缺陷仍在）③ 备份 10-17 档核验 ④ 可选：可达性语义收紧成生产入口 BFS。

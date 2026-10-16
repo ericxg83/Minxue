@@ -4873,3 +4873,11 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 
 - **前端零引用模块扫描 0 候选**（`src/` + `src/workbench/` + `test/` 共 431 文件；手法兼容 import/require/动态 import/export-from/.vue 模板标签/目录导入 index）。探针三处缺陷修正实录：① `export { x } from './y'` 必须抓（否则误报 re-export 活模块）② 目录导入解析到 index（`import './pages/X'` 命中 `pages/X/index.jsx`）③ 扫描范围必须含 test/（测试 import 也是引用）且 walk 去重。**已知未覆盖边界**：字符串路径路由（`path:'/x'` 与组件文件无命名关联）/ `defineAsyncComponent` 间接包装 / glob 动态 import（`import('./pages/'+x)`）——本轮 0 候选未致漏报，下轮候选数突增先查边界再上报。
 - **test/ 目录手跑件形态确认**：`test/option_text_unit.mjs` + `test/p7_knowledge_unit.mjs` 已由 r298 改造接线进 npm test（勿再作为候选）；`test/e2e_todoJump.cjs` 为手跑 e2e（未跟踪 WIP，r296 留档）。⚠️ 「test/ 下不带 `.test.mjs` 后缀的文件」是测试套件的结构性盲区（r216 门禁只认 `.test.mjs` 命名），今后新增手跑件要么改 `.test.mjs` 要么在 testSuiteCoverage 显式登记。
+
+## r299 只读留档 + 提案（2026-10-16 20:2x–，日常巡查 automation `4e9608a9`，commit `ffea0f5`）
+
+- **主项落地**：server 侧模块可达性门禁（判据唯一实现 `test/serverModuleReachabilityKit.mjs` + 门禁 `test/serverModuleReachability.test.mjs` 15 条）。真实树 187 个候选模块中 10 个零引用全部可解释：9 个手跑一次性件登记 `HAND_RUN`（migrate / init-db / analyze_env / check_env / test_oss / auto_debug / retryPendingTasks / fixExistingAnswers / simple-server）+ 0 字节 gitignore 占位件 `server/routes/tasks.js` 按「0 字节非可导入模块」规则排除。已知边界：① 测试/存档脚本引用也算数（比 BFS 松，收紧是后续可选项）② 计算拼接动态路径不可解析 ⇒ migrations 整体出范围 ③ 掩码对正则字面量理论偏移（r297 探针已验证真实树稳定）。
+- **r299-P-A（B，待拍板）——`server/simple-server.js` 去留**：2024 早期 mock 原型 express（mock 练习册数据演示件），全仓零引用、无开机入口、无 spawn 方。已按「拿不准按 B」登记进 HAND_RUN 兜底（防门禁误红），**建议删**（死原型，留着只会被后来者当成活服务——文件头无任何自述）；若负责人要留作历史 demo，则维持登记不动。
+- **r292-P-A 复核仍有效**：并行会话 WIP `scripts/dev/keep_local_services.mjs`（10-15 08:30 后未变）整读——三缺陷全部仍在（① spawn 前端无 `--strictPort` :59 ② 空闲即再 spawn :169-172 ③ 健康检查 3s :76）。「修」需负责人授权触碰他会话 WIP。
+- **非缺陷留档**：`server/services/wrongGateRequeue.js`（DB 编排执行器）与 `server/utils/wrongGateRequeue.js`（纯函数判据，唯一口径）是刻意两层分工，头部互引、test/gateCompleteRequeue.test.mjs 有锁 ⇒ 不是重复实现；测试发现机制（testSuiteCoverageKit 全仓扫描 + testFileList 9 项 + package.json 三处同口径）整读无缺陷；`external/` / `_r*_old/` / `tmp/` / `logs/` 均 gitignored（`git ls-files` = 0）不影响套件；`server/_egress_probe_report.json` 是 neon.js 出口探针实时写文件（后端在跑），非异常。
+- **四道闸**：npm test 2537/2537 fail 0｜eslint 0e/122w｜`dist_nightly_20261016r299` 35.49s｜preview 5665 cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。备份 2026-10-16 13:00 ok:true 无报警。
