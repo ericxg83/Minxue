@@ -37,6 +37,27 @@
  * :5173 活引用（ports.mjs / patrol.mjs 头注把 5173 当反面教材是允许的——
  * 注释已剔除）。反向自检用被删文件的真实活代码行（内联合成，不依赖 git）。
  */
+/**
+ * r295 追加：已退役的本地服务守护家族（keep_backend + patrol daemon 自启）复活守卫。
+ *
+ * 真缺陷（实测，2026-10-16，r294 接手提示①）：
+ *   本地服务 2026-10-13 起重构为「计划任务 MinxueLocalServices → start-local-hidden.vbs
+ *   → keep_local_services.mjs 看门狗（15s 探活 :4000/:3000，失败重拉）」后，
+ *   更早的两套守护全线死掉：
+ *     - `scripts/dev/keep_backend.mjs`（r106 后端守护）+ `start_keep_backend.vbs：
+ *       启动文件夹已无 minxue_keep_backend.vbs；pid 文件里的 PID 17236 实测不存在；
+ *       日志最后写入 10-12 09:58（4 天前）⇒ 进程已死；:4000 现由看门狗看护
+ *       （netstat PID 2588、/api/health ok）⇒ 无守护缺口；
+ *     - `scripts/dev/start_patrol_daemon.vbs` → `scripts/patrol/daemon.mjs`：
+ *       启动文件夹已无 minxue_patrol_daemon.vbs；patrol_daemon.log 最后写入
+ *       10-12 10:42、docs/auto/patrol.md 冻结在 10-12 14:19 ⇒ daemon 停摆 4 天。
+ *   ⇒ r295 删除三文件（A 级死代码清理；daemon.mjs 引擎本体保留为手跑工具，
+ *     其自启通道随本家族退役）。
+ *
+ * 本守卫盯「别再回来」：scripts/** 下剔注释后不得再出现 keep_backend /
+ * start_patrol_daemon 活引用（keep_local_services.mjs 头注把 keep_backend 当
+ * 设计渊源提及是允许的——注释已剔除）。
+ */
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
@@ -149,6 +170,19 @@ export function collectStaleFamilyRefs(files) {
     if (/5173/.test(body)) {
       fails.push(`${file} 仍有活 :5173 引用（旧移动端 dev 端口；现行前端 vite dev 在 :3000，口径见 scripts/patrol/ports.mjs）`)
     }
+    // ── r295：退役守护家族（keep_backend + patrol daemon 自启）──
+    // 令牌 keep_backend 同时覆盖 start_keep_backend（子串）。
+    // patrol daemon 禁的是**路径形态** patrol/daemon.mjs（两种斜杠）——被删的
+    //   start_patrol_daemon.vbs 活代码行正是 `node scripts\patrol\daemon.mjs`；
+    // ⚠️ 不能禁裸 patrol_daemon：patrol/daemon.mjs 引擎本体保留（手跑工具），
+    //   其活代码行 logs/patrol_daemon.pid 含该子串（daemon.mjs 头注的自述跑法
+    //   在块注释里，已被剔除，不误伤）。
+    if (/keep_backend/.test(body)) {
+      fails.push(`${file} 仍引用已删除的后端守护 keep_backend（r106 家族，r295 清理；现行看门狗 = keep_local_services.mjs）`)
+    }
+    if (/patrol[\\/]daemon\.mjs/.test(body)) {
+      fails.push(`${file} 仍引用已退役的 patrol daemon 目标 scripts/patrol/daemon.mjs（10-12 起停摆，r295 清理其自启 vbs；引擎本体保留为手跑工具，禁的是 scripts/** 里的活引用）`)
+    }
   }
   return fails
 }
@@ -169,7 +203,7 @@ function listScriptFiles(dir, base = dir, out = []) {
   return out
 }
 
-test('scripts/** 无旧移动端守护家族活引用（keep_mobile_dev / :5173 已随 r294 清零）', () => {
+test('scripts/** 无退役守护家族活引用（keep_mobile_dev / :5173 随 r294，keep_backend / start_patrol_daemon 随 r295 清零）', () => {
   const fails = collectStaleFamilyRefs(listScriptFiles(SCRIPTS_DIR))
   assert.deepEqual(fails, [])
 })
@@ -190,5 +224,42 @@ test('反向自检：被删守护家族的真实活代码行必须判红', () =>
   assert.ok(
     fails.some((f) => f.includes('5173')),
     '旧家族的红必须点名 5173（否则判据没盯住缺陷本体）'
+  )
+})
+
+// ─────────────────────────────────────────────────────────────
+// r295：退役守护家族（keep_backend + patrol daemon 自启）复活守卫
+// ─────────────────────────────────────────────────────────────
+
+test('反向自检：r295 被删三文件的真实活代码行必须判红', () => {
+  // = git show HEAD: 导出件 logs/_r295_reverse/ 的活代码行（r295 删除）
+  //   keep_backend.mjs（r106 后端守护，PID 17236 已死、日志冻结 10-12 09:58）
+  const oldKeepBackend = [
+    "const LOG = resolve(ROOT, 'server/scripts/logs/keep_backend.log')",
+    "const HEALTH_URL = 'http://127.0.0.1:4000/api/health'",
+    "const PID_FILE = resolve(ROOT, 'server/scripts/logs/keep_backend.pid')",
+  ].join('\n')
+  //   start_keep_backend.vbs（开机自启启动器，启动文件夹已无 minxue_keep_backend.vbs）
+  const oldStartKeepBackend = [
+    'CreateObject("Wscript.Shell").Run "cmd /c cd /d D:\\Minxue_App_V3 && node scripts\\dev\\keep_backend.mjs", 0, False',
+  ].join('\n')
+  //   start_patrol_daemon.vbs（patrol daemon 自启，停摆 4 天）
+  const oldStartPatrolDaemon = [
+    'CreateObject("Wscript.Shell").Run "cmd /c cd /d D:\\Minxue_App_V3 && node scripts\\patrol\\daemon.mjs >> logs\\patrol_daemon.log 2>&1", 0, False',
+  ].join('\n')
+
+  const fails = collectStaleFamilyRefs([
+    ['keep_backend.mjs(修复前)', oldKeepBackend],
+    ['start_keep_backend.vbs(修复前)', oldStartKeepBackend],
+    ['start_patrol_daemon.vbs(修复前)', oldStartPatrolDaemon],
+  ])
+  assert.ok(fails.length >= 3, `r295 旧家族活代码应至少判 3 条红，实际 ${fails.length} 条：${fails.join(' / ')}`)
+  assert.ok(
+    fails.some((f) => f.includes('keep_backend')),
+    'r295 旧家族的红必须点名 keep_backend（否则判据没盯住缺陷本体）'
+  )
+  assert.ok(
+    fails.some((f) => f.includes('patrol/daemon.mjs')),
+    'r295 旧家族的红必须点名 patrol/daemon.mjs（否则判据没盯住缺陷本体）'
   )
 })

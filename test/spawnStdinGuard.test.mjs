@@ -6,7 +6,7 @@
  *   · 单测 14 条常红（healthTrend 11 + auditStoreContractWorks 3），被当成「代码回归」查了几轮
  *   · scripts/patrol daemon 的自动提交静默不执行、patrol.mjs 非 silent 分支全废
  *   · scripts/loopGuard 远端检查恒返回「无网络」
- *   · scripts/dev/keep_backend 的僵尸清理成死代码（listeners() 恒空 ⇒ 端口被占时会再拉一个后端）
+ *   · scripts/dev/keep_backend（已删除，r295）的僵尸清理成死代码（listeners() 恒空 ⇒ 端口被占时会再拉一个后端）
  *   · scripts/pruneDeadDeclarations 恒「未产出报告」退出 1
  * 唯一实现已收敛到 server/utils/localSpawn.js（scripts/ 与 test/ 共用）。
  *
