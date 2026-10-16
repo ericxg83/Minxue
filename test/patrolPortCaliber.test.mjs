@@ -19,7 +19,25 @@
  *   playwright。所以「口径正确」用真 import 行为断言 + 源码契约断言，
  *   反向自检用内联合成坏样本（⛔ 不 spawnSync 调 git，Windows EBUSY）。
  */
-import { readFileSync } from 'node:fs'
+/**
+ * r294 追加：旧移动端守护家族（keep_mobile_dev + :5173）复活守卫。
+ *
+ * 真缺陷（实测，2026-10-16，r293 接手提示①）：
+ *   `scripts/dev/keep_mobile_dev.mjs` + `start_keep_mobile_dev.vbs` 守护的是
+ *   2026-10-04 之前的旧移动端 dev 端口 :5173——本地服务 10-13 起重构为
+ *   MinxueLocalServices 计划任务拉起 :4000/:3000 后，这套家族全线死掉：
+ *     - 启动文件夹入口已不在（现存只有 minxue_keep_local_services.vbs）；
+ *     - 守护日志最后写入 2026-10-08 01:00（204h 前）、pid 文件不存在 ⇒ 进程已死；
+ *     - :5173 无监听（netstat 实测；若守护活着它会每 15s 拉起 vite --port 5173）；
+ *     - 全仓活引用为零（仅 docs 历史记录 + 并行 WIP keep_local_services.mjs 的
+ *       头注模式提及——那是设计渊源说明，不是调用）。
+ *   ⇒ r294 删除两文件（A 级死代码清理）。
+ *
+ * 本守卫盯「别再回来」：scripts/** 下剔注释后不得再出现 keep_mobile_dev /
+ * :5173 活引用（ports.mjs / patrol.mjs 头注把 5173 当反面教材是允许的——
+ * 注释已剔除）。反向自检用被删文件的真实活代码行（内联合成，不依赖 git）。
+ */
+import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
 import test from 'node:test'
@@ -34,10 +52,11 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PATROL_DIR = join(ROOT, 'scripts', 'patrol')
+const SCRIPTS_DIR = join(ROOT, 'scripts')
 
 const read = (f) => readFileSync(join(PATROL_DIR, f), 'utf8')
 
-/** 剔注释：注释里会引用「旧端口」当反面教材（ports.mjs 头注就有），不能把说明文字判成违规 */
+/** 剔注释：注释里会引用「旧端口/旧家族」当反面教材（ports.mjs 头注就有），不能把说明文字判成违规 */
 const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
 
@@ -98,5 +117,78 @@ test('反向自检：修复前的真实形状（硬编码 5173）必须判红', 
   assert.ok(
     fails.some((f) => f.includes('5173')),
     '旧形状的红必须点名 5173（否则判据没盯住缺陷本体）'
+  )
+})
+
+// ─────────────────────────────────────────────────────────────
+// r294：旧移动端守护家族复活守卫（keep_mobile_dev + :5173）
+// ─────────────────────────────────────────────────────────────
+
+/** 剔注释扩版：JS 块/行注释 + VBS/CMD 单引号注释 + REM/:: 行（守护脚本三类注释都要覆盖） */
+const stripAllComments = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^[ \t]*\/\/.*$/gm, '')
+    .replace(/^[ \t]*'.*$/gm, '')
+    .replace(/^[ \t]*(rem\b|::).*$/gim, '')
+
+/** 活引用候选扩展名（scripts/ 下可能藏旧家族的文件类型） */
+const LIVE_EXTS = new Set(['.mjs', '.js', '.cjs', '.vbs', '.cmd', '.json'])
+
+/**
+ * 判据集合：给定 [文件, 源码] 列表，返回「旧移动端守护家族活引用」违规列表。
+ * 只认两件事：① keep_mobile_dev 令牌；② :5173 端口字面量（剔注释后）。
+ */
+export function collectStaleFamilyRefs(files) {
+  const fails = []
+  for (const [file, src] of files) {
+    const body = stripAllComments(src)
+    if (/keep_mobile_dev/.test(body)) {
+      fails.push(`${file} 仍引用已删除的旧移动端守护 keep_mobile_dev（:5173 家族，r294 清理）`)
+    }
+    if (/5173/.test(body)) {
+      fails.push(`${file} 仍有活 :5173 引用（旧移动端 dev 端口；现行前端 vite dev 在 :3000，口径见 scripts/patrol/ports.mjs）`)
+    }
+  }
+  return fails
+}
+
+/** 递归枚举 scripts/ 下活引用候选文件，返回 [相对路径, 源码] */
+function listScriptFiles(dir, base = dir, out = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name)
+    if (entry.isDirectory()) {
+      listScriptFiles(full, base, out)
+      continue
+    }
+    const dot = entry.name.lastIndexOf('.')
+    const ext = dot === -1 ? '' : entry.name.slice(dot)
+    if (!LIVE_EXTS.has(ext)) continue
+    out.push([full.slice(base.length + 1).replaceAll('\\', '/'), readFileSync(full, 'utf8')])
+  }
+  return out
+}
+
+test('scripts/** 无旧移动端守护家族活引用（keep_mobile_dev / :5173 已随 r294 清零）', () => {
+  const fails = collectStaleFamilyRefs(listScriptFiles(SCRIPTS_DIR))
+  assert.deepEqual(fails, [])
+})
+
+test('反向自检：被删守护家族的真实活代码行必须判红', () => {
+  // = git show HEAD:scripts/dev/keep_mobile_dev.mjs 的活代码行（2026-10-08 dbc8c1a，r294 删除）
+  const oldDaemon = [
+    "const HEALTH_URL = 'http://127.0.0.1:5173'",
+    "const VITE_CMD = ['node_modules/vite/bin/vite.js', '--port', '5173', '--host']",
+    "console.log(`keep_mobile_dev 已在运行（PID ${old}），本实例退出`)",
+  ].join('\n')
+  const fails = collectStaleFamilyRefs([['keep_mobile_dev.mjs(修复前)', oldDaemon]])
+  assert.ok(fails.length >= 2, `旧家族活代码应至少判 2 条红，实际 ${fails.length} 条：${fails.join(' / ')}`)
+  assert.ok(
+    fails.some((f) => f.includes('keep_mobile_dev')),
+    '旧家族的红必须点名 keep_mobile_dev（否则判据没盯住缺陷本体）'
+  )
+  assert.ok(
+    fails.some((f) => f.includes('5173')),
+    '旧家族的红必须点名 5173（否则判据没盯住缺陷本体）'
   )
 })
