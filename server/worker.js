@@ -1225,26 +1225,35 @@ const normEnglishOption = (s) => String(s ?? '').toLowerCase().replace(/[^a-z]/g
  */
 export function validateEnglishPassageSplit(questions, pageSubject) {
   const list = Array.isArray(questions) ? questions : []
-  const issues = []
-  const hasBlank = list.some(q => {
+  if (pageSubject !== '英语') {
+    return { applicable: false, ok: true, issues: [] }
+  }
+  // 仅校验「短文挖空选 A/B/C」题型（english_kind=choice_passage）。
+  // 英语综合卷的 III 选词填空 / IV 词形填空 / V 句型转换 不在此闸范围
+  // （各自走轻量处理，避免被三选项 / A-B-C 规则误杀，也避免触发整页重试）。
+  // 历史英语题未带 english_kind 时按旧口径视为 choice_passage，向后兼容。
+  const passageQs = list.filter(q => {
+    const k = q?.english_kind || 'choice_passage'
+    if (k !== 'choice_passage') return false
     const c = String(q?.content ?? '')
     const p = String(q?.parent_stem ?? '')
     return ENGLISH_BLANK_RE.test(c) || ENGLISH_BLANK_RE.test(p)
   })
   ENGLISH_BLANK_RE.lastIndex = 0
-  if (pageSubject !== '英语' || !hasBlank) {
+  if (passageQs.length === 0) {
     return { applicable: false, ok: true, issues: [] }
   }
 
-  // ① 空号覆盖：parent_stem（语篇全文）中的空号全集 vs questions 拆出的空号集合
+  const issues = []
+  // ① 空号覆盖：parent_stem（语篇全文）中的空号全集 vs 拆出的空号集合
   const stemBlanks = new Set()
-  for (const q of list) {
+  for (const q of passageQs) {
     ENGLISH_BLANK_RE.lastIndex = 0
     const stem = String(q?.parent_stem ?? '')
     let m
     while ((m = ENGLISH_BLANK_RE.exec(stem)) !== null) stemBlanks.add(Number(m[1]))
   }
-  const nums = list.map(q => Number(q?.question_number)).filter(n => Number.isFinite(n))
+  const nums = passageQs.map(q => Number(q?.question_number)).filter(n => Number.isFinite(n))
   const numSet = new Set(nums)
   const expected = []
   if (stemBlanks.size > 0) {
@@ -1258,7 +1267,7 @@ export function validateEnglishPassageSplit(questions, pageSubject) {
   }
 
   // ② 逐题校验：options 数量/重复、answer 字母、content 含自身空号
-  for (const q of list) {
+  for (const q of passageQs) {
     const n = q?.question_number
     const label = `空${n}`
     const opts = Array.isArray(q?.options) ? q.options : []
@@ -1277,7 +1286,7 @@ export function validateEnglishPassageSplit(questions, pageSubject) {
     ENGLISH_BLANK_RE.lastIndex = 0
   }
 
-  return { applicable: true, ok: issues.length === 0, issues }
+  return { applicable: true, ok: issues.length === 0, issues, hasPassageIssue: issues.length > 0 }
 }
 
 /** 挖空形态检测（英语语篇页判定用，与 validateEnglishPassageSplit 同一形态口径） */
@@ -1503,11 +1512,32 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
 
     normalizeBlockBoxSemantics(questionsArray)
 
-    // ── 英语语篇拆题校验闸（英语语法重练 T3，2026-10-15）──────────────────
+    // ── 英语综合卷题型过滤（T1.5，2026-10-16）──────────────────
+    // 提示词已要求跳过 I 语音拼写 / VI 书面·情景表达，此处为安全网：
+    // 凡 english_kind 命中 phonetic / writing 的题直接从待落库列表剔除，
+    // 不建 questions 记录、不污染 wrong_questions；剔除计数留日志供复核对账。
+    {
+      const kept = []
+      let droppedPhonetic = 0
+      let droppedWriting = 0
+      for (const q of questionsArray) {
+        const k = q?.english_kind
+        if (k === 'phonetic') { droppedPhonetic++; continue }
+        if (k === 'writing') { droppedWriting++; continue }
+        kept.push(q)
+      }
+      if (questionsArray.length !== kept.length) {
+        console.log(`   [英语过滤] 已剔除不训练题型：语音拼写 ${droppedPhonetic} 题、书面/情景表达 ${droppedWriting} 题（剩 ${kept.length} 题待落库）`)
+        questionsArray.length = 0
+        Array.prototype.push.apply(questionsArray, kept)
+      }
+    }
+
+    // ── 英语语篇拆题校验闸（英语语法重练 T3，2026-10-15；T1.5 改为仅校验 choice_passage）──────────────────
     // 首轮结构违规（B/C 重复 / 漏空 / answer 非字母）→ 带问题说明重试一次；
-    // 重试后仍违规（或 prefetchedContent 双路合并结果不可重试）→ 本页英语题全部
+    // 重试后仍违规（或 prefetchedContent 双路合并结果不可重试）→ 仅本页 choice_passage 题
     // 打 is_suspicious 照常落库，不阻断批改，转人工复核兜底（保守方向：
-    // 多标复核好过失真原文混进重练卷）。数学页不经过本闸。
+    // 多标复核好过失真原文混进重练卷）。数学页 / 非语篇英语题不经过本闸。
     const englishCheck = validateEnglishPassageSplit(questionsArray, pageSubject)
     if (englishCheck.applicable && !englishCheck.ok) {
       const issueText = englishCheck.issues.join('；')
@@ -1515,9 +1545,9 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         console.warn(`   [英语校验闸] 发现 ${englishCheck.issues.length} 处结构违规，带问题说明重试一次: ${issueText}`)
         return recognizeQuestions(imageBase64, taskId, 1, null, { englishValidationHint: issueText })
       }
-      console.warn(`   [英语校验闸] 校验未通过（不阻断，本页英语题标记 is_suspicious 转复核）: ${issueText}`)
+      console.warn(`   [英语校验闸] 校验未通过（不阻断，本页 choice_passage 题标记 is_suspicious 转复核）: ${issueText}`)
       for (const q of questionsArray) {
-        if (q && typeof q === 'object' && q.subject === '英语') q.is_suspicious = true
+        if (q && typeof q === 'object' && q.subject === '英语' && (q.english_kind || 'choice_passage') === 'choice_passage') q.is_suspicious = true
       }
     }
 
@@ -1591,9 +1621,11 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         //   coerceAIText 与 neonService.createQuestions 的口径保持一致。
         sub_no: normalizeSubNo(q.sub_no),
         parent_stem: coerceAIText(q.parent_stem ?? q.shared_stem) || null,
-        // 英语校验闸（T3）：英语语篇页结构违规时整页英语题被标 is_suspicious，
+        // 英语校验闸（T3）：英语语篇页结构违规时本页 choice_passage 题被标 is_suspicious，
         // PC 复核页消费该标记突出显示（与答案库链路 7520 行同名列同语义）。
-        is_suspicious: q.is_suspicious === true,
+        // T1.5：sentence_transform（句型转换）同样标记复核——其答案靠文本精确匹配易误判，
+        // 保守路由到人工复核，避免错判污染错题本。
+        is_suspicious: q.is_suspicious === true || q.english_kind === 'sentence_transform',
         text_bbox: q.text_bbox || null,
         image_type: q.image_type || null,
         image_bbox: q.image_bbox || null,

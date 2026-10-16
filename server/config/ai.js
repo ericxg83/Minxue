@@ -2269,6 +2269,7 @@ return `你是一个专业的作业题目识别助手。请识别图片中的题
       "confidence": 0.95,
       "analysis": "解析",
       "question_type": "choice",  // 必须是下列之一: "choice"(选择题) | "fill"(填空题) | "judge"(判断题) | "answer"(解答题)
+      "english_kind": null,  // 仅英语页使用：choice_passage(短文挖空选A/B/C) | word_bank(选词填空) | word_form(词形填空) | sentence_transform(句型转换) | phonetic(语音拼写) | writing(书面/情景表达)；非英语题填 null。逐条标记，整页英语题必须保持同一种类一致语义
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
       "image_type": "geometry/chart/none",
@@ -2426,7 +2427,28 @@ ${legacy ? `【答案字段强约束（防止串行污染与算术幻觉）】
    选项表也可能单独印在页面末尾或某个角落。请先通读全图，把同一篇文章的片段按阅读顺序
    在心里拼完整，再按空拆题：parent_stem 输出【拼合后的完整全文】（不要只写本页片段）。
    文章从上一页片段衔接处续写时，直接接上，不要加分隔符。
-   若图中确实只有选项表、完全没有文章正文，questions 输出空数组 []，不要臆造文章内容。`
+   若图中确实只有选项表、完全没有文章正文，questions 输出空数组 []，不要臆造文章内容。
+
+【英语页分题型通用规则（与上方语篇选择题分支配套，页面为英语综合卷时启用）】
+英语综合卷常含多个大题（I 语音拼写、II 短文选词、III 选词填空、IV 词形填空、V 句型转换、VI 书面/情景表达）。
+本系统只训练语法/句法客观题，规则如下：
+1. 每道英语题必须填 english_kind（取值见上方 schema 字段说明），整页保持语义一致。
+2. 必做（输出为单题，按空/按小题拆）：
+   - II 短文挖空选 A/B/C：english_kind="choice_passage"，按上方【英语语篇语法选择题分支】拆题。
+   - III 选词填空（短文挖空，每空从词框里挑一个词）：english_kind="word_bank"，question_type="fill"，
+     options=[]（词框是整篇公共语境，不要按空拆成选项数组），answer=该空应填入的词框中的那个词（逐字照抄卷面词框原文），
+     parent_stem=短文全文（挖空标记 __N__ 原样保留），content=该空所在完整句（含挖空标记）。
+   - IV 词形填空（短文挖空，每空给一个词、需变成适当形式）：english_kind="word_form"，question_type="fill"，
+     options=[]，answer=该空应填的变形词（逐字照抄卷面，禁止"顺手纠正"：卷面印 haven 就填其变形，不要改成 have），
+     parent_stem=短文全文，content=该空所在完整句。
+   - V 句型转换（每小题一句改写/合并/提问，题号独立）：english_kind="sentence_transform"，question_type="fill"，
+     options=[]，answer=该题的标准改写句（逐字照抄卷面印出的参考答案），content=该小题完整指令+原句
+     （如"合并成一句：The detective is busy. He is looking for his missing dog."）。
+3. 必跳过（不要输出任何题，系统不需要它们，输出只会污染错题本）：
+   - I 语音拼写（"根据音标写单词"，题干含 /.../ 国际音标）：english_kind="phonetic" 直接跳过。
+   - VI 书面表达/情景表达（开放式写作、补全对话、无唯一标准答案）：english_kind="writing" 直接跳过。
+4. 逐字转录纪律同样适用于 III/IV/V：答案、题干一律照抄卷面印刷体，禁止同义替换或语法"修正"。
+5. 数学题、中文题干题不经过本通用规则；不确定是否英语综合卷时按通用规则处理，不要强行套用 english_kind。`
 }
 
 export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解答助手。请根据给定题目生成标准答案与解析，只返回 JSON：
