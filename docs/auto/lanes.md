@@ -573,3 +573,13 @@
 - **四道闸**：npm test **2456/2456 fail 0**｜eslint **0e/123w**（基线）｜`dist_nightly_20261016r293` **36.33s**｜preview 5610 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：最新 `2026-10-15` ok:true，今日 11:42 早于 13:00 档 ⇒ 无报警。
 - **接手提示**：① 下轮首选 `keep_mobile_dev.mjs` + `start_keep_mobile_dev.vbs`（:5173 旧守护家族）死代码清理（已实证无活调用方）；② r292-P-A 拍板后落地看门狗三缺陷；③ 待拍板清单见 r293 报告第五节。
+
+## 第 r294 轮认领（2026-10-16 13:11–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/293` 正常释放 1 小时，`loopGuard acquire` 直得 **294** 无撞号（`git log --all --grep r294` 空）。
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 死模块清理 + 配套测试）。
+- **落地（A 级，commit `784b12d`，已推送）**：删除旧移动端守护家族 `scripts/dev/keep_mobile_dev.mjs` + `scripts/dev/start_keep_mobile_dev.vbs`（:5173 退役端口，r293 接手提示①）——五项实证（开机入口已不在 / 守护日志 204h 前停写且 pid 不在 ⇒ 进程已死 / :5173 无监听 / :4000+:3000 由 keep_local_services 看门狗覆盖 / 全仓零活调用方）。回归锁 `test/patrolPortCaliber.test.mjs` +2 条（scripts/** 剔注释后禁 `keep_mobile_dev`/`5173` 活引用；反向自检双层：内联合成 + `git show HEAD:` 真实旧版文件级判红 3 条）。
+- **未触碰**：并行会话 11 个已修改 + 7 个未跟踪文件（含 keep_local_services 家族 / neonBackfill1101 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2458/2458 fail 0**｜eslint **0e/123w**（基线）｜`dist_nightly_20261016r294` **34.82s**｜preview 5621 单调用内起服：cert_probe exit 0 + render_smoke exit 0 + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
+- **接手提示**：① 下轮首选 `keep_backend.mjs` + `start_keep_backend.vbs` + `start_patrol_daemon.vbs`（→ patrol/daemon.mjs）同族孤儿清理（开机入口均已不在、职责被 keep_local_services 取代；patrol 引擎 10-12 起停摆）；② r292-P-A 拍板后落地看门狗三缺陷；③ 待拍板清单见 r294 报告第五节（不变）。
