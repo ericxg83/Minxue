@@ -617,3 +617,14 @@
 - **备份**：今日 13:00 档 `2026-10-16` ok:true 正点，**无报警**。
 - **过程教训**：`git add` 对已 `git rm` 的删除路径报 "pathspec did not match any files" ⇒ 删除已暂存时只 add 新文件。
 - **接手提示**：① daemon.mjs 引擎去留拍板后落地（批「删」则删引擎 + 锁延伸，A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ 存档区治理（7 个手跑一次性件 + server/scripts ~150 件）建议合并为一个 B 级方案待拍板。
+
+## 第 r298 轮认领（2026-10-16 19:0x–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/297` 正常释放约 9 小时，`git log --all --grep r298` 空 ⇒ 无撞号直认 **r298**。
+- **本轮赛道**：仓库卫生与门禁基线（测试套件口径 + 死代码扫描手法扩展）——沿用 r293–r297。
+- **落地（A 级，commit `f5a6969`，待推送）**：接线两个从未进套件的手跑测试 `test/option_text_unit.mjs` + `test/p7_knowledge_unit.mjs`（b93c594 提交，文件名不带 `.test.mjs` 后缀 ⇒ glob 结构性失明，npm test 全绿时其 35 条断言一条未跑；r215/r216 假绿家族第三形态）。原地改造 node:test + 改名纳入套件（用例期望值逐字未变，无需动清单）；顺手订正 3 处失效文件名引用。反向自检双层变异实测判红（optionText 整组表决 2 红 / STREAK_MAX_STEPS 2 红），变异后零残留。
+- **新普查手法**：前端零引用模块扫描（431 文件，五形态兼容），修正三处探针缺陷（export-from / 目录导入 index / test 目录与 walk 去重）后 0 候选 ⇒ `src/**` 无死代码留档。
+- **未触碰**：并行会话 11 改 + 7 未跟踪（server/index.js / weeklyReport.js / backfillTags.js / start-local 家族 / reviewStore 系列 / 5 个未跟踪测试 / scripts/dev/ / neonBackfill1101.mjs）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2522/2522 fail 0**（2484+38）｜eslint **0e/122w**（基线）｜`dist_nightly_20261016r298` **35.77s**｜preview 5661 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
+- **接手提示**：① r292-P-A 拍板后落地看门狗三缺陷 ② 备份 10-17 档 13:00 后核验 ③ 前端扫描判据已知边界（字符串路由/defineAsyncComponent/glob 动态 import）下轮复用前先读 r298 报告 2.1。

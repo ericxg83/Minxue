@@ -4868,3 +4868,8 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 **留档（非缺陷）**：两个本机探针 `server/_probe_ruler_measure.mjs` / `server/_diag_figcomplete_calib_0923.mjs`（gitignored 实验标定存档）因指向已删模块不能再跑，保留作历史记录，无需处理。
 
 **无新增 B/C 提案**；待拍板清单不变（r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A / r285-P-B / r280-P-A / r280-P-B / r278-P-B）。
+
+## r298 只读留档（2026-10-16，负面结论防重复排查）
+
+- **前端零引用模块扫描 0 候选**（`src/` + `src/workbench/` + `test/` 共 431 文件；手法兼容 import/require/动态 import/export-from/.vue 模板标签/目录导入 index）。探针三处缺陷修正实录：① `export { x } from './y'` 必须抓（否则误报 re-export 活模块）② 目录导入解析到 index（`import './pages/X'` 命中 `pages/X/index.jsx`）③ 扫描范围必须含 test/（测试 import 也是引用）且 walk 去重。**已知未覆盖边界**：字符串路径路由（`path:'/x'` 与组件文件无命名关联）/ `defineAsyncComponent` 间接包装 / glob 动态 import（`import('./pages/'+x)`）——本轮 0 候选未致漏报，下轮候选数突增先查边界再上报。
+- **test/ 目录手跑件形态确认**：`test/option_text_unit.mjs` + `test/p7_knowledge_unit.mjs` 已由 r298 改造接线进 npm test（勿再作为候选）；`test/e2e_todoJump.cjs` 为手跑 e2e（未跟踪 WIP，r296 留档）。⚠️ 「test/ 下不带 `.test.mjs` 后缀的文件」是测试套件的结构性盲区（r216 门禁只认 `.test.mjs` 命名），今后新增手跑件要么改 `.test.mjs` 要么在 testSuiteCoverage 显式登记。
