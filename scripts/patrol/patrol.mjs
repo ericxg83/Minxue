@@ -5,7 +5,7 @@
  *     不修代码、不改文件（修复由 agent 根据体检结论动手）。
  *
  * 本轮扫描：
- *  A. 进程/端口健康（后端 :4000、移动端 dev :5173、旧 backend :3000）
+ *  A. 进程/端口健康（后端 :4000、前端 vite dev :3000；口径单一实现在同目录 ports.mjs）
  *  B. git 工作区状态（脏文件 / 未提交 WIP / 最近提交时间）
  *  C. 单元测试（npm test，锁 1973 基线 + 新增用例文件自动纳入）
  *  D. 移动端 + 工作台构建（vite build，仅当 src/** 有改动时建议跑——agent 决定）
@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 
 import { collectLintReport, lintReportReasonText } from './lintReportKit.mjs'
 import { collectTestFiles } from '../testFileList.mjs'
+import { BACKEND_PORT, FRONTEND_PORT, FRONTEND_BASE } from './ports.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '../..')
@@ -53,8 +54,11 @@ function section(title) { console.log(`\n▉ ${title}`) }
 // ── A. 进程健康（Node 原生 fetch，避免 Windows curl -o /dev/null 陷阱）──
 section('A. 进程健康')
 const health = {}
+// r293：端口口径收敛到 ports.mjs 单一实现（旧写法在此硬编码 5173，
+//   本地服务 10-13 迁到 :3000 后恒报 mobile-dev DOWN，见 ports.mjs 头注）
+const PORTS = { server: BACKEND_PORT, 'mobile-dev': FRONTEND_PORT }
 for (const [name, path] of [['server', '/api/health'], ['mobile-dev', '/']]) {
-  const port = name === 'server' ? 4000 : 5173
+  const port = PORTS[name]
   const url = `http://127.0.0.1:${port}${path}`
   let status = '?'
   try { status = (await fetch(url, { signal: AbortSignal.timeout(4000) })).status } catch (e) { status = 'DOWN(' + (e.cause?.code || e.name) + ')' }
@@ -109,18 +113,18 @@ if (FORCE_BUILD || srcChanged) {
 
 /* ── D2. 冒烟（构建通过且 src 有改动时自动跑，让 daemon 轮自足）── */
 let smoke = null
-// ⛔ 冒烟依赖 :5173 dev server 存活；守护进程按负责人指令关闭后 dev 可能未启动，
+// ⛔ 冒烟依赖 :3000 dev server 存活；守护进程按负责人指令关闭后 dev 可能未启动，
 //    此时直接跑冒烟必假红（2/11 一类），还会把环境缺省当成代码缺陷记入状态。
 //    dev DOWN 则标 n/a：环境未就绪 ≠ 系统异常。
 if ((FORCE_BUILD || srcChanged) && buildOk === 'ok' && health['mobile-dev'] === 'ok') {
-  const s = run(process.execPath, [path.join(ROOT, 'scripts', 'patrol', 'smoke.mjs'), 'http://127.0.0.1:5173'], { timeout: 200000, silent: true })
+  const s = run(process.execPath, [path.join(ROOT, 'scripts', 'patrol', 'smoke.mjs'), FRONTEND_BASE], { timeout: 200000, silent: true })
   const m = (s.stdout || '').match(/patrol smoke[^\n]*: (\d+)\/(\d+)/)
   smoke = m ? { pass: +m[1], total: +m[2], ok: s.status === 0 } : { pass: 0, total: 0, ok: false }
   console.log(`  冒烟 ${smoke.pass}/${smoke.total}${smoke.ok ? '' : '  ⚠️ 有失败或解析不了'}`)
   if (!smoke.ok) console.log('  ' + ((s.stdout || s.stderr || '').split('\n').filter(Boolean).slice(-10).join('\n  ')))
 } else {
   const reason = (FORCE_BUILD || srcChanged) && buildOk === 'ok'
-    ? 'dev server :5173 未运行（环境未就绪）'
+    ? `dev server :${FRONTEND_PORT} 未运行（环境未就绪）`
     : (buildOk !== 'ok' ? `build=${buildOk}` : 'src 无改动 + 未强制')
   console.log(`  冒烟跳过（${reason}）→ n/a`)
 }

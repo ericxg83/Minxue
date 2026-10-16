@@ -4837,7 +4837,7 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   ③ 健康检查 3s 超时假阴性 ⇒ 10:21:35 误杀 01:17:59 起健康的 vite（10-15 08:55/14:11/15:52 同型循环）⇒ 误杀→重生→再顺延的泄漏复发闭环。
   建议修法：args 加 `--strictPort`；spawn 冷却两条分支都生效；健康检查连续 2 次失败才判死或超时 3s→8s。
   即时缓解已落地（验证零连接后 taskkill 两孤儿，:3000 200 不受影响）；「修」需负责人授权触碰他会话 WIP。
-- **r292-P-B（A 级候选，下轮可落）**：`scripts/patrol/patrol.mjs` 健康检查与 smoke 调用探 **:5173**（现行前端 :3000）⇒ 手跑假 `mobile-dev DOWN` + 冒烟被跳。patrol 引擎自 10-12 14:19 停摆（R232 冻结、无守护进程、无计划任务）被 4e9608a9 转换期孤儿化；patrol.mjs 是 clean committed code ⇒ 拟下轮修 5173→3000 三处 + 小锁。
+- ~~**r292-P-B（A 级候选，下轮可落）**~~：**✅ r293 已落地关闭**（2026-10-16）——`scripts/patrol/patrol.mjs` 健康检查与 smoke 调用探 **:5173**（现行前端 :3000）⇒ 手跑假 `mobile-dev DOWN` + 冒烟被跳。修法：端口口径收敛到新建 `scripts/patrol/ports.mjs` 单一实现（BACKEND_PORT=4000 / FRONTEND_PORT=3000，仿 r158 gate/base.mjs 模式），patrol.mjs/smoke.mjs 均改走它；新锁 `test/patrolPortCaliber.test.mjs` 3 条（含文件级反向自检：HEAD 旧文件判红 6 条）。四道闸 2456/2456｜0e/123w｜36.33s｜8/8+0/16+0/14。详见 `docs/auto/reports/2026-10-16-r293.md`。
 - **r292-P-C（B，待拍板）**：`scripts/wipe-neon.mjs`（88 行，零调用方，`YES-WIPE` 确认闸在的 TRUNCATE 全库脚本）去留——㊳ 遗留成员，不擅自删。
 - **r290 遗留补充实证**：其未跟踪 `test/englishAnalyzer.test.mjs` 的持锁方已证实随 10-15 23:59 关机消亡，文件成孤儿；npm test 套件内绿（2453 含其 4 条）、r291 单跑 4/4 ⇒ 按 r289-P-B 路径请示代提。
 - **只读无缺陷留档**：门禁六件套 365 行整读无缺陷；neonService `addSelfContainedWrongQuestion`/`cleanupStaleParsingOnBoot` 补读无缺陷；`test/e2e_todoJump.cjs` 为需活服务器的手跑 e2e（文件头自述），不进 npm test 非缺陷；服务栈 backend bootAt 09:17:40 跑新码。四道闸：2453/2453｜0e/123w｜`dist_nightly_20261016r292` 55.49s｜preview 5601 cert_probe exit 0 + 8/8 + 0/16 + 0/14。

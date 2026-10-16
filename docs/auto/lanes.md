@@ -563,3 +563,13 @@
 - **四道闸**：npm test 2453/2453 fail 0｜eslint 0e/123w（基线）｜`dist_nightly_20261016r292` 55.49s｜preview 5601：cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
 - **备份**：2026-10-15 档 ok:true（13:33），无报警。**提案**：r292-P-A（B，看门狗三缺陷）/ r292-P-B（A 候选，patrol 5173→3000）/ r292-P-C（B，wipe-neon 去留）。
 - **环境实记**：Git Bash 里 `taskkill /F` 的 `/F` 被 MSYS 路径转换改成 `F:/` 报无效参数 ⇒ 必须 `MSYS_NO_PATHCONV=1 taskkill /F /PID <pid>`。
+
+## 第 r293 轮认领（2026-10-16 11:42–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/292` 正常释放（02:40:28Z），loopGuard round+1 直得 **293** 无撞号。
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 门禁/巡检引擎 + 配套测试）。
+- **落地（A 级，r292-P-B 关闭）**：patrol 引擎陈旧端口 :5173 → :3000。现行服务后端 :4000 + 前端 vite dev :3000（netstat + 活体探针实证，:5173 ECONNREFUSED），而 patrol.mjs 健康检查/smoke 调用/跳过提示 + smoke.mjs 默认 BASE 硬编码 10-04 前旧端口 ⇒ 手跑恒假 `mobile-dev DOWN` + 冒烟恒跳。修法：新建 `scripts/patrol/ports.mjs` 端口口径单一实现（4000/3000，仿 r158 gate/base.mjs），两脚本改走它；新锁 `test/patrolPortCaliber.test.mjs` 3 条，文件级反向自检（HEAD 旧文件判红 6 条）证非空锁。
+- **未触碰**：并行会话 10 个已修改 + 7 个未跟踪文件（keep_local_services / neonBackfill1101 / reviewStore 系列 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2456/2456 fail 0**｜eslint **0e/123w**（基线）｜`dist_nightly_20261016r293` **36.33s**｜preview 5610 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：最新 `2026-10-15` ok:true，今日 11:42 早于 13:00 档 ⇒ 无报警。
+- **接手提示**：① 下轮首选 `keep_mobile_dev.mjs` + `start_keep_mobile_dev.vbs`（:5173 旧守护家族）死代码清理（已实证无活调用方）；② r292-P-A 拍板后落地看门狗三缺陷；③ 待拍板清单见 r293 报告第五节。

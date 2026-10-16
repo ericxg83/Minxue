@@ -1,8 +1,8 @@
 /**
  * 巡查冒烟 — 移动端首页 + 工作台 8 导航（Playwright）
  * ─────────────────────────────────────────────────────────────
- * 前置：vite dev 已起（npm run dev → :5173，工作台经 /workbench.html 提供）。
- * 跑法：node scripts/patrol/smoke.mjs [BASE 默认 http://127.0.0.1:5173]
+ * 前置：vite dev 已起（npm run dev → :3000，工作台经 /workbench.html 提供）。
+ * 跑法：node scripts/patrol/smoke.mjs [BASE 默认 http://127.0.0.1:3000]
  *
  * 断言：
  *  - 移动端首页 #root 挂载、innerText 有真实文字、0 console error、0 4xx/5xx
@@ -12,7 +12,9 @@
  */
 import { chromium } from 'playwright'
 
-const BASE = process.argv[2] || 'http://127.0.0.1:5173'
+import { FRONTEND_BASE } from './ports.mjs'
+
+const BASE = process.argv[2] || FRONTEND_BASE
 
 const NAV = [
   { label: '批改中心', path: '#/grade', landing: ['#/grade'] },
