@@ -553,3 +553,13 @@
   ensure-analysis + 锁同步更新）｜eslint **0e/119w**｜`dist_nightly_20261015r287` **64s**｜
   preview 5592：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16**
   + text_audit **0/14**。
+
+## 第 r292 轮认领（2026-10-16 10:20–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：锁陈旧接管。`running/290` 持锁 12h03m 超 3h 崩溃线；持锁方最后写入 10-15 22:27，Windows 事件日志实证 10-15 23:59:21 关机 → 10-16 09:12:05 开机 ⇒ 会话随关机消亡。手工认领 **r292**（loopGuard+1=291 与 r291 只读轮撞号，按 r273/r278/r285/r287 先例）。
+- **本轮赛道**：仓库卫生与门禁基线（scripts/** 整读）+ 服务端基础设施（非批改：本地服务看门狗/进程健康只读核查）+ docs/auto 台账。
+- **落地**：① 代提交 r291 只读轮文书（commit `4dc86f8`，防未跟踪文件被并发回滚清失）；② 看门狗 vite 端口顺延泄漏的**即时缓解**（验证零连接/零引用后 taskkill :3001/:3002 两孤儿，:3000 200 不受影响）——根因文件 `keep_local_services.mjs` 属并行会话未跟踪 WIP，按「脏项一律不碰」只提案 r292-P-A。
+- **未触碰**：并行会话 8 个已修改 + 8 个未跟踪文件（含 keep_local_services 家族 / neonBackfill1101 / reviewStore 系列 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test 2453/2453 fail 0｜eslint 0e/123w（基线）｜`dist_nightly_20261016r292` 55.49s｜preview 5601：cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。
+- **备份**：2026-10-15 档 ok:true（13:33），无报警。**提案**：r292-P-A（B，看门狗三缺陷）/ r292-P-B（A 候选，patrol 5173→3000）/ r292-P-C（B，wipe-neon 去留）。
+- **环境实记**：Git Bash 里 `taskkill /F` 的 `/F` 被 MSYS 路径转换改成 `F:/` 报无效参数 ⇒ 必须 `MSYS_NO_PATHCONV=1 taskkill /F /PID <pid>`。
