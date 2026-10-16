@@ -1349,7 +1349,17 @@ export function selectEnglishMergePages(pageResults) {
   const hasPending = kinds.some(k => k.kind === 'pending')
   if (!hasPending) return []
   return kinds
-    .filter(k => k.kind === 'pending' || (k.kind === 'self-sufficient' && (k.r?.pageQuestions || []).some(ENGLISH_HAS_BLANK)))
+    .filter(k =>
+      k.kind === 'pending'
+      || (k.kind === 'self-sufficient' && (k.r?.pageQuestions || []).some(ENGLISH_HAS_BLANK))
+      // ⚠️ 0 题空页不能当 non-english 排除（2026-10-16 实测缺口）：keep-only-II-V 提示词下
+      // 模型可能把整页内容过度跳过（本卷第 2 页 V 句型转换被整页吞掉、三次重试均返回 0 题），
+      // classifyEnglishPage 对空页判 non-english → 被排除在合并组外 → 该页内容静默丢失。
+      // 挂起页存在 ⇒ 语篇分离/跨页已坐实，空页最可能就是被吞的另一半——拼进合并组
+      // 只会多给上下文，不会丢已有内容（它本来就没有题）。
+      // 真正含题的非英语页仍按 non-english 排除，数学链路零影响。
+      || (k.kind === 'non-english' && (k.r?.pageQuestions || []).length === 0)
+    )
     .map(k => k.r)
 }
 
@@ -1512,24 +1522,30 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
 
     normalizeBlockBoxSemantics(questionsArray)
 
-    // ── 英语综合卷题型过滤（T1.5，2026-10-16）──────────────────
-    // 提示词已要求跳过 I 语音拼写 / VI 书面·情景表达，此处为安全网：
-    // 凡 english_kind 命中 phonetic / writing 的题直接从待落库列表剔除，
-    // 不建 questions 记录、不污染 wrong_questions；剔除计数留日志供复核对账。
+    // ── 英语综合卷题型过滤（T1.5，2026-10-16；2026-10-16 扩展为 keep-only-II-V）──────────────────
+    // 原则：英语页只训练语法/句法客观题，即 II 选择(choice_passage) / III 选词填空(word_bank) /
+    // IV 词形填空(word_form) / V 句型转换(sentence_transform)。其余一律剔除：
+    //   · I 语音拼写(phonetic)
+    //   · VI 书面·情景表达(writing)
+    //   · VI 实际常为阅读理解（开放式 answer 题，english_kind 为 null/其它）→ 同样剔除
+    // 剔除发生在建 questions 记录之前（不污染错题本），计数留日志供复核对账。
+    // 数学页 / 非英语页不进入本过滤。
     {
-      const kept = []
-      let droppedPhonetic = 0
-      let droppedWriting = 0
-      for (const q of questionsArray) {
-        const k = q?.english_kind
-        if (k === 'phonetic') { droppedPhonetic++; continue }
-        if (k === 'writing') { droppedWriting++; continue }
-        kept.push(q)
-      }
-      if (questionsArray.length !== kept.length) {
-        console.log(`   [英语过滤] 已剔除不训练题型：语音拼写 ${droppedPhonetic} 题、书面/情景表达 ${droppedWriting} 题（剩 ${kept.length} 题待落库）`)
-        questionsArray.length = 0
-        Array.prototype.push.apply(questionsArray, kept)
+      if (pageSubject === '英语') {
+        const KEEP_KINDS = new Set(['choice_passage', 'word_bank', 'word_form', 'sentence_transform'])
+        const kept = []
+        const dropBreakdown = {}
+        for (const q of questionsArray) {
+          const k = q?.english_kind || '(无)'
+          if (KEEP_KINDS.has(k)) { kept.push(q); continue }
+          dropBreakdown[k] = (dropBreakdown[k] || 0) + 1
+        }
+        if (questionsArray.length !== kept.length) {
+          const detail = Object.entries(dropBreakdown).map(([k, n]) => `${k} ${n} 题`).join('、')
+          console.log(`   [英语过滤] 已剔除非 II-V 题型（keep-only-II-V）：${detail}（剩 ${kept.length} 题待落库）`)
+          questionsArray.length = 0
+          Array.prototype.push.apply(questionsArray, kept)
+        }
       }
     }
 
@@ -8209,7 +8225,12 @@ export const processTask = async (job) => {
       const pendingPages = selectEnglishMergePages(pageResults)
       if (pendingPages.length > 0) {
         console.log(`   [英语页组] ${pendingPages.length} 页挂起（语篇分离/跨页），合并重识别: 第 ${pendingPages.map(p => p.pageNumber).join(',')} 页`)
-        const mergedByPage = new Map()
+        // ⚠️ 合并结果代表整张拼接图的完整题集，必须按「拼接组」整体替换一次。
+        // 旧实现逐页 mergedByPage.set(b.pageNumber, mergedQs) 把同一 mergedQs 复制给组内每页
+        // → questions.push 把同一批随机 id 重复塞入 → 落库 23505 主键冲突、整卷失败
+        // （2026-10-16 实测：本卷 2 页合并识别 18 题，被复制成 36 行，撞主键）。
+        // 改为：组内仅首页承接 mergedQs，其余页置空（其题已被合并集覆盖，无坐标损失）。
+        const groupReplacement = new Map() // pageNumber → 替换题集（首页=mergedQs，其余=[]）
         for (let i = 0; i < pendingPages.length; i += ENGLISH_STITCH_MAX_PAGES) {
           const batch = pendingPages.slice(i, i + ENGLISH_STITCH_MAX_PAGES)
           try {
@@ -8232,14 +8253,14 @@ export const processTask = async (job) => {
               continue
             }
             console.log(`   [英语页组] 第 ${batch.map(b => b.pageNumber).join(',')} 页合并识别出 ${mergedQs.length} 题（拼合语篇全文）`)
-            for (const b of batch) mergedByPage.set(b.pageNumber, mergedQs)
+            batch.forEach((b, idx) => groupReplacement.set(b.pageNumber, idx === 0 ? mergedQs : []))
           } catch (mergeError) {
             console.warn(`   [英语页组] 第 ${batch.map(b => b.pageNumber).join(',')} 页合并识别失败（原结果标记 is_suspicious 保留）: ${mergeError.message}`)
             for (const b of batch) for (const q of b.pageQuestions) q.is_suspicious = true
           }
         }
         for (const r of pageResults) {
-          if (mergedByPage.has(r.pageNumber)) r.pageQuestions = mergedByPage.get(r.pageNumber)
+          if (groupReplacement.has(r.pageNumber)) r.pageQuestions = groupReplacement.get(r.pageNumber)
         }
       }
     }
@@ -8416,7 +8437,21 @@ export const processTask = async (job) => {
         console.warn(`   ⚠️ [写入侧配图框] 实测整体失败（保留模型原框）：${e.message}`)
       }
 
-      await createQuestions(questionsWithStudentId)
+      // ── 防御：落库前按 id 去重，杜绝任何来源（跨页合并整组复制、缓存回放等）的重复题 ──
+      // 重复 id 会让整卷落库 23505 主键冲突、整卷失败（2026-10-16 跨页合并事故根因）。
+      const _seenIds = new Set()
+      const _deduped = []
+      for (const q of questionsWithStudentId) {
+        if (q.id) {
+          if (_seenIds.has(q.id)) continue
+          _seenIds.add(q.id)
+        }
+        _deduped.push(q)
+      }
+      if (_deduped.length !== questionsWithStudentId.length) {
+        console.warn(`   ⚠️ [去重] 落库前剔除重复题 ${questionsWithStudentId.length - _deduped.length} 道（按 id）`)
+      }
+      await createQuestions(_deduped)
       console.log(`✅ [Step 6/8] 题目保存成功 (含 ${geometryImageCount} 张几何配图)`)
 
       // ⛔ 断根：把删档前记下的错题记录接回新档案行（配对失败保持 NULL，不硬接）
