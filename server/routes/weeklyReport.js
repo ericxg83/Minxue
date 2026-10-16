@@ -678,7 +678,7 @@ async function fetchKnowledgeDiagnosis(studentId, periodStart, periodEnd) {
       AND wq.added_at < $3
       AND q.is_complete = TRUE
       AND q.ai_tags IS NOT NULL
-      AND q.ai_tags != ''
+      AND q.ai_tags::text != ''
       AND q.ai_tags != '[]'
     GROUP BY COALESCE(NULLIF(q.subject, ''), '其他'), tag
     ORDER BY COALESCE(NULLIF(q.subject, ''), '其他'), wrong_count DESC, total_count DESC`,

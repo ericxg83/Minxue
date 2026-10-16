@@ -143,7 +143,7 @@ async function main() {
      WHERE (
        (q.is_complete = TRUE AND (
          q.ai_tags IS NULL
-         OR q.ai_tags = ''
+         OR q.ai_tags::text = ''
          OR q.ai_tags = '[]'
          OR q.ai_tags::text = '["未分类"]'
        ))
