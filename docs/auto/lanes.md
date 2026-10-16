@@ -583,3 +583,14 @@
 - **四道闸**：npm test **2458/2458 fail 0**｜eslint **0e/123w**（基线）｜`dist_nightly_20261016r294` **34.82s**｜preview 5621 单调用内起服：cert_probe exit 0 + render_smoke exit 0 + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
 - **接手提示**：① 下轮首选 `keep_backend.mjs` + `start_keep_backend.vbs` + `start_patrol_daemon.vbs`（→ patrol/daemon.mjs）同族孤儿清理（开机入口均已不在、职责被 keep_local_services 取代；patrol 引擎 10-12 起停摆）；② r292-P-A 拍板后落地看门狗三缺陷；③ 待拍板清单见 r294 报告第五节（不变）。
+
+## 第 r295 轮认领（2026-10-16 14:27–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/294` 正常释放（13:30），`loopGuard acquire` 直得 **295** 无撞号。
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 死模块清理 + 配套测试）——沿用 r293/r294。
+- **落地（A 级，commit `0564a4b`，已推送）**：r294 接手提示① 关闭——删除退役守护家族 `scripts/dev/keep_backend.mjs` + `start_keep_backend.vbs` + `start_patrol_daemon.vbs`（五项实证：开机入口均不在 / PID 17236 实测不存在、日志冻结 10-12 09:58 / patrol daemon 停摆 4 天 / :4000+:3000 由 keep_local_services 看门狗看护 / 全仓零活调用方）。`scripts/patrol/daemon.mjs` 引擎本体保留为手跑工具。回归锁 `test/patrolPortCaliber.test.mjs` +1 用例（scripts/** 禁 keep_backend 令牌与 patrol/daemon.mjs 路径形态活引用；反向自检双层：内联合成 3 红 + 真实旧文件文件级判红 3 条）。
+- **未触碰**：并行会话 11 改 + 7 未跟踪（含 keep_local_services 家族 / neonBackfill1101 / 5 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2469/2469 fail 0**｜eslint **0e/123w**（基线）｜`dist_nightly_20261016r295` **35.56s**｜preview 5632 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：今日 13:00 档 `2026-10-16` ok:true，**无报警**。
+- **⚠️ 提交裹走事件（r289 同型第二例）**：`git rm` 暂存后并行会话 14:34 抢跑 `39ac2b4` 把三处删除裹入其英语拆题产品码提交；内容无损、未重写他人提交，归属说明见 `0564a4b` message。教训：暂存后立即 commit。
+- **接手提示**：① `scripts/patrol/daemon.mjs` 引擎去留待负责人口径（自启已退役、停摆 4 天、与本 automation 职责重叠；批「删」则删引擎+锁延伸属 A 级）；② r292-P-A 拍板后落地看门狗三缺陷；③ 备份 10-17 档 13:00 后核验；④ neonService 剩余未读段（约 300 行）只读核查。

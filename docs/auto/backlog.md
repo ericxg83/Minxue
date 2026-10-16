@@ -4841,3 +4841,12 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r292-P-C（B，待拍板）**：`scripts/wipe-neon.mjs`（88 行，零调用方，`YES-WIPE` 确认闸在的 TRUNCATE 全库脚本）去留——㊳ 遗留成员，不擅自删。
 - **r290 遗留补充实证**：其未跟踪 `test/englishAnalyzer.test.mjs` 的持锁方已证实随 10-15 23:59 关机消亡，文件成孤儿；npm test 套件内绿（2453 含其 4 条）、r291 单跑 4/4 ⇒ 按 r289-P-B 路径请示代提。
 - **只读无缺陷留档**：门禁六件套 365 行整读无缺陷；neonService `addSelfContainedWrongQuestion`/`cleanupStaleParsingOnBoot` 补读无缺陷；`test/e2e_todoJump.cjs` 为需活服务器的手跑 e2e（文件头自述），不进 npm test 非缺陷；服务栈 backend bootAt 09:17:40 跑新码。四道闸：2453/2453｜0e/123w｜`dist_nightly_20261016r292` 55.49s｜preview 5601 cert_probe exit 0 + 8/8 + 0/16 + 0/14。
+
+## 第 r295 轮（2026-10-16 14:27–，日常巡查 automation `4e9608a9`，锁正常释放认领）
+
+- **锁取证**：`finished/294` 13:30 释放，`loopGuard acquire` 直得 r295（round+1 无撞号）。并行会话 11 改 + 7 未跟踪零碰零提交。备份今日 13:00 档 ok:true 无报警（仍 5/29 表 = r289-P-A）。
+- **落地（A 级，commit `0564a4b`）**：r294 接手提示① 关闭——删除退役守护家族 `scripts/dev/keep_backend.mjs` + `start_keep_backend.vbs` + `start_patrol_daemon.vbs`（r294 报告第四节已列实证：开机入口均不在 / PID 17236 实测不存在 / patrol daemon 停摆 4 天 / 看门狗取代无缺口 / 零活调用方；r295 动手前五项复核全过）。`scripts/patrol/daemon.mjs` 引擎本体**保留为手跑工具**（r293 刚维护 patrol.mjs/smoke.mjs；彻底退役属去留决策，若负责人要删，删引擎+锁延伸属 A 级可自落）。
+- **回归锁**：`test/patrolPortCaliber.test.mjs` +1 用例（`scripts/**` 剔注释后禁 `keep_backend` 令牌与 `patrol/daemon.mjs` 路径形态活引用；反向自检双层：内联合成 3 红 + 真实旧文件文件级判红 3 条）。过程实录：初版禁 `start_patrol_daemon` 文件名令牌被内联反向自检当场抓出**空锁**（该令牌只在 vbs 注释里，活代码行是 `node scripts\patrol\daemon.mjs`）⇒ 改禁路径形态；裸 `patrol_daemon` 不能禁（daemon.mjs 活代码 `logs/patrol_daemon.pid` 含该子串）。
+- **⚠️ 提交裹走事件（r289 同型第二例，记录防再犯）**：`git rm` 暂存三处删除后约 5 分钟，并行会话 14:34:17 抢跑 `39ac2b4`（其英语 III/IV 拆题产品码 6 files +345/−127）把三处删除一并裹入。删除内容与暂存区逐字一致、无内容损伤，**未重写他人提交**（涉对方产品码，rebase 代价高风险大）；归属说明写入 `0564a4b` commit message 与本轮报告。教训复述：**暂存后立即 commit**。
+- **四道闸**：npm test **2469/2469 fail 0**｜eslint **0e/123w**｜`dist_nightly_20261016r295` **35.56s**｜preview 5632 cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。已推送（连带并行会话 2 个产品提交），部署缺口归零。
+- **无新增 B/C 提案**；待拍板清单不变（r292-P-A / r292-P-C / r289-P-A / r289-P-B+r290 遗留测试代提 / r285-P-A / r285-P-B / r280-P-A / r280-P-B / r278-P-B）。
