@@ -2362,6 +2362,11 @@ app.put('/api/questions/:id', async (req, res) => {
       }
       createJudgement({
         questionId: id,
+        // judgements.student_id 是 NOT NULL：漏传 = 每次 PC 改判审计必然 23502 失败，
+        // 重试 3 次后被 .catch 吞掉（2026-10-15 r288 巡查实证：server.log 里同一晚
+        // 9 条 failing row 全是 pc_edit，编辑字段 ["review_status","review_metadata"]）。
+        // 取值与下方 manual_review 分支逐字同源。
+        studentId: updatedQuestion.student_id || oldQuestion?.student_id || null,
         source: 'pc_edit',
         isCorrect: isCorrectEffective,
         metadata: { oldIsCorrect, editedFields: Object.keys(req.body).filter(k => k !== 'id'), misjudgeType }
@@ -4188,8 +4193,8 @@ app.get('/api/wrong-questions/student/:studentId', async (req, res) => {
            jsonb_build_object(
              'id', q.id, 'content', q.content, 'subject', q.subject, 'question_type', q.question_type,
              'options', q.options, 'answer', q.answer, 'analysis', q.analysis,
-             'ai_tags', CASE WHEN q.ai_tags IS NULL OR q.ai_tags = '' THEN '[]'::jsonb ELSE q.ai_tags::jsonb END,
-             'manual_tags', CASE WHEN q.manual_tags IS NULL OR q.manual_tags = '' THEN '[]'::jsonb ELSE q.manual_tags::jsonb END,
+             'ai_tags', CASE WHEN q.ai_tags IS NULL OR q.ai_tags::text = '' THEN '[]'::jsonb ELSE q.ai_tags::jsonb END,
+             'manual_tags', CASE WHEN q.manual_tags IS NULL OR q.manual_tags::text = '' THEN '[]'::jsonb ELSE q.manual_tags::jsonb END,
              'image_url', q.image_url, 'images', q.images, 'geometry_image_url', q.geometry_image_url,
              -- 难度星级（difficultyStars）：组卷预览与重打预览必须同一口径，缺了会只在重打链路显示
              'difficulty', q.difficulty,
@@ -4533,11 +4538,32 @@ app.put('/api/wrong-questions/:id', async (req, res) => {
     res.json({ success: true, message: '状态已更新' })
 
     // [Shadow Mode] 追加写入人工复审判定记录（错题状态变更）
-    createJudgement({
-      questionId: id,
-      source: 'manual_review',
-      metadata: { updatedStatus: status, wrongQuestionId: id }
-    }).catch(e => console.error('[Shadow] judgements写入失败 (人工复审):', e.message))
+    // judgements 的 student_id / question_id 都是 NOT NULL，而本路由只拿得到
+    // wrong_questions.id，必须先回读这一行取真实 student_id 与 question_id。
+    // （2026-10-15 r288 修复：此前两列都没传、question_id 还错传成错题行 id，
+    //  每次状态变更都必然 23502 失败后被 .catch 吞掉，人工复审审计全程静默丢失；
+    //  且 /api/judgements/latest 按 question_id 反查，错传的 id 永远匹配不上。）
+    // 自包含错题（question_id 为 NULL）没有可归属的题目行，跳过并留痕。
+    let wqRow = null
+    try {
+      const { rows: wqRows } = await query(
+        `SELECT student_id, question_id FROM ${TABLES.WRONG_QUESTIONS} WHERE id = $1`,
+        [id]
+      )
+      wqRow = wqRows[0] || null
+    } catch (e) {
+      console.error('[Shadow] 人工复审审计回读失败:', e.message)
+    }
+    if (wqRow?.student_id && wqRow?.question_id) {
+      createJudgement({
+        questionId: wqRow.question_id,
+        studentId: wqRow.student_id,
+        source: 'manual_review',
+        metadata: { updatedStatus: status, wrongQuestionId: id }
+      }).catch(e => console.error('[Shadow] judgements写入失败 (人工复审):', e.message))
+    } else if (wqRow) {
+      console.warn(`[Shadow] 人工复审审计跳过：wrong_questions=${id} 缺 student_id/question_id（自包含错题无 question_id）`)
+    }
 
   } catch (error) {
     console.error('更新错题状态失败:', error)
@@ -4958,7 +4984,7 @@ let backfillProgress = { total: 0, updated: 0, skipped: 0, failed: 0, done: fals
 const BACKFILL_WHERE = `(
            (q.is_complete = TRUE AND (
              q.ai_tags IS NULL
-             OR q.ai_tags = ''
+             OR q.ai_tags::text = ''
              OR q.ai_tags = '[]'
              OR q.ai_tags::text = '["未分类"]'
              OR q.tags_source = 'local'

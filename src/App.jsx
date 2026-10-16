@@ -303,9 +303,10 @@ export default function App() {
 
   // Load wrong questions（错题本计数供首页"待复习"卡片使用，首页也需预热；秒开缓存使其成本极低）
   useEffect(() => {
-    if (currentStudent && (currentPage === 'wrongbook' || currentPage === 'processing')) {
-      loadWrongBookData()
-    }
+    if (!currentStudent || (currentPage !== 'wrongbook' && currentPage !== 'processing')) return
+    const controller = new AbortController()
+    loadWrongBookData({ signal: controller.signal })
+    return () => controller.abort()
   }, [currentStudent?.id, currentPage])
 
   // Load exams（合并原 App.jsx 3s 轮询与 Exam/index.jsx 3s 轮询，统一由 App 层调度）
@@ -525,8 +526,9 @@ export default function App() {
   }, [setPendingFlow, setSelectedWorksheetId, setSelectedExamResourceId, setFlowSubject])
 
   // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新；总数与生命周期计数来自服务端，不再被首批 100 条截断）
-  const loadWrongBookData = async () => {
+  const loadWrongBookData = async ({ signal } = {}) => {
     if (!currentStudent) return
+    if (signal?.aborted) return
     const studentId = currentStudent.id
 
     if (USE_MOCK_DATA) {
@@ -541,7 +543,9 @@ export default function App() {
     }
     // 2) 后台拉取第一页（含 total / counts），后续页面由滚动触底加载
     try {
-      const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: 0 })
+      const { wrongQuestions: rawList, total, counts } = await fetchWrongQuestionsPage(studentId, { limit: WRONG_PAGE_SIZE, offset: 0, signal })
+      // 组件已卸载或 effect 已失效时，不更新 state / 不弹 Toast
+      if (signal?.aborted) return
       const deduped = dedupeWrongQuestions(rawList)
       // 按本次请求的 studentId 自己的 key 存，切回该生可秒开（即使现在已切走）
       writeCache(`wrong_questions_cache_${studentId}`, deduped)
@@ -553,6 +557,8 @@ export default function App() {
       setWrongBookOffset(rawList.length)
       setWrongBookHasMore(rawList.length < total)
     } catch (error) {
+      // 主动取消（StrictMode 卸载、切换学生）不算失败，不弹错误提示
+      if (signal?.aborted) return
       console.error('加载错题失败:', error)
       // 网络失败时保留已展示的缓存数据；但若连缓存都没有，页面会停在
       // 「暂无错题」——必须告诉老师是加载失败而不是真没错题

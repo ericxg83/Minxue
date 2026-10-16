@@ -725,8 +725,8 @@ export const getWrongQuestionsByStudent = async (studentId, useCache = true) => 
 
 // 分页拉取错题（移动端错题本滚动加载）。返回值含 total / counts 生命周期计数。
 // 免缓存：由调用方自行 writeCache 合并已加载数组，避免与 getWrongQuestionsByStudent 的整段缓存互相覆盖。
-export const fetchWrongQuestionsPage = async (studentId, { limit = 100, offset = 0 } = {}) => {
-  const data = await apiRequest(`/wrong-questions/student/${studentId}?limit=${limit}&offset=${offset}`)
+export const fetchWrongQuestionsPage = async (studentId, { limit = 100, offset = 0, signal } = {}) => {
+  const data = await apiRequest(`/wrong-questions/student/${studentId}?limit=${limit}&offset=${offset}`, { signal })
   return {
     wrongQuestions: data.wrongQuestions || [],
     total: data.total ?? 0,
