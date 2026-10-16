@@ -1,66 +1,57 @@
 /**
- * P7 单元验证：知识树归一化 + 掌握度计算（纯函数）
- * 跑法：node test/p7_knowledge_unit.mjs
+ * P7 单元验证：知识树归一化 + 掌握度计算（纯函数）—— r298 接线进 npm test。
+ * 不依赖 DB：mock 出 knowledge_points 列表，调用 calculateMastery 真实产品函数。
  *
- * 不依赖 DB：mock 出 knowledge_points 列表，调用 calculateMastery 和
- * normalizeQuestionTags 的内嵌纯函数部分。
+ * 历史：本文件 2026-09-20（b93c594）以手跑风格提交（node test/p7_knowledge_unit.mjs），
+ * 文件名不带 `.test.mjs` 后缀 ⇒ npm test 的 glob 从未覆盖它（r215/r216 假绿家族的
+ * 漏网形态）。r298 原地改造为 node:test 并改名纳入套件，用例与期望值逐字未变。
  *
  * 覆盖：
  *   - calculateMastery: 0 题 → 0；首答正确 → 100；连续正确 +10 上限；
- *     长期不练 → 衰减
- *   - 标签归一化精确命中（name）和子串命中（"相似三角形" tag 命中"三角形"父节点）
+ *     长期不练 → 衰减（真实调用 server/services/knowledgeMasteryService.js）
+ *   - 标签归一化 mock 语义（⚠️ 锁的是文件内复刻的匹配逻辑，不是产品码
+ *     matchKnowledgePoints——产品码走 DB，纯函数测试覆盖不到，此处仅防复刻件自身腐化）
  */
-
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 // ── 复用 knowledgeMasteryService.calculateMastery ──
-// 通过动态 import 拿到真正的函数
 const { calculateMastery } = await import('../server/services/knowledgeMasteryService.js')
 
-console.log('🧪 calculateMastery 边界用例')
-{
-  const m = calculateMastery({ total: 0, correct: 0, consecutiveCorrect: 0, lastPracticedAt: null })
-  assert.equal(m, 0, 'total=0 应返回 0')
-}
-{
-  const m = calculateMastery({ total: 1, correct: 1, consecutiveCorrect: 1, lastPracticedAt: null })
-  assert.equal(m, 100, '首答正确 1/1 + streak=1 应为 100')
-}
-{
-  // 10 题对 8 题，streak=3（拿 +6），无衰减 → 80 + 6 = 86
-  const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 3, lastPracticedAt: null })
-  assert.equal(m, 86, `期望 86，实得 ${m}`)
-}
-{
-  // 10 题对 8 题，streak=10（封顶 5 步 → +10）→ 80 + 10 = 90
-  const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 10, lastPracticedAt: null })
-  assert.equal(m, 90, `期望 90，实得 ${m}`)
-}
-{
-  // 时间衰减：14 天前最后练习，total=10, correct=8, streak=0 → 80 - 0 = 80
-  const old = new Date(Date.now() - 14 * 86400000).toISOString()
-  const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 0, lastPracticedAt: old })
-  assert.equal(m, 80, `期望 80（衰减边界 14 天不算衰减），实得 ${m}`)
-}
-{
-  // 21 天前最后练习（衰减 1 周 = -5）→ 80 - 5 = 75
-  const old = new Date(Date.now() - 21 * 86400000).toISOString()
-  const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 0, lastPracticedAt: old })
-  assert.equal(m, 75, `期望 75（衰减 1 周），实得 ${m}`)
-}
-{
-  // 上限封顶 100：correct=10, total=10, streak=5 → 100 + 10 = 100
-  const m = calculateMastery({ total: 10, correct: 10, consecutiveCorrect: 5, lastPracticedAt: null })
-  assert.equal(m, 100, `期望 100（封顶），实得 ${m}`)
-}
-console.log('  ✅ calculateMastery 全部通过')
+test('calculateMastery 边界用例', async (t) => {
+  await t.test('total=0 应返回 0', () => {
+    const m = calculateMastery({ total: 0, correct: 0, consecutiveCorrect: 0, lastPracticedAt: null })
+    assert.equal(m, 0)
+  })
+  await t.test('首答正确 1/1 + streak=1 应为 100', () => {
+    const m = calculateMastery({ total: 1, correct: 1, consecutiveCorrect: 1, lastPracticedAt: null })
+    assert.equal(m, 100)
+  })
+  await t.test('10 题对 8 题，streak=3（拿 +6），无衰减 → 86', () => {
+    const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 3, lastPracticedAt: null })
+    assert.equal(m, 86, `期望 86，实得 ${m}`)
+  })
+  await t.test('streak=10 封顶 5 步 → +10 → 90', () => {
+    const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 10, lastPracticedAt: null })
+    assert.equal(m, 90, `期望 90，实得 ${m}`)
+  })
+  await t.test('时间衰减：14 天前最后练习不算衰减 → 80', () => {
+    const old = new Date(Date.now() - 14 * 86400000).toISOString()
+    const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 0, lastPracticedAt: old })
+    assert.equal(m, 80, `期望 80（衰减边界 14 天不算衰减），实得 ${m}`)
+  })
+  await t.test('时间衰减：21 天前最后练习衰减 1 周 → 75', () => {
+    const old = new Date(Date.now() - 21 * 86400000).toISOString()
+    const m = calculateMastery({ total: 10, correct: 8, consecutiveCorrect: 0, lastPracticedAt: old })
+    assert.equal(m, 75, `期望 75（衰减 1 周），实得 ${m}`)
+  })
+  await t.test('上限封顶 100', () => {
+    const m = calculateMastery({ total: 10, correct: 10, consecutiveCorrect: 5, lastPracticedAt: null })
+    assert.equal(m, 100, `期望 100（封顶），实得 ${m}`)
+  })
+})
 
-// ── 标签归一化：用 mock knowledge_points 验证 matchKnowledgePoints 内部逻辑 ──
-// 既然 matchKnowledgePoints 内部依赖 DB，我们手写一个本地匹配函数来验证
-// scoring 的语义（与 knowledgeService.matchKnowledgePoints 一致）。
-
-console.log('🧪 标签归一化匹配（mock 知识树）')
-{
+test('标签归一化匹配（mock 知识树）', () => {
   const mockKp = [
     { id: 'k1', parent_id: null, name: '几何', level: 0, sort_order: 1, synonyms: [] },
     { id: 'k2', parent_id: 'k1', name: '三角形', level: 1, sort_order: 1, synonyms: [] },
@@ -123,13 +114,9 @@ console.log('🧪 标签归一化匹配（mock 知识树）')
   const ids2 = r.map(x => x.id)
   assert.equal(ids2[0], 'k2', '通用标签应优先匹配 level 1 的 三角形 本身')
   assert.ok(!ids2.includes('k3'), '通用标签不应反向命中相似三角形')
+})
 
-  console.log('  ✅ 标签归一化匹配 6 个用例全部通过')
-}
-
-// ── 掌握度公式长期演进一致性 ──
-console.log('🧪 掌握度时间序列模拟（10 题 5 对 5 错 + 后续 5 题连对）')
-{
+test('掌握度时间序列模拟（10 题 5 对 5 错 + 后续 5 题连对）', () => {
   // 模拟：先错 5 题，再对 5 题，streak 累积
   let total = 0, correct = 0, consec = 0
   const series = []
@@ -153,8 +140,4 @@ console.log('🧪 掌握度时间序列模拟（10 题 5 对 5 错 + 后续 5 �
   for (let i = 6; i < 10; i++) {
     assert.ok(series[i] > series[i - 1], `对题阶段 mastery 应递增，idx=${i}`)
   }
-  console.log(`  掌握度序列：${series.join(' → ')}`)
-  console.log('  ✅ 10 题模拟通过')
-}
-
-console.log('\n🎉 P7 单元验证全部通过')
+})

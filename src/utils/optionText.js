@@ -1,6 +1,6 @@
 /**
  * 选项标号清洗（前端版，与 server/utils/optionText.js 保持一致，
- * 一致性由 test/option_text_unit.mjs 断言）。
+ * 一致性由 test/option_text_unit.test.mjs 断言）。
  *
  * AI 识别（OCR）会把试卷原印的标号一起转录进 options，例如 ["(A) 3/4", "(B) 4/3"]；
  * 而各展示层又按数组下标补一个 "A."，于是渲染成 "A. (A) 3/4"。

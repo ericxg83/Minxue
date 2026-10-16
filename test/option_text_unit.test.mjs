@@ -1,25 +1,27 @@
 /**
- * 选项标号清洗单元测试。
- * 同时断言 server/utils/optionText.js 与 src/utils/optionText.js 两份副本行为一致。
- * 运行：node test/option_text_unit.mjs
+ * 选项标号清洗单元测试（r298 接线进 npm test）。
+ * 同时断言 server/utils/optionText.js 与 src/utils/optionText.js 两份副本行为一致
+ * ——「两份实现必须同改」的守护锁（任何一侧漂移都会在这里判红）。
+ *
+ * 历史：本文件 2026-09-20（b93c594）以手跑风格提交（node test/option_text_unit.mjs），
+ * 文件名不带 `.test.mjs` 后缀 ⇒ `node --test "test/*.test.mjs"` 的 glob 从未覆盖它，
+ * npm test 全绿时这 52 条断言一条都没跑（r215/r216 假绿家族的漏网形态：
+ * 门禁判据只认 `.test.mjs` 命名）。r298 原地改造为 node:test 并改名纳入套件，
+ * 用例与期望值逐字未变。
  */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
 import { normalizeOptions as srv, formatOptionsForPrompt as srvFmt } from '../server/utils/optionText.js'
 import { normalizeOptions as web, formatOptionsForPrompt as webFmt } from '../src/utils/optionText.js'
 
-let pass = 0
-let fail = 0
-
 const check = (label, input, expected) => {
-  const a = srv(input)
-  const b = web(input)
-  const same = JSON.stringify(a) === JSON.stringify(b)
-  const ok = same && JSON.stringify(a) === JSON.stringify(expected)
-  if (ok) { pass++; return }
-  fail++
-  console.log(`✗ ${label}`)
-  console.log(`   输入: ${JSON.stringify(input)}`)
-  console.log(`   期望: ${JSON.stringify(expected)}`)
-  console.log(`   实际: ${JSON.stringify(a)}${same ? '' : `  ⚠️ 两份副本不一致，前端得到 ${JSON.stringify(b)}`}`)
+  test(label, () => {
+    const a = srv(input)
+    const b = web(input)
+    const same = JSON.stringify(a) === JSON.stringify(b)
+    assert.ok(same, `两份副本不一致：server=${JSON.stringify(a)}，web=${JSON.stringify(b)}`)
+    assert.equal(JSON.stringify(a), JSON.stringify(expected), `输入 ${JSON.stringify(input)} 期望 ${JSON.stringify(expected)}`)
+  })
 }
 
 // ── 应该剥掉的形态 ──
@@ -50,8 +52,6 @@ check('空数组', [], [])
 check('非数组原样返回', null, null)
 check('数字项不参与（非字符串 → 整组不动）', [1, 2], [1, 2])
 
-console.log(`\n选项标号清洗：${pass} 通过，${fail} 失败`)
-
 // ── prompt 拼接（AI 必须看到 A/B/C/D 标号才能回答字母）──
 const fmtCases = [
   ['干净选项', ['3/4', '4/3', '3/5', '4/5'], 'A. 3/4；B. 4/3；C. 3/5；D. 4/5'],
@@ -60,11 +60,10 @@ const fmtCases = [
   ['非数组返回空串', null, ''],
 ]
 for (const [label, input, expected] of fmtCases) {
-  const a = srvFmt(input)
-  const b = webFmt(input)
-  if (a === expected && b === expected) { pass++; continue }
-  fail++
-  console.log(`✗ formatOptionsForPrompt ${label}: 期望 ${JSON.stringify(expected)}，server=${JSON.stringify(a)}，web=${JSON.stringify(b)}`)
+  test(`formatOptionsForPrompt ${label}`, () => {
+    const a = srvFmt(input)
+    const b = webFmt(input)
+    assert.equal(a, expected, `server 侧期望 ${JSON.stringify(expected)}，实得 ${JSON.stringify(a)}`)
+    assert.equal(b, expected, `web 侧期望 ${JSON.stringify(expected)}，实得 ${JSON.stringify(b)}`)
+  })
 }
-console.log(`含 prompt 拼接后总计：${pass} 通过，${fail} 失败`)
-process.exit(fail === 0 ? 0 : 1)
