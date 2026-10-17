@@ -557,8 +557,15 @@ export default function App() {
       setWrongBookOffset(rawList.length)
       setWrongBookHasMore(rawList.length < total)
     } catch (error) {
-      // 主动取消（StrictMode 卸载、切换学生）不算失败，不弹错误提示
-      if (signal?.aborted) return
+      // 主动取消不算失败，不弹错误提示。三种取消源都要覆盖：
+      // ① 本调用方自身 signal 被 abort（卸载/切学生/StrictMode 重复挂载）；
+      // ② GET 去重竞态：同一路径的在途请求被另一个 effect 的 cleanup abort 后，
+      //    apiRequest 去重表把同一个已拒绝 Promise 返回给本调用方——httpCore 把
+      //    外部 abort 包装成 ApiError{code:'ABORTED'}，本调用方自身 signal 并未
+      //    aborted，只判 ① 会漏（2026-10-17 r300 实测：错题本/处理中 tab 来回切、
+      //    请求在途时弹虚假「错题本加载失败」Toast，探针 logs/_r300_real_probe.mjs）；
+      // ③ 兜底：未经 httpCore 包装的直接抛出的原生 AbortError。
+      if (signal?.aborted || error?.code === 'ABORTED' || error?.name === 'AbortError') return
       console.error('加载错题失败:', error)
       // 网络失败时保留已展示的缓存数据；但若连缓存都没有，页面会停在
       // 「暂无错题」——必须告诉老师是加载失败而不是真没错题

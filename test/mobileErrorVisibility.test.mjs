@@ -62,6 +62,29 @@ function hasButtonInButton(src) {
   return false
 }
 
+/**
+ * r300：loadWrongBookData 的 catch 必须覆盖「GET 去重竞态」取消源。
+ *
+ * 背景（2026-10-17 实测，探针 logs/_r300_real_probe.mjs，真实 apiService 链路）：
+ * c3e1e85 给错题本请求加了 AbortController，但 apiRequest 的 GET 去重会把同一路径
+ * 的在途 Promise 直接返回给第二个调用方。effect 重跑（错题本↔处理中 tab 切换）时，
+ * cleanup abort 了第一个请求 ⇒ 去重返回的同一 Promise 以 httpCore 包装的
+ * ApiError{code:'ABORTED'} 拒绝，而第二个调用方自身 signal 并未 aborted ⇒
+ * 只判 signal?.aborted 的 catch 漏判，弹出虚假「错题本加载失败」Toast。
+ * 判据：console.error('加载错题失败:') 所在 catch 块内（日志之前）必须出现
+ * error?.code === 'ABORTED' 早退。
+ */
+export function wrongBookCatchFailure(app) {
+  const i = app.indexOf("console.error('加载错题失败:', error)")
+  if (i < 0) return 'App.jsx: 加载错题失败锚点不在（改动前请先同步本锁）'
+  const catchStart = app.lastIndexOf('} catch (error) {', i)
+  const seg = catchStart < 0 ? '' : app.slice(catchStart, i)
+  if (!seg.includes("error?.code === 'ABORTED'")) {
+    return 'App.jsx: 加载错题失败 catch 必须判 ApiError code ABORTED（GET 去重竞态：他人 abort 的同一 Promise 返回给本调用方，自身 signal 未 aborted，仅判 signal?.aborted 会弹虚假失败 Toast）'
+  }
+  return null
+}
+
 /** 对一组「修复前」文件复用同一套判据，返回违规清单（供反向自检）。 */
 export function collectFailures(dir) {
   const file = (rel) => {
@@ -139,6 +162,10 @@ export function collectFailures(dir) {
     const wbSeg = anchoredSlice(app, "console.error('加载错题失败:', error)", 400, WB_LABEL, fails)
     if (wbSeg !== null && !wbSeg.includes('Toast.show')) fails.push(WB_LABEL)
 
+    // r300：错题本 catch 必须覆盖 GET 去重竞态取消（ApiError code ABORTED）
+    const wbCatch = wrongBookCatchFailure(app)
+    if (wbCatch) fails.push(wbCatch)
+
     // r110q：作业列表无缓存时加载失败也必须 Toast（与错题本同口径，不得停在「暂无任务」）
     const LT_LABEL = 'App.jsx: 无缓存时作业列表加载失败必须 Toast'
     const ltSeg = anchoredSlice(app, "console.error('加载任务失败:', error)", 400, LT_LABEL, fails)
@@ -181,6 +208,32 @@ test('⛔ 移动端错误可见化 + 学生写操作禁重试（当前树必须�
     [],
     `\n发现 ${failures.length} 处违规：\n` + failures.map((f) => `  - ${f}`).join('\n')
   )
+})
+
+// r300 专用反向自检：判据必须能区分「只判 signal?.aborted」的修复前版本（判红）
+// 与「加判 code ABORTED」的修复后版本（判绿）——双向证明非空锁且不误伤。
+test('锁健全性（r300）：去重竞态判据套 c3e1e85 修复前形状必须判红、套修复后形状必须判绿', () => {
+  const preFix = `const loadWrongBookData = async ({ signal } = {}) => {
+    if (signal?.aborted) return
+    try {
+      const d = await fetchWrongQuestionsPage(studentId, { limit: 100, offset: 0, signal })
+      if (signal?.aborted) return
+    } catch (error) {
+      // 主动取消（StrictMode 卸载、切换学生）不算失败，不弹错误提示
+      if (signal?.aborted) return
+      console.error('加载错题失败:', error)
+      Toast.show({ message: '错题本加载失败，请检查网络后下拉重试', type: 'error' })
+    }
+  }`
+  const pre = wrongBookCatchFailure(preFix)
+  assert.ok(pre !== null && pre.includes('ABORTED'), `修复前形状（只判 signal?.aborted）必须判红，实际: ${pre}`)
+
+  const postFix = preFix.replace(
+    "if (signal?.aborted) return\n      console.error('加载错题失败:', error)",
+    "if (signal?.aborted || error?.code === 'ABORTED' || error?.name === 'AbortError') return\n      console.error('加载错题失败:', error)"
+  )
+  assert.ok(postFix !== preFix, '合成修复后样本的替换必须生效（否则本用例是空转）')
+  assert.equal(wrongBookCatchFailure(postFix), null, '修复后形状必须判绿')
 })
 
 test('锁健全性：判据套合成坏样本必须判红（防空锁，不依赖 git 状态）', () => {
