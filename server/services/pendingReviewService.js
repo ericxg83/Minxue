@@ -56,5 +56,16 @@ export async function getPendingReviewPaperCount() {
     }
   }
 
-  return countPendingReviewPapers({ tasks, exams, unjudgedByExam })
+  // 停课收口（2026-10-17）：在**传入唯一口径前**按停课学生 id 集筛掉其 tasks / exams。
+  // ⛔ 不改 countPendingReviewPapers 本身——那是前后端共用的唯一判据，改了会污染多端。
+  const { rows: stuRows } = await query(`SELECT id, enrollment_status FROM ${TABLES.STUDENTS}`)
+  const pausedIds = new Set(stuRows.filter((s) => s.enrollment_status === 'paused').map((s) => s.id))
+  const visibleTasks = pausedIds.size
+    ? tasks.filter((t) => !pausedIds.has(t.student_id))
+    : tasks
+  const visibleExams = pausedIds.size
+    ? exams.filter((e) => !pausedIds.has(e.student_id))
+    : exams
+
+  return countPendingReviewPapers({ tasks: visibleTasks, exams: visibleExams, unjudgedByExam })
 }

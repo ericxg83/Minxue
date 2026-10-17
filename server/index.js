@@ -732,7 +732,10 @@ app.get('/api/tasks/summary', async (req, res) => {
     //   与 briefing 铃铛桶（未读 done）保持口径一致，点击直达对应 task 复核页
     const { rows } = await query(
       `SELECT
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $1 AND deleted_at IS NULL AND notification_read_at IS NULL), 0) AS pending_review,
+         -- 停课收口（2026-10-17）：铃铛计数排除已停课学生（enrollment_status='paused'）的待办，
+         --   与「已停课」tab / 搜姓名这两个*需要看到停课生*的入口无关（那俩是前端列表层，不动 GET /api/students）。
+         --   停课生的尾巴（待复核/失败）保留在其待办列表里，只是不再计入老师的全局铃铛角标。
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} t LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id WHERE t.status = $1 AND t.deleted_at IS NULL AND t.notification_read_at IS NULL AND COALESCE(s.enrollment_status, 'active') != 'paused'), 0) AS pending_review,
          -- 第 90 轮：failed 任务的最终计数改在 JS 侧用 describeAutoRetry 过滤（见下方 failedTasks），
          -- 这里只取判定需要的四个字段。⛔ 不在 SQL 里重写一遍判据 —— 那会变成第二套口径。
          -- r275（2026-10-13，提案 r249-①/②，负责人批准拆分）：**去掉 notification_read_at IS NULL**。
@@ -744,17 +747,21 @@ app.get('/api/tasks/summary', async (req, res) => {
          COALESCE((SELECT json_agg(row_to_json(f)) FROM (
            SELECT t.status, t.last_error, t.retry_count, t.created_at, t.updated_at, t.notification_read_at
            FROM ${TABLES.TASKS} t
+           LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
            WHERE t.status = $2 AND t.deleted_at IS NULL
+             AND COALESCE(s.enrollment_status, 'active') != 'paused'
          ) f), '[]'::json) AS failed_detail,
          -- 今日新增错题（2026-10-09 负责人拍板，对齐周报 newWrongCount 口径）：
          --   上海自然日 + 不限生命周期（统计的是「今日批卷产生的错题总数」）。
          -- ⛔ 不用 CURRENT_DATE：Neon 会话时区是 UTC，北京 0-8 点新增会被算进「昨天」（实测当天丢 2 道）。
          -- ⛔ 不过滤 lifecycle_status='new'：错题被重练推进后就不计入「今日新增」（实测当天丢 1 道），
          --    且与周报口径（全部生命周期）冲突 ⇒ 展示语义（lifecycle 六态）与统计口径分离。
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS}
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.WRONG_QUESTIONS} wq
+           LEFT JOIN ${TABLES.STUDENTS} s ON s.id = wq.student_id
             WHERE (added_at AT TIME ZONE 'Asia/Shanghai')::date
-                = (NOW() AT TIME ZONE 'Asia/Shanghai')::date), 0) AS today_new_wrong,
-         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} WHERE status = $3 AND deleted_at IS NULL), 0) AS in_progress_count,
+                = (NOW() AT TIME ZONE 'Asia/Shanghai')::date
+            AND COALESCE(s.enrollment_status, 'active') != 'paused'), 0) AS today_new_wrong,
+         COALESCE((SELECT COUNT(*)::int FROM ${TABLES.TASKS} t LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id WHERE t.status = $3 AND t.deleted_at IS NULL AND COALESCE(s.enrollment_status, 'active') != 'paused'), 0) AS in_progress_count,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
            SELECT t.id, t.student_id, t.original_name, t.status, t.created_at, t.updated_at,
                   t.notification_read_at, s.name AS student_name,
@@ -766,6 +773,7 @@ app.get('/api/tasks/summary', async (req, res) => {
            LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
            WHERE t.deleted_at IS NULL
              AND t.status = $1 AND t.notification_read_at IS NULL
+             AND COALESCE(s.enrollment_status, 'active') != 'paused'
            ORDER BY t.updated_at DESC LIMIT 5
          ) t) AS pending_tasks,
          (SELECT COALESCE(json_agg(row_to_json(t)), '[]'::json) FROM (
@@ -780,6 +788,7 @@ app.get('/api/tasks/summary', async (req, res) => {
            LEFT JOIN ${TABLES.STUDENTS} s ON s.id = t.student_id
            WHERE t.deleted_at IS NULL
              AND ((t.status = $1 AND t.notification_read_at IS NOT NULL) OR t.status = $2)
+             AND COALESCE(s.enrollment_status, 'active') != 'paused'
            ORDER BY COALESCE(t.notification_read_at, t.updated_at) DESC LIMIT 5
          ) t) AS recent_tasks`,
       [TASK_STATUS.DONE, 'failed', TASK_STATUS.PROCESSING]
@@ -2014,6 +2023,27 @@ app.get('/api/students/:id', async (req, res) => {
     res.json({ success: true, student: rows[0] })
   } catch (error) {
     console.error('获取学生失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// 停课软提示（2026-10-17）：标记停课前，弹窗列出该学生还剩几份「待复核 / 待批改」。
+// 纯只读，不影响写路径；计数只认该学生自己的 tasks（deleted_at IS NULL）。
+//   pending_review  = status='done'（AI 已完成，等老师复核）
+//   pending_grading = 仍在跑/失败（processing / queued / pending / failed）
+app.get('/api/students/:id/pending-counts', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'done')::int AS pending_review,
+         COUNT(*) FILTER (WHERE status IN ('processing', 'queued', 'pending', 'failed'))::int AS pending_grading
+       FROM ${TABLES.TASKS} WHERE student_id = $1 AND deleted_at IS NULL`,
+      [id]
+    )
+    res.json({ success: true, counts: rows[0] || { pending_review: 0, pending_grading: 0 } })
+  } catch (error) {
+    console.error('获取学生待办计数失败:', error)
     res.status(500).json({ error: error.message })
   }
 })
