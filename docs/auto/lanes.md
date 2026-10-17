@@ -638,3 +638,13 @@
 - **四道闸**：npm test **2537/2537 fail 0**｜eslint **0e/122w**（基线）｜`dist_nightly_20261016r299` **35.49s**｜preview 5665 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：今日 13:00 档 ok:true，**无报警**。
 - **接手提示**：① r299-P-A（simple-server.js 去留）拍板后落地 ② r292-P-A 拍板后落地看门狗三缺陷（本轮复核三缺陷仍在）③ 备份 10-17 档核验 ④ 可选：可达性语义收紧成生产入口 BFS。
+
+## 第 r300 轮认领（2026-10-17 21:06–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/299` 正常释放 32h（关机跨夜），`loopGuard acquire` 直得 **r300** 无撞号（`git log --all --grep r300` 空、remoteAhead=0）。
+- **本轮赛道**：移动端 App 体验（`src/App.jsx` 错误处理）+ 仓库卫生与门禁基线（`test/**` 回归锁）——负责人 2026-10-10 明确「移动端赛道你也一起负责」由本 automation 继承。
+- **落地（A 级，commit `d850dac`，已推送）**：修 `c3e1e85`（今晨并行会话）AbortController 修复的不完整残留——GET 去重竞态把他人 abort 的同一在途 Promise 返回给第二个调用方，httpCore 包装为 `ApiError{code:'ABORTED'}` 而第二个调用方自身 signal 未 aborted ⇒ 错题本↔处理中 tab 来回切、请求在途时弹虚假「加载失败」红 Toast。真实链路探针实证错误形状（按 `error.name==='AbortError'` 判会空转）。修复三种取消源全覆盖；回归锁 `wrongBookCatchFailure` + 双向/合成/文件级三层反向自检。
+- **未触碰**：并行会话 8 改 + 8 未跟踪（含 deploy/ scripts/dev/ 家族 / neonBackfill1101 / reviewStore 系列 / 3 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2538/2538 fail 0**（2537+1）｜eslint **0e/122w**（基线）｜`dist_nightly_20261017r300` **1m17s**｜preview 5670 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
+- **备份**：最新 2026-10-16 ok:true，**今日缺 1 天（提醒级）**——08:00 关机→20:51 开机错过 13:00 档 + 开机后被本巡查轮同源串行延后（r273-P-A 复现，预计轮后补跑）。
+- **接手提示**：① r301 核 `D:/Minxue_Backup/2026-10-17/` 补跑结果 ② r300-P-A 拍板后落地 ③ 移动端错误可见化同类扫描可继续（PC 工作台属他人赛道只提案）。

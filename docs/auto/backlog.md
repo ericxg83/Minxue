@@ -4881,3 +4881,11 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r292-P-A 复核仍有效**：并行会话 WIP `scripts/dev/keep_local_services.mjs`（10-15 08:30 后未变）整读——三缺陷全部仍在（① spawn 前端无 `--strictPort` :59 ② 空闲即再 spawn :169-172 ③ 健康检查 3s :76）。「修」需负责人授权触碰他会话 WIP。
 - **非缺陷留档**：`server/services/wrongGateRequeue.js`（DB 编排执行器）与 `server/utils/wrongGateRequeue.js`（纯函数判据，唯一口径）是刻意两层分工，头部互引、test/gateCompleteRequeue.test.mjs 有锁 ⇒ 不是重复实现；测试发现机制（testSuiteCoverageKit 全仓扫描 + testFileList 9 项 + package.json 三处同口径）整读无缺陷；`external/` / `_r*_old/` / `tmp/` / `logs/` 均 gitignored（`git ls-files` = 0）不影响套件；`server/_egress_probe_report.json` 是 neon.js 出口探针实时写文件（后端在跑），非异常。
 - **四道闸**：npm test 2537/2537 fail 0｜eslint 0e/122w｜`dist_nightly_20261016r299` 35.49s｜preview 5665 cert_probe exit 0 + render_smoke 8/8 + route_sweep 0/16 + text_audit 0/14。备份 2026-10-16 13:00 ok:true 无报警。
+
+## 第 r300 轮（2026-10-17 21:06–，日常巡查 automation `4e9608a9`，commit `d850dac`）
+
+- **主项（A 级已落地）**：移动端错题本「虚假失败 Toast」——GET 去重竞态漏判取消源（详见 `docs/auto/reports/2026-10-17-r300.md`）。修复 `src/App.jsx` catch（`signal?.aborted || error?.code === 'ABORTED' || error?.name === 'AbortError'`）+ 回归锁 `test/mobileErrorVisibility.test.mjs`（`wrongBookCatchFailure` 判据 + 双向/合成/文件级三层反向自检）。四道闸：2538/2538｜0e/122w｜1m17s｜5670: cert 0 + 8/8 + 0/16 + 0/14。
+- **r300-P-A（B，待拍板——备份/巡查同源串行饿死，升级复现）**：10-17 两种落空模式全部实证：① 08:00:49 关机→20:51:37 开机，13:00 档机器关机直接错过；② 开机后备份 automation 每 5s tick 被 `skip same-source`（巡查轮同 sourceKey=3c6e857 占源），「延后非丢失」但依赖巡查轮结束。建议：备份 automation 挪独立 sourceKey 或冷门档（r273-P-A 同提案，本次为第二次实证）。
+- **r289-P-B 缩围**：4 个待代提测试中 2 个（jsonbEmptyStringGuard / pcEditJudgementStudentIdGuard）已由并行会话 `e4c5832` 入库 ⇒ 剩 `test/englishAnalyzer.test.mjs`（r290 遗留，r291 实测 4/4）+ `test/todoJumpAndDefaultTab.test.mjs`（r288 遗留，实测 6/6）+ 手跑件 `test/e2e_todoJump.cjs`，待授权代提。
+- **非缺陷留档**：① JSONB 空串比较家族全仓扫描 0 残留（8+5 列 × `=`/`!=`/`<>` × 正/反转；仅 `server/_diag_*` 历史探针命中）⇒ `e4c5832` 修复无漏网、`jsonbEmptyStringGuard` 三文件范围恰好覆盖全部真实实例；② `apiRequest` GET 去重「返回在途 Promise 不带本次 signal」是性能设计非缺陷（本次根因是调用方取消判定不完整）；③ PrintPreview fire-and-forget 健康探测 `.catch(()=>{})` 无 Toast 是刻意形态；④ 后端 bootAt 20:58:35 晚于全部源码 mtime。
+- **待拍板清单**（不变）：r300-P-A / r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A（C）/ r285-P-B / r280-P-A（B/C）/ r280-P-B / r278-P-B / r299-P-A / daemon.mjs 引擎去留 / 存档区治理合并方案（B）。
