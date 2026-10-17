@@ -889,9 +889,11 @@ function securedOf(stats) {
 
 // ── r133 重构新增 ──
 // （r135：原 1) pickerStudents / 4) focusStudentById 随学生横排选择器一并删除，见模板注释）
-// 顶栏下拉的选项
+// 顶栏下拉的选项（停课收口 2026-10-17：不再列出已停课学生；当前选中的停课生仍保留）
 const studentOptions = computed(() =>
-  studentList.value.map(s => ({ value: s.id, label: s.name }))
+  studentList.value
+    .filter(s => s.enrollment_status !== 'paused' || s.id === selectedStudentId.value)
+    .map(s => ({ value: s.id, label: s.name }))
 )
 // 2) 全错知识点：出题 >= 2 且正确率 0 —— 建议合并讲一节而不是逐个重练
 const zeroAccuracyTags = computed(() => {

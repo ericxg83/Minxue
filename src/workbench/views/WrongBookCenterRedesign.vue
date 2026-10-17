@@ -246,11 +246,13 @@ const selectStudentById = id => { const student = students.value.find(s => Strin
 const formatRelative = time => { const v = dayjs(time); if (!v.isValid()) return ''; const d = dayjs().diff(v, 'day'); if (d === 0) return '今天'; if (d === 1) return '昨天'; if (d < 7) return `${d} 天前`; if (d < 30) return `${Math.floor(d / 7)} 周前`; return v.format('MM-DD') }
 
 // 空状态总览 KPI：从 /api/students 返回字段聚合
+// 停课收口（2026-10-17）：聚合时排除已停课学生（principle②：错题中心不反映停课生）
 const overviewKpis = computed(() => {
-  const total = students.value.length
-  const withWrong = students.value.filter(s => (s.total_error_count || 0) > 0).length
-  const recentNew = students.value.reduce((sum, s) => sum + (s.recent_wrong_count || 0), 0)
-  const totalError = students.value.reduce((sum, s) => sum + (s.total_error_count || 0), 0)
+  const visible = students.value.filter(s => s.enrollment_status !== 'paused')
+  const total = visible.length
+  const withWrong = visible.filter(s => (s.total_error_count || 0) > 0).length
+  const recentNew = visible.reduce((sum, s) => sum + (s.recent_wrong_count || 0), 0)
+  const totalError = visible.reduce((sum, s) => sum + (s.total_error_count || 0), 0)
   return [
     { key: 'total', value: total, unit: '人', label: '学生总数', tone: 'default' },
     { key: 'withWrong', value: withWrong, unit: '人', label: '有错题的学生', tone: withWrong > 0 ? 'warning' : 'default' },

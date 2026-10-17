@@ -151,7 +151,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled, Search, User, WarningFilled } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createStudent, getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, updateStudent } from '../../services/apiService'
+import { createStudent, getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, updateStudent, getStudentPendingCounts } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import { isRetryPaperTask } from '../utils/retryPaperState'
 import ActionButton from '../components/ui/ActionButton.vue'
@@ -308,9 +308,21 @@ const handleRowCommand = async (command, student) => {
   if (command === 'open') return openStudent(student.id)
   if (command === 'resume') return setEnrollment(student, 'active')
   if (command === 'pause') {
+    // 停课软提示（2026-10-17）：先取该生待办份数，确认框列出尾巴；确认后照样停课，
+    // 尾巴留在待复核列表里自然清零（原则①：软提示不拦截）。
+    let counts = { pendingReview: 0, pendingGrading: 0 }
+    try {
+      counts = await getStudentPendingCounts(student.id)
+    } catch { /* 取数失败不阻断停课操作，降级为不展示尾巴 */ }
+    const tails = []
+    if (counts.pendingReview > 0) tails.push(`${counts.pendingReview} 份待复核`)
+    if (counts.pendingGrading > 0) tails.push(`${counts.pendingGrading} 份待批改`)
+    const tailText = tails.length
+      ? `目前还有 ${tails.join('、')}，确认停课后这些待办将保留在列表中，续费恢复后照常处理。`
+      : '目前没有未完成的作业。'
     try {
       await ElMessageBox.confirm(
-        `停课后 ${student.name || '该学生'} 不再计入在读人数，作业和错题记录全部保留；续费后可随时恢复在读。`,
+        `停课后 ${student.name || '该学生'} 不再计入在读人数，作业和错题记录全部保留；续费后可随时恢复在读。${tailText}`,
         '标记停课',
         { confirmButtonText: '确认停课', cancelButtonText: '取消', type: 'warning' }
       )

@@ -177,6 +177,12 @@ export const getStudentById = async (id) => {
   return data.student
 }
 
+// 停课软提示（2026-10-17）：取某学生「待复核 / 待批改」份数，供标记停课确认框展示尾巴。
+export const getStudentPendingCounts = async (id) => {
+  const data = await apiRequest(`/students/${id}/pending-counts`)
+  return data.counts || { pending_review: 0, pending_grading: 0 }
+}
+
 export const createStudent = async (studentData) => {
   // 写操作禁重试（retries=1，仓内既有约定）：服务端 POST /students 是纯 INSERT 无去重，
   // 默认 3 次重试在 5xx/超时时会把「添加中」转圈重放出重复学生。

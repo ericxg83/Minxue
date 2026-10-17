@@ -690,7 +690,9 @@ async function loadData({ force = false } = {}) {
       students.value = response.data || response || []
       const targets = studentId.value
         ? students.value.filter(student => String(student.id) === String(studentId.value))
-        : students.value
+        // 停课收口（2026-10-17）：默认全量视图不再包含已停课学生（principle②），
+        // 但显式选中的停课生（深链/直接定位）仍保留，不强行隐藏正在处理的人。
+        : students.value.filter(student => student.enrollment_status !== 'paused')
       // 题目/重练走 5~10 分钟缓存；手动刷新才 bypass，避免每次切换筛选都打爆连接池。
       const lists = await gradeTasksConcurrency(targets, 4, async (student) => {
         const [tasks, exams] = await Promise.all([
@@ -761,7 +763,10 @@ function openTask(task) {
     return
   }
   showToast(`已${task.actionLabel}`)
-  router.push({ path: '/grade/task', query: { studentId: task.studentId, taskId: task.id, source: task.source } })
+  // 待复核入口默认对准「待处理」页签（2026-10-15 修复「PC 后台待复核引导到的批改页默认对准全部」）：
+  // 只给真正待复核的卷带 focus=todo，已复核完/失败的卷不带，避免落到空列表。
+  const focusTodo = isPendingReviewItem(task) ? 'todo' : undefined
+  router.push({ path: '/grade/task', query: { studentId: task.studentId, taskId: task.id, source: task.source, focus: focusTodo } })
 }
 
 // 重新处理失败作业（2026-09-13 事故修复）：

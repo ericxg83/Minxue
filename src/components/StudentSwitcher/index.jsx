@@ -149,6 +149,13 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
 
   const isFormValid = formData.name.trim() && formData.grade
 
+  // 停课收口（2026-10-17）：切换学生列表不再显示已停课学生（principle②），
+  // 但保留当前正在批改的停课生，避免瞬间无选中态。
+  const displayStudents = (Array.isArray(students) ? students : []).filter((s) => {
+    if (s.enrollment_status !== 'paused') return true
+    return currentStudent?.id === s.id
+  })
+
   return (
     <AnimatePresence>
       {visible && (
@@ -185,7 +192,7 @@ export default function StudentSwitcher({ visible, onClose, onSelectStudent }) {
                 <>
                   {/* Student List */}
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto no-scrollbar pb-3">
-                    {students.map((student) => (
+                    {displayStudents.map((student) => (
                       <div
                         key={student.id}
                         onClick={() => {

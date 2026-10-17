@@ -32,8 +32,8 @@
             <div class="identity-eyebrow">学生档案</div>
             <h1>{{ student.name || '未命名学生' }}</h1>
             <div class="identity-tags">
-              <StatusTag :tone="student.is_active === false ? 'neutral' : 'success'">
-                {{ student.is_active === false ? '已停课' : '在读' }}
+              <StatusTag :tone="student.enrollment_status === 'paused' ? 'neutral' : 'success'">
+                {{ student.enrollment_status === 'paused' ? '已停课' : '在读' }}
               </StatusTag>
               <span class="identity-grade">{{ student.grade || student.class || '未设置年级' }}</span>
             </div>
@@ -183,6 +183,15 @@
         <el-form-item label="年级" prop="grade">
           <WorkbenchInput v-model="editForm.grade" :maxlength="30" placeholder="例如：五年级（选填）" aria-label="年级" @keyup.enter="saveStudent" />
         </el-form-item>
+        <el-form-item label="在读状态">
+          <el-switch
+            v-model="editForm.paused"
+            :active-value="true"
+            :inactive-value="false"
+            active-text="已停课"
+            inactive-text="在读"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <ActionButton variant="ghost" @click="editDialogVisible = false">取消</ActionButton>
@@ -238,7 +247,7 @@ const retryDialogVisible = ref(false)
 const retryScope = ref(null)
 const saving = ref(false)
 const editFormRef = ref()
-const editForm = ref({ name: '', grade: '' })
+const editForm = ref({ name: '', grade: '', paused: false })
 const editRules = {
   name: [
     { required: true, message: '请输入学生姓名', trigger: 'blur' },
@@ -530,7 +539,7 @@ async function refreshRetry() {
 }
 
 const openEditDialog = () => {
-  editForm.value = { name: student.value?.name || '', grade: student.value?.grade || student.value?.class || '' }
+  editForm.value = { name: student.value?.name || '', grade: student.value?.grade || student.value?.class || '', paused: student.value?.enrollment_status === 'paused' }
   editDialogVisible.value = true
 }
 const resetEditForm = () => { editForm.value = { name: '', grade: '' } }
@@ -540,7 +549,11 @@ const saveStudent = async () => {
   if (!valid) return
   saving.value = true
   try {
-    const updated = await updateStudent(student.value.id, { name: editForm.value.name.trim(), grade: editForm.value.grade.trim() })
+    const updated = await updateStudent(student.value.id, {
+      name: editForm.value.name.trim(),
+      grade: editForm.value.grade.trim(),
+      enrollmentStatus: editForm.value.paused ? 'paused' : 'active'
+    })
     student.value = { ...student.value, ...updated }
     editDialogVisible.value = false
     ElMessage.success('学生信息已保存')
