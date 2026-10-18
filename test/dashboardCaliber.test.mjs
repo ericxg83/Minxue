@@ -1,4 +1,4 @@
-// 回归测试（2026-10-09）：Dashboard「今日新增错题 / 较昨日 / 今日已批改 / 近 7 日趋势」口径锁
+// 回归测试（2026-10-09 建，2026-10-18 r301 修订）：Dashboard「今日新增错题 / 较昨日 / 今日已批改 / 近 7 日趋势」口径锁
 //
 // 事故（老师报数 + 只读探针 server/_diag_dashboard_todaywrong.mjs 实测生产库，非推理）：
 //   ① `server/services/dashboardService.js` getDailyTrend 的两条 SQL 用 `::date AS day`，
@@ -17,18 +17,30 @@
 //
 // 本锁是**源码级**锁（r250 先例）：这两处是纯 SQL 字符串，行为测试需要真连库，
 // 源码断言 + 探针对账（改前 A / 真实 B / 改后 C）双保险即可锁死口径，防止有人「顺手优化」回去。
+//
+// ── r301（2026-10-18）修订记录：精确字面量正则 → 锚点切片 + 结构不变量 ──
+// 10-17 22:05 并行会话 `88f11b4`（停课收口 P0/P1，负责人方向，已推送部署）给 6 处铃铛聚合
+// 统一加了 `LEFT JOIN students + COALESCE(s.enrollment_status,'active') != 'paused'`，
+// today_new_wrong / in_progress_count 子查询文本变长超出旧判据 240 字符窗口 ⇒ 旧正则
+// 三条判据全部失配（红在 HEAD，非 WIP）。逐条语义核对后定性为**锁过期（假红）**：
+// 上海自然日两处 cast、无 CURRENT_DATE、无 lifecycle_status、$3 与三参数组全部原样保留，
+// 新增的只是停课生过滤（产品新形态）。按 r160/r214/r289 先例修锁：
+// 判据下沉 `dashboardCaliberKit.mjs`（唯一实现），测试改判结构不变量——
+// 容忍停课过滤，但三条历史事故形态（CURRENT_DATE / lifecycle 过滤 / 占位符错位）仍逐条判红。
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { auditTodayNewWrong, auditSummaryParams } from './dashboardCaliberKit.mjs'
+
 const ROOT = resolve(import.meta.dirname, '..')
 const serviceSrc = readFileSync(resolve(ROOT, 'server/services/dashboardService.js'), 'utf8')
 const indexSrc = readFileSync(resolve(ROOT, 'server/index.js'), 'utf8')
 
 // ── 元判据自证：判定词必须逐字存在，防「判据写错字」造成假通过（r249 教训）──
-for (const token of ['getDailyTrend', 'Asia/Shanghai', 'today_new_wrong']) {
+for (const token of ['getDailyTrend', 'Asia/Shanghai', 'today_new_wrong', 'in_progress_count']) {
   assert.ok(
     (serviceSrc + indexSrc).includes(token),
     `元判据自证失败：判据词 ${token} 不在源码里，本文件的断言全部失效`
@@ -51,37 +63,41 @@ test('trend 的时区归一必须保留 Asia/Shanghai（不许有人改回 UTC �
 })
 
 test('today_new_wrong 必须用上海自然日，禁止 CURRENT_DATE（Neon 会话时区是 UTC）', () => {
-  const m = indexSrc.match(/COALESCE\(\(SELECT COUNT\(\*\)::int FROM \$\{TABLES\.WRONG_QUESTIONS\}[\s\S]{0,240}?AS today_new_wrong/)
-  assert.ok(m, 'today_new_wrong 子查询没匹配到 —— SQL 结构被改了，更新本锁前先对账')
+  const a = auditTodayNewWrong(indexSrc)
+  assert.ok(a.subqueryFound, 'today_new_wrong 子查询锚点没匹配到 —— SQL 结构被改了，更新本锁前先对账')
   assert.ok(
-    m[0].includes("(added_at AT TIME ZONE 'Asia/Shanghai')::date") &&
-    m[0].includes("(NOW() AT TIME ZONE 'Asia/Shanghai')::date"),
+    a.shanghaiNaturalDay,
     'today_new_wrong 不再按上海自然日统计 —— 北京 0-8 点新增会被算进「昨天」'
   )
   assert.ok(
-    !m[0].includes('CURRENT_DATE'),
+    !a.usesCurrentDate,
     'today_new_wrong 又用上了 CURRENT_DATE —— 那是 UTC 自然日，与老师感知的自然日有 8 小时错位'
   )
 })
 
 test('today_new_wrong 不得再按 lifecycle 过滤（2026-10-09 拍板：对齐周报「全部生命周期」口径）', () => {
-  const m = indexSrc.match(/COALESCE\(\(SELECT COUNT\(\*\)::int FROM \$\{TABLES\.WRONG_QUESTIONS\}[\s\S]{0,240}?AS today_new_wrong/)
-  assert.ok(m, 'today_new_wrong 子查询没匹配到')
+  const a = auditTodayNewWrong(indexSrc)
+  assert.ok(a.subqueryFound, 'today_new_wrong 子查询锚点没匹配到')
   assert.ok(
-    !m[0].includes('lifecycle_status'),
+    !a.filtersLifecycle,
     'today_new_wrong 又按 lifecycle_status 过滤了 —— 错题被重练推进后「今日新增」会缩水，且与周报口径冲突'
   )
 })
 
-test('summary SQL 参数占位符与参数数组必须重编号对齐（去掉 lifecycle 参数后 $3/$4 顺移）', () => {
-  const m = indexSrc.match(/COALESCE\(\(SELECT COUNT\(\*\)::int FROM \$\{TABLES\.TASKS\} WHERE status = \$3 AND deleted_at IS NULL\), 0\) AS in_progress_count/)
-  assert.ok(m, 'in_progress_count 应使用 $3（lifecycle 的 $3 被移除后顺移），占位符没对齐会直接 pg bind 报错')
-  const paramsLine = indexSrc
-    .split('\n')
-    .find(l => l.includes('TASK_STATUS.DONE') && l.includes("'failed'"))
-  assert.ok(paramsLine, 'summary 查询的参数数组行没找到')
+test('summary SQL 参数占位符与参数数组必须重编号对齐（去掉 lifecycle 参数后 $3 顺移）', () => {
+  const p = auditSummaryParams(indexSrc)
+  assert.ok(p.segmentFound, 'in_progress_count 子查询锚点没匹配到 —— SQL 结构被改了，更新本锁前先对账')
   assert.ok(
-    !paramsLine.includes("'new'"),
-    `summary 参数数组里还留着 lifecycle 用的 'new'（${paramsLine.trim()}）—— 参数个数会多于占位符，pg bind 报错`
+    p.usesDollar3,
+    'in_progress_count 没有使用 $3（lifecycle 的 $3 被移除后顺移）—— 占位符没对齐会直接 pg bind 报错'
+  )
+  assert.ok(p.paramsFound, 'summary 参数数组没匹配到 [TASK_STATUS.DONE, …] 形态 —— 结构被改了，更新本锁前先对账')
+  assert.ok(
+    !p.paramsHasNew,
+    `summary 参数数组里还留着 lifecycle 用的 'new'（${p.paramsText}）—— 参数个数会多于占位符，pg bind 报错`
+  )
+  assert.ok(
+    p.paramsHasProcessing,
+    `summary 参数数组少了 TASK_STATUS.PROCESSING（实际 ${p.paramsText}）—— $3 占位会少一个参数，pg bind 报错`
   )
 })
