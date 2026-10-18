@@ -169,13 +169,14 @@ test('isSubRowConsistentWithWhole：整题行拆不出分段 / 缺对应段 → 
 
 // ── 采集层提示词与落库口径（文本断言，避免 import worker.js 连数据库） ──
 
-test('练习册/答案库/通用三条 OCR 提示词都带 parent_stem 规则', () => {
+test('练习册/通用 OCR 提示词都带 parent_stem 规则', () => {
   const worker = readFileSync(`${ROOT}server/worker.js`, 'utf8')
   const ai = readFileSync(`${ROOT}server/config/ai.js`, 'utf8')
-  // 练习册 + 答案库两条管线的提示词（各出现一次「绝不能丢掉大题的公共题干」）
+  // 2026-10-18（负责人裁决）：原「答案库」管线提示词随 processAnswerBankGrading
+  // （exam 答案库批改路线）整体删除 ⇒ 幸存的是练习册管线（workbookPrompt）。
   const hits = worker.split('拆小问绝不能丢掉大题的公共题干').length - 1
-  assert.ok(hits >= 2, `worker.js 两条管线都应含公共题干规则，实际 ${hits} 处`)
-  assert.ok(worker.includes('"parent_stem": null'), '练习册/答案库提示词 JSON 模板应声明 parent_stem 字段')
+  assert.ok(hits >= 1, `workbookPrompt 应含公共题干规则，实际 ${hits} 处`)
+  assert.ok(worker.includes('"parent_stem": null'), '练习册提示词 JSON 模板应声明 parent_stem 字段')
   assert.ok(ai.includes('parent_stem'), '通用提示词应含 parent_stem 规则')
   assert.ok(ai.includes('公共题干绝不能丢'), '通用提示词应含「公共题干绝不能丢」约束')
 })

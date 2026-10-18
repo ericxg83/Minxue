@@ -658,3 +658,13 @@
 - **四道闸**：npm test **2539/2539 fail 0**｜eslint **0e/122w** 基线｜`dist_nightly_20261018r301` **59.56s**｜preview 5680 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。0 个 src/ 文件。
 - **备份**：最新 2026-10-17 ok:true；**今日缺 1 天（提醒级）**——13:47:20 才开机错过 13:00 档 + 13:48–17:57 在线窗口 app 未运行（巡查轮本身也未触发佐证）⇒ r300-P-A 第三例实证，建议备份改走计划任务直跑脚本（脱离 app 调度）。
 - **接手提示**：① r302 核 `D:/Minxue_Backup/2026-10-18/` 补跑 ② r292-P-A 看门狗三缺陷今日两次复发（11:53/12:06 误杀循环）待拍板 ③ 移动端错误可见化同类扫描可继续。
+
+## 第 r302 轮认领（2026-10-18 21:2x–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/301`（20:15Z）正常释放约 1 小时，`loopGuard acquire` 直得 **302** 无撞号（`git log --all --grep r302` 空、remoteAhead=0）。
+- **本轮赛道**：仓库卫生与门禁基线（`test/**` 回归锁口径）——沿用 r293–r301。
+- **落地（A 级，零产品码，7 个测试文件）**：HEAD 七红修复——20:55 并行会话 `52d5559`（负责人裁决下线 exam 答案库批改路线：删 processAnswerBankGrading ~1140 行 + /paper 路由 + ExamWorkbench）留下套件 7 红跨轮（其自述只跑「5 件套 65/65」）。逐把归属鉴定（幸存行为实证完好后才改锁）：blankConfidence 名实不符断言删除（git 实证正则自 `dbd8b1d` 起只匹配 answerBank 建题段，workbook blank 由另两断言守护）/ crossPageMerge 3→2 / geometryCrop ≥2→≥1 / ocrFormulaBoundary ≥2→≥1 / pcEditGuard 13→12（探针 12/12 全传 studentId）/ questionParentStem ≥2→≥1 / resourceFold 第三次裁决改写（移除 /paper 期望 + 路由判据改「catchAll 重定向到 /paper-bank」+ PRETTY_SAMPLE 同步新侧栏形状）。反向自检：隔离变异树 8 处针对性变异 ⇒ 七锁全判红逐条点名本体（非空锁）。
+- **未触碰**：并行会话 10 改 + 7 未跟踪（server/index.js / weekendHandout.js / teachingQuestionTypes.js / reviewStore.js / retryPaperState.js / NotificationList.vue / ReviewWorkspace.vue / QuestionBankWorkbench.vue / WeekendHandout.vue / test/retryPaperState.test.mjs + deploy/ scripts/dev/ neonBackfill1101 等）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2540/2540 fail 0**（开工 2531/7 红）｜eslint **0e/132w**（红线 0 error；+10w 归他会话 worker.js 删除残留，我的 7 文件 0w）｜`dist_nightly_20261018r302` **43.23s**｜preview 5690 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。
+- **备份**：`2026-10-18` ok:true（20:19:47，紧随 r301 轮结束 ⇒ 同源串行延后第四例，r300-P-A）；**无报警**；仍 5/29 表。
+- **接手提示**：① r302-P-A 拍板后写入纪律（大删除提交跑全量 npm test）② r302-P-B（worker.js 9 个残留未用 import，A 级但属他会赛道）③ r292-P-A 看门狗三缺陷 ④ 备份 10-19 档 13:00 后核验。

@@ -30,14 +30,15 @@ test('server/config/ai.js 的 buildOCRPrompt 含分数边界规则', async () =>
   assert.ok(prompt.includes(GUARD_CLAUSE), '应包含"除非原题明确把分母用括号括起来"的护栏')
 })
 
-test('server/worker.js 的 workbookPrompt 和 answerBankPrompt 各含一份规则', () => {
+test('server/worker.js 的 workbookPrompt 含分数边界规则', () => {
   const src = readFileSync(resolve(ROOT, 'server/worker.js'), 'utf8')
-  // workbookPrompt 在 ~3533 行，answerBankPrompt 在 ~4273 行。
-  // 两份 prompt 独立，因此规则字符串应至少出现 2 次。
+  // workbookPrompt 在 ~3533 行。2026-10-18（负责人裁决）：answerBankPrompt
+  // （原 ~4273 行）随 processAnswerBankGrading（exam 答案库批改路线）整体
+  // 删除 ⇒ 规则副本 2 → 1，幸存的一份必须完整（标记 + 正例 + 反例 + 护栏）。
   const matches = src.match(new RegExp(RULE_MARKER, 'g')) || []
-  assert.ok(matches.length >= 2, `server/worker.js 应至少含 2 处"${RULE_MARKER}"，实际 ${matches.length} 处`)
-  assert.ok(src.includes(POSITIVE_EXAMPLE), 'workbookPrompt/answerBankPrompt 应含正例')
-  assert.ok(src.includes(NEGATIVE_EXAMPLE), 'workbookPrompt/answerBankPrompt 应含反例')
+  assert.ok(matches.length >= 1, `server/worker.js 应至少含 1 处"${RULE_MARKER}"，实际 ${matches.length} 处`)
+  assert.ok(src.includes(POSITIVE_EXAMPLE), 'workbookPrompt 应含正例')
+  assert.ok(src.includes(NEGATIVE_EXAMPLE), 'workbookPrompt 应含反例')
 })
 
 // r103：原第三条「src/config/ai.js 的 buildOCRPrompt（前端拍照路径）」已随前端直调 AI

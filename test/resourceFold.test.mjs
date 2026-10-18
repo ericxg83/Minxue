@@ -1,12 +1,17 @@
 /**
  * 侧栏导航入口回归锁（2026-10-04 第 101 轮建立；2026-10-06 第 210 轮按负责人新裁决改写）
  *
- * 沿革（两次裁决方向相反，锁必须跟着**代码与最新裁决**走，不能锁死一条被推翻的旧决定）：
+ * 沿革（三次裁决方向相反，锁必须跟着**代码与最新裁决**走，不能锁死一条被推翻的旧决定）：
  *   - r101（2026-10-02 裁决②）：「试卷答案库 / 我的题型库」是低频入口，从侧栏顶级降到
  *     「练习册管理」下的二级缩进项（URL 不变）。当时的锁断言「必须是二级项」。
  *   - r16x（2026-10-06 裁决，commit f1abe5d）：「练习册本体 / 答案数据 / 考法素材」是三个
  *     不同对象，非父子关系 ⇒ 改回平级独立入口，仅按职责分组。**r101 的收纳不再适用。**
  *     ⇒ 旧锁「必须是二级项」随之失效（它是被推翻的旧决定），本文件同步改写。
+ *   - 2026-10-18（负责人裁决，commit 52d5559）：「普通试卷」上传入口与 exam 答案库批改
+ *     路线整体砍掉（resource_answers 生产 0 行、答案库复用 0 次），「试卷答案库」(/paper)
+ *     连同 ExamWorkbench 一并下线 ⇒ 本锁第二次改写：EXPECTED_ENTRIES 移除 /paper，
+ *     路由判据从「path: '/paper' 不得删」改为「/paper 须整体重定向到幸存的试卷题库
+ *     /paper-bank」（老书签不裸死，与 r137 handouts 先例同款处理）。
  *
  * ⛔ 本锁守的是**改版不会让入口消失**，与「收纳还是平级」的层级无关。所以判据是：
  *   ① 8 个入口在侧栏里都存在，且都是**带 icon 的可点一级项**（缺 icon = 渲染成空白/告警）；
@@ -28,14 +33,16 @@ import { flatSource } from './sourceLockKit.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-/** 侧栏应有的 8 个入口（label → path）。入口减少 = 老师少一条路，必须判红。 */
+/** 侧栏应有的入口（label → path）。入口减少 = 老师少一条路，必须判红。
+ *  2026-10-18（负责人裁决）：「试卷答案库」(/paper) 随 exam 答案库批改路线下线，
+ *  自本表移除；幸存的「试卷题库」/paper-bank 与「错题管理」/wrongbook 由下方
+ *  「一级入口数不得减少」的总数地板兜底（新增不拦、减少必拦）。 */
 export const EXPECTED_ENTRIES = [
   ['工作台', '/'],
   ['批改中心', '/grade'],
   ['学习诊断', '/weekly-report'],
   ['学生管理', '/students'],
   ['练习册管理', '/worksheets'],
-  ['试卷答案库', '/paper'],
   ['我的考法库', '/question-bank'],
   ['周末班课件', '/weekend-ppt'],
 ]
@@ -82,9 +89,11 @@ export function collectFailures(src) {
   bad(`侧栏一级入口数不得少于 ${EXPECTED_ENTRIES.length}（当前 ${topItems.length}）`,
     topItems.length >= EXPECTED_ENTRIES.length)
 
-  // ③ r16x 裁决：试卷答案库 / 我的考法库不再作为子项收纳（平级独立入口）
-  bad('试卷答案库不得再作为子项收纳（r16x 已改为平级独立入口）', !childBlocks.includes("path:'/paper'"))
+  // ③ r16x 裁决：我的考法库不得作为子项收纳（平级独立入口）；
+  //    2026-10-18 裁决：「试卷答案库」(/paper) 已随 exam 路线整体下线，
+  //    不得以子项形态回侧栏（两条合起来守「考法素材平级 + /paper 不再复活」）。
   bad('我的考法库不得再作为子项收纳（r16x 已改为平级独立入口）', !childBlocks.includes("path:'/question-bank'"))
+  bad('试卷答案库(/paper) 已裁决下线，不得再作为子项收纳', !childBlocks.includes("path:'/paper'"))
 
   // ④ 声明了 children 就必须有渲染器 —— 只删不接 = 入口静默消失
   const declaresChildren = /children:\[/.test(src)
@@ -105,7 +114,7 @@ export function collectFailures(src) {
 const ROUTER = readFileSync(join(ROOT, 'src/workbench/router/index.js'), 'utf8')
 const SIDEBAR = readFileSync(join(ROOT, 'src/workbench/components/layout/AppSidebar.vue'), 'utf8')
 
-test('⛔ 侧栏入口：8 个入口全可达、路由不删、无「只声明不渲染」的孤儿子项', () => {
+test('⛔ 侧栏入口：全可达、路由不删、无「只声明不渲染」的孤儿子项', () => {
   const failures = collectFailures(SIDEBAR)
   // 路由仍在（页面没删，URL 不变）—— 改版/收纳都不得把路由一起删掉
   for (const [, path] of EXPECTED_ENTRIES) {
@@ -114,6 +123,16 @@ test('⛔ 侧栏入口：8 个入口全可达、路由不删、无「只声明�
       `${path} 路由不得删除（改版 ≠ 下线）`
     )
   }
+  // 2026-10-18（负责人裁决）：「试卷答案库」(/paper) 随 exam 答案库批改路线下线，
+  // 但老书签不能裸死 —— 路由须整体重定向到幸存的「试卷题库」(/paper-bank)。
+  assert.ok(
+    ROUTER.includes("path: '/paper/:catchAll(.*)'"),
+    '/paper 须保留 catchAll 重定向路由（老书签不能 404）'
+  )
+  assert.ok(
+    ROUTER.includes("redirect: '/paper-bank'"),
+    '/paper 须重定向到幸存的试卷题库 /paper-bank'
+  )
   assert.deepEqual(
     failures,
     [],
@@ -146,9 +165,10 @@ test('锁健全性：空源码必须判红（防「永远是空锁」）', () =>
 })
 
 /**
- * r16x+2（`2a5ab25` 侧栏深色母版）把同一份 navGroups 从单行拆成多行后的**真实形状**。
- * 语义与紧凑版逐字相同 ⇒ 本锁必须判**绿**。
- * 2026-10-06 实测：这次纯格式化曾让 3 把侧栏锁同时判红（假红）。
+ * 2026-10-18 后的**真实形状**（52d5559 下线 /paper 后）：
+ * 「试卷答案库」/paper 移除、「试卷题库」/paper-bank 与「错题管理」/wrongbook 在位，
+ * 同一份 navGroups 被格式化成多行。语义与紧凑版逐字相同 ⇒ 本锁必须判**绿**。
+ * 2026-10-06 实测：一次纯格式化曾让 3 把侧栏锁同时判红（假红）。
  */
 const PRETTY_SAMPLE = `<template>
   <aside class="app-sidebar">
@@ -163,7 +183,7 @@ const PRETTY_SAMPLE = `<template>
   </aside>
 </template>
 <script setup>
-import { Collection, DataAnalysis, DocumentChecked, Files, HomeFilled, Notebook, Tickets, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, Notebook, Reading, User } from '@element-plus/icons-vue'
 const navGroups = [
   { label: '', items: [{ label: '工作台', path: '/', icon: HomeFilled }] },
   {
@@ -171,14 +191,15 @@ const navGroups = [
     items: [
       { label: '批改中心', path: '/grade', icon: DocumentChecked },
       { label: '学习诊断', path: '/weekly-report', icon: DataAnalysis },
-      { label: '学生管理', path: '/students', icon: User }
+      { label: '学生管理', path: '/students', icon: User },
+      { label: '错题管理', path: '/wrongbook', icon: Reading }
     ]
   },
   {
     label: '教学资源',
     items: [
       { label: '练习册管理', path: '/worksheets', icon: Notebook },
-      { label: '试卷答案库', path: '/paper', icon: Tickets },
+      { label: '试卷题库', path: '/paper-bank', icon: Grid },
       { label: '我的考法库', path: '/question-bank', icon: Collection },
       { label: '周末班课件', path: '/weekend-ppt', icon: Files }
     ]

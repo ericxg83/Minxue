@@ -18,6 +18,15 @@
  * 同时如实表达"这道题的判定没有不确定性"。
  *
  * ⚠️ 本测试锁的是**代码契约**（写入点必须显式处理 blank），不是某个数字的巧合。
+ *
+ * ── 2026-10-18 订正（r302，负责人裁决下线 exam 答案库路线 52d5559）──
+ * 原有一条「workbook 建题段 blank 不得写 null」断言被删除。订正理由（git 实证）：
+ * 它的正则 `confidence:\s*isEmpty \? ...` 自 dbd8b1d（本锁出生提交）起匹配到的
+ * 一直是 **processAnswerBankGrading（答案库管线）的建题段**，从不是 workbook 的——
+ * 测试名从出生起就名实不符（workbook 建题段从不写 confidence 字段，blank 在
+ * 「答案匹配段」统一处理）。该管线已随 exam 路线整体删除，断言随之退役。
+ * workbook 的 blank 契约未失守：由下方「答案匹配段显式写 1.0」+
+ * 「审计记录与 questions.confidence 同口径」两条断言继续守护（均已实证在位）。
  */
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -52,12 +61,6 @@ test('L1-a：workbook 答案匹配段对 blank 必须显式写 1.0', () => {
   assert.ok(idx > -1, '找不到 workbook 的 blank 赋值点')
   const block = WORKER_CODE.slice(idx, idx + 500)
   assert.match(block, /q\.confidence = 1(\.0)?[,\s;]/, 'blank 分支里必须把 confidence 归到 1.0')
-})
-
-test('L1-a：workbook 建题段 blank 不得写 null（null 会被前端当"处理中"占待办）', () => {
-  const m = WORKER_CODE.match(/confidence:\s*isEmpty \? ([\d.]+)/)
-  assert.ok(m, '找不到 workbook 建题段的 confidence 表达式')
-  assert.equal(m[1], '1.0', 'isEmpty(blank) 的 confidence 必须是 1.0')
 })
 
 test('L1-a：workbook 审计记录与 questions.confidence 同口径', () => {

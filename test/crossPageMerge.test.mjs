@@ -95,12 +95,14 @@ test('buildCrossPageHint 携带上一页末题题号与题干结尾，无末题�
   assert.equal(buildCrossPageHint({ question_number: 1, content: '' }, 1), '')
 })
 
-test('worker.js 三处逐页 OCR（练习册主/重试轮 + 答案册）都接入了跨页缝合', () => {
+test('worker.js 两处逐页 OCR（练习册主/重试轮）都接入了跨页缝合', () => {
   const src = read('server/worker.js')
-  // userText 注入上一页末题上下文：练习册主循环 + 重试轮 + 答案册 = 3 处
+  // userText 注入上一页末题上下文：练习册主循环 + 重试轮 = 2 处。
+  // 2026-10-18（负责人裁决）：原第 3 处「答案册」随 processAnswerBankGrading
+  // （exam 答案库批改路线）整体删除，注入点一并消失 ⇒ 3 → 2。
   const hintCount = (src.match(/buildCrossPageHint\(prevPageTail/g) || []).length
-  assert.ok(hintCount === 3, `worker.js 应有 3 处 buildCrossPageHint 注入（练习册主/重试 + 答案册），实际 ${hintCount} 处`)
-  // 识别后缝合：同为 3 处
+  assert.ok(hintCount === 2, `worker.js 应有 2 处 buildCrossPageHint 注入（练习册主/重试），实际 ${hintCount} 处`)
+  // 识别后缝合：同为 2 处
   const mergeCount = (src.match(/mergeCrossPageContinuation\(/g) || []).length
-  assert.ok(mergeCount === 3, `worker.js 应有 3 处 mergeCrossPageContinuation 调用，实际 ${mergeCount} 处`)
+  assert.ok(mergeCount === 2, `worker.js 应有 2 处 mergeCrossPageContinuation 调用，实际 ${mergeCount} 处`)
 })

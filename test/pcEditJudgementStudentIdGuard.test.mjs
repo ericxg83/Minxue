@@ -58,8 +58,11 @@ test('所有 createJudgement 调用点必须显式传 studentId', () => {
       if (/studentId\s*:\s*null\s*[,\n]/.test(c)) bad.push(`${f} studentId 字面 null（${anchor}）`)
     }
   }
-  // 防正则静默失效：低于历史基线说明提取不到调用点了，锁变成空锁
-  assert.ok(total >= 13, `调用点提取应至少命中 13 处，实际 ${total}（提取正则失效？）`)
+  // 防正则静默失效：低于历史基线说明提取不到调用点了，锁变成空锁。
+  // 2026-10-18（负责人裁决下线 exam 答案库路线，52d5559）：answerBank 管线内的
+  // createJudgement 调用点随 processAnswerBankGrading 删除 ⇒ 13 → 12。
+  // 探针实证：index.js 8 + worker.js 2 + gradingFinalizer.js 2 = 12，全部显式传 studentId。
+  assert.ok(total >= 12, `调用点提取应至少命中 12 处，实际 ${total}（提取正则失效？）`)
   assert.deepEqual(bad, [], `漏传 studentId 的调用点: ${bad.join(' / ')}`)
 })
 

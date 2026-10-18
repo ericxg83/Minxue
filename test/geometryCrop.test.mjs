@@ -124,8 +124,10 @@ test('契约：worker.js 两条管线必须共用同一份 cropGeometryFigures�
 
 test('契约：练习册 prompt 必须采集配图三字段（否则裁剪无输入）', () => {
   const src = readFileSync(new URL('../server/worker.js', import.meta.url), 'utf8')
+  // 2026-10-18（负责人裁决）：answerBank prompt 随 processAnswerBankGrading
+  // （exam 答案库批改路线）整体删除，幸存的一条管线是 workbookPrompt。
   for (const field of ['image_type', 'image_bbox', 'has_figure']) {
     const n = (src.match(new RegExp(`"${field}"`, 'g')) || []).length
-    assert.ok(n >= 2, `workbook 与 answerBank 两套 prompt 都要有 ${field}（当前 ${n} 处）`)
+    assert.ok(n >= 1, `workbook prompt 必须有 ${field}（当前 ${n} 处）`)
   }
 })

@@ -4896,3 +4896,11 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r292-P-A 看门狗三缺陷今日再次实证**：keep_local_services.log 11:53:39 / 12:06:10 两次「健康失败且 :3000 被占（已过冷却）→ taskkill 后下轮拉起」误杀-重生循环（:3000 现值 200）。文件属并行会话未跟踪 WIP ⇒ 维持只提案。
 - **已落地（A 级）**：dashboardCaliber 锁过期假红修复（`88f11b4` 停课收口给聚合 SQL 加 paused 过滤 ⇒ 旧 240 字符正则失配 3 红；判据下沉 `test/dashboardCaliberKit.mjs` + 结构不变量；反向自检 7/7 翻红）。详见 `docs/auto/reports/2026-10-18-r301.md`。
 - **非缺陷留档**：套件计数 2538→2539（+1；测试文件集合与 r300 时点一致，两个未跟踪件单跑 10/10 实证，+1 疑动态生成用例浮动，无新增失败）；`GET /api/tasks/summary` 活体 success:true（$3 参数对齐无 bind 错）。
+
+## 第 r302 轮（2026-10-18 21:2x–，日常巡查 automation `4e9608a9`）
+
+- **已落地（A 级，零产品码，commit 见报告）**：HEAD 七红修复——`52d5559`（负责人 10-18 裁决下线 exam 答案库路线，删 processAnswerBankGrading ~1140 行 + /paper 路由）后 7 把回归锁过期假红，逐把归属鉴定后对齐新现实：blankConfidence 名实不符断言删除（git 实证其正则自 `dbd8b1d` 起只匹配 answerBank 建题段；workbook blank 由答案匹配段/审计记录两断言继续守护）/ crossPageMerge 3→2 / geometryCrop 三字段 ≥2→≥1 / ocrFormulaBoundary ≥2→≥1 / pcEditGuard 基线 13→12（探针 12/12 全传 studentId）/ questionParentStem ≥2→≥1 / resourceFold 第三次裁决改写（EXPECTED_ENTRIES 移除 /paper + 路由判据改 catchAll 重定向到 /paper-bank + PRETTY_SAMPLE 同步新形状）。反向自检：隔离变异树 8 处变异 ⇒ 七锁全判红逐条点名本体。详见 `docs/auto/reports/2026-10-18-r302.md`。
+- **r302-P-A（B，待拍板——大删除类提交必须跑全量 npm test）**：`52d5559` 自述「相关 5 件套测试 65/65 通过」，实际留下 HEAD 7 红跨轮（blankConfidence/crossPageMerge/geometryCrop/ocrFormulaBoundary/pcEditJudgementStudentIdGuard/questionParentStem/resourceFold），直到本轮才修。建议写入 AGENTS.md 修改纪律或提交前检查单：删除 ≥500 行或涉及多测试文件守护区的提交，必须全量 `npm test`。
+- **r302-P-B（A 级清理候选，属批改链路赛道，未动手）**：`server/worker.js` 9 个删除残留未用 import（ANSWER_PAGE_VENDOR_CHAIN:17 / addWrongQuestions:18 / splitSubAnswers:31 / checkFigureReference:222 / FIGURE_GATE_MESSAGE:222 / buildFunctionGraphSvg:225 / renderGeometrySvg:226 / publishCleanGeometryUrl:228 + 未用参数 w/h:389）——lint 1w→10w 的增量全部在此；清掉即回 122w 基线。文件属他会赛道，待其处理或授权。
+- **备份**：2026-10-18 档 ok:true（20:19:47，同源串行延后第四例）；无报警。
+- **待拍板清单**（不变 + 上述两条）：r302-P-A / r302-P-B / r300-P-A / r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A（C）/ r285-P-B / r280-P-A（B/C）/ r280-P-B / r278-P-B / r299-P-A / daemon.mjs 去留 / 存档区治理。
