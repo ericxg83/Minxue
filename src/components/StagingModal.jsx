@@ -74,14 +74,15 @@ export default function StagingModal({
   onRotateFile,
   onSubmit
 }) {
-  const title = stagingType === 'homework' ? '日常作业' : stagingType === 'retry_bound' ? '错题重练 · 上传答卷' : '普通试卷'
+  const title = stagingType === 'homework' ? '日常作业' : '错题重练 · 上传答卷'
   // 原生平台走系统相机/相册，可以连拍；Web 端只有一次性的文件选择器。
   const native = isNativeCameraAvailable()
 
   // 2026-09-15 裁剪入口只对普通录入开放：
   // - workbook：练习册批改靠整页课时编号硬锚定，裁掉页眉会破坏答案锚定
   // - wrong_retry / retry_bound：重练卷靠卷面二维码绑 examId，裁掉二维码进不了重练批改
-  const canCrop = !!onCropFile && (stagingType === 'regular' || stagingType === 'homework')
+  // 2026-10-18：「普通试卷」(regular) 路线已随 exam 答案库批改路线一并下线，只剩 homework。
+  const canCrop = !!onCropFile && stagingType === 'homework'
   const [croppingIdx, setCroppingIdx] = useState(null)
   const croppingPreview = canCrop && croppingIdx != null ? stagingFiles[croppingIdx] : null
 

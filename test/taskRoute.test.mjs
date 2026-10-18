@@ -5,7 +5,8 @@
  * workbook 管线拿 A 册答案库对 B 卷题号 ⇒ 整卷错判 + 题干落成「第 N 题」占位 +
  * 错题以错误 worksheet_id 入册。而改路线时**只清 task_type 不清 worksheet_id**
  * 是头号陷阱：retryTaskById 在非 workbook 时把 worksheet_id 兜底填进 resourceId
- * ⇒ 任务拐进 processAnswerBankGrading，用同一本练习册的 resource_answers 再错一遍。
+ * ⇒ 历史上会拐进答案库管线 processAnswerBankGrading（2026-10-18 已随 exam 路线下线）
+ * 再错一遍，「worksheet_id 与 resource_id 一起清」的口径仍被本文件锁定。
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -36,24 +37,18 @@ test('answers_bank（exam + resource_id）→ homework：resource_id 必须清',
   assert.deepEqual(r.patch, { task_type: 'homework', worksheet_id: null, resource_id: null })
 })
 
-// ── ② 转 exam（答案库）路线 ──
+// ── ② 转 exam（答案库）路线：2026-10-18 已随答案库批改路线下线，一律 bad_target 封死 ──
 
-test('转 exam 必须带合法 resourceId，缺了就拒绝', () => {
+test('转 exam 被拒绝（答案库路线已下线，不再校验 resourceId）', () => {
   const r = planTaskRouteChange({ task_type: 'homework' }, 'exam')
   assert.equal(r.ok, false)
-  assert.equal(r.code, 'exam_needs_resource')
+  assert.equal(r.code, 'bad_target')
 })
 
-test('转 exam 带非法 resourceId 也拒绝（不是 uuid）', () => {
-  const r = planTaskRouteChange({ task_type: 'homework' }, 'exam', { resourceId: 'not-a-uuid' })
-  assert.equal(r.ok, false)
-  assert.equal(r.code, 'exam_needs_resource')
-})
-
-test('转 exam 合法：task_type=exam、worksheet_id 置 NULL、resource_id 指向答案库', () => {
+test('转 exam 带合法 resourceId 也拒绝（封死的是路线本身，不是参数）', () => {
   const r = planTaskRouteChange({ task_type: 'workbook', worksheet_id: WS, resource_id: null }, 'exam', { resourceId: RS })
-  assert.equal(r.ok, true)
-  assert.deepEqual(r.patch, { task_type: 'exam', worksheet_id: null, resource_id: RS })
+  assert.equal(r.ok, false)
+  assert.equal(r.code, 'bad_target')
 })
 
 // ── ③ 重练卷一律禁止 ──
@@ -71,7 +66,7 @@ test('task_type 是 homework 但挂着 generated_exam_id：按重练卷处理，
 })
 
 test('retry_paper 同样禁止', () => {
-  const r = planTaskRouteChange({ task_type: 'retry_paper' }, 'exam', { resourceId: RS })
+  const r = planTaskRouteChange({ task_type: 'retry_paper' }, 'workbook', { worksheetId: WS })
   assert.equal(r.ok, false)
   assert.equal(r.code, 'blocked_retry_paper')
 })
@@ -95,8 +90,8 @@ test('目标路线非法 / 任务缺失', () => {
   assert.equal(planTaskRouteChange(null, 'homework').code, 'no_task')
 })
 
-test('三种路线互转：workbook 转 workbook 必须显式给 worksheetId（不能拍脑袋）', () => {
-  assert.deepEqual(ROUTE_TARGETS, ['homework', 'exam', 'workbook'])
+test('路线互转收敛为 homework/workbook（2026-10-18 exam 下线）：workbook 必须显式给 worksheetId', () => {
+  assert.deepEqual(ROUTE_TARGETS, ['homework', 'workbook'])
   assert.equal(planTaskRouteChange({ task_type: 'homework' }, 'workbook').code, 'workbook_needs_worksheet')
   assert.equal(planTaskRouteChange({ task_type: 'homework' }, 'workbook', { worksheetId: 'x' }).code, 'workbook_needs_worksheet')
 

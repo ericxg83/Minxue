@@ -36,17 +36,12 @@ const routes = [
     beforeEnter: (to) => (to.query.studentId ? { path: `/students/${to.query.studentId}` } : true),
     meta: { requiresPC: true }
   },
-  {
-    path: '/paper',
-    name: 'PaperImport',
-    component: () => import('../views/ExamWorkbench.vue'),
-    meta: { requiresPC: true }
-  },
-  // 2026-09-03 简化：删了 /paper/:id/review（ExamAnswerReview）。
-  // 历史书签/链接落到 /paper 列表，避免空页。
+  // 2026-10-18（负责人裁决）：「试卷答案库」(/paper) 随 exam 答案库批改路线一并下线
+  // ——上线至今 resource_answers 沉淀 0 行、无数据可审。历史书签/链接重定向到
+  // 试卷题库（/paper-bank，幸存的活功能）。catchAll 为空时也匹配 /paper 本身。
   {
     path: '/paper/:catchAll(.*)',
-    redirect: '/paper'
+    redirect: '/paper-bank'
   },
   {
     path: '/students',
@@ -89,9 +84,9 @@ const routes = [
   },
   {
     // 试卷题库（2026-10-10 负责人拍板「新增独立入口」）：
-    // 与「试卷答案库」(/paper) 共用 resources(type='exam') 行，但数据面不同
-    // （题目 resource_questions vs 答案 resource_answers）。
-    // 负责人要求讲题素材与批改答案彻底分家，故与 /paper 平级、不合并。
+    // 纸质卷 → 结构化题目 → 跨卷勾题 → 讲义 PDF，写 resource_questions（题目）。
+    // 2026-10-18：批改侧的「试卷答案库」(/paper) 已随 exam 路线下线，
+    // 讲题素材与批改答案分家的设计让本入口不受影响（幸存活功能）。
     path: '/paper-bank',
     name: 'PaperBank',
     component: () => import('../views/PaperBankWorkbench.vue'),

@@ -1056,84 +1056,15 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
 }
 
 // ── 统一资源 API ──
-
-export const getResources = async ({ type, subject, status } = {}) => {
-  const params = new URLSearchParams()
-  if (type) params.set('type', type)
-  if (subject) params.set('subject', subject)
-  if (status) params.set('status', status)
-  const qs = params.toString()
-  const data = await apiRequest(`/resources${qs ? '?' + qs : ''}`)
-  return data.resources || []
-}
+// 2026-10-18（负责人裁决）：「试卷答案库」随 exam 答案库批改路线一并下线——
+// getResources / createResource / deleteResource / updateResource / getResourceAnswers /
+// updateResourceAnswers / updateResourceAnswerStatus 已删（全仓无调用方）。
+// 仅保留 getResource（ReviewWorkspace 复核页读资源状态在用）；
+// resources 路由写端点自此无前端调用方，详见评审文档 _普通试卷-弱化或砍掉-产品评审-20261018.md。
 
 export const getResource = async (id) => {
   const data = await apiRequest(`/resources/${id}`)
   return data.resource
-}
-
-export const createResource = async ({ name, type, subject, grade, examDate }) => {
-  const data = await apiRequest('/resources', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, type, subject, grade, examDate })
-  })
-  return data.resource
-}
-
-export const deleteResource = async (id) => {
-  return apiRequest(`/resources/${id}`, { method: 'DELETE' })
-}
-
-// 资源元信息更新（含发布状态与答案审核状态的盖章动作）。
-// retries 传 1：这类写操作原先走 workbench/api 的 axios，从不重试；
-// 若沿用默认重试，一次 5xx 会把盖章动作重放，绕过答案审核状态的单次语义。
-export const updateResource = async (id, data) => {
-  const result = await apiRequest(`/resources/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  }, 1)
-  return result.resource
-}
-
-// 把已批改任务的识别结果存档为答案库资源
-export const saveTaskAsAnswerKey = async (taskId, data) => {
-  const result = await apiRequest(`/tasks/${taskId}/save-as-answer-key`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
-  }, 1)
-  return result.resource
-}
-
-// 某个资源下的解析任务（答案库校对页用于显示解析进度）
-export const getTasksByResource = async (resourceId) => {
-  return apiRequest(`/tasks/resource/${resourceId}`)
-}
-
-export const getResourceAnswers = async (resourceId) => {
-  // 答案条数多时后端返回较慢，沿用原 axios 客户端的 120 秒上限
-  const data = await apiRequest(`/resources/${resourceId}/answers`, { timeout: 120000 })
-  return data.answers || []
-}
-
-export const updateResourceAnswers = async (resourceId, answers) => {
-  const data = await apiRequest(`/resources/${resourceId}/answers`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers })
-  })
-  return data.answers || []
-}
-
-export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
-  const data = await apiRequest(`/resources/${resourceId}/answers/status`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answerStatus })
-  })
-  return data.answers || []
 }
 
 export const uploadPdf = async (id, file, precomputedAnswers = null, isCombined = false) => {

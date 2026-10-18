@@ -27,30 +27,24 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const [isUploading, setIsUploading] = useState(false)
 
   // 上传类型 state + ref 镜像（避开 React 18 批处理时序）
-  const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | 'exam' | null
+  const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
   const [selectedWorksheetId, setSelectedWorksheetId] = useState(null)
   const [flowSubject, setFlowSubject] = useState('数学')
-  const [selectedExamResourceId, setSelectedExamResourceId] = useState(null)
   const [showUploadOptions, setShowUploadOptions] = useState(false)
   const [showWorksheetPicker, setShowWorksheetPicker] = useState(false)
-  const [showExamChoice, setShowExamChoice] = useState(false)
-  const [examChoiceFiles, setExamChoiceFiles] = useState([])
-  const [availableExamResources, setAvailableExamResources] = useState([])
   const [homeworkChoiceFiles, setHomeworkChoiceFiles] = useState([])
 
   const pendingFlowRef = useRef(null)
   const selectedWorksheetIdRef = useRef(null)
-  const selectedExamResourceIdRef = useRef(null)
   const flowSubjectRef = useRef('数学')
   pendingFlowRef.current = pendingFlow
   selectedWorksheetIdRef.current = selectedWorksheetId
-  selectedExamResourceIdRef.current = selectedExamResourceId
   flowSubjectRef.current = flowSubject
 
   // ── 多图暂存区 ──
   const [showStaging, setShowStaging] = useState(false)
   const [stagingFiles, setStagingFiles] = useState([]) // [{ file, url, name }]
-const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'；重练卷上传答案走 openStagingForRetry 的 'retry_bound'。注意与 pendingFlow 的 'workbook' 无关，后者照旧在用
+const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷上传答案走 openStagingForRetry 的 'retry_bound'。注意与 pendingFlow 的 'workbook' 无关，后者照旧在用
   const [stagingUploading, setStagingUploading] = useState(false)
   const [cameraBusy, setCameraBusy] = useState(false) // 原生相机/相册打开中
   const cameraInputRef = useRef(null)
@@ -224,29 +218,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
         return
       }
 
-      if (stagingTypeRef.current === 'regular') {
-        try {
-          // 必须用 exam-papers：它只返回 teacher_verified/official_verified 的答案库。
-          // 旧的 /api/resources?type=exam 不过滤审核状态，会把 AI 批改自动沉淀的 ai_draft
-          // 草稿（可能含"计算错误"这类脏答案）也列进选择器，绕过 PC 后台的人工确认。
-          //
-          // 必须走 apiRequest：原来是裸 fetch('/api/...')，相对路径在 Web 端由 vite
-          // dev proxy 兜住，打包进 App 后却打到 https://localhost/api/... → 必然失败，
-          // 且被下面的 catch 静默吞掉，用户永远看不到答案库选择弹窗。
-          const data = await apiRequest('/resources/exam-papers')
-          const resources = (data.resources || []).filter(r => r.answer_count > 0)
-          if (resources.length > 0) {
-            setShowStaging(false)
-            setExamChoiceFiles(files.map(p => p.file))
-            setAvailableExamResources(resources)
-            setShowExamChoice(true)
-            return
-          }
-        } catch (e) {
-          console.warn('检测答案库失败，继续普通上传:', e)
-        }
-      }
-
       const dt = new DataTransfer()
       files.forEach((p) => dt.items.add(p.file))
       setShowStaging(false)
@@ -261,7 +232,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
   const clearPendingUploadFlow = useCallback(() => {
     setPendingFlow(null)
     setSelectedWorksheetId(null)
-    setSelectedExamResourceId(null)
     setFlowSubject('数学')
     __pendingUploadStore.worksheetId = null
     __pendingUploadStore.worksheetName = null
@@ -298,41 +268,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
-    await handleFileSelect({ target: { files: dt.files } })
-  }
-
-  // 普通试卷：使用已有答案库
-  const handleUploadWithExamResource = async (resourceId, resourceName) => {
-    setShowExamChoice(false)
-    setPendingFlow('exam')
-    setSelectedExamResourceId(resourceId)
-    pendingFlowRef.current = 'exam'
-    selectedExamResourceIdRef.current = resourceId
-    __pendingUploadStore.worksheetId = null
-    __pendingUploadStore.worksheetName = null
-    __pendingUploadStore.examResourceId = resourceId
-    __pendingUploadStore.examResourceName = resourceName || null
-    __pendingUploadStore.subject = flowSubject
-    const dt = new DataTransfer()
-    examChoiceFiles.forEach(f => dt.items.add(f))
-    setExamChoiceFiles([])
-    await handleFileSelect({ target: { files: dt.files } })
-  }
-
-  // 普通试卷：全新 AI 批改
-  const handleUploadFreshExam = async () => {
-    setShowExamChoice(false)
-    setPendingFlow(null)
-    setSelectedExamResourceId(null)
-    pendingFlowRef.current = null
-    selectedExamResourceIdRef.current = null
-    __pendingUploadStore.worksheetId = null
-    __pendingUploadStore.worksheetName = null
-    __pendingUploadStore.examResourceId = null
-    __pendingUploadStore.examResourceName = null
-    const dt = new DataTransfer()
-    examChoiceFiles.forEach(f => dt.items.add(f))
-    setExamChoiceFiles([])
     await handleFileSelect({ target: { files: dt.files } })
   }
 
@@ -442,9 +377,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
 
       const flow = pendingFlowRef.current
       if (flow === 'workbook') {
-        await uploadRegularHomework(newFiles, studentSnapshotId)
-        clearPendingUploadFlow()
-      } else if (flow === 'exam') {
         await uploadRegularHomework(newFiles, studentSnapshotId)
         clearPendingUploadFlow()
       } else {
@@ -606,13 +538,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
       __pendingUploadStore.worksheetId = opts.worksheetId
       __pendingUploadStore.worksheetName = opts.worksheetName || null
       __pendingUploadStore.subject = opts.subject || '数学'
-    } else if (opts.resourceId) {
-      setPendingFlow('exam')
-      pendingFlowRef.current = 'exam'
-      setSelectedExamResourceId(opts.resourceId)
-      selectedExamResourceIdRef.current = opts.resourceId
-      __pendingUploadStore.examResourceId = opts.resourceId
-      __pendingUploadStore.subject = opts.subject || '数学'
     } else {
       setPendingFlow(null)
       pendingFlowRef.current = null
@@ -641,12 +566,9 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     const pendingFlowEffective = pendingFlowRef.current
     const worksheetIdEffective = __pendingUploadStore.worksheetId || selectedWorksheetIdRef.current || selectedWorksheetId
     const worksheetNameEffective = __pendingUploadStore.worksheetName
-    const examResourceIdEffective = __pendingUploadStore.examResourceId || selectedExamResourceIdRef.current || selectedExamResourceId
-    const examResourceNameEffective = __pendingUploadStore.examResourceName
     const subjectEffective = __pendingUploadStore.subject !== '数学' ? __pendingUploadStore.subject : (flowSubjectRef.current || flowSubject)
 
     const isWorkbook = pendingFlowEffective === 'workbook' && worksheetIdEffective
-    const isExam = pendingFlowEffective === 'exam' && examResourceIdEffective
 
     // 上传前压缩：压缩失败一律回退原图，绝不因为压缩环节丢用户的作业
     let files = rawFiles
@@ -665,9 +587,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     const timeLabel = dayjs().format('MM/DD HH:mm')
     const taskName = isWorkbook && worksheetNameEffective
       ? `${subjectEffective} · ${worksheetNameEffective}`
-      : isExam && examResourceNameEffective
-        ? examResourceNameEffective
-        : `${subjectEffective || '数学'}作业 ${timeLabel}`
+      : `${subjectEffective || '数学'}作业 ${timeLabel}`
 
     const __blobUrls = files.map(file => URL.createObjectURL(file))
     const tempTask = {
@@ -675,7 +595,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
       student_id: studentId,
       image_url: __blobUrls[0],
       original_name: taskName,
-      task_type: isWorkbook ? 'workbook' : (isExam ? 'exam' : 'homework'),
+      task_type: isWorkbook ? 'workbook' : 'homework',
       pages: files.map((file, index) => ({
         id: `page-${index + 1}`,
         image_url: __blobUrls[index],
@@ -692,11 +612,9 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
       __options: {
         worksheetId: isWorkbook ? worksheetIdEffective : null,
         worksheetName: isWorkbook ? worksheetNameEffective : null,
-        resourceId: isExam ? examResourceIdEffective : null,
         subject: subjectEffective
       },
-      ...(isWorkbook && { worksheet_id: worksheetIdEffective }),
-      ...(isExam && { resource_id: examResourceIdEffective })
+      ...(isWorkbook && { worksheet_id: worksheetIdEffective })
     }
     addTask(tempTask)
 
@@ -716,10 +634,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
         options.worksheetId = worksheetIdEffective
         options.taskType = 'workbook'
         options.subject = subjectEffective
-      } else if (isExam) {
-        options.resourceId = examResourceIdEffective
-        options.taskType = 'exam'
-        options.subject = subjectEffective
       }
       const result = await taskService.uploadFiles(studentId, files, options)
       const taskResult = (result.tasks || []).find(t => !t.error) || (result.tasks || [])[0]
@@ -729,7 +643,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
         realTaskId = taskResult.id
         if (taskResult._dedup) wasDedup = true
         if (isWorkbook) { __pendingUploadStore.worksheetId = null; __pendingUploadStore.worksheetName = null }
-        if (isExam) { __pendingUploadStore.examResourceId = null; __pendingUploadStore.examResourceName = null }
         // 2026-09-02：服务端命中同 hash 已有 task（_dedup=true）时，让 store 把 tempTask
         // 直接合并到旧 task，而不是当作新批改处理——避免重复触发 UI 动效和误以为再次批改。
         if (taskResult._dedup) {
@@ -804,7 +717,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     // 上传类型 / flow
     pendingFlow, setPendingFlow,
     selectedWorksheetId, setSelectedWorksheetId,
-    selectedExamResourceId, setSelectedExamResourceId,
     flowSubject, setFlowSubject,
     clearPendingUploadFlow,
 
@@ -826,11 +738,5 @@ const [stagingType, setStagingType] = useState(null) // 'homework' | 'regular'�
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
     handleUploadAsWorkbook, handleUploadAsRegular,
-
-    // 答案库选择
-    showExamChoice, setShowExamChoice,
-    examChoiceFiles, setExamChoiceFiles,
-    availableExamResources,
-    handleUploadWithExamResource, handleUploadFreshExam
   }
 }

@@ -23,7 +23,6 @@ import AppHeader from './components/AppHeader'
 import UploadOptionsModal from './components/UploadOptionsModal'
 import DeleteConfirmModal from './components/DeleteConfirmModal'
 import StagingModal from './components/StagingModal'
-import ExamChoiceModal from './components/ExamChoiceModal'
 import NotificationsPanel from './components/NotificationsPanel'
 import LearningReportPanel from './components/LearningReportPanel'
 import ImagePreview from './components/ImagePreview'
@@ -474,7 +473,6 @@ export default function App() {
   const {
     setPendingFlow,
     setSelectedWorksheetId,
-    setSelectedExamResourceId,
     flowSubject, setFlowSubject,
     showUploadOptions, setShowUploadOptions,
     showWorksheetPicker, setShowWorksheetPicker,
@@ -487,11 +485,7 @@ export default function App() {
     handleStagingSelectFiles, removeStagingFile, applyStagingCrop, applyStagingRotate,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
-    handleUploadAsWorkbook, handleUploadAsRegular,
-    showExamChoice, setShowExamChoice,
-    examChoiceFiles, setExamChoiceFiles,
-    availableExamResources,
-    handleUploadWithExamResource, handleUploadFreshExam
+    handleUploadAsWorkbook, handleUploadAsRegular
   } = useUploadFlow({ loadTasks, isInitializing })
 
   // H5 移动端上传入口：Home/index.jsx 在用户选完类型后通过 'set-workbook-flow'
@@ -500,30 +494,27 @@ export default function App() {
   useEffect(() => {
     const onSetFlow = (e) => {
       const detail = e?.detail || {}
-      const flow = detail.flow                       // 'workbook' | 'homework' | 'exam' | 'regular' | null
+      const flow = detail.flow                       // 'workbook' | 'homework' | null
       const worksheetId = detail.worksheetId || null
-      const examResourceId = detail.examResourceId || null
       const subject = detail.subject || '数学'
 
       // ── state 镜像（用于 UI 展示）──
-      setPendingFlow(flow === 'workbook' ? 'workbook' : (flow === 'exam' ? 'exam' : null))
+      setPendingFlow(flow === 'workbook' ? 'workbook' : null)
       setSelectedWorksheetId(flow === 'workbook' ? worksheetId : null)
-      setSelectedExamResourceId(flow === 'exam' ? examResourceId : null)
       if (subject) setFlowSubject(subject)
 
       // ── module 级兜底（避开 React 18 批处理时序）──
       __pendingUploadStore.worksheetId = flow === 'workbook' ? worksheetId : null
-      __pendingUploadStore.examResourceId = flow === 'exam' ? examResourceId : null
       __pendingUploadStore.subject = subject
 
       console.log('🔥📡 [set-workbook-flow] 收到移动端上传类型:', {
-        flow, worksheetId, examResourceId, subject,
+        flow, worksheetId, subject,
         worksheetIdLen: worksheetId?.length
       })
     }
     window.addEventListener('set-workbook-flow', onSetFlow)
     return () => window.removeEventListener('set-workbook-flow', onSetFlow)
-  }, [setPendingFlow, setSelectedWorksheetId, setSelectedExamResourceId, setFlowSubject])
+  }, [setPendingFlow, setSelectedWorksheetId, setFlowSubject])
 
   // WrongBook: Load data（秒开策略：先展示本地缓存，再后台刷新；总数与生命周期计数来自服务端，不再被首批 100 条截断）
   const loadWrongBookData = async ({ signal } = {}) => {
@@ -918,7 +909,7 @@ export default function App() {
             任意全屏弹层开启时禁用下拉，避免与弹层内手势抢事件。 */}
         <PullToRefresh
           onRefresh={handlePullRefresh}
-          disabled={showStaging || showUploadOptions || showWorksheetPicker || showExamChoice || showScanQR || showGrading || showExamReview || showPrintPreview || showReprint || showStudentSwitcher || showDeleteConfirm || showNotifications || showLearningReport || showImageViewer || !!wrongBookDetail}
+          disabled={showStaging || showUploadOptions || showWorksheetPicker || showScanQR || showGrading || showExamReview || showPrintPreview || showReprint || showStudentSwitcher || showDeleteConfirm || showNotifications || showLearningReport || showImageViewer || !!wrongBookDetail}
           style={{ paddingBottom: '12px' }}
         >
           {/* 上传队列提示 — Claude style */}
@@ -1112,12 +1103,11 @@ export default function App() {
           subject={flowSubject}
         />
 
-        {/* Upload Options Menu — Three cards */}
+        {/* Upload Options Menu */}
         {showUploadOptions && (
           <UploadOptionsModal
             onClose={() => setShowUploadOptions(false)}
             onStartHomework={() => { setShowUploadOptions(false); openStaging('homework') }}
-            onStartRegular={() => { setShowUploadOptions(false); setPendingFlow(null); setSelectedWorksheetId(null); openStaging('regular') }}
           />
         )}
 
@@ -1139,17 +1129,6 @@ export default function App() {
             onCropFile={applyStagingCrop}
             onRotateFile={applyStagingRotate}
             onSubmit={handleSubmitStaging}
-          />
-        )}
-
-        {/* 普通试卷已有答案库选择对话框 */}
-        {showExamChoice && (
-          <ExamChoiceModal
-            examChoiceFiles={examChoiceFiles}
-            availableExamResources={availableExamResources}
-            onBackdrop={() => { setShowExamChoice(false); setExamChoiceFiles([]) }}
-            onUploadWithResource={handleUploadWithExamResource}
-            onUploadFresh={handleUploadFreshExam}
           />
         )}
 

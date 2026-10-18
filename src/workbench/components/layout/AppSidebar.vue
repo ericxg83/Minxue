@@ -36,7 +36,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, MoreFilled, Notebook, Reading, Tickets, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, MoreFilled, Notebook, Reading, User } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 
 const route = useRoute()
@@ -64,10 +64,9 @@ const navGroups = [
     label: '教学资源',
     items: [
       { label: '练习册管理', path: '/worksheets', icon: Notebook },
-      { label: '试卷答案库', path: '/paper', icon: Tickets },
       // 试卷题库（2026-10-10 负责人拍板「新增独立入口」）：纸质卷 → 结构化题目 → 跨卷勾题 → 讲义 PDF。
-      // 与「试卷答案库」共用 resources(type='exam') 行，但一个存题目、一个存答案；
-      // 负责人要求讲题素材与批改答案彻底分家，故与 /paper 平级而非合并。
+      // 2026-10-18：「试卷答案库」(/paper) 已随 exam 答案库批改路线下线（resource_answers 沉淀 0 行、无数据可审）；
+      // 试卷题库写 resource_questions 与批改答案分家，是幸存的活功能。
       { label: '试卷题库', path: '/paper-bank', icon: Grid },
       { label: '我的考法库', path: '/question-bank', icon: Collection },
       { label: '周末班课件', path: '/weekend-ppt', icon: Files }

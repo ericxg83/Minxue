@@ -21,7 +21,7 @@ const NAV = [
   { label: '学习诊断', path: '#/growth', landing: ['#/weekly-report', '#/growth'] },
   { label: '错题本', path: '#/wrongbook', landing: ['#/students', '#/wrongbook'] },
   { label: '练习册管理', path: '#/worksheets', landing: ['#/worksheets'] },
-  { label: '试卷答案库', path: '#/paper', landing: ['#/paper'] },
+  { label: '老书签/paper', path: '#/paper', landing: ['#/paper-bank'] }, // 2026-10-18「试卷答案库」下线，老链接应重定向到试卷题库
   { label: '我的考法库', path: '#/question-bank', landing: ['#/question-bank'] },
   { label: '周末班课件', path: '#/weekend-ppt', landing: ['#/weekend-ppt'] },
   { label: '名册', path: '#/students', landing: ['#/students'] },

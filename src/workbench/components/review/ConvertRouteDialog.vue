@@ -36,14 +36,6 @@
         <p v-if="!worksheets.length" class="cr-empty">暂无可用练习册（需先在练习册管理里解析完成）</p>
       </div>
 
-      <div v-if="target === 'exam'" class="cr-pick">
-        <label>选择答案库资源</label>
-        <el-select v-model="resourceId" placeholder="请选择答案库" filterable class="cr-select">
-          <el-option v-for="r in resources" :key="r.id" :label="r.name" :value="r.id" />
-        </el-select>
-        <p v-if="!resources.length" class="cr-empty">暂无可用答案库资源</p>
-      </div>
-
       <!-- 影响面：后端 dryRun 返回，未选完目标资源时不发请求 -->
       <div v-if="planning" class="cr-planning">正在预演转换影响…</div>
       <div v-else-if="planError" class="cr-error">{{ planError }}</div>
@@ -82,17 +74,19 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { convertTaskRoute, getWorksheets, getResources, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../../services/apiService'
+import { convertTaskRoute, getWorksheets, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../../services/apiService'
 
 // ⚠️ 高危功能：转换会清空该作业的题目/判题/已入册错题并连带删掉已发布几何重绘图。
 // 2026-09-21 起默认关闭（前端置灰 + 后端 403），恢复需前后端开关同时打开。
 const enabled = TASK_ROUTE_CONVERT_ENABLED
 const disabledHint = TASK_ROUTE_CONVERT_DISABLED_HINT
 
-// 老师发现「上传时选错批改方式」后的纠正入口。三种方式互转：
-//   日常作业（完整 OCR + AI 判题）/ 练习册（预埋答案对题号）/ 答案库（资源答案）。
+// 老师发现「上传时选错批改方式」后的纠正入口。两种方式互转：
+//   日常作业（完整 OCR + AI 判题）/ 练习册（预埋答案对题号）。
+// 2026-10-18（负责人裁决）：「答案库批改」（target='exam'）随 exam 答案库批改路线一并下线
+// （线上 exam 任务 0 条、resource_answers 沉淀 0 行），只留作业/练习册互转。
 // 后端口径见 server/utils/taskRoute.js：重练卷禁止转；转非练习册路线时 worksheet_id
-// 与 resource_id 必须一起清（否则会被兜底成答案库管线，用同一本练习册再错一次）。
+// 与 resource_id 必须一起清。
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   task: { type: Object, default: null }, // { id, name, taskType, worksheetId }
@@ -102,20 +96,17 @@ const emit = defineEmits(['update:modelValue', 'converted'])
 const TARGETS = [
   { value: 'homework', label: '日常作业', desc: 'AI 识别题目并自行判题，不依赖答案库' },
   { value: 'workbook', label: '练习册批改', desc: '按所选练习册的预埋答案按题号批改' },
-  { value: 'exam', label: '答案库批改', desc: '按所选答案库资源的答案批改' },
 ]
 
 const TYPE_LABELS = {
   workbook: '练习册批改',
-  exam: '答案库批改',
   homework: '日常作业',
 }
 
 const target = ref('homework')
 const worksheetId = ref(null)
-const resourceId = ref(null)
+const resourceId = ref(null) // 2026-10-18 起恒 null：exam 目标已随答案库路线下线，保留传参兼容后端契约
 const worksheets = ref([])
-const resources = ref([])
 const plan = ref(null)
 const planning = ref(false)
 const planError = ref('')
@@ -125,14 +116,13 @@ const loaded = ref(false)
 // 三个方向的代价不对称，选目标时先讲清楚（后端 describeRouteRisk 会在预演里再核一次实数）。
 const TARGET_NOTES = {
   workbook: '⚠️ 转练习册会丢题干：练习册路线只从卷面识别题号与手写答案，题干改由该册答案库回填，题号对不上的题会落成「第 N 题」占位符。',
-  exam: '答案库路线按所选资源的答案批改，题干仍来自卷面识别；请确保这份卷确实是所选资源。',
   homework: '日常作业路线完整识别题干后由 AI 判题，不依赖答案库，是信息量最全的方式。',
 }
 const targetNote = computed(() => TARGET_NOTES[target.value] || '')
 
 const currentType = computed(() => {
   const t = props.task?.taskType
-  return t === 'workbook' || t === 'exam' ? t : 'homework'
+  return t === 'workbook' ? t : 'homework'
 })
 const currentLabel = computed(() => TYPE_LABELS[currentType.value] || '日常作业')
 const currentWorksheetName = computed(() => {
@@ -143,7 +133,6 @@ const currentWorksheetName = computed(() => {
 // 目标没选完资源时不发预演请求（后端会直接 400）
 const targetReady = computed(() => {
   if (target.value === 'workbook') return !!worksheetId.value
-  if (target.value === 'exam') return !!resourceId.value
   return true
 })
 const canSubmit = computed(() => !!props.task?.id && targetReady.value && !!plan.value && !planning.value && !submitting.value)
@@ -159,12 +148,8 @@ const reset = async () => {
   if (!loaded.value) {
     loaded.value = true
     try {
-      const [ws, rs] = await Promise.all([
-        getWorksheets().catch(() => []),
-        getResources({ type: 'exam' }).catch(() => []),
-      ])
+      const ws = await getWorksheets().catch(() => [])
       worksheets.value = Array.isArray(ws) ? ws : []
-      resources.value = Array.isArray(rs) ? rs : []
     } catch (e) {
       console.warn('[ConvertRoute] 资源列表加载失败:', e?.message)
     }

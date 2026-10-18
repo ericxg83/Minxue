@@ -9,7 +9,8 @@
 //   2. callVisionCompletion 的三处备份供应商注入点必须受 noBackup 门禁
 //   3. 分批 OCR 必须走带并发上限的 mapWithConcurrency（OCR_PAGE_CONCURRENCY），不得裸 Promise.all
 //   4. retryTaskById 对 workbook 任务不得把 worksheet_id 兜底进 resourceId
-//      （否则重试被 processAnswerBankGrading 抢路由，自包含错题语义被破坏）
+//      （答案库管线 processAnswerBankGrading 已于 2026-10-18 随 exam 路线下线，
+//       此防线保留为 workbook「自包含错题」语义的护栏）
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -83,7 +84,7 @@ test('retryTaskById 对 workbook 任务不得把 worksheet_id 兜底进 resource
   const src = read('server/index.js')
   assert.ok(
     src.includes("task.task_type === 'workbook'"),
-    'retryTaskById 应对 workbook 任务保持 resourceId 原值，防止重试被 processAnswerBankGrading 抢路由'
+    'retryTaskById 应对 workbook 任务保持 resourceId 原值（答案库管线已 2026-10-18 下线，护栏保留防 workbook 语义被破坏）'
   )
 })
 

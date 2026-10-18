@@ -21,10 +21,12 @@ const ROOT = path.resolve(import.meta.dirname, '..')
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8')
 
 const FILES = {
-  exam: read('src/workbench/views/ExamWorkbench.vue'),
   weekly: read('src/workbench/views/WeeklyReportWorkbench.vue'),
   wrong: read('src/workbench/views/WrongBookCenterRedesign.vue'),
 }
+
+// 2026-10-18（负责人裁决）：原 FILES.exam（ExamWorkbench.vue「试卷答案库」）随 exam
+// 答案库批改路线一并下线，其 4 条 exam-* 规则随之删除；「失败可见化」守卫对幸存页面继续生效。
 
 // r137（负责人裁决）：原FILES.handout（HandoutPreview.vue「我的讲义」编辑页）
 // 及其两条规则随页面删除；「讲义子系统不得回流」的守卫在 dataPageMerge.test.mjs 。
@@ -39,81 +41,6 @@ function windowAfter(src, anchor, size = 700) {
 // probe(src) → true 表示「失败可见化已就位」
 // bad        → 该规则对应的「旧版坏样本」，probe(bad) 必须为 false（证明判据非空转）
 const RULES = [
-  {
-    id: 'exam-loadExams-加载失败不伪装空态',
-    probe: (s) =>
-      /const loadError = ref\(''\)/.test(s) &&
-      /v-if="!loading && loadError"/.test(s) &&
-      /import EmptyState from '\.\.\/components\/ui\/EmptyState\.vue'/.test(s) &&
-      /loadError\.value = e\?\.message \|\| '加载失败'/.test(s),
-    bad: `
-      const exams = ref([])
-      const loading = ref(false)
-      const loadExams = async () => {
-        loading.value = true
-        try { exams.value = await getResources({ type: 'exam' }) }
-        catch (e) { console.error('加载试卷答案库失败:', e) }
-        loading.value = false
-      }
-      <!-- 模板 --><el-empty v-if="!loading && exams.length === 0" description="暂无试卷答案库，请先在 AI 批改复审中心审核后存档" />
-    `,
-  },
-  {
-    id: 'exam-handleDelete-删除失败必须提示',
-    probe: (s) => {
-      const w = windowAfter(s, 'const handleDelete = async (row) =>', 400)
-      return w !== null && /ElMessage\.error\(/.test(w)
-    },
-    bad: `
-      const handleDelete = async (row) => {
-        try {
-          await deleteResource(row.id)
-          loadExams()
-        } catch (e) {
-          console.error('删除失败:', e)
-        }
-      }
-    `,
-  },
-  {
-    id: 'exam-handleToggleStatus-发布撤回失败必须提示',
-    probe: (s) => {
-      const w = windowAfter(s, 'const handleToggleStatus = async (row) =>', 500)
-      return w !== null && /ElMessage\.error\(/.test(w)
-    },
-    bad: `
-      const handleToggleStatus = async (row) => {
-        try {
-          const newStatus = row.status === 'published' ? 'draft' : 'published'
-          await updateResource(row.id, { status: newStatus })
-          loadExams()
-        } catch (e) {
-          console.error('切换状态失败:', e)
-        }
-      }
-    `,
-  },
-  {
-    id: 'exam-handleCreate-创建失败必须提示',
-    probe: (s) => {
-      const w = windowAfter(s, 'const handleCreate = async () =>', 500)
-      return w !== null && /ElMessage\.error\(/.test(w)
-    },
-    bad: `
-      const handleCreate = async () => {
-        if (!createForm.value.name) return
-        creating.value = true
-        try {
-          await createResource({ ...createForm.value, type: 'exam' })
-          showCreateDialog.value = false
-          loadExams()
-        } catch (e) {
-          console.error('创建失败:', e)
-        }
-        creating.value = false
-      }
-    `,
-  },
   {
     id: 'weekly-loadSummary-加载失败不伪装「暂无可诊断的学生数据」',
     probe: (s) =>
@@ -150,10 +77,6 @@ const RULES = [
 ]
 
 const SOURCE_OF = {
-  'exam-loadExams-加载失败不伪装空态': () => FILES.exam,
-  'exam-handleDelete-删除失败必须提示': () => FILES.exam,
-  'exam-handleToggleStatus-发布撤回失败必须提示': () => FILES.exam,
-  'exam-handleCreate-创建失败必须提示': () => FILES.exam,
   'weekly-loadSummary-加载失败不伪装「暂无可诊断的学生数据」': () => FILES.weekly,
   'wrong-removeQuestion-移除失败必须提示（不得静默回滚）': () => FILES.wrong,
 }

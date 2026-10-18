@@ -20,8 +20,8 @@ const ROUTES = [
   ['wb:学生列表', '/workbench.html#/students'],
   ['wb:学生档案', '/workbench.html#/students/bd31776e-6673-474c-ae1f-8a22d69cbd46'],
   ['wb:练习册管理', '/workbench.html#/worksheets'],
-  ['wb:试卷答案库', '/workbench.html#/paper'],
   ['wb:老书签/handouts', '/workbench.html#/handouts'], // r137 「我的讲义」下线，本条改验 redirect 不白屏
+  ['wb:老书签/paper', '/workbench.html#/paper'], // 2026-10-18「试卷答案库」下线，本条改验 redirect 到 /paper-bank 不白屏
   ['wb:周末班课件', '/workbench.html#/weekend-ppt'],
   ['wb:我的题型库', '/workbench.html#/question-bank'],
   ['wb:老书签/growth', '/workbench.html#/growth'],

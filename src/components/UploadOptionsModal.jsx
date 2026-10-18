@@ -1,20 +1,22 @@
-import { BookOpen, FileText } from 'lucide-react'
+import { BookOpen } from 'lucide-react'
 import { motion } from 'motion/react'
 
 /**
  * 首页「新建批改任务」弹层。
  *
  * 第 46 轮（2026-10-02）从三卡减为两卡：原来的「错题重练」卡走的是
- * `openStaging('wrong_retry')` → 最末尾的通用上传分支（与「普通试卷」同一条路），
- * 它本身并不做任何重练专属处理；而重练卷的定位靠卷面二维码，
- * 从**任何**一条上传支路进来都会被 `handleFileSelect` 里的 QR 检测拦下归位（useUploadFlow.js:462-466）。
- * 负责人实际习惯也是在「组卷历史」里选卷上传答卷（stagingType='retry_bound'），
- * 所以这张卡只会多一步、多一个误选，删卡不删能力。
+ * `openStaging('wrong_retry')` → 最末尾的通用上传分支（它本身并不做任何重练专属处理）；
+ * 而重练卷的定位靠卷面二维码，从**任何**一条上传支路进来都会被 `handleFileSelect`
+ * 里的 QR 检测拦下归位。负责人实际习惯也是在「组卷历史」里选卷上传答卷
+ * （stagingType='retry_bound'），所以那张卡只会多一步、多一个误选，删卡不删能力。
+ *
+ * 2026-10-18（负责人裁决）：「普通试卷」卡连同 exam 答案库批改路线一并下线——
+ * 线上实证 task_type='exam' 任务 0 条、resource_answers 沉淀 0 行、答案库复用 0 次，
+ * 该路线从未跑起来；其「全新 AI 批改」子路径与日常作业完全等价。
  */
 export default function UploadOptionsModal({
   onClose,
-  onStartHomework,
-  onStartRegular
+  onStartHomework
 }) {
   return (
     <div className="absolute inset-0 z-[25000] flex items-end justify-center">
@@ -49,21 +51,6 @@ export default function UploadOptionsModal({
             <div className="text-left">
               <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>日常作业</span>
               <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>拍照上传，选择练习册或AI批改</span>
-            </div>
-          </button>
-
-          {/* 卡片2: 普通试卷（最后一张，不再加底部外边距）*/}
-          <button
-            onClick={onStartRegular}
-            className="w-full flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.98] tap-scale"
-            style={{ background: 'var(--primary-soft)' }}
-          >
-            <div className="w-14 h-14 rounded-2xl flex items-center justify-center shadow-md flex-shrink-0" style={{ background: 'var(--primary)' }}>
-              <FileText size={28} className="text-white" />
-            </div>
-            <div className="text-left">
-              <span className="block text-[15px] font-semibold" style={{ color: 'var(--text)' }}>普通试卷</span>
-              <span className="block text-[12px] mt-0.5" style={{ color: 'var(--text-secondary)' }}>考试卷/临时卷，AI智能批改</span>
             </div>
           </button>
 

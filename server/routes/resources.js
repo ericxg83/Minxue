@@ -43,7 +43,7 @@ export function pickWritableResourceFields(body) {
 }
 
 // 资源列表
-// v4 增 status 过滤：移动端 ExamChoiceModal 只看 published 资源
+// v4 曾增 status 过滤（移动端选择器只看 published；该选择器已于 2026-10-18 随 exam 路线下线）
 router.get('/', async (req, res) => {
   try {
     const { type, subject, status } = req.query
@@ -144,7 +144,7 @@ router.patch('/:id/answers/status', async (req, res) => {
     if (!answerStatus) return res.status(400).json({ error: '缺少 answerStatus' })
 
     // 提升为可信答案源 = 授权它去判全班同类题，脏答案会放大成成片误判。
-    // 与 /api/tasks/:id/save-as-answer-key 共用同一道闸门，避免绕道这个接口盖章。
+    // 曾与 /api/tasks/:id/save-as-answer-key 共用同一道闸门（该端点已于 2026-10-18 随答案库路线下线），避免绕道盖章。
     if (answerStatus === 'teacher_verified' || answerStatus === 'official_verified') {
       const existing = await getResourceAnswers(req.params.id)
       const dirty = findDirtyAnswers(existing)

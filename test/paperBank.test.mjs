@@ -11,8 +11,8 @@
  *   ③ 讲义版式**不得**复用重练卷的 buildRetryPaperOrder / RETRY_PAPER_BLOCKS
  *      —— 那套会按选择题/填空题/解答题重新分块并重新编号，会丢原卷题号，
  *         而老师讲的正是「第 19 题」「第 24 题」（pdfGenerator.js 里那套是有意为之的）；
- *   ④ 侧栏 /paper 与 /paper-bank 是平级入口，高亮判定必须按路径段边界，
- *      否则打开「试卷题库」时「试卷答案库」会一起亮。
+ *   ④ 侧栏入口高亮判定必须按路径段边界（2026-10-18 起 /paper 已下线，此判据作为
+ *      /paper-bank 与其他前缀相似路由的通用防线保留）。
  *
  * 全部源码锁走 fail-closed（锚点不在即判红），且每条都配反向自检
  *（把「写坏的版本」喂给同一个检查函数必须判红）。
@@ -182,24 +182,19 @@ function isActiveUsesPathBoundary(src) {
   return /path\s*\+\s*'\/'/.test(body)
 }
 
-test('★ 侧栏新增 /paper-bank 入口，且与 /paper 平级（负责人 2026-10-10 拍板「独立入口」）', () => {
+test('★ 侧栏 /paper-bank 入口存在；/paper（试卷答案库）已随 exam 路线下线（负责人 2026-10-18 裁决）', () => {
   const src = read(SIDEBAR)
   const fails = []
   const seg = anchoredSlice(src, 'const navGroups = [', 1600, SIDEBAR, fails)
   if (seg !== null) {
     assert.ok(seg.includes("path: '/paper-bank'"), '侧栏必须挂出 /paper-bank 入口')
-    assert.ok(seg.includes("path: '/paper'"), '原有的 /paper 入口必须还在')
+    assert.ok(!seg.includes("path: '/paper'"), '/paper（试卷答案库）入口必须已删除')
     assert.ok(seg.includes('试卷题库'), '入口文案应为「试卷题库」')
-    // 两者必须在同一个 group（教学资源）里 —— 中间不得出现新的分组对象。
-    // 判据用 `items:`：每个分组对象都是 { label: '...', items: [...] }，
-    // 组内条目只有 label/path/icon，不会再出现 items。
-    const between = seg.slice(seg.indexOf("path: '/paper'"), seg.indexOf("path: '/paper-bank'"))
-    assert.ok(!/items\s*:/.test(between), '/paper 与 /paper-bank 必须同组平级，中间不得插入新分组')
   }
   assert.deepEqual(fails, [])
 })
 
-test('★ 侧栏高亮按路径段边界（否则 /paper-bank 会连带点亮 /paper）', () => {
+test('★ 侧栏高亮按路径段边界（/paper-bank 与其他前缀相似路由的通用防线）', () => {
   assert.ok(isActiveUsesPathBoundary(read(SIDEBAR)), 'isActive 必须用 path + \'/\' 做段边界匹配')
 })
 
@@ -208,12 +203,13 @@ test('反向自检：裸前缀写法必须被判红（这正是本次踩到的�
   assert.equal(isActiveUsesPathBoundary(broken), false)
 })
 
-test('路由 /paper-bank 已注册，且与 /paper 是两个不同组件', () => {
+test('路由：/paper-bank 注册为 PaperBankWorkbench；/paper 已删除并重定向到 /paper-bank（2026-10-18 下线）', () => {
   const src = read('src/workbench/router/index.js')
   assert.match(src, /path:\s*'\/paper-bank'/)
-  assert.match(src, /path:\s*'\/paper'/)
   assert.match(src, /PaperBankWorkbench\.vue/)
-  assert.match(src, /ExamWorkbench\.vue/)
+  assert.ok(!/ExamWorkbench\.vue/.test(src), 'ExamWorkbench.vue（试卷答案库页）必须已从路由移除')
+  assert.match(src, /path:\s*'\/paper\/:catchAll\(\.\*\)'/)
+  assert.match(src, /redirect:\s*'\/paper-bank'/)
 })
 
 test('/api/paper-bank 已挂到 Express', () => {

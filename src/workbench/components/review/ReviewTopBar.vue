@@ -134,7 +134,6 @@
               </el-dropdown-item>
               <!-- [B2-3 快捷键速查] 与 ? 键打开同一浮层 -->
               <el-dropdown-item command="shortcuts" divided>快捷键速查（?）</el-dropdown-item>
-              <el-dropdown-item command="archive" divided :disabled="!canArchive || archiveLoading">留底为答案库</el-dropdown-item>
               <!-- [P0-4 撤销诚实化] 文案必须如实：只回退本页显示，不反向写库。
                    换卷时撤销栈已由 store.selectTask 清空，不存在跨卷误回退。 -->
               <el-dropdown-item command="undo" :disabled="!store.canUndo">回退上次判定（仅本页显示）</el-dropdown-item>
@@ -268,7 +267,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, Check, Document } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
-import { retryTask, saveTaskAsAnswerKey, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
+import { retryTask, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
 import ConvertRouteDialog from './ConvertRouteDialog.vue'
 import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
@@ -497,7 +496,6 @@ const handleMoreCommand = (cmd) => {
   }
   else if (cmd === 'convert') openConvertRoute()
   else if (cmd === 'retry') handleRetryTask()
-  else if (cmd === 'archive') handleArchive()
   // [B2-3] 快捷键速查浮层（与 ? 键同源）
   else if (cmd === 'shortcuts') store.shortcutsVisible = true
 }
@@ -514,12 +512,8 @@ const blockedPaperHint = computed(() =>
   store.currentPaperState === RETRY_PAPER_STATE.GRADING ? 'AI 正在识别与判题' : '学生还没有提交答卷'
 )
 
-// 「留底为答案库」按钮启用条件：仅 exam 任务 + 已完成复核（status='reviewed'）+ 当前 task 有 resource_id。
-// 留底是把 task 答案沉淀进答案库资源的动作，复核完成才有可信答案可沉淀。
-// reviewAllDone 时 currentTask 已被清空，store.lastArchivableTask 会 fallback 到当前学生最新一份已复核 exam 任务，
-// 保证老师"刚复核完"的那份还能操作。
-const canArchive = computed(() => !!store.lastArchivableTask)
-const archiveLoading = ref(false)
+// 2026-10-18（负责人裁决）：「留底为答案库」入口已随 exam 答案库批改路线下线
+// （线上 exam 任务 0 条、resource_answers 沉淀 0 行，无可沉淀亦无消费方）。
 
 const onStudentChange = async (studentId) => {
   const student = store.students.find(s => s.id === studentId)
@@ -593,7 +587,8 @@ const handleComplete = async () => {
   await doComplete()
 }
 
-// 真正执行完成复核：store 不再自动跳下一份，让老师选择「留底为答案库」或「下一份」。
+// 真正执行完成复核：store 不再自动跳下一份，老师可点「下一份」继续处理。
+// 2026-10-18：「留底为答案库」入口已随 exam 答案库批改路线下线，提示只保留续接指引。
 const doComplete = async () => {
   try {
     await store.completeTaskReview()
@@ -601,10 +596,10 @@ const doComplete = async () => {
     // 完成后的提示要如实：全局队列确实搜尽过才说"都处理完成"，否则告诉老师
     // 可以去下一份续接其他学生的卷（2026-10-14 起下一份不限制学生）。
     const tip = store.pendingTasks.length > 0
-      ? '可在「更多」菜单留底为答案库，或点「下一份」继续处理'
+      ? '点「下一份」继续处理'
       : store.globalQueueExhausted
-        ? '可在「更多」菜单留底为答案库；所有学生的待复核试卷都已处理完成'
-        : '可在「更多」菜单留底为答案库；当前学生已无待复核试卷，点「下一份」可接着处理其他学生的试卷'
+        ? '所有学生的待复核试卷都已处理完成'
+        : '当前学生已无待复核试卷，点「下一份」可接着处理其他学生的试卷'
     ElMessage.info(tip)
   } catch (err) {
     // 落库失败时绝不能提示成功：completeTaskReview 现在会把服务端错误原样抛出，
@@ -802,47 +797,6 @@ watch(() => store.gateRequeueNotice, (n) => {
   store.clearGateRequeueNotice()
   store.loadGatePending()
 })
-
-// 「📌 留底为答案库」手动按钮：调 save-as-answer-key 把当前 task 的答案沉淀到资源。
-// 与"完成复核"解耦——后者只更新 task.status，前者显式触发答案库覆写。
-// task 来源用 store.lastArchivableTask：复核中拿 currentTask；reviewAllDone 时 fallback 到最新已复核任务。
-// 复用 task.original_name 作为资源名，老师可在弹窗里修改。
-// resource_id 允许为 null：server 在 save-as-answer-key 内部会自动新建 resource_type='exam' 资源。
-const handleArchive = async () => {
-  const t = store.lastArchivableTask
-  if (!t?.id) return
-  let name = t.original_name || '未命名试卷'
-  try {
-    const { value } = await ElMessageBox.prompt(
-      '将当前这份试卷的答案写入答案库，可修改资源名称。',
-      '📌 留底为答案库',
-      {
-        inputValue: name,
-        inputPlaceholder: '资源名称',
-        confirmButtonText: '确认留底',
-        cancelButtonText: '取消',
-        inputValidator: (val) => (val && val.trim() ? true : '资源名不能为空'),
-      }
-    )
-    name = (value || '').trim() || name
-  } catch {
-    return
-  }
-  archiveLoading.value = true
-  try {
-    await saveTaskAsAnswerKey(t.id, {
-      name,
-      subject: t.subject || null,
-      grade: t.grade || null,
-    })
-    ElMessage.success(`已留底：${name}`)
-  } catch (err) {
-    const msg = err?.response?.data?.error || err?.message || '留底失败，请重试'
-    ElMessage.error(msg)
-  } finally {
-    archiveLoading.value = false
-  }
-}
 
 // 回退最近一次人工判定（仅回退前端内存状态，不反向写库）
 // [P0-4 撤销诚实化] toast 明示「数据库记录未变」，避免老师误以为错题本等已落库事实被回退。

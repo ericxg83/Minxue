@@ -12,17 +12,19 @@
 //   1. 重练卷（generated_exam_id 非空 / task_type ∈ wrong_retry|retry_paper）**禁止转路线**：
 //      题目行不属本卷（见 topics/retry-paper-order.md §5.5），转路线会毁掉组卷数据。
 //   2. 转 homework：task_type='homework'，worksheet_id **与** resource_id 都置 NULL。
-//      ⚠️ 两者必须一起清 —— retryTaskById（index.js）在非 workbook 时会把 worksheet_id
-//      兜底填进 resourceId，只清 task_type 会让任务拐进 processAnswerBankGrading，
-//      用同一本练习册的 resource_answers 再错一次（这是本文件存在的头号理由）。
-//   3. 转 exam：必须显式给 resourceId（答案库资源），否则走不了答案库管线。
+//      （历史上两者必须一起清，否则重试会拐进答案库管线再错一次；2026-10-18 答案库
+//      管线 processAnswerBankGrading 已随 exam 路线下线，「一起清」仍保留为口径。）
+//   3. 转 exam：2026-10-18（负责人裁决）随 exam 答案库批改路线一并下线，
+//      target='exam' 一律 bad_target 拒绝（ROUTE_TARGETS 不再含 'exam'）。
 //   4. 已经是目标路线且字段一致 → noop，调用方不应入队重跑。
 
 import { isAutoTaskName } from './taskTitle.js'
 
-// homework=日常作业（完整 OCR + AI 判题）；exam=答案库资源；workbook=练习册预埋答案。
-// 三者互相可转（老师选错批改方式时纠正），转 workbook 必须显式给 worksheetId。
-export const ROUTE_TARGETS = ['homework', 'exam', 'workbook']
+// homework=日常作业（完整 OCR + AI 判题）；workbook=练习册预埋答案。
+// 两者互相可转（老师选错批改方式时纠正），转 workbook 必须显式给 worksheetId。
+// 2026-10-18（负责人裁决）：exam（答案库资源）路线已下线，不再作为可转目标；
+// 历史 exam 任务转出（→ homework）仍允许（from 侧不校验 task_type）。
+export const ROUTE_TARGETS = ['homework', 'workbook']
 
 // 题目行不归本卷所有的路线：转路线 = 毁数据，一律拒绝。
 const BLOCKED_TASK_TYPES = ['wrong_retry', 'retry_paper']
@@ -56,7 +58,8 @@ const isBlank = (v) => v === null || v === undefined || v === ''
  */
 export function resolveRouteKind(task) {
   if (!task) return 'unknown'
-  // 顺序 = worker 的路由顺序（worker.js processTask）：重练卷 → workbook → 答案库 → general。
+  // 顺序 = worker 的路由顺序（worker.js processTask）：重练卷 → workbook → general。
+  // 2026-10-18 起答案库层已下线；resource_id 非空的历史任务仍按 answer_bank 描述。
   if (task.task_type === 'wrong_retry' || task.task_type === 'retry_paper' || !isBlank(task.generated_exam_id)) {
     return 'slim_retry'
   }
@@ -68,7 +71,7 @@ export function resolveRouteKind(task) {
 /**
  * 计算改路线的字段补丁。
  * @param {{task_type?:string|null, worksheet_id?:string|null, resource_id?:string|null, generated_exam_id?:string|null}} task
- * @param {'homework'|'exam'|'workbook'} target
+ * @param {'homework'|'workbook'} target
  * @param {{resourceId?:string|null, worksheetId?:string|null}} [opts]
  * @returns {{ok:boolean, code:string, reason?:string, patch?:{task_type:string, worksheet_id:string|null, resource_id:string|null}, target?:string, from?:object}}
  */
@@ -97,11 +100,6 @@ export function planTaskRouteChange(task, target, { resourceId = null, worksheet
       return { ok: false, code: 'workbook_needs_worksheet', reason: '转练习册路线必须传合法的 worksheetId（练习册资源 id）' }
     }
     patch = { task_type: 'workbook', worksheet_id: String(worksheetId), resource_id: null }
-  } else if (target === 'exam') {
-    if (isBlank(resourceId) || !UUID_RE.test(String(resourceId))) {
-      return { ok: false, code: 'exam_needs_resource', reason: '转 exam（答案库）路线必须传合法的 resourceId' }
-    }
-    patch = { task_type: 'exam', worksheet_id: null, resource_id: String(resourceId) }
   } else {
     patch = { task_type: 'homework', worksheet_id: null, resource_id: null }
   }

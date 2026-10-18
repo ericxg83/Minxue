@@ -1842,7 +1842,7 @@ export const updateResourceAnswerStatus = async (resourceId, answerStatus) => {
 /**
  * Worker 用：批量查询答案（跳过未 verified 的）
  * ⚠️ 历史遗留：仅按 question_no IN (...) 查，多 unit 时只返回 question_no ASC 排序后的
- * 第一行。答案库批改管线（processAnswerBankGrading）已切到 getResourceAnswersBySection
+ * 第一行。答案库批改管线（processAnswerBankGrading，2026-10-18 已随 exam 路线下线）曾切到 getResourceAnswersBySection
  * 的 3D 单元感知结构，本函数保留为兼容旧调用方，不要再在批改链路里用。
  */
 export const bulkLookupResourceAnswers = async (resourceId, questionNos) => {
