@@ -44,8 +44,21 @@ const IMPORTS = argv.includes('--imports')
 // 负责人裁决红线（2026-10-02 裁决③，backlog 已记「任何轮次不得自行清理，等负责人再开口」）：
 // 几何重绘目录那 5 个整行死 import 不碰。本工具把它们写死为保护名单，
 // 防止以后某轮“反正工具能删”把它们顺手清掉。
-const PROTECTED_NAMES = new Set([
-  'checkFigureReference', 'FIGURE_GATE_MESSAGE', 'buildFunctionGraphSvg', 'renderGeometrySvg', 'publishCleanGeometryUrl'
+//
+// r303（2026-10-18）新增 MAX_GROUP_SIZE：lint 的 no-unused-vars 会报它、本工具机械判
+// 「可安全删除」——但它是负责人拍板方案（docs/similar-groups-方案.md:62「最多截断组内
+// 20 道（防巨型组）」）里**已声明未接线**的常量：clusterContentGroups /
+// clusterKpGroups 均无截断逻辑，路由 confirm 给每个组员建 example ⇒ 巨型组会直接
+// 产出巨型考法/巨型重练卷。接线归功能方（backlog r303-P-A）；在接线落地前删掉这个
+// 常量 = 抹掉已拍板需求的锚点，且下一轮门禁会再次误报（复发回路）⇒ 保名不删。
+// 形态用 Map（名 → 理由）：保留报告里每条都能说清「为什么不动」，防止通用理由张冠李戴。
+const PROTECTED_NAMES = new Map([
+  ['checkFigureReference', '负责人裁决③：几何重绘目录的 5 个死 import 先不动'],
+  ['FIGURE_GATE_MESSAGE', '负责人裁决③：几何重绘目录的 5 个死 import 先不动'],
+  ['buildFunctionGraphSvg', '负责人裁决③：几何重绘目录的 5 个死 import 先不动'],
+  ['renderGeometrySvg', '负责人裁决③：几何重绘目录的 5 个死 import 先不动'],
+  ['publishCleanGeometryUrl', '负责人裁决③：几何重绘目录的 5 个死 import 先不动'],
+  ['MAX_GROUP_SIZE', '拍板方案 docs/similar-groups-方案.md:62 要求组内截断 20 道；常量已声明未接线（待功能方落地，backlog r303-P-A），删掉=抹掉需求锚点'],
 ])
 
 // ── 1. 取 eslint 的 no-unused-vars 报告（复用现有 eslint.config.js，口径不漂移）──
@@ -184,7 +197,7 @@ for (const w of warnings) {
   const hit = decls.find(d => d.name === w.name && d.line === w.line && d.col === w.column)
     || decls.find(d => d.name === w.name && Math.abs((d.line || 0) - w.line) <= 1)
   if (!hit) { kept.push({ ...w, why: '未匹配到声明（函数体内局部变量/闭包变量等）' }); continue }
-  if (PROTECTED_NAMES.has(w.name)) { kept.push({ ...w, why: '负责人裁决③：几何重绘目录的 5 个死 import 先不动' }); continue }
+  if (PROTECTED_NAMES.has(w.name)) { kept.push({ ...w, why: PROTECTED_NAMES.get(w.name) }); continue }
   if (hit.kind === 'param') { kept.push({ ...w, why: '函数参数（删参数会改调用契约）' }); continue }
   if (hit.kind === 'import') {
     if (hit.multiDeclarator) { kept.push({ ...w, why: 'import 说明符（它是该模块唯一导入，删了会改变模块加载副作用）' }); continue }

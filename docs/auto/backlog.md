@@ -4904,3 +4904,24 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r302-P-B（A 级清理候选，属批改链路赛道，未动手）**：`server/worker.js` 9 个删除残留未用 import（ANSWER_PAGE_VENDOR_CHAIN:17 / addWrongQuestions:18 / splitSubAnswers:31 / checkFigureReference:222 / FIGURE_GATE_MESSAGE:222 / buildFunctionGraphSvg:225 / renderGeometrySvg:226 / publishCleanGeometryUrl:228 + 未用参数 w/h:389）——lint 1w→10w 的增量全部在此；清掉即回 122w 基线。文件属他会赛道，待其处理或授权。
 - **备份**：2026-10-18 档 ok:true（20:19:47，同源串行延后第四例）；无报警。
 - **待拍板清单**（不变 + 上述两条）：r302-P-A / r302-P-B / r300-P-A / r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A（C）/ r285-P-B / r280-P-A（B/C）/ r280-P-B / r278-P-B / r299-P-A / daemon.mjs 去留 / 存档区治理。
+
+## 第 r303 轮（2026-10-18 22:57–，日常巡查 automation `4e9608a9`）
+
+- **已落地（A 级，零产品码）**：门禁保护名单纳入 `MAX_GROUP_SIZE`——`scripts/pruneDeadDeclarations.mjs` 的
+  `PROTECTED_NAMES` 由 Set 升级为 Map（名 → 理由），纳入该常量（理由指向 `docs/similar-groups-方案.md:62`），
+  保留报告 `why` 改按条目取值。背景：门禁机械判「可安全删除」，但该常量是负责人拍板方案
+  「最多截断组内 20 道（防巨型组）」已声明未接线的锚点（`similarGroupClustering.js:57`；
+  `clusterContentGroups`/`clusterKpGroups` 均无截断，路由 confirm 给每个组员建 example ⇒ 巨型组产出巨型考法）。
+  回归锁 `test/pruneProtectedNames.test.mjs` 3 条（四条判据 + 两条内联反向自检）。四道闸：2543/2543｜0e/132w｜44.63s｜5700: cert 0 + 8/8 + 0/16 + 0/13。
+- **r303-P-A（B，待拍板——考法库疑似同类题组漏接 20 道截断）**：`server/services/similarGroupClustering.js`
+  `clusterContentGroups`（:66-128）与 `clusterKpGroups`（:136-164）未按 `docs/similar-groups-方案.md:62`
+  截断组内 20 道；`MAX_GROUP_SIZE`（:57）声明未接线；`server/routes/teachingQuestionTypes.js:644+` confirm
+  给每个组员建 example，「整组送重练」取组内全部 questionIds ⇒ 巨型组直接产出巨型考法/巨型重练卷。
+  建议：两处分组输出前 `slice(0, MAX_GROUP_SIZE)`（保留 original 顺序）+ 补测试。归属并行会话考法库赛道
+  （`badd7b6`，21:47 提交）⇒ 待其接线或负责人授权代修。⛔ 接线前任何轮次不得删除 `MAX_GROUP_SIZE`
+  （已纳入门禁保护名单防机械误删）。
+- **非缺陷留档**：① exam 路线大删除（`52d5559`）运行时无悬空引用——`ExamWorkbench`/`processAnswerBankGrading`
+  活代码零命中，`/paper` catchAll 重定向在位；② 移动端静默失败同类扫描 4 候选均非缺陷（App.jsx:238 后台刷新 /
+  639+650 徽标次要指示 / ScanQR 卸载清理 / pdfGenerator 字体预载 / WorksheetPicker:57 自动存默认 fire-and-forget
+  ——主操作已生效、星标不亮正确反映无默认、显式星标另有 Toast）；③ notificationService.js:176 native-only
+  监听注册失败罕见无网络依赖。

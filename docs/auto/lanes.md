@@ -668,3 +668,13 @@
 - **四道闸**：npm test **2540/2540 fail 0**（开工 2531/7 红）｜eslint **0e/132w**（红线 0 error；+10w 归他会话 worker.js 删除残留，我的 7 文件 0w）｜`dist_nightly_20261018r302` **43.23s**｜preview 5690 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。
 - **备份**：`2026-10-18` ok:true（20:19:47，紧随 r301 轮结束 ⇒ 同源串行延后第四例，r300-P-A）；**无报警**；仍 5/29 表。
 - **接手提示**：① r302-P-A 拍板后写入纪律（大删除提交跑全量 npm test）② r302-P-B（worker.js 9 个残留未用 import，A 级但属他会赛道）③ r292-P-A 看门狗三缺陷 ④ 备份 10-19 档 13:00 后核验。
+
+## 第 r303 轮认领（2026-10-18 22:57–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/302`（21:54:24Z）正常释放约 1 小时，`loopGuard acquire` 直得 **303** 无撞号（`git log --all --grep r303` 空、remoteAhead=0）。
+- **本轮赛道**：仓库卫生与门禁基线（`scripts/**` 门禁 + `test/**` 回归锁）——沿用 r293–r302。
+- **落地（A 级，零产品码）**：门禁保护名单纳入 `MAX_GROUP_SIZE`——`pruneDeadDeclarations --check` 报「可安全删除 2 条」，其中 `similarGroupClustering.js:57` 经验真死发现是拍板方案（`docs/similar-groups-方案.md:62` 组内截断 20 道）已声明未接线的锚点常量（两聚类函数无截断、confirm 给每组员建 example ⇒ 巨型组产出巨型考法；测试 9 条无覆盖；全仓仅声明 1 次）。`PROTECTED_NAMES` Set→Map（名→理由）+ 纳入该常量 + `why` 按条目取值；门禁复跑「可删 2→1」。回归锁 `test/pruneProtectedNames.test.mjs` 3 条（四判据 + 两条内联反向自检）。截断本体属并行会话考法库赛道（badd7b6，21:47 提交）⇒ 跨赛道只提案 r303-P-A。
+- **未触碰**：并行会话 10 改 + 7 未跟踪（mtime 冻结 10-15～10-17；今晚 20:25–21:47 四个提交）零动零提交。
+- **四道闸**：npm test **2543/2543 fail 0**｜eslint **0e/132w**（基线）｜`dist_nightly_20261018r303` **44.63s**｜preview 5700 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。0 个 src/ 文件。
+- **备份**：最新 `2026-10-18` ok:true（今日档），**无报警**。
+- **接手提示**：① r303-P-A 拍板后落地截断接线（若授权代修：两处分组输出前 `slice(0, MAX_GROUP_SIZE)` + 补测试；门禁保护名单届时可摘条——常量被使用后 lint 不再报）② r302-P-A 拍板后写入 AGENTS.md 纪律 ③ r302-P-B（worker.js 残留 import）④ r292-P-A 看门狗三缺陷 ⑤ 备份 10-19 档 13:00 后核验。
