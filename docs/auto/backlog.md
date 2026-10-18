@@ -4889,3 +4889,10 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **r289-P-B 缩围**：4 个待代提测试中 2 个（jsonbEmptyStringGuard / pcEditJudgementStudentIdGuard）已由并行会话 `e4c5832` 入库 ⇒ 剩 `test/englishAnalyzer.test.mjs`（r290 遗留，r291 实测 4/4）+ `test/todoJumpAndDefaultTab.test.mjs`（r288 遗留，实测 6/6）+ 手跑件 `test/e2e_todoJump.cjs`，待授权代提。
 - **非缺陷留档**：① JSONB 空串比较家族全仓扫描 0 残留（8+5 列 × `=`/`!=`/`<>` × 正/反转；仅 `server/_diag_*` 历史探针命中）⇒ `e4c5832` 修复无漏网、`jsonbEmptyStringGuard` 三文件范围恰好覆盖全部真实实例；② `apiRequest` GET 去重「返回在途 Promise 不带本次 signal」是性能设计非缺陷（本次根因是调用方取消判定不完整）；③ PrintPreview fire-and-forget 健康探测 `.catch(()=>{})` 无 Toast 是刻意形态；④ 后端 bootAt 20:58:35 晚于全部源码 mtime。
 - **待拍板清单**（不变）：r300-P-A / r292-P-A / r292-P-C / r289-P-A / r289-P-B / r285-P-A（C）/ r285-P-B / r280-P-A（B/C）/ r280-P-B / r278-P-B / r299-P-A / daemon.mjs 引擎去留 / 存档区治理合并方案（B）。
+
+## 第 r301 轮（2026-10-18 19:49–，日常巡查 automation `4e9608a9`，commit `8ea1fb5`）
+
+- **备份缺 1 天（提醒级，r300-P-A 第三例实证）**：最新 `2026-10-17` ok:true（21:33 补跑到账）；今日 13:00 档三落空模式全部实证——① 事件日志 13:47:20 才开机；② 13:48–17:57 机器登录在线 4 小时无补跑，且本巡查每小时一轮在该窗口也未触发（今日首轮 19:49 紧随 19:43:08 二次开机）⇒ 佐证 WorkBuddy app/调度器在该窗口未运行 ⇒ **备份与巡查共用 app 内调度器是结构性根因**（建议备份改走类似 MinxueLocalServices 的计划任务直跑 `node scripts/dailyBackup.mjs`，彻底脱离 app 开闭；r300-P-A 原建议「独立 sourceKey」只解决同源串行，不解决 app 未开）；③ 19:41:20 意外关机。r302 必核 `2026-10-18` 目录。
+- **r292-P-A 看门狗三缺陷今日再次实证**：keep_local_services.log 11:53:39 / 12:06:10 两次「健康失败且 :3000 被占（已过冷却）→ taskkill 后下轮拉起」误杀-重生循环（:3000 现值 200）。文件属并行会话未跟踪 WIP ⇒ 维持只提案。
+- **已落地（A 级）**：dashboardCaliber 锁过期假红修复（`88f11b4` 停课收口给聚合 SQL 加 paused 过滤 ⇒ 旧 240 字符正则失配 3 红；判据下沉 `test/dashboardCaliberKit.mjs` + 结构不变量；反向自检 7/7 翻红）。详见 `docs/auto/reports/2026-10-18-r301.md`。
+- **非缺陷留档**：套件计数 2538→2539（+1；测试文件集合与 r300 时点一致，两个未跟踪件单跑 10/10 实证，+1 疑动态生成用例浮动，无新增失败）；`GET /api/tasks/summary` 活体 success:true（$3 参数对齐无 bind 错）。

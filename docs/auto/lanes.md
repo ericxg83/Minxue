@@ -648,3 +648,13 @@
 - **四道闸**：npm test **2538/2538 fail 0**（2537+1）｜eslint **0e/122w**（基线）｜`dist_nightly_20261017r300` **1m17s**｜preview 5670 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。
 - **备份**：最新 2026-10-16 ok:true，**今日缺 1 天（提醒级）**——08:00 关机→20:51 开机错过 13:00 档 + 开机后被本巡查轮同源串行延后（r273-P-A 复现，预计轮后补跑）。
 - **接手提示**：① r301 核 `D:/Minxue_Backup/2026-10-17/` 补跑结果 ② r300-P-A 拍板后落地 ③ 移动端错误可见化同类扫描可继续（PC 工作台属他人赛道只提案）。
+
+## 第 r301 轮认领（2026-10-18 19:49–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：`finished/300` 跨夜关机释放，`loopGuard acquire` 直得 **r301** 无撞号（`git log --all --grep r301` 空）。
+- **本轮赛道**：仓库卫生与门禁基线（`test/**` 回归锁口径）——沿用 r293–r300。
+- **落地（A 级，commit `8ea1fb5`，已推送）**：修 dashboardCaliber 锁过期假红——10-17 22:05 并行会话 `88f11b4`（停课收口 P0/P1）给 6 处铃铛聚合加 `LEFT JOIN students + paused 过滤`，today_new_wrong/in_progress_count 子查询超旧判据 240 字符窗口 ⇒ 3 红在 HEAD。语义核对 + 活体 `/api/tasks/summary` success:true 定性假红；判据下沉 `test/dashboardCaliberKit.mjs`（唯一实现）+ 锚点切片结构不变量（容忍停课过滤，CURRENT_DATE/lifecycle/占位错位三形态仍判红）；内联合成反向自检 7/7 翻红。
+- **未触碰**：并行会话 10 改 + 12 未跟踪（weekendHandout / reviewStore / retryPaperState / start-local 家族 / deploy/ 家族 / keep_local_services / neonBackfill1101 / 3 个未跟踪测试）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2539/2539 fail 0**｜eslint **0e/122w** 基线｜`dist_nightly_20261018r301` **59.56s**｜preview 5680 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/14**。0 个 src/ 文件。
+- **备份**：最新 2026-10-17 ok:true；**今日缺 1 天（提醒级）**——13:47:20 才开机错过 13:00 档 + 13:48–17:57 在线窗口 app 未运行（巡查轮本身也未触发佐证）⇒ r300-P-A 第三例实证，建议备份改走计划任务直跑脚本（脱离 app 调度）。
+- **接手提示**：① r302 核 `D:/Minxue_Backup/2026-10-18/` 补跑 ② r292-P-A 看门狗三缺陷今日两次复发（11:53/12:06 误杀循环）待拍板 ③ 移动端错误可见化同类扫描可继续。
