@@ -1,8 +1,10 @@
 import { Router } from 'express'
-import { query } from '../config/neon.js'
+import { query, transaction } from '../config/neon.js'
 // r145：只 import 路由真正用到的三个。取数/解析都封在 induceMethodsForKp 内部，
 // 路由层不直接调 parseMethodResponse，避免同一套质量闸出现第二个调用点走偏。
 import { induceMethodsForKp, fetchCandidateKps } from '../services/kaofaInduction.js'
+// 2026-10-18：疑似同类题聚类（字符相似 A 主 + 同知识点 B 辅），方案 docs/similar-groups-方案.md
+import { scanSimilarGroups } from '../services/similarGroupClustering.js'
 
 const router = Router()
 const DEFAULT_USER = 'default-user'
@@ -583,6 +585,150 @@ router.get('/candidates', async (req, res) => {
       })),
       note: '考法 = 这道题在考哪套动作（不是题型形式）。点「自动整理」会先预演，确认后才写库。',
     })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+// ── 疑似同类题组（2026-10-18，方案 docs/similar-groups-方案.md）────────────────
+// 机器粗分（字符相似 A 主 + 同知识点 B 辅）成组 → 老师确认/忽略 → 确认沉淀为考法 draft。
+// ⛔ 本组端点只做「分组快照」，不合并/不删除/不修改任何错题记录（AGENTS.md 第 9 条）。
+const GROUP_UUID_RE = UUID_RE
+
+// GET /api/teaching-question-types/similar-groups?status=pending
+router.get('/similar-groups', async (req, res) => {
+  try {
+    const userId = userOrDefault(req)
+    const status = String(req.query.status || 'pending')
+    if (!['pending', 'confirmed', 'ignored'].includes(status)) {
+      return res.status(400).json({ success: false, error: 'status 仅支持 pending/confirmed/ignored' })
+    }
+    const { rows } = await query(
+      `SELECT g.id, g.student_id, s.name AS student_name, g.status, g.reason, g.title,
+              g.wrong_ids, g.question_ids, g.question_preview, g.type_id,
+              g.created_at, g.updated_at, g.confirmed_at, g.ignored_at
+         FROM similar_question_groups g
+         JOIN students s ON s.id = g.student_id
+        WHERE g.status = $1
+        ORDER BY g.created_at DESC`,
+      [status]
+    )
+    res.json({ success: true, groups: rows })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+// GET /api/teaching-question-types/similar-groups/:id —— 组详情（含全部错题预览）
+router.get('/similar-groups/:id', async (req, res) => {
+  try {
+    if (!GROUP_UUID_RE.test(req.params.id)) return res.status(404).json({ success: false, error: '组不存在' })
+    const { rows } = await query(
+      `SELECT g.*, s.name AS student_name
+         FROM similar_question_groups g
+         JOIN students s ON s.id = g.student_id
+        WHERE g.id = $1`, [req.params.id])
+    if (!rows.length) return res.status(404).json({ success: false, error: '组不存在' })
+    res.json({ success: true, group: rows[0] })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+// POST /api/teaching-question-types/similar-groups/scan —— 触发一次聚类扫描（免费、幂等）
+router.post('/similar-groups/scan', async (req, res) => {
+  try {
+    const result = await scanSimilarGroups()
+    res.json({ success: true, ...result })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+// POST /api/teaching-question-types/similar-groups/:id/confirm —— 确认：沉淀为考法 draft
+// ⛔ kp_id 是 NOT NULL（047 迁移）⇒ 必须定主考点。
+//    body.kpId 可选：老师已在前端选定主考点时传它（优先级最高）；
+//    否则从组内错题关联推断；两者都没有 → 409 code='NO_KP'，让老师手动选。
+router.post('/similar-groups/:id/confirm', async (req, res) => {
+  try {
+    const userId = userOrDefault(req)
+    if (!GROUP_UUID_RE.test(req.params.id)) return res.status(404).json({ success: false, error: '组不存在' })
+    const { rows } = await query(
+      `SELECT * FROM similar_question_groups WHERE id = $1`, [req.params.id])
+    if (!rows.length || rows[0].status !== 'pending') {
+      return res.status(409).json({ success: false, error: rows.length ? '该组已处理，不能重复确认' : '组不存在' })
+    }
+    const group = rows[0]
+    const wrongIds = group.wrong_ids || []
+
+    // 1. 主考点：body.kpId 优先 → 组内题推断 → 都没有则 409（需老师手动选）
+    let kpId = null
+    if (req.body?.kpId && isUuid(req.body.kpId)) kpId = String(req.body.kpId)
+    if (!kpId && wrongIds.length) {
+      const { rows: kpRows } = await query(
+        `SELECT qk.kp_id, COUNT(*)::int AS n
+           FROM wrong_questions wq
+           JOIN question_knowledge qk ON qk.question_id = wq.question_id
+          WHERE wq.id = ANY($1::uuid[])
+          GROUP BY qk.kp_id
+          ORDER BY n DESC, qk.kp_id
+          LIMIT 1`, [wrongIds])
+      kpId = kpRows[0]?.kp_id || null
+    }
+    if (!kpId) {
+      return res.status(409).json({
+        success: false,
+        code: 'NO_KP',
+        error: '这组题还没关联知识点，请先选一个主考点再确认（考试法必须有主考点）。',
+      })
+    }
+
+    // 2. 事务内：建考法 draft + examples + 组 → confirmed（任一失败整体回滚，不留半成品）
+    const typeId = await transaction(async (client) => {
+      const { rows: typeRows } = await client.query(
+        `INSERT INTO teaching_question_types (user_id, kp_id, subject, name, status, source, auto_summary)
+         VALUES ($1, $2, '数学', $3, 'draft', 'auto', $4::jsonb)
+         RETURNING id`,
+        [userId, kpId, group.title || '疑似同类题组', JSON.stringify({ action: '同类错题组', similarGroupId: group.id })]
+      )
+      const newTypeId = typeRows[0].id
+
+      // 3. 按 r220 机制为组内每道错题建 examples（source_wrong_question_id 挂错题）
+      for (const wqId of wrongIds) {
+        const { rows: wqRows } = await client.query(
+          `SELECT wq.error_count, q.content
+             FROM wrong_questions wq
+             LEFT JOIN questions q ON q.id = wq.question_id
+            WHERE wq.id = $1`, [wqId])
+        if (!wqRows.length) continue
+        const w = wqRows[0]
+        await client.query(
+          `INSERT INTO teaching_question_type_examples (type_id, source_wrong_question_id, snapshot, note)
+           VALUES ($1, $2, $3::jsonb, $4)`,
+          [newTypeId, wqId,
+            JSON.stringify({ wrongCount: w.error_count || 1, stem: (w.content || '').slice(0, 120), exampleId: wqId }),
+            '疑似同类题组自动沉淀']
+        )
+      }
+
+      // 4. 组 → confirmed
+      await client.query(
+        `UPDATE similar_question_groups
+            SET status = 'confirmed', type_id = $2, confirmed_at = now(), updated_at = now()
+          WHERE id = $1`, [group.id, newTypeId])
+      return newTypeId
+    })
+
+    res.status(201).json({
+      success: true,
+      typeId,
+      note: '已沉淀为考法 draft，可到考法库「待确认」里改名/确认，或直接整组送重练。',
+    })
+  } catch (error) { res.status(500).json({ success: false, error: error.message }) }
+})
+
+// POST /api/teaching-question-types/similar-groups/:id/ignore —— 忽略
+router.post('/similar-groups/:id/ignore', async (req, res) => {
+  try {
+    if (!GROUP_UUID_RE.test(req.params.id)) return res.status(404).json({ success: false, error: '组不存在' })
+    const { rowCount } = await query(
+      `UPDATE similar_question_groups
+          SET status = 'ignored', ignored_at = now(), updated_at = now()
+        WHERE id = $1 AND status = 'pending'`, [req.params.id])
+    if (!rowCount) return res.status(409).json({ success: false, error: '该组已处理，不能重复忽略' })
+    res.json({ success: true })
   } catch (error) { res.status(500).json({ success: false, error: error.message }) }
 })
 

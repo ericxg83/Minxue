@@ -10,13 +10,14 @@
       <button type="button" title="系统从错题归纳的讲法建议，确认后长期复用（不着急，有空再挑）" :class="['line-tab',{active:activeLine==='kaofa'}]" @click="setLine('kaofa')"><el-icon><Collection /></el-icon>考法库<template v-if="summary.recommendation_count"> · {{ summary.recommendation_count }} 待确认</template></button>
     </nav>
     <!-- r222 体验优化：两条线各配一句人话说明 —— 老师不需要记「考点 vs 考法」的概念，只要知道自己要干什么 → 走哪条线 -->
-    <p class="line-hint"><template v-if="activeLine==='kp'">备课找题就走这条线：选一个考点 → 看它和谁常一起考 → 把题送进周末班课件。</template><template v-else>系统从错题里归纳的「讲法」——一批题都在考同一个动作。认可就点「确认收录」，不急，有空再挑。</template></p>
+    <p class="line-hint"><template v-if="activeLine==='kp'">备课找题就走这条线：选一个考点 → 看它和谁常一起考 → 把题送进周末班课件。</template><template v-else-if="subMode==='similar'">题面相近的错题被机器聚成一类——这是同类题素材。认可一组就点「确认沉淀为考法」，不急，有空再挑。</template><template v-else>系统从错题里归纳的「讲法」——一批题都在考同一个动作。认可就点「确认收录」，不急，有空再挑。</template></p>
 
     <!-- 统计条：只在真有数据时给数字，0 写「暂无」，不摆三个孤零零的 0（r218） -->
     <section v-if="activeLine==='kaofa'" class="library-stats">
       <button type="button" class="library-stat" :class="{primary:subMode==='recommended'}" @click="setSubMode('recommended')"><span>待你确认</span><strong>{{ summary.recommendation_count || '暂无' }}</strong><small>系统按近期错题整理 · 点此查看</small></button>
       <button type="button" class="library-stat" :class="{primary:subMode==='library'}" @click="setSubMode('library')"><span>已沉淀考法</span><strong>{{ summary.type_count || '暂无' }}</strong><small>覆盖 {{ summary.knowledge_count || 0 }} 个知识点</small></button>
       <div class="library-stat"><span>本周维护</span><strong>{{ summary.updated_this_week || '暂无' }}</strong><small>本周确认或更新的考法</small></div>
+      <button type="button" class="library-stat" :class="{primary:subMode==='similar'}" @click="setSubMode('similar')"><span>疑似同类题</span><strong>{{ similarGroups.length || '暂无' }}</strong><small>题面相近的错题，确认后沉淀为考法</small></button>
     </section>
 
     <!-- ═══ 业务线① 考点工作台 ═══ -->
@@ -87,15 +88,45 @@
       </main>
     </template>
 
-    <!-- ═══ 业务线② 考法库（待确认 / 已确认） ═══ -->
+    <!-- ═══ 业务线② 考法库（待确认 / 已确认 / 疑似同类题） ═══ -->
     <template v-else>
-      <FilterBar class="type-filter">
+      <FilterBar class="type-filter" v-if="subMode !== 'similar'">
         <template #leading><div class="result-context"><strong>{{ subMode === 'recommended' ? '待你确认' : '已沉淀考法' }}</strong><span>{{ types.length }} 个</span></div></template>
         <WorkbenchInput v-model="keyword" clearable placeholder="搜索考法或讲法" width="240px" aria-label="搜索考法或讲法" @input="debouncedLoad"><template #prefix><el-icon><Search /></el-icon></template></WorkbenchInput>
         <template #actions><el-button text @click="startCreate"><el-icon><Plus /></el-icon>手动补充</el-button></template>
       </FilterBar>
 
+      <!-- 疑似同类题：机器粗分（字符相似为主 + 同知识点辅助），确认后沉淀为考法 draft -->
+      <FilterBar class="type-filter" v-if="subMode === 'similar'">
+        <template #leading><div class="result-context"><strong>疑似同类题</strong><span>{{ similarGroups.length }} 组待确认</span></div></template>
+        <WorkbenchInput v-model="similarKeyword" clearable placeholder="搜学生名或题目" width="240px" aria-label="搜索疑似同类题" @input="similarSearch" />
+        <template #actions><el-button text :loading="similarScanning" @click="runSimilarScan"><el-icon><Refresh /></el-icon>扫描疑似同类题</el-button></template>
+      </FilterBar>
+
       <main class="library-workspace">
+        <!-- 疑似同类题列表 -->
+        <template v-if="subMode === 'similar'">
+          <ContentCard class="type-list-card" title="疑似同类题" :description="'题面相近或同知识点的错题组，机器粗分 + 你确认后才沉淀为考法'" flush>
+            <div v-if="similarLoading" class="list-loading"><el-skeleton v-for="index in 5" :key="index" animated :rows="2" /></div>
+            <EmptyState v-else-if="!filteredSimilarGroups.length" :icon="CircleCheck" :title="similarScanState === 'scanned' ? '没有疑似同类题' : '还没扫描过'" :description="similarScanState === 'scanned' ? '当前没有题面相近的错题组。' : '点右上角「扫描疑似同类题」，系统会免费找出题面相近的错题。'">
+              <template #actions><ActionButton v-if="similarScanState !== 'scanned'" @click="runSimilarScan">扫描疑似同类题</ActionButton></template>
+            </EmptyState>
+            <div v-else class="type-list"><button v-for="item in filteredSimilarGroups" :key="item.id" type="button" :class="['type-row',{active:similarSelectedId===item.id}]" @click="selectSimilarGroup(item.id)"><span class="row-main"><strong>{{ item.student_name }} · {{ item.title }}</strong><small>{{ item.reason === 'content' ? '内容相近' : '同知识点' }} · {{ (item.wrong_ids||[]).length }} 道</small></span><span class="row-evidence">{{ (item.question_preview||[]).length }} 道预览</span><el-icon><ArrowRight /></el-icon></button></div>
+          </ContentCard>
+          <ContentCard class="type-inspector" title="组详情" :description="similarSelected ? `${similarSelected.student_name} · ${similarSelected.title}` : '选一组，看它包含了哪些题'" flush>
+            <div v-if="similarDetailLoading" class="detail-loading"><el-skeleton animated :rows="10" /></div>
+            <EmptyState v-else-if="!similarSelected" :icon="Reading" title="选一个疑似组" description="左边选一组，这里预览这组题。确认后沉淀为考法（draft），可继续整组送重练。" compact />
+            <article v-else class="type-detail">
+              <div class="detail-heading"><div><div class="knowledge-label">{{ similarSelected.student_name }}</div><h2>{{ similarSelected.title }}</h2></div></div>
+              <div v-if="similarSelected.reason" class="recommendation"><strong>{{ similarSelected.reason === 'content' ? '内容相近' : '同知识点' }}（机器粗分）</strong> · 共 {{ (similarSelected.wrong_ids||[]).length }} 道错题，确认前不会改动任何错题记录。</div>
+              <section class="detail-section"><h3>这组题</h3><div class="examples"><article v-for="(q,i) in (similarSelected.question_preview||[])" :key="i" class="example-card"><div class="example-idx">{{ i + 1 }}</div><div class="example-body"><div class="example-content">{{ q.content || '题目内容不可用' }}</div></div></article></div></section>
+              <div class="detail-actions" v-if="similarSelected.status==='pending'"><el-button @click="ignoreSimilarGroup">忽略</el-button><el-button type="primary" :loading="similarConfirming" @click="confirmSimilarGroup">确认沉淀为考法</el-button></div>
+            </article>
+          </ContentCard>
+        </template>
+
+        <!-- 待确认 / 已确认 考法列表 -->
+        <template v-else>
         <ContentCard class="type-list-card" :title="subMode === 'recommended' ? '系统整理的考法建议' : '已沉淀的考法'" :description="subMode === 'recommended' ? '按近期多人出错程度排序，认可就确认收录' : '长期可复用的教学考法'" flush>
           <div v-if="loading" class="list-loading"><el-skeleton v-for="index in 5" :key="index" animated :rows="2" /></div>
           <EmptyState v-else-if="!types.length" :icon="subMode === 'recommended' ? CircleCheck : Collection" :title="subMode === 'recommended' ? '本周没有待确认考法' : '还没有已确认考法'" :description="subMode === 'recommended' ? '点右上角「整理本周考法」，系统会先预演给你看，满意再写入。' : '先确认系统整理的考法，或手动补充一个。'">
@@ -128,6 +159,7 @@
             <div class="detail-actions" v-if="selectedType.status==='draft'"><el-button @click="editSelected">先改名字</el-button><el-button type="primary" :loading="confirming" @click="confirmType">确认收录</el-button></div>
           </article>
         </ContentCard>
+        </template>
       </main>
     </template>
 
@@ -234,7 +266,7 @@ async function applyOrganize(){applying.value=true;try{
 }catch(error){ElMessage.error(error.message||'写入失败')}finally{applying.value=false}}
 
 function setLine(line){activeLine.value=line;syncUrl();if(line==='kaofa'&&!types.value.length)loadTypes()}
-function setSubMode(mode){activeLine.value='kaofa';subMode.value=mode;selectedId.value=null;selectedType.value=null;loadTypes();syncUrl()}
+function setSubMode(mode){activeLine.value='kaofa';subMode.value=mode;selectedId.value=null;selectedType.value=null;if(mode==='similar'){loadSimilarGroups();syncUrl()}else{loadTypes();syncUrl()}}
 function pickKp(id){selectedKpId.value=id;loadKpWorkbench();syncUrl()}
 function jumpToKp(id){if(!id)return;selectedKpId.value=id;loadKpQuestions();syncUrl()}
 function clearKp(){selectedKpId.value='';kpQuestions.value=[];kpScope.value=null;cooccurNodes.value=[];cooccurLinks.value=[];kpActiveId.value=null;syncUrl()}
@@ -285,14 +317,98 @@ async function saveType(){if(!editor.value.kpId||!editor.value.name.trim())retur
 async function generateVariants(example){variantLoadingId.value=example.id;try{const response=await apiRequest(`/variants/${example.sourceQuestionId}/generate-all`,{method:'POST',body:JSON.stringify({})});ElMessage.success(response.generated?`已生成 ${response.generated} 道变式题`:'变式题已就绪')}catch(error){ElMessage.error(error.message||'生成变式题失败')}finally{variantLoadingId.value=null}}
 function handleDetailAction(command){if(command==='edit')return editSelected();const isIgnore=command==='ignore';ElMessageBox.confirm(isIgnore?'忽略后本次自动建议将不再展示。':'归档后考法不再参与自动整理与推荐。',isIgnore?'忽略建议':'归档考法',{type:'warning'}).then(async()=>{await apiRequest(`/teaching-question-types/${selectedType.value.id}${isIgnore?'/ignore':''}`,{method:isIgnore?'POST':'DELETE'});selectedId.value=null;selectedType.value=null;await Promise.all([loadTypes(),loadSummary()]);ElMessage.success(isIgnore?'已忽略本次建议':'考法已归档')}).catch(()=>{})}
 
+// ── 疑似同类题（2026-10-18：字符相似粗分 + 同知识点辅助，确认后沉淀为考法 draft）──
+const similarGroups=ref([]), similarLoading=ref(false), similarScanning=ref(false), similarScanState=ref('idle')
+const similarSelectedId=ref(null), similarSelected=ref(null), similarDetailLoading=ref(false), similarConfirming=ref(false)
+const similarKeyword=ref('')
+const filteredSimilarGroups=computed(()=>{
+  const kw=(similarKeyword.value||'').trim().toLowerCase()
+  if(!kw)return similarGroups.value
+  return similarGroups.value.filter(g=>{
+    const name=(g.student_name||'').toLowerCase().includes(kw)
+    const title=(g.title||'').toLowerCase().includes(kw)
+    const reason=(g.reason==='content'?'内容相近':'同知识点')
+    return name||title||reason.includes(kw)
+  })
+})
+async function loadSimilarGroups(keepSelection=false){
+  similarLoading.value=true
+  try{
+    const data=await apiRequest('/teaching-question-types/similar-groups?status=pending')
+    similarGroups.value=data.groups||[]
+    if(similarGroups.value.length) similarScanState.value='scanned'
+    if(!keepSelection){similarSelectedId.value=null;similarSelected.value=null}
+    else if(similarSelectedId.value&&!similarGroups.value.some(g=>g.id===similarSelectedId.value)){similarSelectedId.value=null;similarSelected.value=null}
+  }catch(error){ElMessage.error(error.message||'加载疑似同类题失败')}
+  finally{similarLoading.value=false}
+}
+async function runSimilarScan(){
+  similarScanning.value=true
+  try{
+    const data=await apiRequest('/teaching-question-types/similar-groups/scan',{method:'POST'})
+    ElMessage.success(`扫描完成：新增 ${data.inserted} 组疑似同类题`)
+    similarScanState.value='scanned'
+    await loadSimilarGroups()
+  }catch(error){ElMessage.error(error.message||'扫描失败')}
+  finally{similarScanning.value=false}
+}
+async function selectSimilarGroup(id){
+  similarSelectedId.value=id
+  similarDetailLoading.value=true
+  try{
+    const data=await apiRequest(`/teaching-question-types/similar-groups/${id}`)
+    similarSelected.value=data.group
+  }catch(error){ElMessage.error(error.message||'加载组详情失败')}
+  finally{similarDetailLoading.value=false}
+}
+async function confirmSimilarGroup(){
+  if(!similarSelectedId.value)return
+  similarConfirming.value=true
+  try{
+    const data=await apiRequest(`/teaching-question-types/similar-groups/${similarSelectedId.value}/confirm`,{method:'POST'})
+    ElMessage.success('已沉淀为考法 draft，可到「待你确认」里改名或确认')
+    similarSelected.value=null;similarSelectedId.value=null
+    await Promise.all([loadSimilarGroups(),loadSummary()])
+  }catch(error){
+    // ⛔ kp_id NOT NULL：组内题没关联知识点时后端返回 code='NO_KP'（挂在 error.payload.code），
+    //    让老师手动选一个主考点再确认（考法必须挂主考点，不硬造）。
+    if(error?.payload?.code==='NO_KP'){
+      const {value}=await ElMessageBox.prompt('这组题还没关联知识点，请选一个主考点再确认（考法必须有主考点）。输入考点名称关键词筛选：','选择主考点',{inputType:'text',confirmButtonText:'确认沉淀',cancelButtonText:'取消'}).catch(()=>({}))
+      if(!value)return
+      const matchedByName=flatKnowledge.value.find(k=>k.name===value.trim())
+      const matchedByFuzzy=flatKnowledge.value.filter(k=>k.name.includes(value.trim()))
+      let pick=matchedByName
+      if(!pick&&matchedByFuzzy.length===1)pick=matchedByFuzzy[0]
+      if(!pick&&matchedByFuzzy.length>1){
+        const {value:full}=await ElMessageBox.prompt(`找到 ${matchedByFuzzy.length} 个考点：${matchedByFuzzy.map(k=>k.name).join('、')}。输入完整考点名：`,'选择主考点',{inputType:'text'}).catch(()=>({}))
+        if(full)pick=matchedByFuzzy.find(k=>k.name===full.trim())||matchedByFuzzy.find(k=>k.name.includes(full.trim()))
+      }
+      if(!pick){ElMessage.warning('未找到匹配考点，已取消');return}
+      await apiRequest(`/teaching-question-types/similar-groups/${similarSelectedId.value}/confirm`,{method:'POST',body:JSON.stringify({kpId:pick.id})})
+      ElMessage.success('已沉淀为考法 draft，可到「待你确认」里改名或确认')
+      similarSelected.value=null;similarSelectedId.value=null
+      await Promise.all([loadSimilarGroups(),loadSummary()])
+      return
+    }
+    ElMessage.error(error.message||'确认失败')
+  }finally{similarConfirming.value=false}
+}
+async function ignoreSimilarGroup(){
+  if(!similarSelectedId.value)return
+  ElMessageBox.confirm('忽略后这组疑似同类题不再展示（错题记录本身不动）。','忽略这组建议',{type:'warning'}).then(async()=>{
+    try{await apiRequest(`/teaching-question-types/similar-groups/${similarSelectedId.value}/ignore`,{method:'POST'});ElMessage.success('已忽略');similarSelected.value=null;similarSelectedId.value=null;await loadSimilarGroups()}catch(error){ElMessage.error(error.message||'忽略失败')}
+  }).catch(()=>{})
+}
+function similarSearch(){}
+
 // ── URL 同步（r218 补铁律 13：入口参数必须双路生效，mount + watch 都得有）
 function syncUrl(){const q={};if(selectedKpId.value)q.kpId=selectedKpId.value;if(activeLine.value==='kaofa'){q.line='kaofa';q.sub=subMode.value}router.replace({path:'/question-bank',query:q})}
 function applyRouteQuery(){
   const line=route.query.line==='kaofa'?'kaofa':'kp'
-  const sub=route.query.sub==='library'?'library':'recommended'
+  const sub=route.query.sub==='library'?'library':(route.query.sub==='similar'?'similar':'recommended')
   const kp=route.query.kpId?String(route.query.kpId):''
   if(line!==activeLine.value)activeLine.value=line
-  if(line==='kaofa'&&sub!==subMode.value){subMode.value=sub;loadTypes()}
+  if(line==='kaofa'&&sub!==subMode.value){subMode.value=sub;if(sub==='similar')loadSimilarGroups();else loadTypes()}
   if(kp&&kp!==selectedKpId.value){selectedKpId.value=kp;if(activeLine.value==='kp')loadKpWorkbench()}
 }
 // ⛔ 铁律 13：hash 路由同页改 query 时 onMounted 不再跑 ⇒ 必须 watch，
@@ -306,7 +422,7 @@ onMounted(async()=>{
   // ⛔ r218：**移除**了 r145 加的 `autoOrganize(true)` 静默预演。它每次开页面都白跑一次
   //   AI 归纳（5 考点 × 27-48s、还要花钱），却因为不传 apply 而永远写不了库。
   //   整理改为右上角显式点击：先看预演，再决定写不写。
-  if(activeLine.value==='kaofa'){await loadTypes();await loadSummary()}
+  if(activeLine.value==='kaofa'){if(subMode.value==='similar')await loadSimilarGroups();else await loadTypes();await loadSummary()}
   else if(selectedKpId.value)await loadKpWorkbench()
   else await loadSummary()   // 默认停在考点选择器：让老师先选「从哪儿开始讲」，不自动替他选
 })
@@ -321,7 +437,7 @@ onMounted(async()=>{
 .line-tab:hover{border-color:var(--wb-primary);color:var(--wb-primary)}
 .line-tab.active{border-color:var(--wb-primary);background:var(--wb-primary-soft);color:var(--wb-primary);font-weight:600}
 /* 统计条 */
-.library-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:16px;border:1px solid var(--wb-border);border-radius:10px;background:var(--wb-bg-card);overflow:hidden}
+.library-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:16px;border:1px solid var(--wb-border);border-radius:10px;background:var(--wb-bg-card);overflow:hidden}
 .library-stat{display:grid;gap:4px;padding:16px 20px;border:0;border-right:1px solid var(--wb-border-light);background:transparent;color:inherit;text-align:left;cursor:pointer}
 .library-stat:last-child{border-right:0;cursor:default}
 .library-stat:hover:not(:last-child){background:var(--wb-bg-subtle)}
