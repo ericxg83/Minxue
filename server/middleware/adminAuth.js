@@ -8,8 +8,16 @@
  *
  * ── 策略（渐进式，不 break 现状）─────────────────────────────────────────
  *   · ADMIN_SECRET 已设 → 严格校验请求头 x-admin-token，不匹配 401
- *   · ADMIN_SECRET 未设 → 只允许本地来源（loopback / 内网），非本地 401 + 告警
- *     （生产公网来源在 env 未设时被锁，开发本地不受影响）
+ *   · ADMIN_SECRET 未设 + NODE_ENV=production → 一律 401（fail-closed）
+ *   · ADMIN_SECRET 未设 + 非生产（开发）→ 只允许本地来源（loopback / 内网）
+ *
+ * ⛔ production 为什么不做「本地来源放行」（2026-10-18 实测，P15 失效根因）：
+ *   server/index.js 未设 app.set('trust proxy')，因此 Express 的 req.ip =
+ *   req.socket.remoteAddress = **Render 前置代理的内网 IP**（172.x/10.x 网段）。
+ *   isLocalSource 的内网正则会把【所有公网请求】误判为"本地"→ 直接放行 ⇒
+ *   公网任意人仍可 POST /api/admin/data-cleanup 全表删除（与实测一致：
+ *   render.yaml NODE_ENV=production 且无 ADMIN_SECRET，公网 dryRun 仍返回 200）。
+ *   生产没有"本地来源"这一说（访问者都来自公网），未配 ADMIN_SECRET 就必须全拒。
  *
  * 负责人需在 Render 后台设置 ADMIN_SECRET 环境变量并 redeploy，之后管理端点即受保护。
  * token 由负责人自行保管，前端/脚本调用 admin 端点时带 x-admin-token 请求头。
@@ -31,10 +39,18 @@ export function adminAuth(req, res, next) {
     if (token && token === secret) return next()
     return res.status(401).json({ error: '管理端点需要有效的 x-admin-token' })
   }
-  // ADMIN_SECRET 未设：本地来源放行（开发友好），非本地拒绝并告警
+  // ADMIN_SECRET 未设：
+  if (process.env.NODE_ENV === 'production') {
+    // ⛔ 生产一律拒绝：Render 前置代理使 req.ip 恒为内网代理 IP，
+    //    isLocalSource 会把所有公网请求误判为本地（2026-10-18 实测，P15 失效）。
+    //    生产没有"本地来源"——必须配置 ADMIN_SECRET 才能使用 admin 端点。
+    console.warn(`[adminAuth] 生产环境 ADMIN_SECRET 未配置，拒绝所有 admin 访问：${req.method} ${req.originalUrl}`)
+    return res.status(401).json({ error: '生产环境管理端点必须配置 ADMIN_SECRET 并携带 x-admin-token' })
+  }
+  // 开发环境（NODE_ENV!=='production'）：本地来源放行（开发友好），非本地拒绝并告警
   if (isLocalSource(req)) return next()
-  console.warn(`[adminAuth] 拒绝公网访问 admin 端点（ADMIN_SECRET 未配置）：${req.method} ${req.originalUrl} from ${req.ip}`)
-  return res.status(401).json({ error: '生产环境访问管理端点需配置 ADMIN_SECRET 并携带 x-admin-token' })
+  console.warn(`[adminAuth] 拒绝非本地访问 admin 端点（ADMIN_SECRET 未配置）：${req.method} ${req.originalUrl} from ${req.ip}`)
+  return res.status(401).json({ error: '访问管理端点需配置 ADMIN_SECRET 并携带 x-admin-token' })
 }
 
 export default adminAuth

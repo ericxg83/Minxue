@@ -11,7 +11,10 @@
  *
  * 判据设计：源码级锁定 ——
  *   1. adminAuth.js 必须存在并导出 adminAuth 中间件，含 ADMIN_SECRET 校验与本地来源兜底；
- *   2. server/index.js 必须在所有 /api/admin 路由之前挂载 app.use('/api/admin', adminAuth)。
+ *   2. server/index.js 必须在所有 /api/admin 路由之前挂载 app.use('/api/admin', adminAuth)；
+ *   3. ⛔ 生产 fail-closed：ADMIN_SECRET 未设 + NODE_ENV=production 必须一律 401，
+ *      不得走 isLocalSource（2026-10-18 实测：Render 无 trust proxy，req.ip=代理内网 IP，
+ *      isLocalSource 把公网请求误判本地 → P15 失效，公网 dryRun 仍 200）。
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -40,4 +43,22 @@ test('P15 回归锁：server/index.js 必须在路由前挂载 app.use(\'/api/ad
   assert.ok(mountIdx < firstAdminRoute, 'adminAuth 挂载必须在第一个 /api/admin 路由之前')
   // import 必须存在
   assert.match(IDX, /import \{ adminAuth \} from ['"`]\.\/middleware\/adminAuth\.js['"`]/, '必须 import adminAuth')
+})
+
+test('P15 回归锁：生产 fail-closed——NODE_ENV=production 且未设 ADMIN_SECRET 必须全拒（P16 修复）', () => {
+  // isLocalSource 必须在 production 分支内不可达：production 分支直接 401
+  assert.match(MW, /NODE_ENV === 'production'/, '必须显式判断 NODE_ENV=production')
+  // 位置关系：production 分支的 401 必须出现在 isLocalSource(req) 调用之前
+  // （若有人把 isLocalSource 提前放进 production 分支，本判据即翻红）
+  const prodCheckAt = MW.indexOf("NODE_ENV === 'production'")
+  const prod401At = MW.indexOf('return res.status(401)', prodCheckAt)
+  const localCallAt = MW.indexOf('isLocalSource(req)') // 函数定义也在前面，但调用点是 if (isLocalSource(req))
+  const localIfAt = MW.indexOf('if (isLocalSource(req))')
+  assert.ok(prod401At > prodCheckAt, 'production 分支必须返回 401')
+  assert.ok(prod401At > -1 && localIfAt > -1 && prod401At < localIfAt,
+    'production 分支的 401 必须先于 isLocalSource 调用（Render 代理 IP 会误判本地）')
+  // 双策略仍须保留：ADMIN_SECRET 校验 + isLocalSource 开发兜底
+  assert.match(MW, /ADMIN_SECRET/, '必须读取 ADMIN_SECRET 环境变量')
+  assert.match(MW, /x-admin-token/, '必须校验 x-admin-token 请求头')
+  assert.match(MW, /isLocalSource/, '开发环境仍须有本地来源兜底函数')
 })
