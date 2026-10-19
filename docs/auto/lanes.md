@@ -688,3 +688,4 @@
 - **四道闸**：npm test **2549/2549 fail 0**｜eslint **0e/131w**（基线）｜`dist_nightly_20261019r307` **43.46s**｜preview 5710 单调用内起服：cert 0 + 8/8 + 0/16 + 0/13。
 - **备份**：最新 `2026-10-18` ok:true；今日 13:00 档被占源，r308 核 `2026-10-19` 补跑。无报警。
 - **接手提示**：① 备份 10-19 档核验 ② 持锁方 redisManager 改动收口与其四道闸 ③ r305-P-B 拍板后落地（🔴 置顶：Upstash 双库配额耗尽，生产 worker.available:false）④ 无新增 A 级候选时继续只读核查面。
+| **本地服务守护（看门狗）** | `scripts/dev/keep_local_services.mjs`、`scripts/dev/watchdogCadence.mjs`、`test/watchdogCadence.test.mjs` | 日常巡查 automation `4e9608a9`（2026-10-19 13:5x 负责人指令插入轮） | ✅ 本轮交付（高峰/低峰动态节奏 + 启动宽限 + 结构锁）；**进程重启待负责人双击 vbs 或下次登录自动生效**（沙箱禁止本会话生成常驻进程，schtasks/WMI/detached 全被拦或被作业对象回收，实测留档） |

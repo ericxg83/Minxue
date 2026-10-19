@@ -1,0 +1,242 @@
+/**
+ * keep_local_services.mjs — 敏学本地服务守护（后端 :4000 + 前端 :3000）
+ *
+ * 背景（2026-10-15）：
+ *   原有的开机自启（计划任务 MinxueLocalServices → start-local-hidden.vbs → start-local.cmd）
+ *   只用 `start /min cmd /c ...` 各拉一次，**没有任何保活**。实测 2026-10-15 08:19 登录触发后，
+ *   后端 08:21:41 才报「服务已启动」、约 08:22 就被 Ctrl+C（日志末尾 `^C`）收走，前端同样消失，
+ *   到 08:25 时 :3000 / :4000 都不在监听 —— 自启"跑过了"但服务没留下。
+ *   本守护沿用仓内已验证过的 keep_backend.mjs(r106)/keep_mobile_dev.mjs(2026-10-08) 模式：
+ *   以分离进程常驻；2026-10-19 起按使用高峰动态调频——高峰（默认周一~五 15:00-21:30，
+ *   生产库 tasks 60 天分布实测覆盖 90%）15s 探活保证随时拉起，低峰 600s 一探，
+ *   拉起后自动加速 2 分钟确认恢复（纯函数见 watchdogCadence.mjs，回归锁见 test/watchdogCadence.test.mjs）。
+ *
+ * 覆盖对象：
+ *   - 后端 :4000  健康检查 GET /api/health（3s 超时）
+ *   - 前端 :3000  vite dev，健康检查 GET /（3s 超时）
+ *
+ * 判据（与 keep_backend / keep_mobile_dev 完全一致，别改单边）：
+ *   探活失败 + 端口空闲        → detached 拉起
+ *   探活失败 + 端口被占        → 过了冷却期才 taskkill（冷启动可能 20~60s，误杀会死循环）
+ *   探活失败 + netstat 探测失败 → null，**本轮既不清也不拉**（「不知道」≠「没有」，
+ *                                混起来会拉出双份抢端口；见 server/utils/localSpawn.js）
+ *
+ * 开机自启链：计划任务 MinxueLocalServices(AtLogOn) → scripts/start-local-hidden.vbs
+ *            → 本脚本（隐藏窗口）。Startup 文件夹另放一份同款 vbs 做兜底。
+ * 单实例：logs/keep_local_services.pid 互斥，重复启动直接退出。
+ * 浏览器：带 --open 时，首次探到两端都健康后打开一次 http://127.0.0.1:3000/（每次守护生命周期仅一次）。
+ * 日志：logs/keep_local_services.log（追加，带时间戳）
+ * 停止：任务管理器结束 node（keep_local_services）即可（不会连带杀服务）。
+ */
+import { spawn } from 'node:child_process'
+import { appendFile, mkdir } from 'node:fs/promises'
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { spawnLocal } from '../../server/utils/localSpawn.js'
+import {
+  DEFAULT_OFFPEAK_INTERVAL_MS,
+  DEFAULT_PEAK_INTERVAL_MS,
+  DEFAULT_PEAK_WINDOWS_SPEC,
+  isPeak,
+  parseWindows,
+  pickIntervalMs,
+} from './watchdogCadence.mjs'
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const LOG = resolve(ROOT, 'logs', 'keep_local_services.log')
+const PID_FILE = resolve(ROOT, 'logs', 'keep_local_services.pid')
+// ⭐ 探测节奏（2026-10-19 负责人指示）：不必全天候 15s 高频——高峰（默认周一~五 15:00-21:30，
+//    来自生产库 tasks 60 天分布，覆盖 90%）保持 15s 保证随时拉起；低峰 600s 一探；
+//    任何一次拉起后自动加速 2 分钟确认恢复。可用 env 覆盖：
+//    WATCHDOG_PEAK_WINDOWS（格式见 watchdogCadence.mjs 头注）/ WATCHDOG_PEAK_INTERVAL_MS /
+//    WATCHDOG_OFFPEAK_INTERVAL_MS
+const PEAK_INTERVAL_MS = parseInt(process.env.WATCHDOG_PEAK_INTERVAL_MS, 10) || DEFAULT_PEAK_INTERVAL_MS
+const OFFPEAK_INTERVAL_MS = parseInt(process.env.WATCHDOG_OFFPEAK_INTERVAL_MS, 10) || DEFAULT_OFFPEAK_INTERVAL_MS
+const PEAK_WINDOWS = parseWindows(process.env.WATCHDOG_PEAK_WINDOWS) ?? parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
+const ACCELERATE_MS = 2 * 60_000 // 拉起后用高峰节奏确认恢复的时长
+const COOLDOWN_MS = 90_000 // 拉起后给足冷启动时间，期间探活失败也不 taskkill
+const OPEN_BROWSER = process.argv.includes('--open')
+const OPEN_URL = 'http://127.0.0.1:3000/'
+
+// 仓库外的 esbuild 二进制（见 .workbuddy-ai/memory/topics/build-and-dev.md §4）
+const ESBUILD_PATH = 'C:/Users/Administrator/.workbuddy-ai/binaries/esbuild/esbuild.exe'
+
+const SERVICES = [
+  {
+    name: 'backend',
+    port: 4000,
+    healthUrl: 'http://127.0.0.1:4000/api/health',
+    args: ['server/index.js'],
+    // ⭐ spawnedAt 以守护启动时刻起算（而非 0）：给启动宽限 90s——守护冷启动首跳若恰逢
+    //    服务健康检查瞬时失败（如 vite 按需编译 >3s），没有宽限会立即 taskkill 健康服务
+    //    （2026-10-19 13:57 实测一例）。90s 后行为与旧版完全一致。
+    spawnedAt: Date.now(),
+  },
+  {
+    name: 'frontend',
+    port: 3000,
+    healthUrl: 'http://127.0.0.1:3000/',
+    args: ['node_modules/vite/bin/vite.js', '--port', '3000', '--host'],
+    spawnedAt: Date.now(), // 同上：启动宽限
+  },
+]
+
+async function log(line) {
+  try {
+    await mkdir(dirname(LOG), { recursive: true })
+    await appendFile(LOG, `[${new Date().toISOString()}] ${line}\n`, 'utf8')
+  } catch {
+    /* 日志失败不影响守护 */
+  }
+}
+
+async function healthy(svc) {
+  try {
+    const ctl = new AbortController()
+    const t = setTimeout(() => ctl.abort(), 3000)
+    const r = await fetch(svc.healthUrl, { signal: ctl.signal })
+    clearTimeout(t)
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+/** 返回占用端口的 PID 列表；⛔ 探测失败返回 null（「不知道」≠「没有」） */
+function listeners(port) {
+  const r = spawnLocal('netstat', ['-ano', '-p', 'tcp'], { windowsHide: true })
+  if (r.status !== 0) return null
+  const pids = new Set()
+  for (const line of String(r.stdout || '').split('\n')) {
+    if (!line.includes(`:${port}`) || !/LISTENING/i.test(line)) continue
+    const pid = line.trim().split(/\s+/).pop()
+    if (/^\d+$/.test(pid)) pids.add(pid)
+  }
+  return [...pids]
+}
+
+function spawnService(svc) {
+  const env = { ...process.env }
+  if (existsSync(ESBUILD_PATH)) env.ESBUILD_BINARY_PATH = ESBUILD_PATH
+  const child = spawn(process.execPath, svc.args, {
+    cwd: ROOT,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+    env,
+  })
+  child.unref()
+}
+
+// ── 单实例守卫（开机自启 + 手动启动叠加时防双跑）──
+try {
+  if (existsSync(PID_FILE)) {
+    const old = Number(readFileSync(PID_FILE, 'utf8').trim())
+    if (old && old !== process.pid) {
+      try {
+        process.kill(old, 0) // 还活着 → 已有守护在跑
+        console.log(`keep_local_services 已在运行（PID ${old}），本实例退出`)
+        process.exit(0)
+      } catch {
+        /* 旧进程已死，残留 pid 文件，接管 */
+      }
+    }
+  }
+  writeFileSync(PID_FILE, String(process.pid))
+  process.on('exit', () => {
+    try {
+      if (readFileSync(PID_FILE, 'utf8').trim() === String(process.pid)) unlinkSync(PID_FILE)
+    } catch {
+      /* 忽略 */
+    }
+  })
+} catch {
+  /* pid 守卫失败不阻断守护主职能 */
+}
+
+let ticking = false
+let browserOpened = false
+let everSpawned = false
+let accelerateUntil = 0 // 拉起后的加速确认期截止时刻（期间用高峰节奏 15s 探活）
+let lastMode = null // 'peak' | 'offpeak'，仅用于节奏切换时记一行日志
+
+async function tick() {
+  if (ticking) return
+  ticking = true
+  try {
+    let allHealthy = true
+    for (const svc of SERVICES) {
+      const ok = await healthy(svc)
+      if (!ok) allHealthy = false
+      if (ok) continue
+
+      const pids = listeners(svc.port)
+      if (pids === null) {
+        await log(`[${svc.name}] netstat 探测失败 → 本轮不清也不拉（避免抢端口）`)
+        continue
+      }
+      if (pids.length) {
+        const inCooldown = Date.now() - svc.spawnedAt < COOLDOWN_MS
+        if (inCooldown) {
+          const left = Math.round((COOLDOWN_MS - (Date.now() - svc.spawnedAt)) / 1000)
+          await log(`[${svc.name}] :${svc.port} 被占（PID ${pids.join(',')}）但刚拉起（冷却 ${left}s）→ 等待启动`)
+          continue
+        }
+        await log(`[${svc.name}] 健康失败且 :${svc.port} 被占（PID ${pids.join(',')}，已过冷却）→ taskkill 后下轮拉起`)
+        for (const pid of pids) {
+          spawnLocal('taskkill', ['/F', '/PID', pid], { windowsHide: true, stdio: 'ignore' })
+        }
+        continue
+      }
+      await log(`[${svc.name}] 健康失败且 :${svc.port} 空闲 → 拉起`)
+      svc.spawnedAt = Date.now()
+      everSpawned = true
+      accelerateUntil = Date.now() + ACCELERATE_MS
+      spawnService(svc)
+    }
+
+    if (allHealthy && !browserOpened && everSpawned && OPEN_BROWSER) {
+      browserOpened = true
+      await log(`两端健康 → 打开浏览器 ${OPEN_URL}`)
+      try {
+        spawn('cmd', ['/c', 'start', '', OPEN_URL], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      } catch (e) {
+        await log(`打开浏览器失败: ${e.message}`)
+      }
+    }
+  } catch (e) {
+    await log(`tick 异常: ${e.message}`)
+  } finally {
+    ticking = false
+  }
+}
+
+await log(
+  `守护启动（高峰每 ${PEAK_INTERVAL_MS / 1000}s / 低峰每 ${OFFPEAK_INTERVAL_MS / 1000}s 探活 :4000 + :3000，` +
+  `窗口 ${process.env.WATCHDOG_PEAK_WINDOWS || DEFAULT_PEAK_WINDOWS_SPEC}，PID ${process.pid}${OPEN_BROWSER ? '，--open' : ''}）`
+)
+
+// 自排程主循环：每轮按「高峰/低峰/拉起加速期」动态决定下一轮间隔（替代旧版固定 15s setInterval）
+async function loop() {
+  const now = new Date()
+  const mode = isPeak(now, PEAK_WINDOWS) ? 'peak' : 'offpeak'
+  if (mode !== lastMode) {
+    await log(`节奏切换 → ${mode === 'peak' ? `高峰（每 ${PEAK_INTERVAL_MS / 1000}s 探活）` : `低峰（每 ${OFFPEAK_INTERVAL_MS / 1000}s 探活）`}`)
+    lastMode = mode
+  }
+  await tick()
+  const nextMs = pickIntervalMs({
+    now,
+    windows: PEAK_WINDOWS,
+    peakMs: PEAK_INTERVAL_MS,
+    offPeakMs: OFFPEAK_INTERVAL_MS,
+    accelerateUntil,
+  })
+  setTimeout(() => { loop().catch(() => {}) }, nextMs)
+}
+
+loop().catch(async (e) => {
+  await log(`主循环异常退出: ${e.message}，5s 后重启主循环`)
+  setTimeout(() => { loop().catch(() => {}) }, 5000)
+})
