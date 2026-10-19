@@ -82,3 +82,33 @@ r305 发现双库配额耗尽 ⇒ 队列停摆。但本轮 13:06 探针发现**�
 - r305-P-C 部分缓解（心跳 1/5），BullMQ 轮询烧速与「是否上付费层」维持原提案待拍板。
 - ⚠️ 备1 在配额边界上「能通/不能通」飘（10:15 断、13:06 通、13:39 又断）——自愈机制对这种飘态
   正好是对症药（每 15 分钟试一次，通就归队），无需人工干预。
+
+## 6. 生产恢复验证（14:16–14:2x，负责人贴 env，本轮补记）
+
+- **负责人 14:16 在 Render 贴上 `REDIS_POOL_URLS`**（注：贴的池子 =
+  `redis://…superb-mallard…（主库明文版）` + `rediss://…current-mollusk…`，缺 first-skunk）。
+- Render 14:16:48 自动重启，部署 commit `87e0f6d`（看门狗调频 docs 随车）。
+- **14:19:39 实测 worker-status：`redis.connected: true` / `worker.available: true`** —— 权威判据通过，
+  **生产队列复活，「今晚能用」达成**。
+- 重启瞬间主库恰好可用（14:16 探针实弹 GET/DBSIZE 通，DBSIZE=304）⇒ 生产直连主库成功，
+  池子尚未被用到；主库再撞墙时 failover 会先跳过死跳的 `redis://` 明文项（对 TLS-only Upstash 必败）
+  再落 mollusk —— 兜底成立，仅多耗一跳超时。
+- **负责人关键澄清：三个 Upstash 库 = 三个独立账号** ⇒ 各自独立 500K/月，failover 有真实意义
+  （修正此前「同账号共享额度」的假设；也解释 mollusk 新账号额度充足）。
+- **新发现（重要，勘误口径）**：`/api/quota/status` 的 degraded 是**熔断标记快照、不会自动复测**——
+  本地 first-skunk 报「08:48 起超限 329 分钟」、生产主库报「13:38 起超限 35 分钟」，
+  而 14:16 外部探针实测**两库 GET/DBSIZE 全通**。⇒ 判断 Redis 真死活，
+  **必须用新连接实弹 GET/DBSIZE**（留档探针 `server/_probe_upstash_now.mjs`，只读零写入），
+  不能信 quota/status 的旧报错；PING 更不行（超额后仍 PONG）。
+- 本地 :4000（13:37 起）当时 `redis.connected:false`：等 startBreakerProbe 轮转（900s/轮、按池序轮转探一个）
+  探到可用实例即自动恢复，无需人工。
+
+## 7. 池子优化建议（不阻塞今晚，负责人有空再贴）
+
+理想池（都 `rediss://`、去掉主库重复项、补上 first-skunk 独立账号的 500K）：
+
+```
+rediss://default:<first-skunk 的密码>@first-skunk-160324.upstash.io:6379,rediss://default:gQAAAAAAAW-tAAIgcDFhYWIxZmY5MTg3ODI0OWU5YTNlMGIxODNkYzdlN2VjNQ@current-mollusk-94125.upstash.io:6379
+```
+
+三个账号三份额度 = 主库 50 万 + 备1 50 万 + 备2 50 万，故障转移链条完整。
