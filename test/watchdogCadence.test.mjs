@@ -105,6 +105,17 @@ test('反向自检：旧固定节奏（合成样本）在低峰与新策略结�
   )
 })
 
+test('时区无关性：isPeak 按「UTC 毫秒 + 固定偏移」判定（Render 是 UTC 机器，不得依赖本机钟面）', () => {
+  const w = parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
+  // 用绝对时刻构造（ISO 带 Z），任何时区机器上结果一致：
+  assert.equal(isPeak(new Date('2026-10-19T08:30:00Z'), w), true, 'UTC 08:30 = 北京周一 16:30 → 高峰')
+  assert.equal(isPeak(new Date('2026-10-19T02:00:00Z'), w), false, 'UTC 02:00 = 北京周一 10:00 → 低峰')
+  // 跨日：UTC 周日 19:00 = 北京周一 03:00 → 按北京钟面判为低峰（不得因 UTC 钟面落周日而误判）
+  assert.equal(isPeak(new Date('2026-10-18T19:00:00Z'), w), false, 'UTC 周日 19:00 = 北京周一 03:00 → 低峰')
+  assert.equal(isPeak(new Date('2026-10-23T13:29:00Z'), w), true, 'UTC 13:29 = 北京周五 21:29 → 高峰')
+  assert.equal(isPeak(new Date('2026-10-23T13:30:00Z'), w), false, 'UTC 13:30 = 北京周五 21:30 整 → 低峰（开区间）')
+})
+
 test('结构锁：keep_local_services.mjs 已接入动态节奏并拆除固定 setInterval', () => {
   assert.ok(WD_SRC.includes('pickIntervalMs('), '主循环必须调用 pickIntervalMs')
   assert.ok(WD_SRC.includes('isPeak(now, PEAK_WINDOWS)'), '主循环必须用 isPeak 判高峰')

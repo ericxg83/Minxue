@@ -1,5 +1,6 @@
 import Redis from 'ioredis'
 import { recordDegraded } from './services/quotaSentinel.js'
+import { parseWindows, isPeak, DEFAULT_PEAK_WINDOWS_SPEC } from './lib/peakWindows.mjs'
 
 // Upstash 业务级错误关键字（ping 不会触发，只在实际命令时返回）
 const QUOTA_EXHAUSTED_PATTERNS = [
@@ -26,9 +27,16 @@ class RedisManager {
     this.pool = []
     this.initialized = false
     this.healthCheckInterval = null
-    // 心跳间隔：默认 300s（2026-10-19 由 60s 调大 5 倍，降 Upstash 免费额度烧速）。
-    // 可用环境变量 REDIS_HEALTH_CHECK_MS 覆盖，便于不重新部署即可微调。
-    this.healthCheckIntervalMs = parseInt(process.env.REDIS_HEALTH_CHECK_MS, 10) || 300000
+    // 心跳节奏（2026-10-19 负责人 14:24 指令：每条 PING 都烧 Upstash 额度 ⇒ 高峰密集、低峰基本不用）：
+    // tick 固定 REDIS_HEALTH_CHECK_PEAK_MS（默认 60s，本地定时器不烧 Redis），tick 内由
+    // shouldRunHealthCheck 门控——高峰窗内每 tick 必查；低峰每 REDIS_HEALTH_CHECK_MS（默认 30 分钟）抽检。
+    // 高峰窗与看门狗共用 server/lib/peakWindows.mjs 唯一实现（⛔ 不能 import scripts/dev/watchdogCadence.mjs：
+    // Render rootDir=server，scripts/ 不在生产镜像，生产会 ERR_MODULE_NOT_FOUND）。
+    // ⚠️ REDIS_HEALTH_CHECK_MS 语义已从「全天固定间隔」（曾默认 300000）改为「低峰间隔」。
+    this.healthTickMs = parseInt(process.env.REDIS_HEALTH_CHECK_PEAK_MS, 10) || 60000
+    this.healthOffPeakIntervalMs = parseInt(process.env.REDIS_HEALTH_CHECK_MS, 10) || 1800000
+    this.healthTickCount = 0
+    this.healthPeakWindows = parseWindows(process.env.REDIS_PEAK_WINDOWS) ?? parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
     this.reconnectDelayMs = 5000 // 5 seconds
     // 熔断自愈回探间隔：默认 15 分钟（REDIS_BREAKER_PROBE_MS 可覆盖）。
     // 只在「存在被熔断实例」时才真正发命令，正常运行零开销。
@@ -171,6 +179,15 @@ class RedisManager {
           retryStrategy: () => null
         })
       }
+      // 探针 client 同样必须挂 error 监听（2026-10-19 r308 实测补）：
+      // ioredis 对没有 error 监听的实例只会打印 "[ioredis] Unhandled error event"
+      // （built/Redis.js silentEmit 兜底：有监听才 emit，无监听仅 console.error，
+      // 不抛异常、不崩进程——本轮对真实超额主库/恢复备库/不存在域名三种路径实测
+      // uncaughtException 计数均为 0）。但不挂的代价是：被熔断实例每次回探失败
+      // 都会往日志堆一条「看似未处理崩溃」的噪音，真事故时反而干扰判读。
+      // 失败语义由本函数返回值承载（false = 额度未恢复/不可达），此处静默即可；
+      // 实例状态的可观测面是 getStats().quotaExhausted 与 /api/diagnostics/worker-status。
+      client.on('error', () => { /* 失败由返回值表达，禁 ioredis 默认噪音行 */ })
       await client.get(REDIS_BREAKER_PROBE_KEY)
       return true
     } catch {
@@ -422,6 +439,16 @@ class RedisManager {
     return null
   }
 
+  /**
+   * 心跳门控（纯函数便于测试）：高峰窗内每 tick 必查；低峰按 healthOffPeakIntervalMs
+   * 换算的 tick 间隔抽检。判据用动作时刻的 now，禁止事后取值。
+   */
+  shouldRunHealthCheck(now = new Date(), tickCount = this.healthTickCount) {
+    if (isPeak(now, this.healthPeakWindows)) return true
+    const every = Math.max(1, Math.round(this.healthOffPeakIntervalMs / this.healthTickMs))
+    return tickCount % every === 0
+  }
+
   startHealthCheck() {
     // Clear existing interval
     if (this.healthCheckInterval) {
@@ -430,6 +457,8 @@ class RedisManager {
 
     this.healthCheckInterval = setInterval(async () => {
       if (this.isShuttingDown) return
+      this.healthTickCount += 1
+      if (!this.shouldRunHealthCheck()) return
 
       try {
         const client = await this.getAvailableClient()
@@ -441,9 +470,9 @@ class RedisManager {
       } catch (err) {
         console.error('[Redis:HealthCheck] 健康检查失败:', err.message)
       }
-    }, this.healthCheckIntervalMs)
+    }, this.healthTickMs)
 
-    console.log(`[Redis:HealthCheck] 已启动 (间隔: ${this.healthCheckIntervalMs / 1000}s)`)
+    console.log(`[Redis:HealthCheck] 已启动 (tick: ${this.healthTickMs / 1000}s；高峰每 tick 必查 / 低峰每 ${this.healthOffPeakIntervalMs / 60000} 分钟；窗口: ${process.env.REDIS_PEAK_WINDOWS || DEFAULT_PEAK_WINDOWS_SPEC})`)
   }
 
   stopHealthCheck() {
