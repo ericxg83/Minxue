@@ -4973,3 +4973,16 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **备份**：最新 `2026-10-18` ok:true（北京 20:19:47，同源串行延后第五例），仍 5/29 表；今日 13:00 档被本轮流占源，预计轮后补跑 ⇒ **r308 必核 `2026-10-19` 目录**。无报警。
 - **四道闸**：npm test **2549/2549 fail 0**（13.5s）｜eslint **0e/131w**（基线；中途 2e 空 catch 自伤按 r289 先例补注释修复）｜`dist_nightly_20261019r307` **43.46s**｜preview 5710 单调用内起服：cert 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**，全 exit 0。0 个 src/ 文件。
 - 无新增 B/C 提案；待拍板清单不变（见 r307 报告第五节）。
+
+## Redis 配额事故热修复（2026-10-19 13:2x–13:5x，**负责人指令插入轮**，commit `defbd6d` 已推送，不认领轮号）
+
+> 负责人深夜指令：「修熔断卡死 + 降频 + mollusk 挂第三备份 + 推送 + 今晚必须能用」。按 r270 先例为指令插入轮。
+> ⚠️ 澄清归属：r307 段所述「13:15 持锁方复工改 redisManager.js」实为**本轮（本 automation）在负责人直接指挥下**的修改，非 r304 持锁方。
+
+- **✅ 熔断卡死根因修复（`defbd6d`）**：`redisManager` 被熔断实例原本只等每月 1 号解除、健康检查绝不回探 ⇒ Upstash 额度月中恢复也无法归队（first-skunk 实测 10:15 熔断→13:06 已恢复→队列仍死）。新增 `startBreakerProbe`（默认 15min，`REDIS_BREAKER_PROBE_MS` 可调，仅存在熔断实例时才发命令）：对被熔断实例发**真实数据命令** GET（PING 对配额超额天然失明）→ 成功即解除熔断归队 + 新回调 `onQuotaRecovered`（queue.js 注册：仅队列坏死态才 rebuildQueue，健康不打断）。事故持续主因从「没有额度」修正为「有额度回不了队」。
+- **✅ 降频（r305-P-C 部分落地）**：健康检查 60s→300s（`REDIS_HEALTH_CHECK_MS` 可覆盖），心跳烧量 1/5。作者为本轮（r307 段误记为持锁方）。
+- **✅ 第三备份接线**：负责人新建 Upstash 库 **current-mollusk-94125**（实测 PING/SET/GET/DEL 全通、全新空库），按指令挂**第三备份**：池序 = superb-mallard（主）→ first-skunk（备1）→ current-mollusk（备2）。URL 已归一 `rediss://`。仅入本地 `server/.env`（gitignored 不入库）。
+- **实弹验证**：npm test **2555/2555**（含新锁 test/redisBreakerSelfHeal.test.mjs 6 条；反向自检旧版三层全判红）｜eslint 0e/131w｜0 个 src/ 文件构建冒烟豁免（r303 先例）。探针进程走真实 initQueue：主库撞墙熔断 → 备1 也撞墙（余量在刀口）→ **落 mollusk，taskQueue 就绪**；本地后端已重启加载新码。
+- **生产**：`defbd6d` 13:38 已自动部署（bootAt 实证）。队列惰性初始化，首次建任务时走链路。**⚠️ 待负责人一步（无面板权限）**：Render Dashboard → minxue-api → Environment → `REDIS_POOL_URLS` 追加 current-mollusk 串（完整串见 `docs/auto/reports/2026-10-19-hotfix-redis.md` §4）→ 保存自动重部署 ⇒ 生产今晚稳。兜底：自愈回探会在 first-skunk/主库额度窗口恢复时自动救活生产队列（first-skunk 今日已演示月中恢复；主库最迟 11-01）。
+- **r305-P-B 状态更新**：本地 ✅ 恢复（实测落 mollusk）；生产 🟡 代码已就位、差负责人贴 env。贴完并经下一轮巡查实测 `redis.connected:true` 后正式关闭。
+- **⚠️ r308 必办**：① 核 `2026-10-19` 备份目录（r307 交接）；② 生产 Redis 恢复确认（worker-status `redis.connected` 权威判据）；③ 若负责人已贴 env，关闭 r305-P-B。
