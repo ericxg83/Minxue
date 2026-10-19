@@ -25,6 +25,21 @@
         若学生这几题本来空着没做，可直接按「未作答」处理；若是漏拍了一页，请让学生补传该页后重新处理。
       </span>
     </div>
+    <!-- 当前题「定位框不在本页 / 无框」提示。
+         [2026-10-15] 「同 origQ 借用」只借页码、不借框（借框 = 把别题的框画到本题头上），
+         于是出现「翻到正确页但没蓝框」。过去静默不画，老师只能对着空白图猜。
+         这里只陈述事实 + 给一个跳到框所在页的出口，**绝不画存疑的框**。 -->
+    <div v-if="boxHintText" class="review-boxhint-notice">
+      <el-icon class="coverage-icon"><WarningFilled /></el-icon>
+      <span class="coverage-text">{{ boxHintText.text }}</span>
+      <el-button
+        v-if="boxHintText.action"
+        class="boxhint-jump"
+        size="small"
+        text
+        @click="jumpToBoxPage(boxHintText.pageIndex)"
+      >{{ boxHintText.action }}</el-button>
+    </div>
     <!-- 重练卷不可复核（学生还没交卷 / AI 处理中） -->
     <!-- 必须先于 all-done / 三栏判断：这批卷的学生答卷不存在，三栏里的
          AI 统计、原卷出处、完成批改按钮都会拿原始作业的旧判定冒充本次结果 -->
@@ -175,6 +190,44 @@ const retryCoverageLabelText = computed(() => {
   return contiguous ? `${sorted[0]}~${sorted[sorted.length - 1]}` : labels.join('、')
 })
 
+// ── 当前题「定位框在哪一页」提示文案 ──
+// [2026-10-15] 「同 origQ 借用」只借页码不借框（借框 = 把 A 题框画到 B 题头上，
+//   违反「绝不乱画」红线），所以会出现「翻到正确页但没蓝框」。过去这是静默的，
+//   老师只能对着空白图猜。这里把事实说出来，并给一个「跳到框所在页」的出口。
+const boxHintText = computed(() => {
+  const h = store.currentQuestionBoxHint
+  if (!h) return null
+  const label = store.currentReviewQuestion?._paperLabel
+    || String(store.currentReviewIndex + 1)
+  if (h.kind === 'otherPage') {
+    return {
+      text: `第 ${label} 题的定位框记录在第 ${h.pageNumber} 页，不在当前页——` +
+        `该题的作答对位存疑（识别方式：${h.matchedBy || '未知'}），因此没有画框，避免画到邻题上。`,
+      action: `跳到第 ${h.pageNumber} 页看框`,
+      pageIndex: h.pageIndex,
+    }
+  }
+  if (h.kind === 'noTrace') {
+    return {
+      text: `第 ${label} 题在答卷图上没有识别到作答痕迹，因此不画定位框。`,
+      action: null,
+      pageIndex: h.pageIndex,
+    }
+  }
+  return {
+    text: `第 ${label} 题没有对位记录（旧数据 / 未走对位管线），无法定位。`,
+    action: null,
+    pageIndex: null,
+  }
+})
+
+// 跳到「该题定位框所在的那一页」（老师想看框时用）。走 store.setPageIndex 唯一入口，
+// 保证 ensureRefinedBoxes() 不被跳过（见 reviewStore 内 setPageIndex 的注释）。
+const jumpToBoxPage = (pageIndex) => {
+  if (pageIndex == null) return
+  store.setPageIndex(Number(pageIndex))
+}
+
 // ── 重练卷不可复核（2026-09-12 修复）──
 // 学生还没交卷 / AI 还在跑的卷不允许进入复核视图。
 // 兜底场景：批改中心的旧链接、Dashboard 深链、老师打开的瞬间学生才交卷。
@@ -246,18 +299,27 @@ provide('archiveState', archiveState)
 //   const 会踩 TDZ，虽因 onMounted 回调延迟执行而侥幸不炸，但不该留这种巧合。
 function focusQuestionFromQuery() {
   const requestedQuestionId = route.query.q
-  if (!requestedQuestionId) return
-  // 定位判据用 questionId 全等匹配，**不按题号找**：题号在错题卷上会被重排
-  // （分块后跨块累加），按题号匹配会落到隔壁题上——那比不定位更坏。
-  const idx = store.allQuestions.findIndex(q => String(q.id) === String(requestedQuestionId))
-  if (idx < 0) {
-    // 该题不在本卷（题目被删 / 被排除，或 taskId 其实指向另一份卷）：如实说，
-    // 不能静默停在别的题上让老师以为改的是目标题。
-    ElMessage.warning('这道题不在当前试卷里，可能已被删除或排除；请在题号列表里确认')
+  if (requestedQuestionId) {
+    // 定位判据用 questionId 全等匹配，**不按题号找**：题号在错题卷上会被重排
+    // （分块后跨块累加），按题号匹配会落到隔壁题上——那比不定位更坏。
+    const idx = store.allQuestions.findIndex(q => String(q.id) === String(requestedQuestionId))
+    if (idx < 0) {
+      // 该题不在本卷（题目被删 / 被排除，或 taskId 其实指向另一份卷）：如实说，
+      // 不能静默停在别的题上让老师以为改的是目标题。
+      ElMessage.warning('这道题不在当前试卷里，可能已被删除或排除；请在题号列表里确认')
+      return
+    }
+    store.jumpToQuestion(idx)
+    store.pendingEditQuestionId = store.allQuestions[idx].id
     return
   }
-  store.jumpToQuestion(idx)
-  store.pendingEditQuestionId = store.allQuestions[idx].id
+  // ?focus=todo：待复核入口默认对准「待处理」页签并跳到第一道未确认题
+  // （2026-10-15 修复「PC 后台待复核引导到的批改页默认对准全部，应对准待处理」）。
+  // 只在入口显式声明时生效——不把默认遮罩强加给「打开已复核完的卷」（那会看到空列表）；
+  // 走的是 store.jumpToFirstUnconfirmed（与上下文条「还差 N 题」同源口径）。
+  if (route.query.focus === 'todo') {
+    store.jumpToFirstUnconfirmed()
+  }
 }
 
 // ── 初始化：加载数据 ──
@@ -493,8 +555,41 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .review-coverage-notice .coverage-hint { color: var(--wb-text-secondary); }
+
+/* ── 当前题「定位框不在本页 / 无框」提示 ──
+   与覆盖度提示同款（警示语义靠左色条 + 图标承载），但只占一行、不抢视觉焦点。 */
+.review-boxhint-notice {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 6px 20px;
+  background: var(--wb-warning-soft);
+  border-bottom: 1px solid var(--wb-border);
+  border-left: 3px solid var(--wb-warning);
+  color: var(--wb-text);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.review-boxhint-notice .coverage-icon {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--wb-warning);
+  font-size: 14px;
+}
+.review-boxhint-notice .boxhint-jump {
+  align-self: center;
+  flex-shrink: 0;
+  height: 22px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--wb-warning);
+}
 .three-panel { min-height: 0; }
-@media (max-width: 1100px) { .review-coverage-notice { padding: 7px 14px; } }
+@media (max-width: 1100px) {
+  .review-coverage-notice { padding: 7px 14px; }
+  .review-boxhint-notice { padding: 6px 14px; }
+}
 
 /* [B2-3 快捷键速查] 浮层内键位表（append-to-body 渲染，走 :deep 无必要——
    dialog 内容仍在本组件作用域内编译） */

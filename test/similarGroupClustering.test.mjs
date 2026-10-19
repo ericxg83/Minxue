@@ -77,6 +77,21 @@ test('A 主聚类: 单条不聚', () => {
   assert.equal(clusterContentGroups([{ id: 'a1', studentId: 's1', content: '独题' }]).length, 0)
 })
 
+test('A 主聚类: MAX_GROUP_SIZE=20 截断，巨型组不产出巨型考法/重练卷', () => {
+  // 构造 30 道题面相近（互差 ≤2）的题 → 组必须被截到 20 道
+  const items = []
+  for (let i = 0; i < 30; i++) {
+    // 同一题 + 尾部标点抖动制造低编辑距离变体
+    items.push({ id: `big${i}`, studentId: 's1', content: `若x=-2是关于x的方程x^2+a^2=${i}ax的一个根，试求a的值${'.'.repeat(i % 2)}` })
+  }
+  const groups = clusterContentGroups(items)
+  assert.ok(groups.length >= 1, '应有聚类结果')
+  for (const g of groups) {
+    assert.ok(g.wrongIds.length <= 20, `组不得超过 20 道，实际 ${g.wrongIds.length}`)
+    assert.match(g.title, /^内容相近 \d+ 道$/)
+  }
+})
+
 test('B 辅聚类: 同学生同知识点 ≥2 题聚组', () => {
   const items = [
     { id: 'a1', studentId: 's1', kpIds: ['kp1', 'kp2'] },
@@ -93,4 +108,14 @@ test('B 辅聚类: 同学生同知识点 ≥2 题聚组', () => {
 test('B 辅聚类: 单条或跨学生不聚', () => {
   assert.equal(clusterKpGroups([{ id: 'a1', studentId: 's1', kpIds: ['k1'] }]).length, 0)
   assert.equal(clusterKpGroups([{ id: 'a1', studentId: 's1', kpIds: ['k1'] }, { id: 'b1', studentId: 's2', kpIds: ['k1'] }]).length, 0)
+})
+
+test('B 辅聚类: kp 组同样受 MAX_GROUP_SIZE 截断', () => {
+  const items = []
+  for (let i = 0; i < 30; i++) items.push({ id: `k${i}`, studentId: 's1', kpIds: ['kp1'] })
+  const groups = clusterKpGroups(items)
+  assert.ok(groups.length >= 1, '应有聚类结果')
+  for (const g of groups) {
+    assert.ok(g.wrongIds.length <= 20, `kp 组不得超过 20 道，实际 ${g.wrongIds.length}`)
+  }
 })

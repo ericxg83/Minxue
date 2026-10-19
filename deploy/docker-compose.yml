@@ -1,0 +1,65 @@
+# 敏学后端一键编排：应用 + PostgreSQL + Redis + nginx（前端静态）
+# 用法（在 ECS 上，且 deploy/dist 已放好构建产物）：
+#   docker compose up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: minxue
+      POSTGRES_PASSWORD: CHANGE_ME_DB_PASSWORD
+      POSTGRES_DB: minxue
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U minxue -d minxue"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+
+  app:
+    build:
+      context: ./server
+      dockerfile: ../deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # 连接串用 compose 内部主机名，覆盖 .env 里的值，避免配错
+    environment:
+      NEON_DATABASE_URL: postgresql://minxue:CHANGE_ME_DB_PASSWORD@db:5432/minxue?sslmode=disable
+      REDIS_LOCAL: "true"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_LOCAL_PASSWORD: ""
+    # 其余密钥（OSS / AI / CORS）从 .env.production 读取
+    env_file:
+      - .env.production
+    expose:
+      - "3001"
+
+  web:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+
+volumes:
+  pgdata:
+  redisdata:

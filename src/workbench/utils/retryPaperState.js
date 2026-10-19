@@ -103,6 +103,16 @@ export function resolveRetryPaperState(exam, pages = []) {
   if (GRADING_TASK_STATUSES.includes(taskStatus)) return RETRY_PAPER_STATE.GRADING
   if (taskStatus === 'failed') return RETRY_PAPER_STATE.FAILED
 
+  // [2026-10-17 修复] 老师已拍板（task reviewed）→ 已确认，**优先于 exam.status 判定**。
+  // 口径铁律 2 本来就是「老师确认了看答卷 task.status === 'reviewed'」；此前它被嵌在
+  // exam.status==='graded' 分支里，一旦卷行不存在（移动端「删除错题卷」只删
+  // generated_exams 行、留下孤儿答卷 task），exam={} 拿不到 'graded'，
+  // 就会跌进最底部的兜底分支被打回 PENDING_REVIEW —— 老师确认过的卷重新涌回待复核。
+  // 全库实证（2026-10-17）：29 条孤儿答卷里 17 条 reviewed 全部被服务端计成待复核，
+  // 首页 KPI 30 vs 批改中心 13。前端 orphanRetry 按 task.status 判（reviewed→已完成），
+  // 两端因此各数各的；本分支提前后两端重新收敛。
+  if (taskStatus === 'reviewed') return RETRY_PAPER_STATE.REVIEWED
+
   // 到这里说明答卷已批完。
   //
   // [2026-09-17] exam.status 的语义变了：结算从「老师点完成复核时」提前到「AI 批完时」
@@ -118,7 +128,6 @@ export function resolveRetryPaperState(exam, pages = []) {
   // 统一归 PENDING_CONFIRM：PC 端进待办（workflow → review，可进批改页结算），
   // 移动端仍映射 RESULT（「批完即出结果」产品口径不变，见 retryExamStage.js）。
   if (exam?.status === 'graded') {
-    if (taskStatus === 'reviewed') return RETRY_PAPER_STATE.REVIEWED
     return RETRY_PAPER_STATE.PENDING_CONFIRM
   }
 

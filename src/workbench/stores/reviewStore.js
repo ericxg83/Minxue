@@ -326,6 +326,41 @@ export const useReviewStore = defineStore('review', () => {
     return map
   })
 
+  // [2026-10-15] 当前题「定位框落在哪一页」诊断 —— 只陈述事实，不替老师改判定。
+  //
+  // 背景：syncPageForCurrentQuestion 的「同 origQ 借用」**只借页码、不借框**
+  //   （借框 = 把 A 题的框画到 B 题头上，违反「绝不乱画」红线；2026-10-15 实测
+  //    321afd64 与 38802d84 是两道内容不同的题，只是题号字段都标成 11(1)，
+  //    借框必然画错）。于是老师会遇到「翻到了正确页、但没蓝框」——
+  //    过去这是静默的（PaperViewerPanel 取不到框就不画），老师只能对着空白图猜。
+  //  这里把「该题的框实际记在哪一页 / 有没有痕迹」算出来交给 UI 说人话。
+  //
+  // 返回 null = 无需提示（当前页已有框 / 非 paper / 单页）；否则 { kind, pageNumber, pageIndex }：
+  //   'otherPage' → 框记在别的页（对位存疑：老师看的页与框记录的页不一致）
+  //   'noTrace'   → 有对位记录但无框（学生未作答 / 图上没痕迹）
+  //   'noRecord'  → 完全没有对位记录（旧数据 / 未走对位管线）
+  const currentQuestionBoxHint = computed(() => {
+    if (source.value !== 'paper') return null
+    const q = allQuestions.value[currentReviewIndex.value]
+    if (!q) return null
+    const pages = currentPaperPages.value
+    if (pages.length <= 1) return null
+    // 当前页已经有框 → 老师看得到，无需提示
+    if (currentRetryAlignBoxes.value?.[q.id]) return null
+    for (let i = 0; i < pages.length; i++) {
+      const hit = parsePageAlignRecords(pages[i]).find(r => r?.questionId === q.id)
+      if (!hit) continue
+      const hasBox = !!(hit.text_bbox || hit.image_bbox || hit.block_coordinates)
+      return {
+        kind: hasBox ? 'otherPage' : 'noTrace',
+        pageNumber: Number(hit.pageNumber || 1),
+        pageIndex: i,
+        matchedBy: hit.matchedBy || null,
+      }
+    }
+    return { kind: 'noRecord' }
+  })
+
   // ── 重练卷「答卷覆盖度」：哪些题在整份答卷图上没有任何作答痕迹 ──
   // [2026-09-15] 缺页黑洞（错题再测-0911 陈昊煜实锤：16 题只识别到 11 题）：
   //   答卷少拍一页时，那几题在图上没有任何痕迹，最终落成「AI 未判定」
@@ -696,20 +731,90 @@ export const useReviewStore = defineStore('review', () => {
     const q = allQuestions.value[currentReviewIndex.value]
     if (!q) return
     // paper（重练）模式：q.page_number 是【原始作业】的页码，与重练答卷图的页码
-    // 不是同一套编号，拿它翻答卷页会跳错页。只有该题在对位明细里有【带定位框】的
-    // 记录时，才能确定它画在哪张答卷图上 → 跳过去；否则保持老师当前页不动。
+    // 不是同一套编号，拿它翻答卷页会跳错页。
+    //
+    // 三级定位（信任度从高到低）：
+    //   ① 直查：q 自己的「matchedBy='number'」对位记录 → 这是 OCR 读到了题号 + 答案，
+    //      唯一能信的「题 ↔ 页」直接信号。
+    //   ② 同 origQ 借用：自己没 number 匹配（matchedBy='position' / 'none' / 无记录）时，
+    //      找「其它题、同 origQ、number 匹配」的页码借用。现实：同 origQ 的题通常
+    //      落在同一页（slim 管线把同题号的题分到不同页 = 至少一边判错），借 number
+    //      匹配的页能纠正 position/none 错位（2026-10-15 实测：321afd64 origQ=11(1)
+    //      matchedBy=position pgNum=1 → 实际在 p2，相同 origQ 的 38802d84 matchedBy=number
+    //      pgNum=2 才是真位置，老师点「19、解答题」应该去 p2 而不是被引到 p1）。
+    //   ③ 最近邻兜底：①② 都拿不到时，按卷面顺序找最近的有框题推断页码（仅翻页，
+    //      不画框——保持既有「无框不画」降级）。
     if (source.value === 'paper') {
       const pages = currentPaperPages.value
       if (pages.length <= 1) return
-      const hasBox = (r) => !!(r?.text_bbox || r?.image_bbox || r?.block_coordinates)
-      const targetIdx = pages.findIndex(p => {
+
+      // ① 直查：q 自己的 number 匹配
+      const directIdx = pages.findIndex(p => {
         const pageNum = p?.page_number || 1
         return parsePageAlignRecords(p).some(
-          r => r?.questionId === q.id && hasBox(r) && Number(r.pageNumber || 1) === Number(pageNum || 1)
+          r => r?.questionId === q.id
+            && r.matchedBy === 'number'
+            && Number(r.pageNumber || 1) === Number(pageNum || 1)
         )
       })
-      if (targetIdx >= 0 && targetIdx !== currentPageIndex.value) {
-        setPageIndex(targetIdx)
+      if (directIdx >= 0) {
+        if (directIdx !== currentPageIndex.value) setPageIndex(directIdx)
+        return
+      }
+
+      // ② 同 origQ 借用：找「其它题、同 origQ、number 匹配」的页
+      const qOrigQ = String(q.question_number || '')
+        + (q.sub_no != null && String(q.sub_no).trim() ? `(${String(q.sub_no).trim()})` : '')
+      if (qOrigQ) {
+        const sameOrigQPageIdxs = new Set()
+        for (const other of allQuestions.value) {
+          if (!other || other.id === q.id) continue
+          const oOrigQ = String(other.question_number || '')
+            + (other.sub_no != null && String(other.sub_no).trim() ? `(${String(other.sub_no).trim()})` : '')
+          if (oOrigQ !== qOrigQ) continue
+          for (let pi = 0; pi < pages.length; pi++) {
+            const pageNum = pages[pi]?.page_number || 1
+            const hit = parsePageAlignRecords(pages[pi]).some(
+              r => r?.questionId === other.id
+                && r.matchedBy === 'number'
+                && Number(r.pageNumber || 1) === Number(pageNum || 1)
+            )
+            if (hit) { sameOrigQPageIdxs.add(pi); break }
+          }
+        }
+        if (sameOrigQPageIdxs.size > 0) {
+          // 数据预期：同 origQ 的 number 匹配都落在同一页；若有分歧（数据脏），
+          // 取「与当前页最近」的那一张，避免把老师从正确页拖走。
+          const cur = currentPageIndex.value
+          const picked = [...sameOrigQPageIdxs].sort((a, b) => Math.abs(a - cur) - Math.abs(b - cur))[0]
+          if (picked !== currentPageIndex.value) setPageIndex(picked)
+          return
+        }
+      }
+
+      // ③ 最近邻兜底：按卷面顺序找最近的有框题推断页码（仅翻页、不画框）
+      const pageMap = retryAnswerPageMap.value // qId → 1-based 答卷页索引（仅含有框题）
+      const n = allQuestions.value.length
+      const cur = currentReviewIndex.value
+      const pageOf = (i) => (i >= 0 && i < n) ? pageMap[allQuestions.value[i].id] : null
+      const prevP = pageOf(cur - 1)
+      const nextP = pageOf(cur + 1)
+      let fallback = null
+      if (prevP != null && nextP != null && prevP === nextP) {
+        fallback = prevP
+      } else {
+        for (let d = 1; d < n && fallback == null; d++) {
+          const f = pageOf(cur + d)
+          if (f != null) { fallback = f; break }
+          const b = pageOf(cur - d)
+          if (b != null) { fallback = b; break }
+        }
+      }
+      if (fallback != null) {
+        const fIdx = Number(fallback) - 1
+        if (fIdx >= 0 && fIdx < pages.length && fIdx !== currentPageIndex.value) {
+          setPageIndex(fIdx)
+        }
       }
       return
     }
@@ -2128,6 +2233,8 @@ export const useReviewStore = defineStore('review', () => {
     setPageIndex,
     // 重练答卷定位框（paper 模式，来自 task.result.retryAlign）
     currentRetryAlignBoxes,
+    // 当前题「定位框落在哪一页」诊断（同 origQ 借用只翻页不借框 → 会出现翻对页但没框）
+    currentQuestionBoxHint,
     // 题目定位框「实测」（image 模式，来自 POST /questions/task/:id/refine-boxes）
     refinedBoxes,
     refineStatus,

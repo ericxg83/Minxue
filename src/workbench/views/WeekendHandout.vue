@@ -581,7 +581,10 @@ onMounted(async () => {
   applyKpIdsFromQuery()
   try {
     const res = await apiRequest('/students')
-    students.value = (res.students || []).filter(s => s.enrollment_status !== 'archived')
+    // 停课学生不进课件名册。⛔ 曾按 'archived' 过滤，而 enrollment_status 的 CHECK 约束
+    // 只有 active/paused（见 server/migrations/049）⇒ 恒真、等于没过滤。
+    // 前端这里只是选择器收口；真正拦住取题的是 server/lib/weekendHandout.js 的名册 SQL。
+    students.value = (res.students || []).filter(s => s.enrollment_status !== 'paused')
   } catch (e) {
     ElMessage.warning('学生列表加载失败：' + (e.message || '网络错误'))
   }

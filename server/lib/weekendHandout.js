@@ -153,20 +153,27 @@ export async function buildHandout(opts) {
   }
 
   // ── 学生 ──
-  const { rows: studentRows } = await pool.query(
-    `SELECT id, name FROM students WHERE grade = $1 ORDER BY name`, [grade]
+  // 停课（enrollment_status='paused'）不进课件：名册产出的 studentIds 同时喂给下方取题
+  // （wq.student_id = ANY($1)），在源头挡一次即覆盖「选谁」与「取谁的错题」两端。
+  // ⛔ 这里是唯一拦截点：前端 WeekendHandout.vue 的同名过滤只管选择器，管不到取题。
+  // 老师显式点名（studentFilter）仍放行停课学生 —— 点名即意图明确，不受在读名单约束。
+  const { rows: studentRowsAll } = await pool.query(
+    `SELECT id, name, enrollment_status FROM students WHERE grade = $1 ORDER BY name`, [grade]
   )
-  if (studentRows.length === 0) {
+  const studentRows = studentRowsAll.filter(s => s.enrollment_status !== 'paused')
+  if (studentRowsAll.length === 0) {
     const { rows: all } = await pool.query(`SELECT DISTINCT grade FROM students ORDER BY 1`)
     throw new Error(`年级「${grade}」下没有学生。库里实际年级值：${all.map(r => r.grade).join(' / ')}`)
   }
   const studentIds = studentFilter.length
-    ? studentRows.filter(s => studentFilter.includes(s.name)).map(s => s.id)
+    ? studentRowsAll.filter(s => studentFilter.includes(s.name)).map(s => s.id)
     : studentRows.map(s => s.id)
   if (studentIds.length === 0) {
-    throw new Error(`学生过滤后没有匹配。可选：${studentRows.map(s => s.name).join(', ')}`)
+    // 报错时给出全部姓名（含已停课），否则老师只看到「没有匹配」却不知道可选谁
+    throw new Error(`学生过滤后没有匹配。可选：${studentRowsAll.map(s => s.name).join(', ')}`)
   }
-  log(`[1] 参数 OK: grade=${grade} subject=${subject || '(不过滤)'} 时段=${toYmd(periodStart)}~${toYmd(periodEnd)} studentIds=${studentIds.length}`)
+  const pausedCount = studentRowsAll.length - studentRows.length
+  log(`[1] 参数 OK: grade=${grade} subject=${subject || '(不过滤)'} 时段=${toYmd(periodStart)}~${toYmd(periodEnd)} studentIds=${studentIds.length}${pausedCount ? `（已排除停课 ${pausedCount} 人）` : ''}`)
 
   // ── 取数 ──
   const params = [studentIds, periodStart, periodEnd]
@@ -1060,7 +1067,7 @@ export async function buildHandout(opts) {
     }))
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh'))
   const periodLabel = `${toYmd(periodStart)} ~ ${toYmd(new Date(periodEnd.getTime() - 1))}`
-  const nameOf = id => studentRows.find(s => s.id === id)?.name || ''
+  const nameOf = id => studentRowsAll.find(s => s.id === id)?.name || ''
 
   // ── slides（PPT 渲染输入）──
   // 讲题状态标记已在上方捞出（markByAnchor），这里只做按锚点 join。

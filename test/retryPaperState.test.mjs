@@ -126,6 +126,35 @@ test('老师拍板后（答卷 task 已 reviewed）→ 已确认，即使还有�
   assert.equal(isPendingReview(state), false)
 })
 
+test('卷被删的孤儿答卷：task reviewed 必须仍判已确认（2026-10-17 事故回归锁定）', () => {
+  // 2026-10-17 事故：移动端「删除错题卷」只删 generated_exams 行、留下答卷 task，
+  // 服务端 countPendingReviewPapers 把孤儿答卷按 examId 分组后 exam={} 拿不到
+  // 'graded'，17 条已 reviewed 的答卷全部跌进底部兜底被打回 PENDING_REVIEW，
+  // 首页 KPI「待复核 30」vs 批改中心「待人工复核 13」。口径铁律 2 本来就是
+  // 「老师确认了看答卷 task.status === 'reviewed'」—— 判定必须优先于 exam.status。
+  // exam 行不存在（={}）
+  assert.equal(
+    resolveRetryPaperState({}, [sheet('reviewed')]),
+    RETRY_PAPER_STATE.REVIEWED,
+    '卷行被删也绝不能把老师确认过的卷打回待复核'
+  )
+  // exam 传 null（更极端的脏数据形态）
+  assert.equal(
+    resolveRetryPaperState(null, [sheet('reviewed')]),
+    RETRY_PAPER_STATE.REVIEWED
+  )
+  // exam 未结算（ungraded）同理：reviewed 只看答卷 task
+  assert.equal(
+    resolveRetryPaperState({ status: 'ungraded' }, [sheet('reviewed')]),
+    RETRY_PAPER_STATE.REVIEWED
+  )
+  // 但「未拍板」不沾光：卷被删 + done 仍是待复核（真实可复核的卷没了 ≠ 老师确认过）
+  assert.equal(
+    resolveRetryPaperState({}, [sheet('done')]),
+    RETRY_PAPER_STATE.PENDING_REVIEW
+  )
+})
+
 test('同一份卷被交多次 → 取最新一次答卷的状态', () => {
   const pages = [
     sheet('failed', '2026-09-08T03:00:00.000Z'),

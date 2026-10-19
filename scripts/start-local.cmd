@@ -1,7 +1,15 @@
 @echo off
 REM ============================================================================
- REM  Minxue local services auto-start (approved by owner 2026-10-13)
- REM  Trigger: Windows Scheduled Task "MinxueLocalServices" (AtLogOn)
+ REM  Minxue local services - MANUAL one-shot starter (kept for hand use)
+ REM  Autostart is NO LONGER this file: since 2026-10-15 the logon chain is
+ REM    Scheduled Task "MinxueLocalServices" (AtLogOn) + Startup folder entry
+ REM      -> scripts\start-local-hidden.vbs
+ REM      -> scripts\dev\keep_local_services.mjs   (keep-alive watchdog)
+ REM  Why: this file only launches each service once and never re-checks.
+ REM       2026-10-15 08:19 logon run: backend reported "service started" at
+ REM       08:21:41, was Ctrl+C'd (log ends with ^C) around 08:22, and by 08:25
+ REM       neither :3000 nor :4000 was listening. The watchdog probes every 15s
+ REM       and relaunches, so services actually survive.
  REM  Starts: backend :4000 (node server/index.js) + frontend :3000 (vite dev)
  REM  Note: Redis/Memurai runs as a Windows service (auto-starts on boot);
  REM        services already listening are not restarted (avoid EADDRINUSE).

@@ -147,7 +147,9 @@ function goRoute(type) {
 function openTask(task) {
   emit('close')
   if (task.status === 'done') {
-    router.push({ path: '/grade/task', query: { taskId: task.id, studentId: task.studentId || '', source: 'homework' } })
+    // 待复核入口默认对准「待处理」页签（2026-10-15）：status=done = AI 已完成待老师复核，
+    // 进批改页应直接对准待处理，而不是默认全部。
+    router.push({ path: '/grade/task', query: { taskId: task.id, studentId: task.studentId || '', source: 'homework', focus: 'todo' } })
   } else {
     router.push({ path: '/grade', query: { status: 'failed' } })
   }

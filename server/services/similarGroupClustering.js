@@ -107,12 +107,16 @@ export function clusterContentGroups(items) {
                 }
               }
               if (groupIds.length >= 2) {
+                // ⛔ r303-P-A 接线：MAX_GROUP_SIZE 是方案 docs/similar-groups-方案.md:62 拍板锚点
+                //   （「最多截断组内 20 道（防巨型组）」）。只声明不截断 ⇒ 巨型组会直接产出
+                //   巨型考法/巨型重练卷。截断保留吸收顺序（即 original 顺序）。
+                const capped = groupIds.slice(0, MAX_GROUP_SIZE)
                 const memberMap = new Map(list.map(x => [x.id, x]))
-                const wrongs = groupIds.map(id => memberMap.get(id)).filter(Boolean)
+                const wrongs = capped.map(id => memberMap.get(id)).filter(Boolean)
                 groups.push({
                   studentId: a.studentId,
-                  wrongIds: groupIds,
-                  title: `内容相近 ${groupIds.length} 道`,
+                  wrongIds: capped,
+                  title: `内容相近 ${capped.length} 道`,
                   reason: 'content',
                   preview: wrongs.map(w => ({ id: w.id, content: (w.content || '').slice(0, 80) })).slice(0, 5),
                 })
@@ -152,12 +156,14 @@ export function clusterKpGroups(items, previewOf = (it) => ({})) {
     if (fresh.length < 2) continue
     const ids = fresh.map(x => x.id)
     ids.forEach(id => used.add(id))
+    // ⛔ r303-P-A 接线：同 content 组，kp 组也按 MAX_GROUP_SIZE 截断（方案:62），防止巨型组。
+    const capped = ids.slice(0, MAX_GROUP_SIZE)
     groups.push({
       studentId: fresh[0].studentId,
-      wrongIds: ids,
-      title: `同知识点 ${ids.length} 道`,
+      wrongIds: capped,
+      title: `同知识点 ${capped.length} 道`,
       reason: 'kp',
-      preview: fresh.map(it => ({ id: it.id, ...previewOf(it) })).slice(0, 5),
+      preview: fresh.slice(0, capped.length).map(it => ({ id: it.id, ...previewOf(it) })).slice(0, 5),
     })
   }
   return groups

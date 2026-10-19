@@ -1,0 +1,6 @@
+# 真实生产环境变量（含密钥，禁止提交）
+.env.production
+# TLS 证书
+certs/
+# 前端构建产物（在 ECS 上本地 build 生成，不进仓库）
+dist/
