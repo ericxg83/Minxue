@@ -4995,3 +4995,13 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **⚠️ 进程重启待负责人一步（沙箱硬边界，实测留档）**：schtasks 黑名单拦截、WMI/Start-Process 拦截、node detached 子进程被作业对象回收（breakaway 实验 20s 存活测试失败）⇒ 本会话**无法**生成常驻进程。**醒来后双击 `scripts/start-local-hidden.vbs`（或明天开机登录自动生效）**即可让新节奏接管；生效自检 = logs/keep_local_services.log 出现「守护启动（高峰每 15s / 低峰每 600s …）」+「节奏切换 → 低峰」。
 - **风险重估（降低）**：今日 5 次服务中断全部是旧看门狗误杀健康服务所致（r292-P-A），后端/前端本体极稳 ⇒ 在负责人重启看门狗之前，服务裸奔今晚的风险可接受；新节奏上线后低峰误杀机会再降 97%。
 - **r292-P-A 状态**：启动宽限已落地（部分缓解）；探活假阴性根因（vite >3s 响应误判？）与冷却竞态维持原提案，待后续轮次处理。
+
+## 生产复活 + Redis 心跳高峰分化（2026-10-19 14:16–14:4x，负责人两条指令，commit `cf9b757` + `08e8210` 已推送）
+
+- **✅ r305-P-B 达成关闭条件**：负责人 14:16 贴上 Render `REDIS_POOL_URLS` → 14:16:48 自动重启（部署 87e0f6d）→ 14:19:39 实测 `redis.connected:true` / `worker.available:true`（正式关闭留下一轮巡查复核手续）。本地 14:23:42 被自愈探针自动救活（第 3 轮轮到 mollusk）——**defbd6d 自愈回探端到端实战首胜**。
+- **负责人澄清：三个 Upstash 库 = 三个独立账号**（各 500K/月）⇒ failover 真实有效，修正「同账号共享额度」旧假设。贴的池子两瑕疵不阻塞：第一项 = 主库 `redis://` 明文版（TLS-only 死跳）+ 缺 first-skunk；理想池见 reports/2026-10-19-hotfix-redis.md §7。
+- **⚠️ 勘误口径**：`quota/status` degraded 是熔断标记旧快照、不自动复测（本地报 first-skunk「08:48 起 335 分钟」而实弹全通）⇒ 判 Redis 真死活只认 `worker-status.redis.connected` 或新连接实弹 GET/DBSIZE（`server/_probe_upstash_now.mjs` 留档）；PING 超额后仍 PONG 也不行。
+- **心跳高峰分化（负责人 14:24：「降频是影响额度的东西，高峰密集一点，低峰可以不用」）**（`08e8210`，5 文件 +186/−84）：心跳改 tick 门控——`REDIS_HEALTH_CHECK_PEAK_MS`（默认 60s，本地定时器零 Redis 消耗）为 tick，`shouldRunHealthCheck` 门控：高峰窗内每 tick 必查 / 低峰每 `REDIS_HEALTH_CHECK_MS` 抽检；**`REDIS_HEALTH_CHECK_MS` 语义改为「低峰间隔」，默认 300000→1800000**；`REDIS_PEAK_WINDOWS` 可覆盖窗口。
+- **高峰窗判定下沉 `server/lib/peakWindows.mjs` 唯一实现**（铁律「同一件事一个实现」；watchdogCadence.mjs 改兼容 re-export，看门狗与旧锁 import 路径不变）。两个硬约束实测钉死：① **Render `rootDir: server`，scripts/ 不在生产镜像** ⇒ 运行时核心不能 import scripts/dev/*（会 ERR_MODULE_NOT_FOUND）；② **Render 机器 UTC 时区** ⇒ isPeak 改「UTC 毫秒+固定偏移(+480，env PEAK_TZ_OFFSET_MIN)」时区无关判定。
+- **r305-P-C 升级（头号待拍板）**：烧速归因未完——13:06 额度重置后 66 分钟烧穿 50 万 ≈ **126 req/s**，心跳与 BullMQ drainDelay=60s 都解释不了（疑轮询/重连风暴/Events 类），需 prod 侧实测命令速率定位真凶后再定「降频 or 付费层」。
+- **四道闸**：npm test **2562/2562**（净增 1：降频条改写 + 时区条新增）｜eslint 0e｜0 个 src/ 文件豁免构建冒烟｜生产 `08e8210` 14:33 部署、`redis.connected:true` 实证。

@@ -112,3 +112,29 @@ rediss://default:<first-skunk 的密码>@first-skunk-160324.upstash.io:6379,redi
 ```
 
 三个账号三份额度 = 主库 50 万 + 备1 50 万 + 备2 50 万，故障转移链条完整。
+
+## 8. 心跳高峰分化（负责人 14:24 指令，commit `08e8210` 已推送 + 生产 14:33 部署）
+
+> 负责人点破：「看来我说的保活机制和你说的降频是两个事情。降频是影响这个额度的东西，
+> 那你也可以高峰的时候密集一点，低峰的时候可以不用。」
+
+- **改造**（server/redisManager.js）：心跳从固定间隔改 **tick 门控**——
+  - tick = `REDIS_HEALTH_CHECK_PEAK_MS`（默认 **60s**，纯本地定时器，不烧 Redis）；
+  - tick 内 `shouldRunHealthCheck()` 门控：**高峰窗内每 tick 必查 / 低峰每 `REDIS_HEALTH_CHECK_MS` 抽检一次**；
+  - `REDIS_HEALTH_CHECK_MS` **语义改为「低峰间隔」，默认 300000 → 1800000**（30 分钟）；
+  - `REDIS_PEAK_WINDOWS` 可覆盖高峰窗（默认同看门狗：周一~五 15:00-21:30，北京）。
+- **烧速账**：心跳三实例 ~77K/月 → **~38K/月**（高峰密 60s、低峰稀 30min 的加权）。
+- **高峰窗判定下沉 `server/lib/peakWindows.mjs`（唯一实现）**，watchdogCadence.mjs 改兼容 re-export。
+  两个硬约束实测钉死：
+  1. **Render `rootDir: server`，scripts/ 不在生产镜像** ⇒ 运行时核心绝不能 import scripts/dev/*
+     （否则生产 ERR_MODULE_NOT_FOUND 整个服务起不来）；
+  2. **Render 机器是 UTC 时区** ⇒ isPeak 改「UTC 毫秒 + 固定偏移（+480，env `PEAK_TZ_OFFSET_MIN`）」
+     时区无关判定——北京机器（看门狗）与 UTC 机器（生产）对同一绝对时刻判定一致。
+- **回归锁更新**：redisBreakerSelfHeal「降频配置」条改写为高峰分化断言（默认值 + 门控高峰必查/
+  低峰抽检 + env 覆盖 + 自定义窗口）；watchdogCadence 新增时区无关性条（绝对 UTC 时刻跨日边界）。
+  **npm test 2562/2562**｜eslint 0e｜0 个 src/ 文件豁免构建冒烟。
+- **生产实证**：`08e8210` 14:33:34 部署，`redis.connected:true`（health ok 本身即证明 peakWindows
+  在生产可解析——import 路径若错服务直接起不来）。
+- **⚠️ r305-P-C 仍开放（头号待拍板）**：心跳只占烧速小头——13:06 额度重置后 66 分钟烧穿 50 万
+  ≈ 126 req/s，心跳与 BullMQ drainDelay=60s 都解释不了，真凶未归因（疑轮询/重连风暴/Events 类）。
+  需 prod 侧实测 Redis 命令速率定位后，再拍「降频 or 付费层」。
