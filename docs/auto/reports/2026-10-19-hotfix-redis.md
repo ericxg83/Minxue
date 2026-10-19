@@ -163,3 +163,24 @@ rediss://default:<first-skunk 的密码>@first-skunk-160324.upstash.io:6379,redi
 本轮高峰分化（高峰 60s/低峰 30min）后 ~38K/月，叠加 mollusk 独立账号，**到 11-01 自然月重置前
 mollusk 单独扛完全够**；11-01 后三账号 150 万/月 + 三棒 failover 分摊，结构性充裕。
 r305-P-C 的「付费层」选项优先级显著下降（维持观察，若 mollusk 月耗异常再议）。
+
+## §9 终局验证（15:01-15:13）——三棒链条全绿，r305-P-B 正式关闭
+
+负责人 15:01 前贴好 `REDIS_POOL_URLS`。为破「env 贴了但 connected:false」的可观测性僵局，
+本轮新增 `GET /api/diagnostics/redis-pool`（commit `861df68`，暴露 `redisManager.getStats()`，
+不含 URL/密码；顺带修复 index.js 此前未导入 redisManager 的问题）。部署后 15:13:39 实测：
+
+```
+total:3  connected:1  current:upstash_backup_2
+quotaExhausted: [upstash_primary, upstash_backup_1]
+upstash_primary(priority1): connected=false, 熔断   ← superb-mallard 账号①，超额
+upstash_backup_1(priority2): connected=false, 熔断  ← first-skunk 账号②，超额
+upstash_backup_2(priority3): connected=true         ← mollusk 账号③，接管服务
+worker-status: available=true, redis.connected=true
+```
+
+- **负责人贴的池子串完全正确**：`total:3` 证明两条 `rediss://` 备库链接全部解析入池；
+- **故障转移端到端工作**：主库/备1 被真实配额错误标记熔断（非误标），mollusk 自动接管；
+- 15:04 短暂的 `connected:false` 是 boot 后惰性初始化 + 重试退避（primary/first-skunk 各 ~30s）的时序，
+  非配置错误——这正是新增池子端点的价值：状态一查便知，不再靠猜；
+- 遗留自动兜底：主库/备1 由 `startBreakerProbe`（900s）持续回探，11-01 额度重置自动归队，无需人工。

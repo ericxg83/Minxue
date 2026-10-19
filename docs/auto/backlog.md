@@ -4985,6 +4985,7 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **实弹验证**：npm test **2555/2555**（含新锁 test/redisBreakerSelfHeal.test.mjs 6 条；反向自检旧版三层全判红）｜eslint 0e/131w｜0 个 src/ 文件构建冒烟豁免（r303 先例）。探针进程走真实 initQueue：主库撞墙熔断 → 备1 也撞墙（余量在刀口）→ **落 mollusk，taskQueue 就绪**；本地后端已重启加载新码。
 - **生产**：`defbd6d` 13:38 已自动部署（bootAt 实证）。队列惰性初始化，首次建任务时走链路。**⚠️ 待负责人一步（无面板权限）**：Render Dashboard → minxue-api → Environment → `REDIS_POOL_URLS` 追加 current-mollusk 串（完整串见 `docs/auto/reports/2026-10-19-hotfix-redis.md` §4）→ 保存自动重部署 ⇒ 生产今晚稳。兜底：自愈回探会在 first-skunk/主库额度窗口恢复时自动救活生产队列（first-skunk 今日已演示月中恢复；主库最迟 11-01）。
 - **r305-P-B 状态更新**：本地 ✅ 恢复（实测落 mollusk）；生产 🟡 代码已就位、差负责人贴 env。贴完并经下一轮巡查实测 `redis.connected:true` 后正式关闭。
+- **✅ r305-P-B 正式关闭（15:13 实测）**：负责人 15:01 前贴好 `REDIS_POOL_URLS`（first-skunk + mollusk，`rediss://` 双链接格式正确——新端点 `/api/diagnostics/redis-pool` 实证 `total:3` 三条全解析），Render 15:01:03 重启后故障转移链按设计工作：`upstash_primary` 熔断 → `upstash_backup_1`(first-skunk) 熔断 → **`upstash_backup_2`(mollusk) connected:true 接管**，`worker-status` `available:true + redis.connected:true`。新增池子可观测面端点（commit `861df68`，getStats 不含密钥可公开），「env 贴了但连不上」这类问题今后一查便知。遗留自动兜底：主库/first-skunk 由 `startBreakerProbe` 每 15min 回探，11-01 额度重置后自动归队。
 - **⚠️ r308 必办**：① 核 `2026-10-19` 备份目录（r307 交接）；② 生产 Redis 恢复确认（worker-status `redis.connected` 权威判据）；③ 若负责人已贴 env，关闭 r305-P-B。
 
 ## 看门狗高峰调频（2026-10-19 13:5x–14:1x，**负责人指令插入轮**，commit `262f815` 已推送，不认领轮号）
