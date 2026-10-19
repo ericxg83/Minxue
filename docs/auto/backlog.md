@@ -4925,3 +4925,51 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   639+650 徽标次要指示 / ScanQR 卸载清理 / pdfGenerator 字体预载 / WorksheetPicker:57 自动存默认 fire-and-forget
   ——主操作已生效、星标不亮正确反映无默认、显式星标另有 Toast）；③ notificationService.js:176 native-only
   监听注册失败罕见无网络依赖。
+
+## 第 r305 轮（2026-10-19 10:15–11:1x，日常巡查 automation `4e9608a9`，**只读审计轮·锁被占·零提交**）
+
+- **🔴 r305-P-B（C，置顶·待负责人立即处置）：Upstash Redis 双库月配额耗尽，批改队列本地+生产双停摆**。
+  实测：`REDIS_URL`（superb-mallard-128559）与 `REDIS_POOL_URLS` 唯一 backup（first-skunk-160324）**均**返回
+  `ERR max requests limit exceeded. Limit: 500000, Usage: 500003`（PING 仍 PONG，写/读命令全拒）⇒
+  `GET /api/queue/stats` available:false、`/api/diagnostics/worker-status` 的 `redis.connected:false`（本地与
+  `minxue-api.onrender.com` 生产**同症**）；降级水位 prod since 2026-10-18 21:48:12、本地 since 2026-10-19 08:49:09。
+  `REDIS_LOCAL=false`（本机 Memurai 实测 Running 但未启用）。近 48h 零新任务未造成事故，但**下次上传作业将直接失败**
+  （`server/index.js:557` queue.add 抛错→清孤儿行→500）。恢复通路（需拍板）：
+  ① 新建/升级 Upstash 库并更新 server/.env + Render env 后重启两端（治本，生产也恢复）；
+  ② 本地 `REDIS_LOCAL=true` 走本机 Memurai（即时恢复本地，Render 仍待①）。
+  机制留档：`server/redisManager.js` PING 超额不失明（连接级健康检查查不出配额），熔断只能命令报错后触发；
+  两实例全超额后无处可切，rebuildQueue 无效——属设计内已知局限，非本轮新缺陷。
+- **r305-P-C（C，待拍板）：500K/月烧速归因与防护**。两免费库在一个月内先后打满：60s 健康检查 Ping（每实例
+  ~43K/月）+ BullMQ 轮询（drainDelay=60s 已调过一轮）仍是主要烧源；backup_1 现存 311 个 BullMQ key（曾承接
+  故障转移流量）。建议：ping 间隔 60s→300s、或健康检查改走低频抽检、或评估付费层；根因未定前不建议再攒第 3 个免费库。
+- **r305-P-A（A 级候选，下一工作轮落地）：测试 glob 排除 `_` 前缀探针**。本轮唯一套件红 =
+  `test/_probe_mockmodule.test.mjs`（持锁方 r304 探针，09:03 创建，`.gitignore:140` `_*` 排除永不入库），
+  但 `test/*.test.mjs` glob 不认 `_` 前缀 ⇒ 每次 npm test 都拾取它并 8s 超时红（其余 2538/2539 顶层全绿，
+  HEAD 产品码无回归）。修法（两处同步、守唯一口径）：`package.json` → `test/[^_]*.test.mjs`；
+  `scripts/testFileList.mjs` `collectTestFiles` 加 `!f.startsWith('_')` 过滤；补回归锁（拿探针形态判红）。
+  ⛔ 探针是持锁方活文件，本轮与下一轮在其收尾前不得删除。
+- **非缺陷/留档**：① 探针本体证据——`fix-tanglian-ordinals` handler 最终 res.json 正常返回（耗时 9.2s，
+  中途 `Connection terminated unexpectedly` 重连），非真挂死；归属持锁方赛道未深入；② 近 48h 零新上传、
+  无 pending 堆积、非终态仅 reviewed；③ 看门狗 r292-P-A 今日四次复发（00:55/02:10/02:19/02:40 taskkill 前端），
+  提案维持；④ eslint 0e/131w、部署缺口 0/0、esbuild 0.21.5 健康、技能体检 exit 0（0/57/70）。
+
+## 第 r306 轮（2026-10-19 11:39–11:5x，日常巡查 automation `4e9608a9`，**只读审计轮·锁被占·零提交**）
+
+- **锁态**：`running/304`（北京 08:55 认锁），持锁方 11:29 提交 `7a6c928`（错题归属全量大扫描常驻脚本 +180 行）活跃在制，认锁 2h44m < 3h 崩溃线 ⇒ 未认领、未回写、零 commit、未碰其 17 个在制文件，报告取空号 **r306**。
+- **r305-P-B 生产侧跟踪新证据（🔴 C，维持置顶）**：Render 11:31 随 `7a6c928` 自动重部署后，生产 `worker-status` 仍 `redis.connected:false` 且 `worker.available:false`（r305 时 true）⇒ **全新实例+最新码仍连不上 Redis，配额耗尽未恢复**。本地降级水位 since 08:49 持续 172min。
+- **⚠️ 新发现信号失真（并入 r305-P-B 证据链）**：生产 `/api/quota/status` 返回 `ok:true, degraded:[]`，与 worker-status 的 `redis.connected:false` **互相矛盾**——quota sentinel 在全新实例上尚未被真实命令报错触发（启动宽限）⇒ 顶栏 QuotaBanner 60s 轮询读它，**老师在生产端看不到降级横幅但上传仍会失败**。判据固化：**quota/status 的 ok:true 不是康复信号，worker-status 的 redis.connected 才是权威判据**。
+- **套件与基线**：npm test 2545 pass / 1 fail（唯一红=持锁方探针 `test/_probe_mockmodule.test.mjs`，r305-P-A 仍开放）｜eslint 0e/131w 基线｜esbuild 0.21.5 健康｜部署缺口 0/0｜技能体检 exit 0（0/57/70）｜stash 空。
+- **服务活性**：本地 :4000/:3000 均 200，后端 bootAt 00:49:06 早于全部 WIP mtime；看门狗 r292-P-A 四次误杀循环（00:55–02:40）后 9h 无新复发。
+- **持锁方产品工作上下文（不审计只记录）**：《_错题归属全面复查-我没有错过-20261019.md》10:46 定稿——确诊 30 条从未做错 + 171 条判对仍在册 + 19 条快照串题 + 70 条空壳 + 4 条软删，judgements 审计仅覆盖 271 题；自述已清理 206 条（库内备份表 wrong_questions_backup_p0a/p0b/p0b2/p0f_20261019）。
+- **备份**：最新 `2026-10-18` ok:true，今日 11:39 早于 13:00 档 ⇒ 无报警。
+- 无新提案；待拍板清单不变。文书未提交（下一工作轮带入）。
+
+## 第 r307 轮（2026-10-19 12:57–13:3x，日常巡查 automation `4e9608a9`，**锁陈旧接管轮**，commit `c424c10` 已推送）
+
+- **轮次性质**：`running/304` 持锁 242min > 3h 崩溃线（08:55 认锁；持锁方 11:29 提交 `7a6c928` 后静默 88min、无 r304 报告、未释放）⇒ 按 loopGuard ≥3h 规则接管，手工认领 **r307**（loopGuard+1=305 与只读轮 r305/r306 撞号，r273/r278/r285/r287/r292 先例）。⚠️ **13:15 持锁方复工**（新改 `server/redisManager.js`：心跳 60s→300s + `REDIS_HEALTH_CHECK_MS` env，回应 r305-P-C 烧速）⇒ 接管规则允许开工，但开工后仍要盯 `git status` 新脏项；本轮与其零文件交集、显式 pathspec 零串车。
+- **✅ r305-P-A 本轮关闭（A 级，零产品码）**：`test/_probe_mockmodule.test.mjs`（r304 探针，.gitignore:140 `_*` 永不入库）被旧 glob `test/*.test.mjs` 拾进套件 8s 超时红（r305/r306 只读实证 HEAD 产品码无回归）。修法三处同口径：package.json 主 glob → `test/[^_]*.test.mjs`；`scripts/testFileList.mjs` `collectTestFiles` 排除 `_` 前缀；`test/testSuiteCoverageKit.mjs` 新增 `MAIN_GLOB` 单一实现 + `MAIN_GLOB_RE` 改形状 + 两处审计改引 + `_` 前缀按约定跳过。新锁 4 条（行为级真跑 node --test / 旧 glob 判红 / 旧 glob 文本喂两处审计判红 / `_` 前缀跳过非漏跑）。**环境发现（全仓适用）**：外层 `node --test` 注入 `NODE_TEST_CONTEXT`，子进程 `node --test` 继承后会以「递归运行」为由跳过全部文件——**status 0 + 空 stdout 的假绿**；测试里起子进程 node --test 必须 `delete env.NODE_TEST_CONTEXT`（本轮两个行为级用例因此首跑假绿 22/24，加清理后 24/24）。
+- **🔴 r305-P-B 维持置顶（今日 13:00 复核，仍未恢复）**：本地 `queue/stats` `available:false` + `ERR max requests limit exceeded. Limit: 500000, Usage: 500003`；本地 `worker-status` `redis.connected:false`（worker 进程内兜底 available:true）；**生产 `worker-status` `redis.connected:false` 且 `worker.available:false`** ⇒ 重部署后 4.5h 仍未恢复，下次上传作业将失败（`index.js:557` → 500）。生产 `quota/status` 仍 `ok:true, degraded:[]` ⇒ r306 判据再次实证：**quota/status ok:true 不是康复信号，worker-status 的 redis.connected 才是权威判据**。
+- **r305-P-C 跟踪**：持锁方 13:15 已落「ping 60s→300s + env 可覆盖」mitigation（其赛道，未碰未评）；配额恢复（换库/升级/本地 REDIS_LOCAL）仍待拍板。
+- **备份**：最新 `2026-10-18` ok:true（北京 20:19:47，同源串行延后第五例），仍 5/29 表；今日 13:00 档被本轮流占源，预计轮后补跑 ⇒ **r308 必核 `2026-10-19` 目录**。无报警。
+- **四道闸**：npm test **2549/2549 fail 0**（13.5s）｜eslint **0e/131w**（基线；中途 2e 空 catch 自伤按 r289 先例补注释修复）｜`dist_nightly_20261019r307` **43.46s**｜preview 5710 单调用内起服：cert 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**，全 exit 0。0 个 src/ 文件。
+- 无新增 B/C 提案；待拍板清单不变（见 r307 报告第五节）。

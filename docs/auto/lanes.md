@@ -678,3 +678,13 @@
 - **四道闸**：npm test **2543/2543 fail 0**｜eslint **0e/132w**（基线）｜`dist_nightly_20261018r303` **44.63s**｜preview 5700 单调用内起服：cert_probe exit 0 + render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。0 个 src/ 文件。
 - **备份**：最新 `2026-10-18` ok:true（今日档），**无报警**。
 - **接手提示**：① r303-P-A 拍板后落地截断接线（若授权代修：两处分组输出前 `slice(0, MAX_GROUP_SIZE)` + 补测试；门禁保护名单届时可摘条——常量被使用后 lint 不再报）② r302-P-A 拍板后写入 AGENTS.md 纪律 ③ r302-P-B（worker.js 残留 import）④ r292-P-A 看门狗三缺陷 ⑤ 备份 10-19 档 13:00 后核验。
+
+## 第 r307 轮认领（2026-10-19 12:57–，新日常巡查任务 · automation `4e9608a9`）
+
+- **轮次性质**：锁陈旧接管。`running/304` 持锁 242min > 3h 崩溃线（08:55 认锁；持锁方 11:29 提交 `7a6c928` 后静默 88min、无 r304 报告、未释放）⇒ 按 loopGuard ≥3h 规则接管，手工认领 **r307**（loopGuard+1=305 与只读轮 r305/r306 撞号，r273/r278/r285/r287/r292 先例）。⚠️ 13:15 持锁方复工（`server/redisManager.js` 心跳 60s→300s）⇒ 零文件交集、显式 pathspec 零串车。
+- **本轮赛道**：仓库卫生与门禁基线（`package.json` 测试 glob + `scripts/testFileList.mjs` + `test/testSuiteCoverage*`）——沿用 r293–r303。
+- **落地（A 级，commit `c424c10`，已推送）**：r305-P-A 关闭——`test/_probe_mockmodule.test.mjs`（r304 探针，gitignored）被旧 glob `test/*.test.mjs` 拾进套件 8s 超时红；三处清单同口径排除 `_` 前缀 + `MAIN_GLOB` 单一实现 + 4 条新锁（含行为级真跑 node --test）。环境发现：测试里起子进程 `node --test` 必须清 `NODE_TEST_CONTEXT`（否则子进程以「递归运行」跳过全部文件，status 0 + 空 stdout 假绿）。
+- **未触碰**：持锁方 11 改 + 8 未跟踪（含 13:15 新改的 `server/redisManager.js`）零动零提交；`.workbuddy-ai/memory/MEMORY.md` 零动。
+- **四道闸**：npm test **2549/2549 fail 0**｜eslint **0e/131w**（基线）｜`dist_nightly_20261019r307` **43.46s**｜preview 5710 单调用内起服：cert 0 + 8/8 + 0/16 + 0/13。
+- **备份**：最新 `2026-10-18` ok:true；今日 13:00 档被占源，r308 核 `2026-10-19` 补跑。无报警。
+- **接手提示**：① 备份 10-19 档核验 ② 持锁方 redisManager 改动收口与其四道闸 ③ r305-P-B 拍板后落地（🔴 置顶：Upstash 双库配额耗尽，生产 worker.available:false）④ 无新增 A 级候选时继续只读核查面。
