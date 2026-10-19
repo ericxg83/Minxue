@@ -99,6 +99,22 @@ const initQueue = async () => {
         }
       }
 
+      // ⭐ 熔断自愈（2026-10-19）：redisManager 回探发现被熔断实例额度恢复并解除标记后通知到这里。
+      // 仅当队列处于坏死态（从未初始化成功）才重建——rebuildQueue 自带重入守卫；
+      // 队列健康时恢复的实例只是重新入池等下次故障转移，不必拆掉当前健康连接。
+      if (typeof redisManager.onQuotaRecovered !== 'function') {
+        redisManager.onQuotaRecovered = (id) => {
+          if (queueInitialized && currentConnection) {
+            console.log(`[Queue] 📡 实例 ${id} 熔断解除归队，当前连接健康，无需重建`)
+            return
+          }
+          console.log(`[Queue] 📡 实例 ${id} 熔断解除且队列处于坏死态，尝试重建`)
+          rebuildQueue(`quota_recovered:${id}`).catch((e) =>
+            console.error('[Queue] 熔断解除触发的 rebuildQueue 失败:', e.message)
+          )
+        }
+      }
+
       const connection = await redisManager.getAvailableClient()
       if (!connection) {
         throw new Error('无法连接到任何 Redis 实例')

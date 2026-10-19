@@ -14,6 +14,11 @@ const isQuotaExhaustedError = (message) => {
   return QUOTA_EXHAUSTED_PATTERNS.some(p => lower.includes(p.toLowerCase()))
 }
 
+// 熔断自愈回探用的 key：GET 一个不存在的 key ⇒ 返回 null，不写入、不改任何状态，
+// 但它是「计入配额的真实数据命令」——实例仍在超额 ⇒ 原样报配额错；额度已恢复 ⇒ 成功返回。
+// （PING 不行：Upstash 超额后 PING 仍 PONG，连接级探活对配额天然失明。）
+const REDIS_BREAKER_PROBE_KEY = '__redis_breaker_selfheal_probe__'
+
 class RedisManager {
   constructor() {
     this.clients = new Map()
@@ -21,8 +26,18 @@ class RedisManager {
     this.pool = []
     this.initialized = false
     this.healthCheckInterval = null
-    this.healthCheckIntervalMs = 60000 // 60 seconds (reduced from 30s to cut request volume)
+    // 心跳间隔：默认 300s（2026-10-19 由 60s 调大 5 倍，降 Upstash 免费额度烧速）。
+    // 可用环境变量 REDIS_HEALTH_CHECK_MS 覆盖，便于不重新部署即可微调。
+    this.healthCheckIntervalMs = parseInt(process.env.REDIS_HEALTH_CHECK_MS, 10) || 300000
     this.reconnectDelayMs = 5000 // 5 seconds
+    // 熔断自愈回探间隔：默认 15 分钟（REDIS_BREAKER_PROBE_MS 可覆盖）。
+    // 只在「存在被熔断实例」时才真正发命令，正常运行零开销。
+    this.breakerProbeIntervalMs = parseInt(process.env.REDIS_BREAKER_PROBE_MS, 10) || 900000
+    this.breakerProbeInterval = null
+    this.breakerProbing = false
+    this.breakerProbeCursor = 0
+    // 熔断解除回调（由 queue.js 注册：实例恢复归队后，队列坏死态则重建）
+    this.onQuotaRecovered = null
     this.isShuttingDown = false
     // 配额熔断追踪：被熔断的实例 id 集合
     this.quotaExhaustedSet = new Set()
@@ -70,6 +85,98 @@ class RedisManager {
     }
     if (this.quotaExhaustedSet.delete(id)) {
       console.log(`[Redis:${id}] 🔓 解除配额熔断`)
+    }
+  }
+
+  /**
+   * ⭐ 熔断自愈回探（2026-10-19，负责人批准的「修熔断卡死」）：
+   * markQuotaExhausted 一旦标记就只等每月 1 号解除——但 Upstash 免费额度并非只在月初恢复
+   * （2026-10-19 实测：backup_1 上午被标熔断，2.5 小时后实际已恢复可用），
+   * 而健康检查只 ping「未熔断」实例、绝不回探被熔断实例 ⇒ 额度恢复了也无法归队，
+   * 队列可能带病停摆到月底。本回探对被熔断实例发「真实数据命令」（GET）：
+   * 成功 ⇒ 解除熔断归队 + 触发 onQuotaRecovered（queue 侧坏死态则重建队列）。
+   */
+  startBreakerProbe() {
+    if (this.breakerProbeInterval) {
+      clearInterval(this.breakerProbeInterval)
+    }
+    this.breakerProbeCursor = 0
+    this.breakerProbing = false
+    this.breakerProbeInterval = setInterval(async () => {
+      if (this.isShuttingDown || this.breakerProbing) return
+      this.breakerProbing = true
+      try {
+        await this.probeMarkedInstances()
+      } catch {
+        // 回探自身失败不影响主流程，下个周期再试
+      } finally {
+        this.breakerProbing = false
+      }
+    }, this.breakerProbeIntervalMs)
+    console.log(`[Redis:BreakerProbe] 已启动 (间隔: ${Math.round(this.breakerProbeIntervalMs / 1000)}s)`)
+  }
+
+  stopBreakerProbe() {
+    if (this.breakerProbeInterval) {
+      clearInterval(this.breakerProbeInterval)
+      this.breakerProbeInterval = null
+      console.log('[Redis:BreakerProbe] 已停止')
+    }
+  }
+
+  /**
+   * 对被熔断实例做一轮回探（每轮只探一个，按池顺序轮转，避免同刻多实例并发试探）。
+   * @returns {Promise<string|null>} 本轮被解除熔断的实例 id（无则 null）
+   */
+  async probeMarkedInstances() {
+    const marked = this.pool.filter(item => this.quotaExhaustedSet.has(item.id))
+    if (marked.length === 0) return null
+    const item = marked[this.breakerProbeCursor % marked.length]
+    this.breakerProbeCursor = (this.breakerProbeCursor + 1) % marked.length
+    const recovered = await this.probeInstance(item)
+    if (recovered) {
+      console.log(`[Redis:${item.id}] 🔄 自愈回探成功（真实数据命令通过），解除配额熔断归队`)
+      this.resetQuotaExhausted(item.id)
+      if (typeof this.onQuotaRecovered === 'function') {
+        try {
+          this.onQuotaRecovered(item.id)
+        } catch (e) {
+          console.error('[Redis] onQuotaRecovered 回调执行失败:', e.message)
+        }
+      }
+      return item.id
+    }
+    return null
+  }
+
+  /**
+   * 对单个实例发一次真实数据命令试探（临时连接，用完即断，不复用进连接池）。
+   * @returns {Promise<boolean>} true = 数据命令成功（额度已恢复）
+   */
+  async probeInstance(item) {
+    let client = null
+    try {
+      if (item.type === 'URL') {
+        client = new Redis(item.url, {
+          connectTimeout: 8000,
+          maxRetriesPerRequest: 1,
+          retryStrategy: () => null,
+          tls: { rejectUnauthorized: false }
+        })
+      } else {
+        client = new Redis({
+          ...(item.config || {}),
+          connectTimeout: 8000,
+          maxRetriesPerRequest: 1,
+          retryStrategy: () => null
+        })
+      }
+      await client.get(REDIS_BREAKER_PROBE_KEY)
+      return true
+    } catch {
+      return false
+    } finally {
+      try { client?.disconnect() } catch { /* ignore */ }
     }
   }
 
@@ -255,6 +362,9 @@ class RedisManager {
     // Start health check
     this.startHealthCheck()
 
+    // 熔断自愈回探：被熔断实例定期用真实数据命令试探，额度恢复即归队
+    this.startBreakerProbe()
+
     // 每月 1 号 00:01 自动解除所有配额熔断（与 Upstash 免费额度重置周期对齐）
     this.scheduleMonthlyReset()
   }
@@ -347,6 +457,7 @@ class RedisManager {
   async close() {
     this.isShuttingDown = true
     this.stopHealthCheck()
+    this.stopBreakerProbe()
 
     for (const [id, client] of this.clients) {
       try {
@@ -375,3 +486,5 @@ class RedisManager {
 }
 
 export const redisManager = new RedisManager()
+// 类本体也导出：供回归测试构造隔离实例（不污染单例状态）
+export { RedisManager }
