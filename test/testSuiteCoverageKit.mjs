@@ -46,10 +46,24 @@ export function parseTestFiles(script) {
 export const TEST_FILE_RE = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/
 
 /**
- * `test/*.test.mjs` 这个 glob **实际能罩到**的形状：test/ 直下一层、且以 .test.mjs 结尾。
+ * npm test 的主 glob（单一实现：package.json scripts.test、auditCoverage、
+ * auditTestFileDiscovery 与 testSuiteCoverage.test.mjs 的形状自证都引它）。
+ *
+ * r307 收紧（`test/*.test.mjs` → `test/[^_]*.test.mjs`）：`_` 前缀是 .gitignore:140
+ * `_*` 约定的一次性探针/临时产物（git 永不接纳），但 node --test 的 glob 不认这条约定——
+ * r304 探针 `test/_probe_mockmodule.test.mjs` 因此混进套件，每次 npm test 都 8s 超时红
+ * （r305/r306 两轮只读审计实证，HEAD 产品码无回归，红全部来自这个永不入库的文件）。
+ * Node 22 实测：glob 字符类 `[^_]` 由 node --test 原生支持；npm→cmd.exe 引号内 `^`
+ * 原样透传（两者都有 isolated 实证，见 r307 报告）。
+ */
+export const MAIN_GLOB = 'test/[^_]*.test.mjs'
+
+/**
+ * `MAIN_GLOB` 这个 glob **实际能罩到**的形状：test/ 直下一层、首字符不是 `_`
+ * （探针约定排除）、以 .test.mjs 结尾。
  * ⛔ 别改成更宽松的正则 —— 它描述的是 Node 的 glob 语义，不是我们的期望。
  */
-export const MAIN_GLOB_RE = /^test\/[^/]+\.test\.mjs$/
+export const MAIN_GLOB_RE = /^test\/[^/_][^/]*\.test\.mjs$/
 
 /** 相对路径归一化（Windows 上 fs 给的是反斜杠，比对前必须统一） */
 const toPosix = (p) => String(p).replace(/\\/g, '/')
@@ -78,19 +92,22 @@ export function auditTestFileDiscovery(pkgText, actualTestFiles) {
     fails.push('真实测试文件清单为空（扫描本身失效）—— 扫描失效时必须判红，不能静默判绿')
     return fails
   }
-  if (!listed.includes('test/*.test.mjs')) {
-    fails.push('scripts.test 里没有 test/*.test.mjs —— 主套件被挤没了')
+  if (!listed.includes(MAIN_GLOB)) {
+    fails.push(`scripts.test 里没有 ${MAIN_GLOB} —— 主套件被挤没了（或 _ 前缀探针混进了套件）`)
   }
 
   const covered = new Set([...MUST_COVER, ...EXCLUDED])
 
   for (const raw of actualTestFiles) {
     const f = toPosix(raw)
+    // r307：`_` 前缀 = .gitignore:140 约定的一次性探针（永不入库），按约定整体跳过——
+    // 它不是「漏跑」，而是设计上不进任何套件（npm test / patrol 同口径）。
+    if (f.slice(f.lastIndexOf('/') + 1).startsWith('_')) continue
     if (f.startsWith('test/')) {
       // test/ 下的文件必须被主 glob 罩到；罩不到的（换后缀、塞子目录）会静默不跑
       if (!MAIN_GLOB_RE.test(f)) {
         fails.push(
-          `${f} 在 test/ 下但被 "test/*.test.mjs" 漏掉 —— 它不会被执行（改成 *.test.mjs 直放 test/，或显式列进 scripts.test）`
+          `${f} 在 test/ 下但被 "${MAIN_GLOB}" 漏掉 —— 它不会被执行（改成 *.test.mjs 直放 test/，或显式列进 scripts.test）`
         )
       }
       continue
@@ -123,8 +140,8 @@ export function auditCoverage(pkgText) {
     fails.push(`scripts.test 不是 node --test：${script}`)
   }
 
-  if (!listed.includes('test/*.test.mjs')) {
-    fails.push('scripts.test 里没有 test/*.test.mjs —— 主套件被挤没了')
+  if (!listed.includes(MAIN_GLOB)) {
+    fails.push(`scripts.test 里没有 ${MAIN_GLOB} —— 主套件被挤没了（或 _ 前缀探针混进了套件）`)
   }
 
   for (const f of MUST_COVER) {

@@ -35,7 +35,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -46,8 +46,10 @@ import {
   auditTestFileDiscovery,
   parseTestFiles,
   TEST_FILE_RE,
+  MAIN_GLOB,
   MAIN_GLOB_RE
 } from './testSuiteCoverageKit.mjs'
+import { runNodeScript } from '../server/utils/localSpawn.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const pkgText = readFileSync(path.join(ROOT, 'package.json'), 'utf8')
@@ -164,12 +166,103 @@ test('反向自检：证明 r215 的旧判据看不见「清单外的新文件�
   assert.ok(auditTestFileDiscovery(pkgText, bad).length === 1, '新判据必须能看见它')
 })
 
-test('判据形状自证：MAIN_GLOB_RE 必须与 scripts.test 里那个 glob 逐字一致', () => {
-  // 防止有人改了 package.json 的 glob（比如改成 test/**/*.test.mjs）而本锁还在按旧形状判
+test('判据形状自证：MAIN_GLOB_RE 必须与 scripts.test 里那个 glob 同口径（r307：排除 _ 前缀探针）', () => {
+  // 防「改了 package.json 的 glob 而本锁还在按旧形状判」——glob 与判据必须逐字对齐
   const script = JSON.parse(pkgText).scripts.test
-  const glob = script.match(/"[^"]*test[^"]*\.test\.mjs"|test\/\*\.test\.mjs/)[0].replace(/"/g, '')
-  assert.equal(glob, 'test/*.test.mjs', 'scripts.test 里的主 glob 变了，MAIN_GLOB_RE 必须同步')
+  const m = script.match(/"(test\/[^"]*\.test\.mjs)"/)
+  assert.ok(m, 'scripts.test 里必须有用引号包住的主 glob（test/...test.mjs）')
+  assert.equal(m[1], MAIN_GLOB, 'scripts.test 里的主 glob 变了，MAIN_GLOB_RE/MAIN_GLOB 必须同步')
   assert.ok(MAIN_GLOB_RE.test('test/a.test.mjs'))
+  assert.ok(!MAIN_GLOB_RE.test('test/_a.test.mjs'), '_ 前缀探针必须被排除（r304 探针混进套件三轮的修法）')
   assert.ok(!MAIN_GLOB_RE.test('test/a/b.test.mjs'))
   assert.ok(!MAIN_GLOB_RE.test('test/a.test.js'))
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// r307 新增：主 glob 排除 `_` 前缀探针（.gitignore:140 `_*` 约定）
+// 背景：r304 探针 test/_probe_mockmodule.test.mjs（gitignored 永不入库）被旧 glob
+//   `test/*.test.mjs` 拾进套件，每次 npm test 都 8s 超时红（r305/r306 只读轮实证）。
+//   修法 = package.json / testFileList / 本 kit 三处同口径排除 + 行为级实测锁。
+// ───────────────────────────────────────────────────────────────────────────
+
+/** 合成 glob 夹具：一个会失败的 _ 探针 + 一个会通过的普通用例（tmp/ 已 gitignore） */
+function makeGlobFixture(dirName) {
+  const dir = path.join(ROOT, 'tmp', dirName)
+  mkdirSync(path.join(dir, 'test'), { recursive: true })
+  writeFileSync(
+    path.join(dir, 'test', '_probe_x.test.mjs'),
+    'import { test } from "node:test"\ntest("probe must not run", () => { throw new Error("picked up") })\n'
+  )
+  writeFileSync(
+    path.join(dir, 'test', 'normal.test.mjs'),
+    'import { test } from "node:test"\ntest("normal runs", () => {})\n'
+  )
+  return dir
+}
+
+/**
+ * 起子进程 node --test 用的环境（r307 实测）：外层 node --test 会往环境里注入
+ * `NODE_TEST_CONTEXT`，子进程继承后以「node:test run() is being called recursively
+ * within a test file. skipping running files.」为由**跳过执行所有文件**——status 0、
+ * stdout 空，看着像跑过其实一个用例都没跑（比红更危险的假绿）。必须删掉它再起。
+ */
+function childTestEnv() {
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
+  return env
+}
+
+test('行为级：package.json 的主 glob 真跑 node --test 时不得拾取 _ 前缀探针（r307）', () => {
+  // 这不是源码锁——真起 node 跑真 glob。旧 glob 下这个夹具必红（见下一把反向自检）。
+  const dir = makeGlobFixture('_r307_globcheck')
+  const glob = JSON.parse(pkgText).scripts.test.match(/"(test\/[^"]*\.test\.mjs)"/)[1]
+  const r = runNodeScript(['--test', glob], { cwd: dir, env: childTestEnv() })
+  try {
+    assert.equal(
+      r.status,
+      0,
+      `主 glob 拾取了 _ 探针（node --test 退出 ${r.status}）：\n${r.stdout}\n${r.stderr}`
+    )
+    assert.match(String(r.stdout), /normal runs/, '普通用例必须真跑（否则是空转绿）')
+    assert.doesNotMatch(String(r.stdout), /probe must not run/, '_ 探针的名字不该出现在输出里')
+    assert.doesNotMatch(
+      String(r.stderr),
+      /recursively within a test file/,
+      '子进程被当成递归测试运行而跳过执行（NODE_TEST_CONTEXT 未清）——空 stdout + 退 0 是假绿'
+    )
+  } finally {
+    // 清不掉也不许让用例红（本机 safe-delete 对目录 fail-closed，仓内惯例：tmp/ 不追清理）
+    try { rmSync(dir, { recursive: true, force: true }) } catch { /* 清理失败不追责，tmp/ 已 gitignore */ }
+  }
+})
+
+test('反向自检：旧 glob（test/*.test.mjs）会把 _ 探针拾进套件 ⇒ 必须判红（证明上一把不是空锁）', () => {
+  const dir = makeGlobFixture('_r307_globcheck_rev')
+  const r = runNodeScript(['--test', 'test/*.test.mjs'], { cwd: dir, env: childTestEnv() })
+  try {
+    assert.notEqual(r.status, 0, '旧 glob 必须拾取 _ 探并非零退出（否则主断言是空锁）')
+    assert.match(String(r.stdout), /probe must not run/, '旧 glob 的输出里必须出现被误拾的探针')
+  } finally {
+    try { rmSync(dir, { recursive: true, force: true }) } catch { /* 同上：清理失败不追责 */ }
+  }
+})
+
+test('反向自检：旧 glob 文本喂给两处审计都必须判红且点名（r307 修法的结构性一面）', () => {
+  const oldPkg = pkgText.replace(MAIN_GLOB, 'test/*.test.mjs')
+  assert.notEqual(oldPkg, pkgText, '注入必须被证实生效（旧 glob 替换成功）')
+  assert.ok(
+    auditCoverage(oldPkg).some((f) => /主套件被挤没了/.test(f)),
+    'auditCoverage 必须对旧 glob 判红'
+  )
+  assert.ok(
+    auditTestFileDiscovery(oldPkg, REAL).some((f) => /主套件被挤没了/.test(f)),
+    'auditTestFileDiscovery 必须对旧 glob 判红'
+  )
+})
+
+test('反向自检：_ 前缀文件按约定跳过，不是「漏跑」判红（r307）', () => {
+  // 真实磁盘上就有 test/_probe_mockmodule.test.mjs（gitignored 探针）——它流过
+  // auditTestFileDiscovery 时必须被跳过而非判红；合成样本同理。
+  const fails = auditTestFileDiscovery(pkgText, [...REAL, 'test/_syntheticProbe.test.mjs'])
+  assert.deepEqual(fails, [], '_ 前缀探针必须被跳过而非判红：' + JSON.stringify(fails))
 })

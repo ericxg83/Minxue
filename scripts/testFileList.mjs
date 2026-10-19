@@ -14,8 +14,10 @@
  *
  * 与磁盘的关系：`test/` 目录每次现扫（新增 .test.mjs 自动纳入）；
  *   9 个 server 侧文件是显式清单（它们在 test/ 之外，glob 表达不了）。
- *   ⚠️ test/ 下只收 `.test.mjs`——与 package.json 的 `test/*.test.mjs` 同口径，
+ *   ⚠️ test/ 下只收 `.test.mjs`——与 package.json 的 `test/[^_]*.test.mjs` 同口径，
  *   `.test.js` 在 test/ 下没有先例；server 侧那两个 .test.js 在显式清单里点名。
+ *   ⚠️ r307：`_` 前缀文件不收——那是 .gitignore:140 `_*` 约定的一次性探针（永不入库），
+ *   但 node --test 的 glob 不认这条约定（r304 探针混进套件 8s 超时红，r305/r306 实证）。
  *
  * r268 变更（关闭 backlog ㊱）：显式清单 8 → 9，纳入
  *   `server/tests/figureRegionRefiner.test.mjs`（2026-09-20 草稿锁，一直没被任何
@@ -45,7 +47,11 @@ export function collectTestFiles(root) {
   const files = []
   try {
     for (const f of fs.readdirSync(path.join(root, 'test'))) {
-      if (f.endsWith('.test.mjs')) files.push('test/' + f)
+      // r307：`_` 前缀 = .gitignore:140 `_*` 约定的一次性探针/临时产物（git 永不接纳），
+      // 与 package.json 主 glob `test/[^_]*.test.mjs` 同口径排除——两处清单必须一致，
+      // 否则 patrol 与 npm test 会跑出不同的套件（r267 三处口径漂移的同族复发）。
+      if (!f.endsWith('.test.mjs') || f.startsWith('_')) continue
+      files.push('test/' + f)
     }
   } catch {}
   for (const f of EXTRA_SERVER_TESTS) files.push(f)
