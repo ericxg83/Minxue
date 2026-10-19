@@ -113,6 +113,7 @@ import { recognizeAnswerImage } from './services/answerOCRService.js'
 import { recognizeQuestionImage } from './services/questionOCRService.js'
 import { uploadImage, deleteFile } from './services/ossService.js'
 import { getTaskQueue, getGeometryQueue, getQueueStats, taskWorker } from './queue.js'
+import { redisManager } from './redisManager.js'
 import { processTask, generateAnswerForQuestion, extractAnswerFromAnalysis, normalizeGeneratedAnswer, validateAIAnswer } from './worker.js'
 // 定时回填走 LLM（backfillTags.js 的 generateTag），用于修正上传热路径产出的
 // 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
@@ -1766,6 +1767,17 @@ app.get('/api/diagnostics/worker-status', async (req, res) => {
     })
   } catch (error) {
     console.error('诊断接口失败:', error)
+    res.status(500).json({ error: error.message })
+  }
+})
+
+// Redis 连接池可观测面（2026-10-19：今天排查「env 贴了但 connected:false」时，
+// 池子解析/连接/熔断状态全靠猜 ⇒ 暴露 getStats()。⚠️ getStats 返回不含 URL/密码，
+// 只有实例 id、优先级、连接态、熔断集合，可安全公开。）
+app.get('/api/diagnostics/redis-pool', (req, res) => {
+  try {
+    res.json({ success: true, timestamp: new Date().toISOString(), pool: redisManager.getStats() })
+  } catch (error) {
     res.status(500).json({ error: error.message })
   }
 })
