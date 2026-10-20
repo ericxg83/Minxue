@@ -41,7 +41,7 @@ import dotenv from 'dotenv'
 import {
   BACKUP_ROOT,
   KEEP_DAYS,
-  TABLES,
+  ALL_TABLES,
   assessBackupResult,
   planExpiredSnapshots,
   snapshotDirName,
@@ -72,7 +72,10 @@ const manifest = {
 let interrupted = null
 
 try {
-  for (const table of TABLES) {
+  // ⭐ 2026-10-20 扩到 ALL_TABLES（核心 5 张 + 补充 7 张，见 backupKit.EXTRA_TABLES）：
+  //    原只备 5/29 张表，库崩后恢复会缺题目↔知识点关联/知识点树/判题记录等关键表。
+  //    补充表备不备、有几行都不影响成败判据（assessBackupResult 只对核心 TABLES 判非空）。
+  for (const table of ALL_TABLES) {
     const { rows } = await pool.query(`SELECT * FROM ${table}`)
     const file = path.join(outDir, `${table}.json`)
     fs.writeFileSync(file, JSON.stringify(rows))

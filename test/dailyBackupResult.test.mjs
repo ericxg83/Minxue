@@ -22,6 +22,8 @@ import {
   BACKUP_ROOT,
   KEEP_DAYS,
   TABLES,
+  EXTRA_TABLES,
+  ALL_TABLES,
   assessBackupResult,
   planExpiredSnapshots,
   snapshotDirName,
@@ -210,4 +212,49 @@ test('备份核心表覆盖面没被偷偷缩小（至少含学生/作业/错题
   //   判据改成真正会失败的那种：常量本身必须是非空字符串（下一行再管它的形状）。
   assert.ok(typeof BACKUP_ROOT === 'string' && BACKUP_ROOT.length > 0, 'BACKUP_ROOT 必须是非空字符串常量')
   assert.ok(BACKUP_ROOT.startsWith('D:/'), '备份根目录必须是本地磁盘常量（当前常量 changed）')
+})
+
+// ── D. 两级备份面（2026-10-20 修 r289-P-A：备份只覆盖 5/29 表→ 补关键关联表）────────
+
+test('D1：补充表覆盖了恢复时必需的关键表（题目↔知识点关联/知识点树/判题记录等）', () => {
+  for (const t of ['question_knowledge', 'knowledge_points', 'question_assets', 'judgements']) {
+    assert.ok(EXTRA_TABLES.includes(t), `关键补充表漏备份：${t}`)
+  }
+})
+
+test('D2：ALL_TABLES = 核心表 + 补充表，且补充表不与核心表重复', () => {
+  assert.deepEqual(ALL_TABLES, [...TABLES, ...EXTRA_TABLES])
+  const dup = EXTRA_TABLES.filter((t) => TABLES.includes(t))
+  assert.deepEqual(dup, [], `补充表与核心表重复：${dup.join(',')}`)
+})
+
+test('D3：★关键语义——补充表为空/缺失不影响备份成立（只对核心表判非空）', () => {
+  // 核心表齐全、补充表全为 0 行 ⇒ 仍判成功（补充表允许阶段性为空）
+  const manifest = {
+    tables: {
+      students: 22, tasks: 263, wrong_questions: 1327, questions: 4115, knowledge_mastery: 1664,
+      question_knowledge: 0, knowledge_points: 0, judgements: 0 // 补充表全空
+    }
+  }
+  const r = assessBackupResult(manifest)
+  assert.equal(r.ok, true, '补充表为空不得让备份误判失败（会天天假红）')
+  assert.deepEqual(r.emptyTables, [], '补充表为空不计入 emptyTables')
+})
+
+test('D4：★反向自检——把补充表也塞进核心判据（错误做法）必须被本测试判红', () => {
+  // 错误实现会长这样：assessBackupResult 改成对 ALL_TABLES 判空。
+  // 内联合成该错误判据，证明它会让「补充表为空」的正常快照误判失败——
+  // 这正是两级设计要避免的，故 D3 的断言（非空判成功）能拦住它。
+  const manifest = { tables: { students: 22, tasks: 263, wrong_questions: 1327, questions: 4115, knowledge_mastery: 1664, question_knowledge: 0 } }
+  const wrongEmpty = ALL_TABLES.filter((t) => (manifest.tables[t] ?? 0) <= 0)
+  assert.ok(wrongEmpty.includes('question_knowledge'), '错误判据会把空补充表算进失败名单（合成自检）')
+  assert.equal(wrongEmpty.length > 0, true, '合成自检前提：存在空补充表')
+  // 正确判据（当前实现）只对 TABLES 判空 ⇒ 补充表不进名单 ⇒ ok
+  assert.deepEqual(assessBackupResult(manifest).emptyTables, [], '正确判据：空补充表不进失败名单')
+})
+
+test('D5：dailyBackup.mjs 遍历 ALL_TABLES（不是只 TABLES），否则补充表根本没被备', () => {
+  const src = scriptSrc()
+  assert.ok(/for \(const table of ALL_TABLES\)/.test(src), 'dailyBackup 主循环必须遍历 ALL_TABLES')
+  assert.ok(!/for \(const table of TABLES\)/.test(src), '不应只遍历核心 TABLES（补充表会漏备）')
 })
