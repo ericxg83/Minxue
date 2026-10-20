@@ -203,3 +203,85 @@ test('③ getAvailableClient 选实例期不触发 onQuotaExhausted（端到端�
   assert.equal(notified, 0, '选实例期绝不能触发重建回调（会双建队列）')
   assert.equal(m.quotaExhaustedSet.has('upstash_primary'), true, '但必须记录熔断（让后续调用继续跳过它）')
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// r318（2026-10-20）：连接失败退避 + 失败连接必须断开。
+//
+// 病因（实测复现，server/_diag_leakproof.mjs）：
+//   createClient 失败只 return null，从不 disconnect 那个 ioredis 客户端；
+//   它却按 retryStrategy 在后台继续重试 ⇒ 每失败一次就多一个「幽灵重连源」。
+//   叠加「每个健康检查 tick 都重连一次死库（高峰 60s/次、永不停止）」
+//   ⇒ 重连次数随运行时长线性增长，直到进程重启（Render sleep）才归零，然后重来。
+//   本地复现：3 次失败调用 ⇒ 后台重连事件 2→5→10，7 秒后累计 32 次。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('④ 连接失败必须指数退避：首退 15s，梯度翻倍，上限 15 分钟', () => {
+  const m = new RedisManager()
+  assert.equal(typeof m.recordConnectFailure, 'function', 'recordConnectFailure 必须存在（旧版无 ⇒ 判红）')
+
+  const delays = []
+  for (let i = 0; i < 8; i++) {
+    m.recordConnectFailure('upstash_primary')
+    const st = m._connectBackoff.get('upstash_primary')
+    delays.push(Math.round((st.nextAt - Date.now()) / 1000))
+  }
+  assert.equal(delays[0], 15, '首次退避 15s（不能一上来就 15 分钟：一次网络抖动要能快速回来）')
+  assert.equal(delays[1], 30)
+  assert.equal(delays[2], 60)
+  assert.equal(delays[6], 900, '第 7 次起封顶 900s')
+  assert.equal(delays[7], 900, '上限后不再增长（否则等于永久拉黑）')
+  assert.equal(m._connectBackoff.get('upstash_primary').failures, 8, '连续失败次数必须累计')
+})
+
+test('④ 退避窗口内 isInConnectBackoff=true，过期后=false', () => {
+  const m = new RedisManager()
+  m.recordConnectFailure('upstash_primary')
+  assert.equal(m.isInConnectBackoff('upstash_primary'), true, '刚失败必须处于退避窗口')
+  assert.equal(m.isInConnectBackoff('upstash_backup_2'), false, '没失败过的实例不该被冷落')
+
+  // 把窗口推到过去：模拟退避到期
+  const st = m._connectBackoff.get('upstash_primary')
+  st.nextAt = Date.now() - 1
+  assert.equal(m.isInConnectBackoff('upstash_primary'), false, '退避到期必须允许重试')
+})
+
+test('④ 退避中的实例在选池时被跳过，且完全不发起连接', async () => {
+  const m = new RedisManager()
+  m.pool = [
+    { id: 'upstash_primary', type: 'URL', url: 'redis://dead', priority: 1 },
+    { id: 'upstash_backup_1', type: 'URL', url: 'redis://live', priority: 2 },
+  ]
+  m.recordConnectFailure('upstash_primary') // 主库连不上，进入退避
+
+  let reconnectAttempts = 0
+  m.createClient = async () => { reconnectAttempts++; return null }
+
+  const healthy = makeClient()
+  m.clients.set('upstash_backup_1', healthy)
+
+  const got = await m.getAvailableClient()
+  assert.equal(got, healthy, '应选中健康 backup')
+  assert.equal(reconnectAttempts, 0, '退避中的实例绝不能再被重连（旧行为：每个 tick 撞一次 = 疯狂重连）')
+})
+
+test('④ 熔断解除同时清空退避（自愈回探成功后要能立刻归队）', () => {
+  const m = new RedisManager()
+  m.recordConnectFailure('upstash_primary')
+  assert.equal(m.isInConnectBackoff('upstash_primary'), true)
+
+  m.resetQuotaExhausted('upstash_primary')
+  assert.equal(m.isInConnectBackoff('upstash_primary'), false, '解除熔断必须同时解除退避')
+})
+
+test('④ 结构性锚点：createClient 失败分支必须 disconnect + 设置连接超时/keepAlive', () => {
+  // 反向自检用：R318_TARGET_SRC 指向旧版文件时，本用例必须判红（否则是空锁）。
+  const target = process.env.R318_TARGET_SRC || '../server/redisManager.js'
+  const src = fs.readFileSync(new URL(target, import.meta.url), 'utf8')
+  const start = src.indexOf('async createClient(')
+  assert.ok(start > 0, '必须能找到 createClient')
+  const body = src.slice(start, src.indexOf('\n  async probeWithTimeout', start))
+  assert.ok(body.includes('client?.disconnect()'), '失败连接必须断开（否则 ioredis 后台无限重试＝幽灵重连源）')
+  assert.ok(body.includes('connectTimeout'), '必须设置连接超时（否则死库把冷启动拖住几十秒）')
+  assert.ok(body.includes('keepAlive'), '必须开 TCP keepAlive（高峰保活，负责人 2026-10-20 要求）')
+  assert.ok(body.includes('recordConnectFailure'), '失败必须记入退避表（否则每个 tick 重撞死库）')
+})

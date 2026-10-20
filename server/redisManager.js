@@ -66,6 +66,12 @@ class RedisManager {
     // 选实例深度计数器（2026-10-20 r317）：>0 表示正在挑可用实例，
     // 此期间检测到的配额耗尽只记录不通知重建（避免 initQueue 重入双建队列）。
     this._inSelection = 0
+    // 连接失败退避表（2026-10-20 r318）：id -> { failures, nextAt }
+    // ⛔ 为什么必须有：连不上的实例（配额死库 / 网络不可达）此前每个健康检查 tick
+    //   都会重新 createClient 一次 —— 高峰 60s 一次、永不停止，且每次失败都留下
+    //    一个仍在后台重试的 ioredis 客户端（见 createClient catch 的注释）。
+    //    退避后同一实例的失败重试被指数拉长到最长 15 分钟一次。
+    this._connectBackoff = new Map()
   }
 
   /**
@@ -176,6 +182,42 @@ class RedisManager {
   }
 
   /**
+   * 连接层失败退避（2026-10-20 r318）。
+   *
+   * ⛔ 病因（实测定位）：`createClient()` 失败后返回 null，但调用方
+   *   `_selectAvailableClient()` 在下一个 tick 又会调回来 —— 健康检查在高峰
+   *   每 60s 一次，于是**每个 tick 都向一个已知连不上的实例发起一次完整 TLS 握手**，
+   *   永不停止。更糟的是每次失败的那个 ioredis 客户端既没进 clients map、
+   *   也从没 disconnect（见 createClient catch），它会按 retryStrategy 在后台
+   *   继续重试 5 次 ⇒ 失败次数线性叠加。
+   *   本地复现（server/_diag_leakproof.mjs）：3 次失败调用 ⇒ 后台重连事件 2→5→10，
+   *   7 秒后累计 32 次，且随调用次数线性增长。
+   *
+   * 退避梯度：15s → 30s → 60s → 120s → 240s → 480s，上限 900s（15 分钟）。
+   * 首次 15s 是刻意压低：健康实例偶发断连（网络抖动）时要能快速回来，
+   * 不能因为一次抖动就让它离线几分钟。
+   */
+  recordConnectFailure(id) {
+    if (!id) return
+    const prev = this._connectBackoff.get(id)
+    const failures = (prev?.failures || 0) + 1
+    const delayMs = Math.min(15000 * Math.pow(2, Math.min(failures - 1, 6)), 900000)
+    this._connectBackoff.set(id, { failures, nextAt: Date.now() + delayMs })
+    console.warn(`[Redis:${id}] ⏳ 连接失败退避 ${Math.round(delayMs / 1000)}s（连续第 ${failures} 次，期间不再重试该实例）`)
+  }
+
+  /** 该实例是否仍在退避窗口内（窗口内一律跳过，不再发起连接） */
+  isInConnectBackoff(id, now = Date.now()) {
+    const state = this._connectBackoff.get(id)
+    return !!state && now < state.nextAt
+  }
+
+  /** 连接成功 / 熔断解除时清空退避，让实例立刻可参与选池 */
+  clearConnectFailure(id) {
+    if (id) this._connectBackoff.delete(id)
+  }
+
+  /**
    * 解除一个实例的熔断标记（每月 1 号 Upstash 额度刷新时调用）。
    */
   resetQuotaExhausted(id) {
@@ -187,6 +229,8 @@ class RedisManager {
       }
       // 落盘同步：解除后磁盘上的旧标记必须一起清掉，否则下次冷启动会误恢复
       this.persistQuotaExhausted()
+      // 退避表同步清空：解除熔断意味着允许重新尝试这些实例
+      this._connectBackoff.clear()
       // 与 ensureResetAfterMonthlyBoundary 同口径：记录已清月份，避免 1 号当天重复清
       this._lastResetMonth = `${new Date().getFullYear()}-${new Date().getMonth()}`
       return
@@ -196,6 +240,8 @@ class RedisManager {
       // 落盘同步（2026-10-20 r317）：单实例解除也要更新磁盘，否则下次冷启动误判为仍熔断
       this.persistQuotaExhausted()
     }
+    // 无论此前是否在熔断集合里，解除动作都同时清掉连接退避（自愈回探已证明它可用）
+    this.clearConnectFailure(id)
   }
 
   /**
@@ -446,11 +492,24 @@ class RedisManager {
       return this.clients.get(poolItem.id)
     }
 
+    // ⛔ 必须在 try 之外声明：catch 里要把它 disconnect 掉。
+    //   2026-10-20 r318 实测：旧代码把 client 声明在 try 内，catch 只 return null
+    //   ⇒ 连接失败的 ioredis 实例既不在 clients map 里、也永远不会被关闭，
+    //   却仍按 retryStrategy 在后台继续重试（最多 5 次）⇒ 每失败一次就多一个
+    //   「幽灵重连源」，随健康检查 tick 线性叠加。本地复现
+    //   （server/_diag_leakproof.mjs）：3 次失败调用 ⇒ 后台重连事件 2→5→10，
+    //   7 秒后累计 32 次。这就是「越睡越疯狂重连」的直接成因。
+    let client = null
+
     try {
-      let client
       if (poolItem.type === 'URL') {
         client = new Redis(poolItem.url, {
           maxRetriesPerRequest: poolItem.maxRetriesPerRequest || null,
+          connectTimeout: 6000,
+          // 高峰保活（负责人 2026-10-20 要求「高峰期不要断」）：
+          // 30s 一次 TCP keepalive 探测，避免长时间空闲被中间设备/服务端掐断后
+          // 用户第一下操作吃到重连延迟。keepalive 探测不产生 Redis 命令、不计配额。
+          keepAlive: 30000,
           tls: { rejectUnauthorized: false },
           retryStrategy: poolItem.retryStrategy
         })
@@ -499,7 +558,10 @@ class RedisManager {
       //    随后在真实业务命令上炸 → 熔断 → BullMQ 拆建风暴。
       //    改为「真实数据命令」校验：超额库当场被拒（不进池），
       //    并标记熔断，使后续 getAvailableClient 直接跳过它。
-      const probe = await this.probeQuotaAlive(client)
+      // ⛔ r318：再加 8s 上限。连不上的实例 maxRetriesPerRequest=null 会让这条
+      //    探活命令一直挂在重连队列里（最多 5 次重试 × 10s 超时 ≈ 50s），
+      //    冷启动就被一个死库拖住近一分钟 —— 用户「睡醒后第一下特别慢」即此。
+      const probe = await this.probeWithTimeout(client, 8000)
       if (!probe.alive) {
         if (probe.quota) {
           console.warn(`[Redis:${poolItem.id}] ⚠️ 连接已建立但额度已耗尽（真实命令失败），不纳入连接池`)
@@ -508,10 +570,12 @@ class RedisManager {
           console.warn(`[Redis:${poolItem.id}] ⚠️ 真实命令探活失败（非配额原因），不纳入连接池`)
         }
         try { client.disconnect() } catch { /* ignore */ }
+        this.recordConnectFailure(poolItem.id)
         return null
       }
 
       this.clients.set(poolItem.id, client)
+      this.clearConnectFailure(poolItem.id)
       console.log(`[Redis:${poolItem.id}] ✅ 连接成功`)
       return client
     } catch (err) {
@@ -521,7 +585,29 @@ class RedisManager {
       if (isQuotaExhaustedError(err?.message || '')) {
         this.markQuotaExhausted(poolItem.id, err.message, { notify: false })
       }
+      // ⛔ 关键修复（r318）：失败连接必须立刻断开，否则它在后台继续重试
+      //   ⇒ 每 tick 漏一个幽灵重连源，越积越多。
+      try { client?.disconnect() } catch { /* ignore */ }
+      this.recordConnectFailure(poolItem.id)
       return null
+    }
+  }
+
+  /**
+   * 带超时的真实命令探活：避免连不上的实例把启动/选池卡在 ioredis 的重连队列里。
+   * 超时按「非配额失败」处理（不误标熔断），由调用方决定是否退避。
+   */
+  async probeWithTimeout(client, timeoutMs) {
+    let timer = null
+    try {
+      return await Promise.race([
+        this.probeQuotaAlive(client),
+        new Promise(resolve => {
+          timer = setTimeout(() => resolve({ alive: false, quota: false, timedOut: true }), timeoutMs)
+        })
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
     }
   }
 
@@ -536,14 +622,23 @@ class RedisManager {
     //   既不浪费一次失败的连接握手，也不会先连废库再报错 → 触发 BullMQ 拆建风暴。
     this.loadPersistedQuotaExhausted()
 
-    // Try to connect to all Redis instances
-    // 已被标记熔断的实例跳过连接（它们的额度已耗尽，连了也只会失败）
+    // 只连到「第一个可用实例」就停，其余实例惰性连接（r318）。
+    // ⛔ 旧行为是给池里每个实例都建连接：3 个实例 = 3 条 TLS 长连接，
+    //   其中死库还要各等一轮重试超时，冷启动被拖慢几十秒，也白白占着 Upstash
+    //   的连接额度。备份实例只在真正需要 failover 时（getAvailableClient 里）
+    //   才建立连接，语义完全不变，连接数与冷启动耗时都降到 1/N。
+    //   已被标记熔断的实例直接跳过（它们的额度已耗尽，连了也只会失败）。
     for (const item of this.pool) {
       if (this.quotaExhaustedSet.has(item.id)) {
         console.log(`[Redis] 跳过已熔断实例: ${item.id}`)
         continue
       }
-      await this.createClient(item)
+      if (this.isInConnectBackoff(item.id)) {
+        console.log(`[Redis] 跳过退避中的实例: ${item.id}`)
+        continue
+      }
+      const client = await this.createClient(item)
+      if (client) break
     }
 
     this.initialized = true
@@ -593,6 +688,12 @@ class RedisManager {
 
       // Try to reconnect if client doesn't exist
       if (!client) {
+        // ⛔ r318：退避期内绝不再发起连接。
+        //   旧行为是每个健康检查 tick 都重连一次死库（高峰 60s/次、永不停止），
+        //   这是「疯狂重连」最直接的来源。退避后最长 15 分钟才试一次。
+        if (this.isInConnectBackoff(item.id)) {
+          continue
+        }
         console.log(`[Redis] 尝试重连: ${item.id}`)
         client = await this.createClient(item)
         if (client) {
@@ -618,10 +719,17 @@ class RedisManager {
         console.warn(`[Redis:${item.id}] 真实命令探活失败：额度已耗尽，跳过该实例`)
         this.markQuotaExhausted(item.id, 'quota exhausted on data command probe', { notify: false })
       } else {
-        // 非配额错误（网络抖动 / 连接被断）⇒ 丢弃这个 client 让下次重建，
-        // ⛔ 绝不能标记额度熔断：一次抖动就把健康实例永久踢出池子＝误伤。
-        console.warn(`[Redis:${item.id}] 真实命令探活失败（非配额原因），丢弃该连接并尝试下一个`)
-        this.clients.delete(item.id)
+        // 非配额错误（网络抖动 / 连接被断）⇒ 绝不能标记额度熔断（一次抖动就把
+        // 健康实例踢出池子＝误伤）。
+        // ⛔ r318：也**不要**在这里直接 clients.delete。删掉 map 条目后，
+        //   下一次选池会 createClient 建一条新连接，而旧 client 仍在后台重连
+        //   ⇒ 又是一条幽灵重连源。让它自己重连：真正断死（status==='end'）
+        //   时 'end' 处理器会移除，并在这里补记退避。
+        console.warn(`[Redis:${item.id}] 真实命令探活失败（非配额原因），交给 ioredis 自愈重连`)
+        if (client.status === 'end') {
+          this.clients.delete(item.id)
+          this.recordConnectFailure(item.id)
+        }
       }
       continue
     }
@@ -699,7 +807,13 @@ class RedisManager {
         id: item.id,
         priority: item.priority,
         connected: this.clients.has(item.id),
-        quotaExhausted: this.quotaExhaustedSet.has(item.id)
+        quotaExhausted: this.quotaExhaustedSet.has(item.id),
+        // 连接失败退避（r318）：让诊断端点能看出「这个实例正在被冷落多久」
+        // —— 修复前无法从外部区分「连不上但每隔 60s 被重试」和「连不上且已退避」。
+        connectBackoffSec: this._connectBackoff.has(item.id)
+          ? Math.max(0, Math.round((this._connectBackoff.get(item.id).nextAt - Date.now()) / 1000))
+          : 0,
+        connectFailures: this._connectBackoff.get(item.id)?.failures || 0
       }))
     }
   }

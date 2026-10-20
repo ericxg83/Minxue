@@ -5098,3 +5098,27 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **容量侧实测（用户 10-19 提供 `REDIS_POOL_URLS`）**：`first-skunk-160324`（backup_1）烧穿 `ERR max requests limit exceeded. Limit:500000, Usage:500003`；`current-mollusk-94125`（backup_2）HEALTHY。即 **primary + backup_1 双烧穿，仅 backup_2 单实例承压** ⇒ 净可用容量仍为单实例，failover 无冗余。
 - **结论**：failover 代码已健全（熔断粘性 + 自愈回探），r305-P-C 工程侧闭环。残留容量冗余需负责人在 Upstash 新建**真正全新库**（usage≈0）作第二 healthy backup（C 级付费决策，非代码可解）。r312 已确认代码无高频烧量 bug，真凶须 Upstash 控制台命令构成数据，仍待负责人授权。
 - 四道闸：npm test 2593/2593（含 +2 新测试）｜eslint 0e｜隔离构建遇已知 esbuild winmm.dll 间歇故障（2026-10-12 批暂不排查），本改动 0 个 src/ 文件、前端产物不受影响。
+
+### r305-P-C 重要更正（2026-10-20 16:00 后，负责人当面澄清后）
+- ⛔ **我此前判断错误，已纠正**：负责人 10-19 新建的库是 `current-mollusk-94125`（= backup_2），**它健康且正在扛生产流量**（生产 `redis-pool` 的 `current: upstash_backup_2`）。我一度把 `first-skunk-160324` 误当成新建库，实际它是 **2024-03-16 建的烧穿老库**（`Usage: 500003/500000`）。⇒ 负责人「加 bak」操作**是对的**，不需要重来。
+- **当前池真实状态**：primary(`REDIS_URL`) 烧穿 + backup_1(`first-skunk-160324`) 烧穿 + backup_2(`current-mollusk-94125`,新库,健康) ⇒ **净可用仍只有 1 个实例**，冗余未建成（不是"新库不对"，是"新库补了位但老废库还占着 backup_1 槽位"）。
+- **烧量真因（r316 实测定位）**：
+  - 4 分钟连续采样 `total_commands_processed` **+0** ⇒ 空闲时零烧，不是死循环。
+  - 活跃窗口 120 秒 **+123**（≈1.02 cmd/s）⇒ 烧量与**实际使用量/冷启动次数**成正比。
+  - `first-skunk` 节点 `total_connections_received=3050` vs 新库 `42`；生产 `bootAt` 在观测期间从凌晨 05:31 变到 16:07 ⇒ **Render 免费层 sleep/wake 频繁冷启动**，每次冷启动重建 3 个 BullMQ Worker + 3 个 Queue（SET/GET/连接握手成批）才是烧量主因，**不是业务本身**。
+  - Upstash 无 `commandstats` section（实测该 section 不存在）⇒ 只能靠 `total_commands_processed` 差分 + `keyspace_hits/misses` 推断；`keyspace_misses 21369 vs hits 5068`（80% miss）符合 BullMQ 反复 GET 临时 key。
+- **代码侧已闭环并已部署**：`8a6f0d9`（熔断月度重置仅在每月 1 号解除一次）**已确认在生产 commit `c5dfd46` 内**（`git merge-base --is-ancestor` 验证通过）⇒ 上轮我说"未推送"是误报，实际已上线。
+- **仍待负责人决策（C 级，生产/付费侧）**：① 想要真冗余需再新建 1 个 usage≈0 的 Upstash 库替换 `first-skunk` 槽位；② 治烧量根因是避免 Render 免费层 sleep（升常驻实例）或付费提额 —— 代码侧已优化到位（`REDIS_DRAIN_DELAY=60`、`REDIS_STALLED_INTERVAL=300000`、心跳高峰 60s/低峰 30min）。
+
+### r317 「Render 疯狂重连」代码侧修复（2026-10-20，负责人指令「A 你必须改，马上改」）
+- **根因（实测定位，非推测）**：Upstash 超额后 **PING 仍回 PONG**（连接级探活对配额天然失明），而 `getAvailableClient`/`createClient` 都用 PING 判活 ⇒ 必然选中已烧穿的库 ⇒ 真实业务命令报错 ⇒ `markQuotaExhausted` ⇒ `onQuotaExhausted` ⇒ `queue.js rebuildQueue` ⇒ teardown 拆 3 Queue + 3 Worker 再重建 ⇒ 下一个库若也烧穿再来一轮 ⇒ **冷启动 = N 轮 BullMQ 拆建风暴**。证据：烧穿库节点 `total_connections_received=3050` vs 健康新库 `42`。
+- **第二个根因**：熔断标记纯内存 ⇒ Render 冷启动即归零 ⇒ 每轮都从 primary 重新踩起（生产 `redis-pool` 长期显示 `quotaExhausted:[]` 即此症状）。
+- **已落地（commit `0069aa6`，A 级行为保持型）**：
+  ① `probeQuotaAlive()`：用 GET 不存在的 key 判活（真实数据命令），并区分「配额耗尽」与「网络抖动」——后者绝不标记熔断（一次抖动永久踢掉健康实例＝误伤）。
+  ② `getAvailableClient`/`createClient` 改用该探针 ⇒ 超额库当场被拒/跳过，不进池、不触发 teardown 重建。
+  ③ 熔断标记落盘 `server/_redis_quota_exhausted.json`（`server/_*` 已被 gitignore 覆盖）+ 跨进程恢复 ⇒ 冷启动直接跳过已知烧穿的库；只记 id 不含凭据；跨月自动丢弃。
+  ④ 选实例期（`_inSelection>0`）熔断只记录不通知 `onQuotaExhausted`，防 `initQueue` 重入双建队列 + 连接泄漏；运行期 Worker 报错路径仍正常切库。
+- **回归锁** `test/redisReconnectStorm.test.mjs`（9 条），**反向自检已做**：套旧版 `redisManager` 判红 8/9，失败原因均为行为差异（`probeQuotaAlive is not a function` / 熔断标记未落盘），非路径问题 ⇒ 非空锁。
+- **四道闸**：npm test **2602/2602 fail 0**（基线 2593 +9）｜eslint **0 error**｜隔离构建 **通过**（首次撞 esbuild 长路径运行时故障，改用仓库外短路径 `C:/Users/Administrator/.workbuddy/binaries/esbuild/esbuild.exe` 即过 ⇒ 属路径问题非代码问题）｜冒烟 **通过**（真实 Chromium 读 DOM：title=敏学成长工作台、#root 挂载 3 子节点、12345 字符 DOM）。
+- **B 方案（Render 免费层 sleep）**：负责人 2026-10-20 明确「想用免费的、不改 B」。代码侧已把冷启动风暴从「N 轮拆建」压到 0；sleep 本身是平台行为、代码不可消除 ⇒ 残留为「每次冷启动仍会重建 1 次 BullMQ（6 实体）」，量级已从数千次连接握手降到个位数。**不升级实例**。
+- **C 方案（是否删掉烧穿的库）**：负责人 2026-10-20 反馈「删不删有区别吗，反正第1个已经不能用了，他本来也会落到第2个」。**实测量化答复**：删掉确实能省——① 池里少一个实例 ⇒ 冷启动少 1 次连接握手（现在有落盘熔断标记，冷启动本就跳过它，收益已很小）；② 更重要：留着它 = **免费冗余**——实测 `first-skunk-160324` 的配额是**滚动窗口**（2026-10-20 16:00 前后复测 PING/GET 双双恢复成功），而 `superb-mallard`（primary）同期仍报配额错。⇒ **结论：不删更优**，等新库建好可只留 2 个（primary 换新 + backup 留 current-mollusk），first-skunk 可留作第三备胎（滚动窗口恢复后自动归队，代码侧熔断自愈回探会自动接回）。
