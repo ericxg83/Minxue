@@ -68,6 +68,9 @@ export default function RetryTask({ taskId, onBack }) {
   const albumInputRef = useRef(null)
   const pendingRef = useRef(null)
   pendingRef.current = pendingFiles
+  // 已成功上传并建好批改任务的 id。关联（link）失败时可免重传直接复用，
+  // 否则重试会重新上传同图——hash 算不出时服务端不去重，会建出重复 task。
+  const uploadedRef = useRef(null)
 
   const loadTask = async () => {
     if (!taskId) return
@@ -173,14 +176,22 @@ export default function RetryTask({ taskId, onBack }) {
     }
     setUploading(true)
     try {
-      // 自动关联：后端按 generatedExamId 取 student_id + 写入 task_type='wrong_retry'
-      const res = await taskService.uploadRetryAnswer(taskId, files.map((p) => p.file))
-      const created = (res.tasks || []).filter((t) => !t.error)
-      if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
+      let firstTaskId
+      if (uploadedRef.current && uploadedRef.current.firstTaskId) {
+        // 上次「上传已成功、仅关联失败」：复用已建任务，跳过重复上传
+        // （避免重传同图在 hash 算不出时建出重复 task，也省一次大文件上传）
+        firstTaskId = uploadedRef.current.firstTaskId
+      } else {
+        // 自动关联：后端按 generatedExamId 取 student_id + 写入 task_type='wrong_retry'
+        const res = await taskService.uploadRetryAnswer(taskId, files.map((p) => p.file))
+        const created = (res.tasks || []).filter((t) => !t.error)
+        if (created.length === 0) throw new Error(res?.report?.summary || '上传失败')
+        firstTaskId = created[0].id
+        uploadedRef.current = { firstTaskId }
+      }
 
       // 关联批改任务并置 grading。
-      // 走 apiRequest 拿超时与重试：这步失败会静默让任务永远停在"待批改"。
-      const firstTaskId = created[0].id
+      // 走 apiRequest 拿超时与重试：这步失败会让任务停在"待批改"，需可恢复（见 catch）。
       await apiRequest(`/retry-tasks/${taskId}/link`, {
         method: 'PATCH',
         body: JSON.stringify({ retryTaskId: firstTaskId })
@@ -189,12 +200,23 @@ export default function RetryTask({ taskId, onBack }) {
       // 清理本地预览
       files.forEach((p) => p.url && URL.revokeObjectURL(p.url))
       setPendingFiles([])
+      uploadedRef.current = null
       Toast.show({ icon: 'success', content: '答卷已上传，开始批改' })
       // 重新拉取状态（批改中）
       await loadTask()
     } catch (e) {
       console.error('上传答卷失败:', e)
-      Toast.show({ icon: 'fail', content: e.message || '上传失败，请重试' })
+      // 区分两种失败：上传本身失败 vs 上传成功但关联失败。
+      // 后者不该提示「上传失败」，否则老师会误以为没传上去而重传
+      // （重传在 hash 算不出时建重复 task，且永远卡在「待批改」无法自愈）。
+      const linkingFailed = !!(uploadedRef.current && uploadedRef.current.firstTaskId)
+      Toast.show({
+        icon: 'fail',
+        content: linkingFailed
+          ? '答卷已上传，但关联到任务失败（重试不会重复上传）'
+          : (e.message || '上传失败，请重试'),
+        duration: 3200
+      })
     } finally {
       setUploading(false)
     }
