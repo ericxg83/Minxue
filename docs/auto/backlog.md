@@ -5092,3 +5092,9 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - 🔴 **r305-P-C**：代码侧已确认无 bug；定位需 Upstash 命令构成数据（负责人提供或授权）。**并新增提示：backup_1 已烧穿，建议补实例。**
 - 跨赛道交几何/批改负责人：`server/utils/fractionRect/index.js` 疑似死模块；worker.js 222-228 几何函数声明零调用。
 - 产品向开放选择：r280-P-B（草稿库发布信任链缺口，**待 P-A 定版后评估**——P-A 已定版，可下轮落地）、存档区治理范围、r300 备份脱离调度。
+
+### r305-P-C 闭环（2026-10-20，本会话现场处理）
+- **代码侧新修复（A 级，已提交 `8a6f0d9`）**：`redisManager.ensureResetAfterMonthlyBoundary` 旧判据 `now >= 当月1号` 在 1–31 号整月都为真 ⇒ Render 每次冷启动都清空配额熔断集合，月度内 failover 保护形同虚设。改为「仅每月 1 号解除一次 + 同进程同月幂等」，已恢复实例由 `startBreakerProbe` 真实数据命令回探归队。新增 2 条回归测试（非1号保持粘性 / 仅1号解除+幂等），旧版判红。
+- **容量侧实测（用户 10-19 提供 `REDIS_POOL_URLS`）**：`first-skunk-160324`（backup_1）烧穿 `ERR max requests limit exceeded. Limit:500000, Usage:500003`；`current-mollusk-94125`（backup_2）HEALTHY。即 **primary + backup_1 双烧穿，仅 backup_2 单实例承压** ⇒ 净可用容量仍为单实例，failover 无冗余。
+- **结论**：failover 代码已健全（熔断粘性 + 自愈回探），r305-P-C 工程侧闭环。残留容量冗余需负责人在 Upstash 新建**真正全新库**（usage≈0）作第二 healthy backup（C 级付费决策，非代码可解）。r312 已确认代码无高频烧量 bug，真凶须 Upstash 控制台命令构成数据，仍待负责人授权。
+- 四道闸：npm test 2593/2593（含 +2 新测试）｜eslint 0e｜隔离构建遇已知 esbuild winmm.dll 间歇故障（2026-10-12 批暂不排查），本改动 0 个 src/ 文件、前端产物不受影响。
