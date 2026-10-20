@@ -5006,3 +5006,20 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **高峰窗判定下沉 `server/lib/peakWindows.mjs` 唯一实现**（铁律「同一件事一个实现」；watchdogCadence.mjs 改兼容 re-export，看门狗与旧锁 import 路径不变）。两个硬约束实测钉死：① **Render `rootDir: server`，scripts/ 不在生产镜像** ⇒ 运行时核心不能 import scripts/dev/*（会 ERR_MODULE_NOT_FOUND）；② **Render 机器 UTC 时区** ⇒ isPeak 改「UTC 毫秒+固定偏移(+480，env PEAK_TZ_OFFSET_MIN)」时区无关判定。
 - **r305-P-C 升级（头号待拍板）**：烧速归因未完——13:06 额度重置后 66 分钟烧穿 50 万 ≈ **126 req/s**，心跳与 BullMQ drainDelay=60s 都解释不了（疑轮询/重连风暴/Events 类），需 prod 侧实测命令速率定位真凶后再定「降频 or 付费层」。
 - **四道闸**：npm test **2562/2562**（净增 1：降频条改写 + 时区条新增）｜eslint 0e｜0 个 src/ 文件豁免构建冒烟｜生产 `08e8210` 14:33 部署、`redis.connected:true` 实证。
+
+## r308 轮（2026-10-19 14:21–15:23，日常巡查 automation `4e9608a9`，commit `bffb95a`；**文书由 r309 于 10-20 补写**）
+
+- **轮次性质**：`finished/307` 正常释放，loopGuard acquire 直得 **308**（git grep 空无撞号）。15:23:34 提交后机器 15:26:21 关机（事件日志 6006 实证），会话随关机消亡 ⇒ 报告/锁释放/三处文书全缺，锁 stale 至 10-20 由 r309 接管。
+- **主项（负责人指令「推送上去」）**：r304 遗留孤儿现场**保全性入库**（24 文件 +1621/−80）——deploy/ Docker 自部署模板（Dockerfile/compose/nginx/DEPLOY-GUIDE/env.example 占位符 + .gitignore 排真密钥）、`scripts/neonBackfill1101.mjs`（幂等 + dry 默认）、start-local 家族微调、周末讲义/相似组聚类/重练卷状态/复核台通知/reviewStore 等并行 WIP + 6 个配套测试（englishAnalyzer/todoJumpAndDefaultTab/e2e_todoJump/redisProbeErrorListener/retryPaperState/similarGroupClustering）。
+- **安全闸（提交前实测）**：密钥扫描零命中（仅注释 `rediss://` 字样）；npm test **2566/2566**；eslint **0e/7w**；vite 构建 **41.44s**（快照 `dist_nightly_20261019r308`）。
+- **性质声明**：保全性入库**非功能验收**，后续轮次按 backlog 逐项收口（reviewStore/ReviewWorkspace/retryPaperState/weekendHandout/similarGroupClustering/deploy 家族功能未验收；`MAX_GROUP_SIZE` 截断未接线 = r303-P-A 仍在）。
+- **r308 必办三项（r309 已闭环）**：① `2026-10-19` 备份 ok:true（北京 13:21:39）② 生产 Redis 恢复确认（`redis.connected:true`/`worker.available:true`，backup_2 mollusk 接管）③ 看门狗新节奏生效（10-20 00:53:04Z 自启日志实证）。
+
+## 第 r309 轮（2026-10-20 08:57–09:1x，日常巡查 automation `4e9608a9`，**锁陈旧接管轮**，commit 见报告 §4）
+
+- **轮次性质**：`running/308` 持锁 **18h35m ≫ 3h 崩溃线**；消亡五实证（最后提交 15:23 后全仓零写入 / 无 r308 报告 / 锁未释放 / **事件日志 10-19 15:26:21 关机→10-20 08:52:41 开机** / git status 干净 stash 空）⇒ 按 loopGuard ≥3h 规则接管，回写 `running/309`。
+- **主项（A 级文档，零产品码）**：补写 `docs/auto/reports/2026-10-19-r308.md`（依据 `bffb95a` 完整消息 + 只读回验重建，不重写历史、不追认未验收产品码）+ r308 必办三项核验闭环（备份 ok / 生产 Redis 健康 / 看门狗新节奏已随开机生效——262f815 无需负责人再手动重启）。
+- **✅ r305-P-B 正式关闭**：生产 `worker-status` `redis.connected:true` + `worker.available:true`（completed 6 / failed 0），`redis-pool` total 3、current `upstash_backup_2` 接管中；本地同拓扑（primary + backup_1 标记 quotaExhausted，backup_2 connected）。
+- **⚠️ r292-P-A 今日复发现场（新证据）**：开机冷启动窗口 00:54:48–00:57:26Z，看门狗对健康 vite 连续三次「健康失败且 :3000 被占（已过冷却）→ taskkill 后下轮拉起」（PID 17352/8472/19848），约 3 分钟自愈——启动宽限 90s 只护得住 watchdog 自己 spawn 的进程，护不住开机任务先拉起的 vite。维持 B 级提案；建议修法：探活失败后二次确认再 kill / 或「端口被占且进程 CPU>0」判活。
+- **四道闸**：npm test **2566/2566 fail 0**（78.6s）｜eslint **0e/131w**｜`dist_nightly_20261020r309` **59.68s**｜preview 5732：cert_probe exit 0（唯一外联=OSS 作业图）+ render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。0 个 src/ 文件、0 个产品码文件。
+- **备份**：最新 `2026-10-19` ok:true（北京 13:21:39），今日 08:57 早于 13:00 档 ⇒ **无报警**。
