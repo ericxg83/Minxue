@@ -13,4 +13,7 @@ export {
   parseWindows,
   isPeak,
   pickIntervalMs,
+  frontendDevArgs,
+  decideOccupiedPort,
+  decideIdlePort,
 } from '../../server/lib/peakWindows.mjs'

@@ -90,3 +90,41 @@ export function pickIntervalMs({ now, windows, peakMs, offPeakMs, accelerateUnti
   if (Number.isFinite(accelerateUntil) && accelerateUntil > now.getTime()) return peakMs
   return isPeak(now, windows, tzOffsetMin) ? peakMs : offPeakMs
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// 本地看门狗三缺陷判据（2026-10-20，负责人授权修 r292-P-A；纯函数，唯一实现）
+//
+// 为什么在这里：keep_local_services.mjs 的 tick() 直接耦合 spawn/netstat/fetch，无法单测；
+// 把「该不该杀/该不该拉」三个判据下沉成纯函数，既有唯一实现又可被test/watchdogOwnership.test.mjs
+// 锁定（含反向自检）。守护运行时调用这三个函数，不再内联判断。
+// ────────────────────────────────────────────────────────────────────────────
+
+/** 前端启动参数（含 --strictPort）—— 缺陷①：缺它时端口被占会静默顺延，孤儿永不被回收 */
+export function frontendDevArgs(port = 3000) {
+  return ['node_modules/vite/bin/vite.js', '--port', String(port), '--strictPort', '--host']
+}
+
+/**
+ * 端口「被占」且探活失败时，是否该 taskkill —— 缺陷②（kill 侧）。
+ * 只杀本守护自己拉起的进程；外部（开机任务 / 手动）拉起的进程不归本守护杀，
+ * 否则会误杀健康服务（r309 实测开机冷启动窗口三次误杀 vite，3 分钟自愈）。
+ * @param {{spawnedAt:number, spawnedByUs:boolean}} svc
+ * @param {number} now Date.now()
+ * @param {number} cooldownMs
+ * @returns {'cooldown'|'external'|'kill'} 动作决策
+ */
+export function decideOccupiedPort(svc, now, cooldownMs) {
+  if (now - svc.spawnedAt < cooldownMs) return 'cooldown' // 刚拉起，等它起
+  if (!svc.spawnedByUs) return 'external' // 外部进程，不杀，仅观察
+  return 'kill' // 本守护拉起的、已过冷却、仍不健康 → 杀
+}
+
+/**
+ * 端口「空闲」且探活失败时，是否该拉起 —— 缺陷②（spawn 侧）。
+ * 开机自启链先拉进程但尚未 listen 时端口瞬时空闲，此时抢拉会双份抢端口；
+ * 冷却期（守护启动/上次拉起后 cooldownMs）内只等待，冷却后仍空闲才由守护接管拉起。
+ * @returns {'cooldown'|'spawn'}
+ */
+export function decideIdlePort(svc, now, cooldownMs) {
+  return now - svc.spawnedAt < cooldownMs ? 'cooldown' : 'spawn'
+}

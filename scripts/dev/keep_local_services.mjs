@@ -41,6 +41,9 @@ import {
   isPeak,
   parseWindows,
   pickIntervalMs,
+  frontendDevArgs,
+  decideOccupiedPort,
+  decideIdlePort,
 } from './watchdogCadence.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
@@ -56,6 +59,11 @@ const OFFPEAK_INTERVAL_MS = parseInt(process.env.WATCHDOG_OFFPEAK_INTERVAL_MS, 1
 const PEAK_WINDOWS = parseWindows(process.env.WATCHDOG_PEAK_WINDOWS) ?? parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
 const ACCELERATE_MS = 2 * 60_000 // 拉起后用高峰节奏确认恢复的时长
 const COOLDOWN_MS = 90_000 // 拉起后给足冷启动时间，期间探活失败也不 taskkill
+// ⭐ 探活超时 3s → 8s（2026-10-20，r292-P-A 缺陷③）：vite 首次按需编译常 >3s，3s 会把
+//    「健康但正忙」误判成失败 → 触发无谓 kill/spawn 抖动。开机冷启动窗口实测三次误杀
+//    健康 vite（r309：PID 17352/8472/19848，00:54–00:57Z，3 分钟自愈）即此因。
+//    8s 远小于最短探活间隔（低峰 600s / 高峰 15s），不会拖慢故障发现。
+const HEALTH_TIMEOUT_MS = 8000
 const OPEN_BROWSER = process.argv.includes('--open')
 const OPEN_URL = 'http://127.0.0.1:3000/'
 
@@ -71,14 +79,25 @@ const SERVICES = [
     // ⭐ spawnedAt 以守护启动时刻起算（而非 0）：给启动宽限 90s——守护冷启动首跳若恰逢
     //    服务健康检查瞬时失败（如 vite 按需编译 >3s），没有宽限会立即 taskkill 健康服务
     //    （2026-10-19 13:57 实测一例）。90s 后行为与旧版完全一致。
+    // ⭐ spawnedByUs（2026-10-20，r292-P-A 缺陷②）：开机自启链（计划任务 MinxueLocalServices
+    //    → start-local.cmd）会**先于**本守护拉起两端。守护启动首跳若探活瞬时失败 + 端口恰空闲
+    //    （开机任务进程刚起、尚未 listen），旧版无条件再拉 ⇒ 双份抢端口（r292/r309 实测）。
+    //    该标记区分「本守护拉起的」与「外部拉起的」：只有本守护拉起过的，端口空闲才负责拉起；
+    //    外部的端口空闲仅观察等待，给它启动时间，不抢拉。
     spawnedAt: Date.now(),
+    spawnedByUs: false,
   },
   {
     name: 'frontend',
     port: 3000,
     healthUrl: 'http://127.0.0.1:3000/',
-    args: ['node_modules/vite/bin/vite.js', '--port', '3000', '--host'],
+    // ⭐ --strictPort（2026-10-20，负责人授权修 r292-P-A缺陷①）：缺它时 :3000 被占vite
+    //    会静默顺延 :3001/:3002，而本守护只探 :3000 ⇒ 顺延出来的孤儿永不被回收
+    //    （r292 实测 3 实例 :3000/:3001/:3002、633MB，两孤儿零连接）。参数由纯函数
+    //    frontendDevArgs() 统一提供（唯一实现，test/watchdogOwnership.test.mjs 锁定）。
+    args: frontendDevArgs(3000),
     spawnedAt: Date.now(), // 同上：启动宽限
+    spawnedByUs: false, // 同上：开机任务先拉起时不抢拉
   },
 ]
 
@@ -94,7 +113,7 @@ async function log(line) {
 async function healthy(svc) {
   try {
     const ctl = new AbortController()
-    const t = setTimeout(() => ctl.abort(), 3000)
+    const t = setTimeout(() => ctl.abort(), HEALTH_TIMEOUT_MS)
     const r = await fetch(svc.healthUrl, { signal: ctl.signal })
     clearTimeout(t)
     return r.ok
@@ -177,20 +196,33 @@ async function tick() {
         continue
       }
       if (pids.length) {
-        const inCooldown = Date.now() - svc.spawnedAt < COOLDOWN_MS
-        if (inCooldown) {
+        // 判据下沉纯函数 decideOccupiedPort（唯一实现，测试锁定）：
+        //   cooldown → 刚拉起等它起/ external → 外部进程不杀仅观察 / kill → 本守护拉起的才杀
+        const action = decideOccupiedPort(svc, Date.now(), COOLDOWN_MS)
+        if (action === 'cooldown') {
           const left = Math.round((COOLDOWN_MS - (Date.now() - svc.spawnedAt)) / 1000)
           await log(`[${svc.name}] :${svc.port} 被占（PID ${pids.join(',')}）但刚拉起（冷却 ${left}s）→ 等待启动`)
           continue
         }
-        await log(`[${svc.name}] 健康失败且 :${svc.port} 被占（PID ${pids.join(',')}，已过冷却）→ taskkill 后下轮拉起`)
+        if (action === 'external') {
+          await log(`[${svc.name}] 健康失败且 :${svc.port} 被占（PID ${pids.join(',')}）但该进程非本守护拉起 → 不 taskkill，仅观察`)
+          continue
+        }
+        await log(`[${svc.name}] 健康失败且 :${svc.port} 被占（PID ${pids.join(',')}，已过冷却，本守护拉起）→ taskkill 后下轮拉起`)
         for (const pid of pids) {
           spawnLocal('taskkill', ['/F', '/PID', pid], { windowsHide: true, stdio: 'ignore' })
         }
         continue
       }
+      // 端口空闲：判据下沉纯函数 decideIdlePort（冷却内等待，防开机双拉）
+      if (decideIdlePort(svc, Date.now(), COOLDOWN_MS) === 'cooldown') {
+        const left = Math.round((COOLDOWN_MS - (Date.now() - svc.spawnedAt)) / 1000)
+        await log(`[${svc.name}] 健康失败且 :${svc.port} 空闲但处于启动冷却（剩余 ${left}s）→ 等待（防开机双拉）`)
+        continue
+      }
       await log(`[${svc.name}] 健康失败且 :${svc.port} 空闲 → 拉起`)
       svc.spawnedAt = Date.now()
+      svc.spawnedByUs = true
       everSpawned = true
       accelerateUntil = Date.now() + ACCELERATE_MS
       spawnService(svc)
