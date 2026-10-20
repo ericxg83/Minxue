@@ -5139,3 +5139,9 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - 退避加 **fail-open**：池内全在退避窗口时强试一次，防「一次网络抖动把队列层锁死 15 分钟」。
 - 回归锁：`test/redisReconnectStorm.test.mjs` 18 条、`test/keepalivePeakGate.test.mjs` 8 条、`test/renderKeepalive.test.mjs` 8 条。
 **四道闸**：npm test **2626/2626 fail 0**｜eslint 0 error（改动文件）｜峰值实测 `instantaneous_ops_per_sec=1`、`total_commands_processed` 5 分钟 +0（空闲零烧，未再出现 400/s 突发）｜生产部署后复验（待 push 后）。
+
+### ⛔ 配额口径纠正（2026-10-20 19:30，负责人当面纠错，优先级高于本文件旧表述）
+- **本文档 r317 段写的「first-skunk 配额是滚动窗口」是错的，已作废。** 该判断来自「10-20 16:00 first-skunk 恢复可用」的现象反推，站不住脚（Upstash 对超额账号会间歇放行连接，且 `INFO total_commands_processed` 会随实例重启归零，两者都不等于额度恢复）。
+- **正确口径（官方定价页 + 负责人历史澄清）**：Upstash 免费层 = **每个账号 1 个库、50 万命令/自然月**，月末滚动到新月份后清零；**三个库 = 三个独立账号**（2026-10-19 负责人已澄清，见 `.workbuddy/memory/2026-10-19.md:162`）⇒ 每月合计 **150 万**，按池优先级 primary → backup_1 → backup_2 **顺序 failover**。
+- **推论**：按修复后日耗约 1.5 万条算，11-01 之后 150 万够 **约 100 天**，单库 50 万也够 33 天 ⇒ 「6 天烧穿」是风暴产物，不是正常用量。
+- **代码保证（commit 63924ce）**：`ensureResetAfterMonthlyBoundary` 1 号清完熔断后**回写磁盘 + 清退避**（此前只清内存，1 号当天再冷启动会把本月标记读回来，白跳过刚恢复的库）；回归锁 `test/redisMonthlyReset.test.mjs` 4 条。
