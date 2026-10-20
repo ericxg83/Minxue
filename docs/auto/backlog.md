@@ -5023,3 +5023,29 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **⚠️ r292-P-A 今日复发现场（新证据）**：开机冷启动窗口 00:54:48–00:57:26Z，看门狗对健康 vite 连续三次「健康失败且 :3000 被占（已过冷却）→ taskkill 后下轮拉起」（PID 17352/8472/19848），约 3 分钟自愈——启动宽限 90s 只护得住 watchdog 自己 spawn 的进程，护不住开机任务先拉起的 vite。维持 B 级提案；建议修法：探活失败后二次确认再 kill / 或「端口被占且进程 CPU>0」判活。
 - **四道闸**：npm test **2566/2566 fail 0**（78.6s）｜eslint **0e/131w**｜`dist_nightly_20261020r309` **59.68s**｜preview 5732：cert_probe exit 0（唯一外联=OSS 作业图）+ render_smoke **8/8** + route_sweep **0/16** + text_audit **0/13**。0 个 src/ 文件、0 个产品码文件。
 - **备份**：最新 `2026-10-19` ok:true（北京 13:21:39），今日 08:57 早于 13:00 档 ⇒ **无报警**。
+
+---
+
+## r312 轮（2026-10-20 11:5x–12:4x，automation 4e9608a9，负责人授权代码类自决后批量执行）
+
+### 已落地并提交（代码类待办逐个清账）
+- **r299-P-A 关闭**（commit `999ee42`）：删`server/simple-server.js`。真相：`.gitignore` 忽略、从未入库的本地 mock 残留（还占 4000 端口）。同步解耦 `apiCallerAuditKit` DECL_RE + `serverModuleReachabilityKit` HAND_RUN + `.gitignore` 死规则。
+- **r292-P-C 关闭**（commit `999ee42`）：删 `scripts/wipe-neon.mjs`（零调用方 TRUNCATE 全库脚本，git 可逆）。
+- **r292-P-A 关闭**（commit `c374702`）：看门狗三缺陷全修（`--strictPort` / 端口空闲查冷却+只杀本守护拉起的 / 探活 3s→8s）；判据下沉纯函数 + `test/watchdogOwnership.test.mjs` 15 条（反向自检套旧版 5 红）。
+- **r289-P-A 关闭**（commit `5c2b625`）：备份 5→12 表（新增 `EXTRA_TABLES` 两级分级，核心表判成败/补充表只备不管），实跑 manifest ok:true、14M。
+- **r302-P-B 部分关闭**（commit `b4b2595`）：删 worker.js 三个零引用 import（模块加载验证导出完好）。几何函数声明跨赛道未动。
+- **r289-P-B 自动消解**：`englishAnalyzer` / `todoJumpAndDefaultTab` 实测已入库且全绿，后续轮次已收口，无需代提。
+
+### 推翻的旧结论
+- **r278-P-B 撤回**：`_r113q_baddir` 不是死副本，是 `test/mobileErrorVisibility.test.mjs` 的**活测试夹具**（运行时写合成树的反向自检语料）⇒ **不删**。
+
+### 仍开放（跨赛道 / 真开放岔路）
+- **r305-P-C（🔴 C，置顶）——生产额度烧速定位**：r312 代码侧全量排查 `redisManager.js`（Upstash retryStrategy 上限 5 次+指数退避）与 `queue.js`（三队列 drainDelay 60s/lockDuration 5-10min/指数 backoff）——**所有重试/重连/心跳路径都有退避，未发现无节制高频循环的代码 bug**，与 r305 实证（心跳/drainDelay 烧不出 126 req/s）一致。真正烧 50 万的源头**必须靠 Upstash 控制台命令构成数据**（哪个命令/哪个 key 高频）定位，静态代码看不到运行时构成。属 C 级（生产/付费资源），需负责人授权/Upstash 控制台数据才能继续。
+- **跨赛道观察（交几何/批改负责人）**：① `server/utils/fractionRect/index.js` 仅被 09-27 一次性脚本引用、生产零引用，疑似死模块；② worker.js 222-228 行几何函数声明（`checkFigureReference`/`renderGeometrySvg`/`buildFunctionGraphSvg`/`publishCleanGeometryUrl`）本地零调用，疑似待接线半成品。
+- **产品向开放选择（保留提案）**：r280 答案库死分支「激活 or 删除」、存档区治理范围、r300 备份脱离调度。
+
+### 四道闸
+四单元全绿：npm test 2566/2581/2586/2586 全fail 0｜eslint 0e/131w｜构建 47.70/37.44/36.93/36.44s｜cert_probe 0 失败 + text_audit 0/13。0 个 src/ 文件；构建统一短路径 esbuild 绕开已知 winmm.dll 间歇故障。
+
+### 备份
+最新 `2026-10-19`（13:00 档未到，无报警）；本轮手动生成今日档 `2026-10-20`（扩表后验证 ok:true、14M）。
