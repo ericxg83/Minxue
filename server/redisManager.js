@@ -674,36 +674,26 @@ class RedisManager {
   }
 
   async _selectAvailableClient() {
-    // Try each Redis instance in priority order
-    for (let i = 0; i < this.pool.length; i++) {
-      const idx = (this.currentIndex + i) % this.pool.length
+    const total = this.pool.length
+    const start = this.currentIndex
+
+    // ── 第一遍：只在「已连接」的实例里挑（r319）──────────────────────────
+    // ⛔ 为什么必须分两遍：旧实现是单趟「按优先级，遇到没有连接就当场建连」，
+    //   于是一个优先级更高、但已经连不上的库（配额烧穿 / 网络不可达）会让**每一次**
+    //   getAvailableClient 都先付一次握手超时（connectTimeout 6s + 探活 8s），
+    //   才轮到后排那个本来好好的健康库。高峰期健康检查每 60s 一次、每次业务取连接
+    //   也走这里 ⇒ 「明明有可用库，每次取连接都要卡几秒」。
+    //   已连接实例的探活只是一条 GET，零握手成本；先把它挑完，再去建新连接。
+    for (let i = 0; i < total; i++) {
+      const idx = (start + i) % total
       const item = this.pool[idx]
 
       // ⭐ 配额熔断：跳过已被标记为额度耗尽的实例
-      if (this.quotaExhaustedSet.has(item.id)) {
-        continue
-      }
+      if (this.quotaExhaustedSet.has(item.id)) continue
 
-      let client = this.clients.get(item.id)
+      const client = this.clients.get(item.id)
+      if (!client) continue
 
-      // Try to reconnect if client doesn't exist
-      if (!client) {
-        // ⛔ r318：退避期内绝不再发起连接。
-        //   旧行为是每个健康检查 tick 都重连一次死库（高峰 60s/次、永不停止），
-        //   这是「疯狂重连」最直接的来源。退避后最长 15 分钟才试一次。
-        if (this.isInConnectBackoff(item.id)) {
-          continue
-        }
-        console.log(`[Redis] 尝试重连: ${item.id}`)
-        client = await this.createClient(item)
-        if (client) {
-          this.currentIndex = idx
-          return client
-        }
-        continue
-      }
-
-      // Check if client is still alive
       // ⛔ 2026-10-20 r317：原来这里用 PING 判活，但 Upstash 超额后 PING 仍回 PONG
       //    ⇒ 必然选中烧穿的库 ⇒ 真实命令报错 ⇒ 熔断 ⇒ BullMQ 拆建风暴。
       //    改用真实数据命令（GET 不存在的 key）：超额即报错，当场跳过该实例，
@@ -731,7 +721,46 @@ class RedisManager {
           this.recordConnectFailure(item.id)
         }
       }
-      continue
+    }
+
+    // ── 第二遍：确实一个可用连接都没有，才按优先级建连（r319）───────────
+    // ⛔ 退避是「有别的路可走时别死磕」的优化，绝不能变成「全部退避 ⇒ 谁也不试」。
+    //   若一次都没尝试（所有实例都在退避窗口内），必须 fail-open 强试优先级最高的那个，
+    //   否则一次网络抖动就把整个队列层锁死最长 15 分钟——比疯狂重连严重得多。
+    let attempted = 0
+    let lastResort = null
+    let lastResortIdx = -1
+    for (let i = 0; i < total; i++) {
+      const idx = (start + i) % total
+      const item = this.pool[idx]
+
+      if (this.quotaExhaustedSet.has(item.id)) continue
+      if (this.clients.has(item.id)) continue
+
+      // ⛔ r318：退避期内绝不再发起连接。
+      //   旧行为是每个健康检查 tick 都重连一次死库（高峰 60s/次、永不停止），
+      //   这是「疯狂重连」最直接的来源。退避后最长 15 分钟才试一次。
+      if (this.isInConnectBackoff(item.id)) {
+        if (!lastResort) { lastResort = item; lastResortIdx = idx }
+        continue
+      }
+
+      attempted++
+      console.log(`[Redis] 尝试重连: ${item.id}`)
+      const client = await this.createClient(item)
+      if (client) {
+        this.currentIndex = idx
+        return client
+      }
+    }
+
+    if (attempted === 0 && lastResort) {
+      console.warn(`[Redis:${lastResort.id}] 池内实例全在退避窗口，兜底强试一次（fail-open，绝不锁死）`)
+      const client = await this.createClient(lastResort)
+      if (client) {
+        this.currentIndex = lastResortIdx
+        return client
+      }
     }
 
     console.error('[Redis] ❌ 所有实例均不可用')

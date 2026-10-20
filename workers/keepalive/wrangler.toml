@@ -12,6 +12,9 @@ compatibility_date = "2025-01-01"
 
 # Render 免费实例 15 分钟无入站请求即 spin down；5 分钟一次留足调度余量。
 # Cloudflare Cron Triggers 对 Worker 的 scheduled 调用不计入请求数配额。
+# ⚠️ 2026-10-20 r319：cron 本身仍是 */5（Cloudflare 侧不做条件判断），但 Worker 内部
+#   会按高峰窗口（默认周一~周五 15:00–21:30 北京时间 + 10 分钟预热）门控 ——
+#   窗口外一个请求都不发，让 Render 正常休眠。见 src/index.js 的 shouldPingNow。
 [triggers]
 crons = ["*/5 * * * *"]
 

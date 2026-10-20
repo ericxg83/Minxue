@@ -20,10 +20,19 @@ name: Render Keepalive
 
 on:
   schedule:
-    # 刻意避开整十分（0/10/20…）：GitHub 官方文档说明 schedule 在高负载时会延迟
-    # 甚至丢弃，并明确建议「避免整点触发」。最初的 `*/10 * * * *` 正好全踩在
-    # 整十分上，实测上线后 40 分钟、跨 4 个调度窗口一次都没触发。
-    - cron: '7,17,27,37,47,57 * * * *'
+    # ⛔ 2026-10-20 实测：本 workflow 名义上每 10 分钟一次（144 次/天），
+    #   实际通过 GitHub API 拉到近 90 次运行记录，**每天只跑 3–8 次**且时刻随机
+    #   （10-11 至 10-20 每天 2–8 次）；间隔常达 4–6 小时 ≫ Render 15 分钟休眠阈值
+    #   ⇒ 保活从来没真正生效过，Render 照样反复睡/醒。根因是 GitHub 对 schedule 的
+    #   限流与丢弃（公开仓库也一样），不是 cron 写法问题。
+    #   ⇒ 该 workflow 只作为「尽力而为」的兜底；可靠保活靠 workers/keepalive 的
+    #     Cloudflare Cron Triggers（5 分钟精确触发）。
+    #
+    # 只在高峰窗口内保活（负责人 2026-10-20 指示：高峰期间不要断，其余时间让它睡）。
+    # 高峰口径与 server/lib/peakWindows.mjs 同一份：周一~周五 15:00–21:30（北京时间）。
+    # UTC cron：06:50Z–13:50Z 对应 14:50–21:50 北京时间（06 点这一小时用于 10 分钟预热，
+    # 精确门控由下面 run 步骤里的北京时间判定负责）。
+    - cron: '*/10 6-13 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -41,6 +50,19 @@ jobs:
     steps:
       - name: Ping /api/health
         run: |
+          # ── 高峰窗口门控（北京时间 UTC+8）──────────────────────────────
+          # 口径与 server/lib/peakWindows.mjs 一致：周一~周五 15:00–21:30，
+          # 外加 15 分钟预热（14:45 起）。窗口外一个请求都不发 —— 让 Render 正常睡，
+          # 睡觉是我们的策略而不是被动事故。
+          # 为什么 cron 之外还要兜这一层：GH schedule 会延迟数十分钟甚至跨出窗口才真正
+          # 跑起来（实测每天只触发 3–8 次），迟到的那次不该把实例白叫醒。
+          BJ=$(date -u -d '+8 hours' +%u-%H%M)
+          DOW=${BJ%%-*}; HM=${BJ##*-}
+          if [ "$DOW" -gt 5 ] || [ "$HM" -lt 1445 ] || [ "$HM" -gt 2150 ]; then
+            echo "窗口外（北京时间 $BJ），本次跳过保活，让实例正常休眠"
+            exit 0
+          fi
+
           URL="https://minxue-api.onrender.com/api/health"
 
           for attempt in 1 2 3; do

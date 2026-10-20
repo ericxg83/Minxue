@@ -273,8 +273,7 @@ test('④ 熔断解除同时清空退避（自愈回探成功后要能立刻归�
   assert.equal(m.isInConnectBackoff('upstash_primary'), false, '解除熔断必须同时解除退避')
 })
 
-test('④ 结构性锚点：createClient 失败分支必须 disconnect + 设置连接超时/keepAlive', () => {
-  // 反向自检用：R318_TARGET_SRC 指向旧版文件时，本用例必须判红（否则是空锁）。
+test('④ 结构性锚点：createClient 失败分支必须 disconnect + 设置连接超时/keepAlive', () => {  // 反向自检用：R318_TARGET_SRC 指向旧版文件时，本用例必须判红（否则是空锁）。
   const target = process.env.R318_TARGET_SRC || '../server/redisManager.js'
   const src = fs.readFileSync(new URL(target, import.meta.url), 'utf8')
   const start = src.indexOf('async createClient(')
@@ -284,4 +283,84 @@ test('④ 结构性锚点：createClient 失败分支必须 disconnect + 设置�
   assert.ok(body.includes('connectTimeout'), '必须设置连接超时（否则死库把冷启动拖住几十秒）')
   assert.ok(body.includes('keepAlive'), '必须开 TCP keepAlive（高峰保活，负责人 2026-10-20 要求）')
   assert.ok(body.includes('recordConnectFailure'), '失败必须记入退避表（否则每个 tick 重撞死库）')
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// r319（2026-10-20）：选连接必须两遍——先挑已连接的，再建新连接。
+//
+// 病因：旧实现单趟按优先级走，遇到「更高优先级但连不上」的库就当场建连，
+//   于是每次 getAvailableClient 都先付一次握手超时（6s 连接 + 8s 探活），
+//   才轮到后排那个本来健康的已连接库 ⇒ 明明有可用库，每次取连接都卡几秒。
+//   这在高频调用方（BullMQ 取连接、健康检查每 60s）上是真金白银的延迟。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('⑤ 已有健康连接时，不得为「更高优先级但连不上」的库先付握手超时', async () => {
+  const m = new RedisManager()
+  m.pool = [
+    { id: 'upstash_primary', type: 'URL', url: 'redis://dead', priority: 1 },
+    { id: 'upstash_backup_1', type: 'URL', url: 'redis://live', priority: 2 },
+  ]
+  // primary 没有任何连接、也没在退避窗口（退避到期后正是这个状态）
+  m.recordConnectFailure('upstash_primary')
+  m._connectBackoff.get('upstash_primary').nextAt = Date.now() - 1
+
+  let handshakes = 0
+  m.createClient = async () => { handshakes++; return null }
+
+  const healthy = makeClient()
+  m.clients.set('upstash_backup_1', healthy)
+
+  const got = await m.getAvailableClient()
+  assert.equal(got, healthy, '应直接返回已连接的健康库')
+  assert.equal(handshakes, 0, '有可用连接时绝不能再对死库发起握手（否则每次取连接都卡几秒）')
+})
+
+test('⑤ 优先级仍然有效：高优先级已连接时优先选它', async () => {
+  const m = new RedisManager()
+  m.pool = [
+    { id: 'upstash_primary', type: 'URL', url: 'redis://a', priority: 1 },
+    { id: 'upstash_backup_1', type: 'URL', url: 'redis://b', priority: 2 },
+  ]
+  const primary = makeClient()
+  const backup = makeClient()
+  m.clients.set('upstash_primary', primary)
+  m.clients.set('upstash_backup_1', backup)
+
+  const got = await m.getAvailableClient()
+  assert.equal(got, primary, '两遍选池不得打乱优先级')
+  assert.equal(m.currentIndex, 0)
+})
+
+test('⑤ 一个连接都没有时才建连，且按优先级从第一个可用开始', async () => {
+  const m = new RedisManager()
+  m.pool = [
+    { id: 'upstash_primary', type: 'URL', url: 'redis://a', priority: 1 },
+    { id: 'upstash_backup_1', type: 'URL', url: 'redis://b', priority: 2 },
+  ]
+  const tried = []
+  const backup = makeClient()
+  m.createClient = async (item) => { tried.push(item.id); return item.id === 'upstash_backup_1' ? backup : null }
+
+  const got = await m.getAvailableClient()
+  assert.equal(got, backup)
+  assert.deepEqual(tried, ['upstash_primary', 'upstash_backup_1'], '按优先级依次尝试，连上即停')
+})
+
+test('⑤ 全池都在退避窗口时必须 fail-open 强试一次（退避不得把队列层锁死）', async () => {
+  const m = new RedisManager()
+  m.pool = [
+    { id: 'upstash_primary', type: 'URL', url: 'redis://a', priority: 1 },
+    { id: 'upstash_backup_1', type: 'URL', url: 'redis://b', priority: 2 },
+  ]
+  // 两个实例都刚失败过（退避窗口 15s 内）——正是「一次网络抖动」后的真实状态
+  m.recordConnectFailure('upstash_primary')
+  m.recordConnectFailure('upstash_backup_1')
+
+  let tried = 0
+  const healthy = makeClient()
+  m.createClient = async () => { tried++; return healthy }
+
+  const got = await m.getAvailableClient()
+  assert.equal(got, healthy, '全部退避时必须兜底强试，否则整个队列层最长锁死 15 分钟')
+  assert.equal(tried, 1, '兜底只试一次（不是把退避全推翻、退回疯狂重连）')
 })

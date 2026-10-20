@@ -5122,3 +5122,20 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **四道闸**：npm test **2602/2602 fail 0**（基线 2593 +9）｜eslint **0 error**｜隔离构建 **通过**（首次撞 esbuild 长路径运行时故障，改用仓库外短路径 `C:/Users/Administrator/.workbuddy/binaries/esbuild/esbuild.exe` 即过 ⇒ 属路径问题非代码问题）｜冒烟 **通过**（真实 Chromium 读 DOM：title=敏学成长工作台、#root 挂载 3 子节点、12345 字符 DOM）。
 - **B 方案（Render 免费层 sleep）**：负责人 2026-10-20 明确「想用免费的、不改 B」。代码侧已把冷启动风暴从「N 轮拆建」压到 0；sleep 本身是平台行为、代码不可消除 ⇒ 残留为「每次冷启动仍会重建 1 次 BullMQ（6 实体）」，量级已从数千次连接握手降到个位数。**不升级实例**。
 - **C 方案（是否删掉烧穿的库）**：负责人 2026-10-20 反馈「删不删有区别吗，反正第1个已经不能用了，他本来也会落到第2个」。**实测量化答复**：删掉确实能省——① 池里少一个实例 ⇒ 冷启动少 1 次连接握手（现在有落盘熔断标记，冷启动本就跳过它，收益已很小）；② 更重要：留着它 = **免费冗余**——实测 `first-skunk-160324` 的配额是**滚动窗口**（2026-10-20 16:00 前后复测 PING/GET 双双恢复成功），而 `superb-mallard`（primary）同期仍报配额错。⇒ **结论：不删更优**，等新库建好可只留 2 个（primary 换新 + backup 留 current-mollusk），first-skunk 可留作第三备胎（滚动窗口恢复后自动归队，代码侧熔断自愈回探会自动接回）。
+
+### r319 保活只在高峰 + 选连接两遍 + 退避 fail-open（2026-10-20，负责人三问）
+**问1「修复了吗」——答：代码改了但没上线。** 生产 `/api/health` 实测 `commit=c5dfd46`（16:07 冷启动，uptime 3254s），而 r317 修复是 `0069aa6`、r318 是 `e8e00fd`，两者都在 **origin/main 之外**（`git log origin/main` 末条 = c5dfd46）⇒ **生产仍在跑老代码**。本轮补齐并推送。
+**问2「为什么疯狂重连」——实测三段证据链：**
+- 生产 `/api/diagnostics/redis-pool`：`total 3 / connected 1 / current upstash_backup_2 / quotaExhausted [upstash_backup_1]`，**primary 连接失败但没被标记**（老代码的配额正则认不出 `Connection is closed.`）⇒ 每个健康检查 tick（高峰 60s）都重撞一次。
+- `/api/quota/status`：`redis` 降级项 `ERR max requests limit exceeded. Limit: 500000, Usage: 500003`，`minutes=63` ⇒ 与 16:07 冷启动同刻。
+- **保活从来没真跑过**：GitHub API 拉 90 条 `keepalive.yml` 运行记录，10-11 至 10-20 每天只有 **2–8 次**（名义 144 次/天），间隔常 4–6 小时 ≫ Render 15 分钟阈值 ⇒ Render 反复睡/醒，每次醒都重建 3 Queue + 3 Worker。
+- **不是保活在重连**：`workers/keepalive` 打的是 `/api/health`（只量磁盘/字体，不查库、零 Redis 命令）⇒ 保活既不烧 Upstash 额度也不制造重连；「疯狂重连」全在服务端 Redis 层（PING 对配额失明 + 幽灵客户端 + 熔断标记纯内存）。
+**问3「高峰期间不要断」——已落地（三处同一份窗口判据 `server/lib/peakWindows.mjs`，默认周一~周五 15:00–21:30 北京时间）：**
+- `scripts/dev/renderKeepalive.mjs`（新）：本地看门狗每 tick 看一眼，高峰内每 5 分钟打一次 `/api/health`（fire-and-forget，不拖慢 15s 探活）；只在 `bootAt` 变化时记「检测到冷启动」；`RENDER_KEEPALIVE=off` 可关。⇒ 负责人干活时电脑开着 = 真正会执行的保活通道。
+- `.github/workflows/keepalive.yml`：cron 收窄为 `*/10 6-13 * * 1-5` + 北京时间门控（14:45–21:50），窗口外直接 `exit 0`。仍标注为「尽力而为」（实测限流）。
+- `workers/keepalive`：内部 `shouldPingNow`（10 分钟预热）+ 手动访问不受限；`peakWindows.mjs` 加 `typeof process` 守卫以便 Workers 运行时求值。**部署仍需负责人一次性 `npx wrangler deploy`（当前未部署）。**
+**同轮代码加固（r319，A 级）：**
+- `_selectAvailableClient` 改**两遍**：先在已连接实例里挑（零握手），都没有才建连 ⇒ 死库不再让每次取连接都先卡 6s 连接超时 + 8s 探活。
+- 退避加 **fail-open**：池内全在退避窗口时强试一次，防「一次网络抖动把队列层锁死 15 分钟」。
+- 回归锁：`test/redisReconnectStorm.test.mjs` 18 条、`test/keepalivePeakGate.test.mjs` 8 条、`test/renderKeepalive.test.mjs` 8 条。
+**四道闸**：npm test **2626/2626 fail 0**｜eslint 0 error（改动文件）｜峰值实测 `instantaneous_ops_per_sec=1`、`total_commands_processed` 5 分钟 +0（空闲零烧，未再出现 400/s 突发）｜生产部署后复验（待 push 后）。

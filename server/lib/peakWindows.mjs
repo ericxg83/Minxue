@@ -25,7 +25,11 @@
 export const DEFAULT_PEAK_WINDOWS_SPEC = '1-5 15:00-21:30'
 export const DEFAULT_PEAK_INTERVAL_MS = 15_000
 export const DEFAULT_OFFPEAK_INTERVAL_MS = 600_000
+// ⚠️ 必须用 `typeof process` 守卫：本文件同时被 Cloudflare Worker（workers/keepalive）
+// 引用，Workers 运行时没有 `process` 全局 —— 直接 `process.env` 会在模块求值阶段抛
+// ReferenceError，整个 cron 静默失效。Node 侧行为与原来完全一致。
 export const DEFAULT_TZ_OFFSET_MIN = (() => {
+  if (typeof process === 'undefined' || !process?.env) return 480
   const n = parseInt(process.env.PEAK_TZ_OFFSET_MIN, 10)
   return Number.isFinite(n) ? n : 480 // 默认北京时间 UTC+8
 })()

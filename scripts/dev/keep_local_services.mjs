@@ -45,6 +45,7 @@ import {
   decideOccupiedPort,
   decideIdlePort,
 } from './watchdogCadence.mjs'
+import { createRenderKeepalive } from './renderKeepalive.mjs'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 const LOG = resolve(ROOT, 'logs', 'keep_local_services.log')
@@ -59,6 +60,13 @@ const OFFPEAK_INTERVAL_MS = parseInt(process.env.WATCHDOG_OFFPEAK_INTERVAL_MS, 1
 const PEAK_WINDOWS = parseWindows(process.env.WATCHDOG_PEAK_WINDOWS) ?? parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
 const ACCELERATE_MS = 2 * 60_000 // 拉起后用高峰节奏确认恢复的时长
 const COOLDOWN_MS = 90_000 // 拉起后给足冷启动时间，期间探活失败也不 taskkill
+
+// ⭐ Render 保活（2026-10-20 r319，负责人「高峰期间不要断」）：
+//   每个 tick 顺手看一眼，只在高峰窗口内每 5 分钟打一次 /api/health（不阻塞主循环）。
+//   窗口判据与 Redis 心跳 / Cloudflare Worker 同一份（server/lib/peakWindows.mjs）。
+//   窗口外一个请求都不发——让 Render 正常睡，睡觉是我们的策略而不是被动事故。
+//   env RENDER_KEEPALIVE=off 可关闭；RENDER_KEEPALIVE_URL 可改目标。
+const renderKeepalive = createRenderKeepalive({ windows: PEAK_WINDOWS, log })
 // ⭐ 探活超时 3s → 8s（2026-10-20，r292-P-A 缺陷③）：vite 首次按需编译常 >3s，3s 会把
 //    「健康但正忙」误判成失败 → 触发无谓 kill/spawn 抖动。开机冷启动窗口实测三次误杀
 //    健康 vite（r309：PID 17352/8472/19848，00:54–00:57Z，3 分钟自愈）即此因。
@@ -227,6 +235,9 @@ async function tick() {
       accelerateUntil = Date.now() + ACCELERATE_MS
       spawnService(svc)
     }
+
+    // Render 保活（高峰窗口内，节流 5 分钟；fire-and-forget，绝不拖慢 15s 的探活节奏）
+    renderKeepalive.maybePing()
 
     if (allHealthy && !browserOpened && everSpawned && OPEN_BROWSER) {
       browserOpened = true
