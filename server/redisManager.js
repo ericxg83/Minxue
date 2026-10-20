@@ -51,6 +51,9 @@ class RedisManager {
     this.quotaExhaustedSet = new Set()
     // 配额熔断通知回调（由 queue.js 注册，触发 BullMQ Worker 重建）
     this.onQuotaExhausted = null
+    // 上次「跨月解除熔断」的月份键（YYYY-M），用于 ensureResetAfterMonthlyBoundary
+    // 只在跨月时清一次，避免 Render 每次冷启动都清空熔断（2026-10-20 r305-P-C 闭环修复）
+    this._lastResetMonth = null
   }
 
   /**
@@ -89,6 +92,8 @@ class RedisManager {
         console.log(`[Redis] 🔓 解除所有配额熔断 (${this.quotaExhaustedSet.size} 个实例): ${Array.from(this.quotaExhaustedSet).join(', ')}`)
         this.quotaExhaustedSet.clear()
       }
+      // 与 ensureResetAfterMonthlyBoundary 同口径：记录已清月份，避免 1 号当天重复清
+      this._lastResetMonth = `${new Date().getFullYear()}-${new Date().getMonth()}`
       return
     }
     if (this.quotaExhaustedSet.delete(id)) {
@@ -224,18 +229,27 @@ class RedisManager {
   }
 
   /**
-   * 兜底：进程冷启动时如果已经过了"本月 1 号 00:01"，
-   * 立即清空所有熔断标记，让主实例重新可用。
+   * 兜底：进程冷启动时若正值「每月 1 号」，清空所有熔断标记让实例重新可用。
    * 解决 Render 免费层 sleep 后 setTimeout 不会触发的场景。
+   *
+   * ⚠️ 2026-10-20 修复（r305-P-C 闭环）：旧判据 `now >= 当月1号` 在 1–31 号整月都为真
+   * ⇒ Render 每次冷启动（sleep 唤醒 / 部署）都把熔断标记清空 ⇒ 月度内 failover 保护形同虚设，
+   * 要等下一次真实命令报错才重新标记。改为「仅在每月 1 号」解除一次，月度内熔断保持粘性；
+   * 已恢复实例由 startBreakerProbe 的真实数据命令回探负责归队，无需冷启动兜底抢跑。
    */
   ensureResetAfterMonthlyBoundary() {
-    if (this.quotaExhaustedSet.size === 0) return
     const now = new Date()
-    const thisMonthBoundary = new Date(now.getFullYear(), now.getMonth(), 1, 0, 1, 0, 0)
-    if (now.getTime() >= thisMonthBoundary.getTime()) {
-      console.log(`[Redis] 🔓 冷启动兜底：本月 1 号已过，解除 ${this.quotaExhaustedSet.size} 个熔断标记`)
-      this.quotaExhaustedSet.clear()
+    if (now.getDate() !== 1) return
+    const thisMonthKey = `${now.getFullYear()}-${now.getMonth()}`
+    // 同进程同月已清过 ⇒ 幂等跳过（避免 1 号当天多次冷启动反复清空）
+    if (this._lastResetMonth === thisMonthKey) return
+    if (this.quotaExhaustedSet.size === 0) {
+      this._lastResetMonth = thisMonthKey
+      return
     }
+    console.log(`[Redis] 🔓 冷启动兜底（本月 1 号）：解除 ${this.quotaExhaustedSet.size} 个熔断标记`)
+    this.quotaExhaustedSet.clear()
+    this._lastResetMonth = thisMonthKey
   }
 
   buildPool() {

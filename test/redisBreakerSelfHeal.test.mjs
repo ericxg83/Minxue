@@ -136,3 +136,41 @@ test('结构性锚点：自愈方法族必须存在（旧版无此方法族，�
   assert.equal(typeof m.startBreakerProbe, 'function')
   assert.equal(typeof m.stopBreakerProbe, 'function')
 })
+
+// 2026-10-20 r305-P-C 闭环：修复 ensureResetAfterMonthlyBoundary 的「整月每次启动都清」bug。
+// 反向自检：旧版用 `now >= 当月1号` 判据 → 非 1 号也会清空 → 本用例判红。
+test('月度熔断兜底：非 1 号冷启动禁止清空熔断（保持粘性）', () => {
+  const RealDate = global.Date
+  global.Date = class extends RealDate {
+    constructor(...a) { if (a.length) { super(...a); return } super(2026, 9, 20, 12, 0, 0) }
+    static now() { return new RealDate(2026, 9, 20, 12, 0, 0).getTime() }
+  }
+  try {
+    const m = new RedisManager()
+    m.quotaExhaustedSet.add('upstash_backup_1')
+    m.ensureResetAfterMonthlyBoundary()
+    assert.equal(m.quotaExhaustedSet.has('upstash_backup_1'), true, '非 1 号冷启动 ⇒ 熔断必须保持粘性，不得清空')
+  } finally {
+    global.Date = RealDate
+  }
+})
+
+test('月度熔断兜底：仅每月 1 号冷启动解除，且同进程同月幂等', () => {
+  const RealDate = global.Date
+  global.Date = class extends RealDate {
+    constructor(...a) { if (a.length) { super(...a); return } super(2026, 9, 1, 12, 0, 0) }
+    static now() { return new RealDate(2026, 9, 1, 12, 0, 0).getTime() }
+  }
+  try {
+    const m = new RedisManager()
+    m.quotaExhaustedSet.add('upstash_backup_1')
+    m.ensureResetAfterMonthlyBoundary()
+    assert.equal(m.quotaExhaustedSet.has('upstash_backup_1'), false, '1 号冷启动 ⇒ 解除熔断')
+    // 同进程同日再次冷启动：应幂等跳过，期间重新熔断的实例必须保持
+    m.quotaExhaustedSet.add('upstash_backup_2')
+    m.ensureResetAfterMonthlyBoundary()
+    assert.equal(m.quotaExhaustedSet.has('upstash_backup_2'), true, '同进程同月已清过 ⇒ 不再重复清空')
+  } finally {
+    global.Date = RealDate
+  }
+})
