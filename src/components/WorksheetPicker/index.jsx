@@ -54,7 +54,10 @@ export default function WorksheetPicker({ visible, onClose, onSelect, subject })
     onSelect({ worksheetId: worksheet.id, worksheetName: worksheet.name })
     // 如果没有默认，自动保存为默认
     if (currentStudent && subject && !defaultId) {
-      upsertStudentWorksheetSetting(currentStudent.id, subject, worksheet.id).catch(() => {})
+      // 失败也要可见：与 handleSetDefault 同口径，否则默认悄悄不生效、下次还得重选且无反馈。
+      // 仍保持 fire-and-forget，不阻塞 onSelect/onClose 主流程。
+      upsertStudentWorksheetSetting(currentStudent.id, subject, worksheet.id)
+        .catch(() => { Toast.show({ content: '默认练习册保存失败，请重试', icon: 'fail', duration: 2000 }) })
     }
     onClose()
   }
