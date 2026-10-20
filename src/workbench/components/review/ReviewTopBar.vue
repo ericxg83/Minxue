@@ -123,7 +123,7 @@
            全卷已确认 → 「完成复核」升级为唯一 primary（success 实心），「下一份」升为 plain secondary。 -->
       <template v-if="store.currentPaperReviewable">
         <el-dropdown trigger="click" @command="handleMoreCommand">
-          <el-button size="default" :disabled="moreBusy">
+          <el-button size="default" :disabled="retryLoading">
             ⋯ 更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
           </el-button>
           <template #dropdown>
@@ -456,8 +456,16 @@ const canNextTask = computed(() => {
   return store.pendingTasks.length > 0
 })
 
-// 「更多」下拉：命令分发到原有 handler，动作本身零改动
-const moreBusy = computed(() => retryLoading.value || archiveLoading.value)
+// ⛔ 2026-10-20 修复「页面出现异常（render function）」：本行原本是
+//   `retryLoading.value || archiveLoading.value`，而「留底为答案库」功能在
+//   52d5559（2026-10-18 负责人裁决砍 exam 答案库路线）里已整体删除，
+//   `archiveLoading` 这个 ref 一起被删，引用却漏在这里。
+//   后果：每次渲染「更多」按钮的 :disabled 绑定都抛 ReferenceError
+//   ⇒ 顶栏整块 render 中断 ⇒ 全局 errorHandler 弹红条
+//   「页面出现异常（render function）」+ 部分内容不再更新（.vue 不在 lint 闸内，
+//   所以 static 检查全绿）。现在只剩 retry 一个忙碌源，直接绑 retryLoading，
+//   不再保留这个空壳 computed。
+
 
 // [P0-2 主按钮矩阵 2026-09-27] 全卷已确认 = 派生态（口径与 questionConfirmationMap 同源），
 // 驱动顶栏「完成复核 / 下一份」的主次切换；右栏完成态用的是同一口径（QuestionDetailPanel.allConfirmed）。
