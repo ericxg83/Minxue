@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import Redis from 'ioredis'
 import { recordDegraded } from './services/quotaSentinel.js'
 import { parseWindows, isPeak, DEFAULT_PEAK_WINDOWS_SPEC } from './lib/peakWindows.mjs'
@@ -19,6 +21,13 @@ const isQuotaExhaustedError = (message) => {
 // 但它是「计入配额的真实数据命令」——实例仍在超额 ⇒ 原样报配额错；额度已恢复 ⇒ 成功返回。
 // （PING 不行：Upstash 超额后 PING 仍 PONG，连接级探活对配额天然失明。）
 const REDIS_BREAKER_PROBE_KEY = '__redis_breaker_selfheal_probe__'
+
+// 熔断标记落盘位置（2026-10-20 r317）。
+// 沿用 quotaSentinel 的 server/_* 约定：已被 .gitignore 覆盖，永不入库。
+// ⚠️ 每次调用都重新读 env：路径在模块顶层求值的话，测试里临时改 env 就不生效
+//    （回归锁 test/redisReconnectStorm.test.mjs 需要按用例隔离状态文件）。
+const quotaStateFilePath = () => process.env.REDIS_QUOTA_STATE_FILE
+  || path.join(import.meta.dirname, '_redis_quota_exhausted.json')
 
 class RedisManager {
   constructor() {
@@ -54,17 +63,41 @@ class RedisManager {
     // 上次「跨月解除熔断」的月份键（YYYY-M），用于 ensureResetAfterMonthlyBoundary
     // 只在跨月时清一次，避免 Render 每次冷启动都清空熔断（2026-10-20 r305-P-C 闭环修复）
     this._lastResetMonth = null
+    // 选实例深度计数器（2026-10-20 r317）：>0 表示正在挑可用实例，
+    // 此期间检测到的配额耗尽只记录不通知重建（避免 initQueue 重入双建队列）。
+    this._inSelection = 0
   }
 
   /**
    * 将一个实例标记为「额度耗尽」，从可用池中临时剔除。
    * 下一个 getAvailableClient() 会跳过它，强制走 backup。
    * 下次 resetQuotaExhausted()（默认每月 1 号）会解除熔断。
+   *
+   * @param {string} id 实例 id
+   * @param {string} reason 原因（写日志用）
+   * @param {object} [opts]
+   * @param {boolean} [opts.notify=true] 是否回调 onQuotaExhausted（触发 BullMQ 重建）。
+   *   ⛔ 2026-10-20 r317：**选实例阶段必须传 false**。
+   *   旧代码用 PING 判活，永远选不中烧穿的库，只能等真实业务命令报错才熔断，
+   *   而那次熔断发生在「Worker 已经在用这个连接」的运行期 ⇒ 必须重建队列（合理）。
+   *   改用真实数据命令判活后，熔断会发生在**初始化/选实例阶段** ——
+   *   此时 Worker 还没建好，若此时回调 onQuotaExhausted ⇒ rebuildQueue 会
+   *   teardown+initQueue 重入 ⇒ 双建队列 + 连接泄漏（比原问题更糟）。
+   *   所以：选实例阶段只记录熔断（让后续 getAvailableClient 跳过它），
+   *   真正需要切库时由运行期的 Worker error 处理器触发（那条路径 notify=true）。
    */
-  markQuotaExhausted(id, reason) {
+  markQuotaExhausted(id, reason, opts = {}) {
     if (!id) return
+    const { notify = true } = opts
+    // ⛔ 选实例期间一律不通知重建（2026-10-20 r317）。
+    //   探活用的真实数据命令失败时，ioredis 可能同时派发 'error' 事件（携带配额文案），
+    //   那条路径也会走到 markQuotaExhausted。若此时 notify=true ⇒ onQuotaExhausted
+    //   ⇒ rebuildQueue ⇒ teardown+initQueue 重入 ⇒ 双建队列 + 连接泄漏。
+    //   统一在这里兜住：只要还在选实例，就只记录不通知。
+    const effectiveNotify = notify && this._inSelection === 0
     if (this.quotaExhaustedSet.has(id)) return
     this.quotaExhaustedSet.add(id)
+    this.persistQuotaExhausted()
     console.warn(`[Redis:${id}] 🚫 额度熔断: ${reason || 'quota exhausted'}`)
     // 关闭该 client 释放连接（不删除 pool 成员，保留配置以便后续 reset 后重用）
     const client = this.clients.get(id)
@@ -73,12 +106,72 @@ class RedisManager {
       this.clients.delete(id)
     }
     // 通知 queue 重建 Worker 连接
-    if (typeof this.onQuotaExhausted === 'function') {
+    if (effectiveNotify && typeof this.onQuotaExhausted === 'function') {
       try {
         this.onQuotaExhausted(id, reason)
       } catch (e) {
         console.error('[Redis] onQuotaExhausted 回调执行失败:', e.message)
       }
+    }
+  }
+
+  /**
+   * 熔断标记落盘（2026-10-20 r317）。
+   *
+   * ⛔ 为什么必须落盘：Render 免费层 sleep/wake 会重启进程 ⇒ 内存里的
+   *    quotaExhaustedSet 归零 ⇒ 新进程完全不知道哪个库烧穿过 ⇒ 又从 primary 开始踩
+   *    ⇒ 每轮冷启动都触发一轮 BullMQ 拆建风暴（实测烧穿库节点累计 3050 次连接握手）。
+   *    落盘后，冷启动直接跳过已知烧穿的实例 ⇒ 风暴从「每轮 N 次」降到 0。
+   *
+   * 落点沿用 quotaSentinel 的既有约定：server/_* 已被 .gitignore 覆盖，不入库。
+   * 写盘失败绝不影响主流程（熔断在内存里依然有效）。
+   */
+  persistQuotaExhausted() {
+    try {
+      fs.writeFileSync(
+        quotaStateFilePath(),
+        JSON.stringify({
+          ids: Array.from(this.quotaExhaustedSet),
+          month: this._currentMonthKey(),
+          savedAt: Date.now()
+        }),
+        'utf8'
+      )
+    } catch (e) {
+      console.warn('[Redis] 熔断标记落盘失败（不影响主流程）:', e?.message)
+    }
+  }
+
+  /** 当前月份键（YYYY-M），用于熔断标记的跨月失效判定 */
+  _currentMonthKey() {
+    const now = new Date()
+    return `${now.getFullYear()}-${now.getMonth()}`
+  }
+
+  /**
+   * 读回上次进程留下的熔断标记（跨进程记忆）。
+   * 只恢复「标记」，不恢复连接 ⇒ 冷启动不会先连废库再报错。
+   *
+   * ⛔ 跨月守卫：Upstash 额度按自然月重置 ⇒ 上个月的熔断标记在新月份
+   *    一定是过期的（额度已恢复）。若照搬 ⇒ 新月里白跳过一个健康实例，
+   *    直到 15 分钟后的自愈回探才纠正它。跨月 ⇒ 直接丢弃旧标记。
+   */
+  loadPersistedQuotaExhausted() {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(quotaStateFilePath(), 'utf8'))
+      const ids = Array.isArray(parsed?.ids) ? parsed.ids : []
+      if (ids.length === 0) return
+      if (parsed.month && parsed.month !== this._currentMonthKey()) {
+        console.log(`[Redis] 忽略跨月的历史熔断标记（${parsed.month} ≠ ${this._currentMonthKey()}，额度已按月重置）`)
+        return
+      }
+      const valid = ids.filter(id => this.pool.some(item => item.id === id))
+      if (valid.length > 0) {
+        for (const id of valid) this.quotaExhaustedSet.add(id)
+        console.log(`[Redis] 📌 从磁盘恢复熔断标记（上次进程留下）: ${valid.join(', ')}`)
+      }
+    } catch {
+      // 首次运行 / 文件不存在 ⇒ 无历史标记，正常路径
     }
   }
 
@@ -92,12 +185,16 @@ class RedisManager {
         console.log(`[Redis] 🔓 解除所有配额熔断 (${this.quotaExhaustedSet.size} 个实例): ${Array.from(this.quotaExhaustedSet).join(', ')}`)
         this.quotaExhaustedSet.clear()
       }
+      // 落盘同步：解除后磁盘上的旧标记必须一起清掉，否则下次冷启动会误恢复
+      this.persistQuotaExhausted()
       // 与 ensureResetAfterMonthlyBoundary 同口径：记录已清月份，避免 1 号当天重复清
       this._lastResetMonth = `${new Date().getFullYear()}-${new Date().getMonth()}`
       return
     }
     if (this.quotaExhaustedSet.delete(id)) {
       console.log(`[Redis:${id}] 🔓 解除配额熔断`)
+      // 落盘同步（2026-10-20 r317）：单实例解除也要更新磁盘，否则下次冷启动误判为仍熔断
+      this.persistQuotaExhausted()
     }
   }
 
@@ -160,6 +257,38 @@ class RedisManager {
       return item.id
     }
     return null
+  }
+
+  /**
+   * 用「真实数据命令」判定某个已建立连接的实例是否还有可用额度。
+   *
+   * ⛔ 为什么不能用 PING（2026-10-20 r317 实测定位「Render 疯狂重连」根因）：
+   *   Upstash 超额后 **PING 仍回 PONG**（连接级探活对配额天然失明）。
+   *   于是旧代码 `getAvailableClient()` 用 PING 判活 ⇒ 必然选中一个已烧穿的库
+   *   ⇒ 真实业务命令报错 ⇒ markQuotaExhausted ⇒ queue.js 触发 rebuildQueue
+   *   ⇒ teardown 拆掉 3 个 Queue + 3 个 Worker 再重建（成批连接握手）
+   *   ⇒ 下一个库若也烧穿再来一轮 ⇒ **冷启动 = N 轮 BullMQ 拆建风暴**。
+   *   实证：烧穿库节点 total_connections_received=3050，健康新库仅 42。
+   *
+   * 真实数据命令（GET 一个不存在的 key）才会被配额闸拦住
+   * ⇒ 能在**选中之前**就识别出烧穿的实例并直接跳过，不触发任何拆建。
+   *
+   * @returns {Promise<{alive:boolean, quota:boolean}>}
+   *   alive=true  → 额度可用；quota=true → 确认是配额耗尽（区别于网络抖动）
+   */
+  async probeQuotaAlive(client) {
+    try {
+      await client.get(REDIS_BREAKER_PROBE_KEY)
+      return { alive: true, quota: false }
+    } catch (err) {
+      const msg = err?.message || ''
+      if (isQuotaExhaustedError(msg)) {
+        return { alive: false, quota: true }
+      }
+      // 非配额类错误（网络抖动 / 连接被断）：不能当成额度耗尽，
+      // 否则一次抖动就会把健康实例永久标记为熔断 ⇒ 误伤。
+      return { alive: false, quota: false }
+    }
   }
 
   /**
@@ -338,6 +467,8 @@ class RedisManager {
         // ⭐ 配额熔断：Upstash 业务级错误（ping 不会触发，只有真实命令会触发）
         // 命中后立即标记该实例为不可用，下次 getAvailableClient 跳过它走 backup
         if (isQuotaExhaustedError(msg)) {
+          // notify 默认 true，但 _inSelection>0 时会被强制降级为「只记录」——
+          // 选实例阶段的错误派发不触发重建（防 initQueue 重入）。
           this.markQuotaExhausted(poolItem.id, msg)
           // 配额哨兵（提案 1）：复用既有熔断判断上报水位，只记录、不改熔断语义
           recordDegraded('redis', { kind: 'quota', detail: `[${poolItem.id}] ${String(msg).slice(0, 200)}` })
@@ -363,12 +494,33 @@ class RedisManager {
         this.clients.delete(poolItem.id)
       })
 
-      await client.ping()
+      // ⛔ 2026-10-20 r317：这里原来只做 `await client.ping()` 当健康校验，
+      //    但 Upstash 超额后 PING 仍回 PONG ⇒ 烧穿的库被判定「连接成功」并进池，
+      //    随后在真实业务命令上炸 → 熔断 → BullMQ 拆建风暴。
+      //    改为「真实数据命令」校验：超额库当场被拒（不进池），
+      //    并标记熔断，使后续 getAvailableClient 直接跳过它。
+      const probe = await this.probeQuotaAlive(client)
+      if (!probe.alive) {
+        if (probe.quota) {
+          console.warn(`[Redis:${poolItem.id}] ⚠️ 连接已建立但额度已耗尽（真实命令失败），不纳入连接池`)
+          this.markQuotaExhausted(poolItem.id, 'quota exhausted on data command probe', { notify: false })
+        } else {
+          console.warn(`[Redis:${poolItem.id}] ⚠️ 真实命令探活失败（非配额原因），不纳入连接池`)
+        }
+        try { client.disconnect() } catch { /* ignore */ }
+        return null
+      }
+
       this.clients.set(poolItem.id, client)
       console.log(`[Redis:${poolItem.id}] ✅ 连接成功`)
       return client
     } catch (err) {
       console.error(`[Redis:${poolItem.id}] ❌ 连接失败: ${err.message}`)
+      // 连接层失败时也要记下熔断：配额耗尽的实例重连会持续失败，
+      // 留着它每次 getAvailableClient 都要重试一遍（冷启动风暴的另一半来源）。
+      if (isQuotaExhaustedError(err?.message || '')) {
+        this.markQuotaExhausted(poolItem.id, err.message, { notify: false })
+      }
       return null
     }
   }
@@ -379,8 +531,18 @@ class RedisManager {
     // Build pool now that env vars are loaded
     this.pool = this.buildPool()
 
+    // ⭐ 2026-10-20 r317：先恢复上次进程留下的熔断标记，再建连接。
+    //   顺序很重要：先恢复 ⇒ 冷启动直接跳过已知烧穿的实例，
+    //   既不浪费一次失败的连接握手，也不会先连废库再报错 → 触发 BullMQ 拆建风暴。
+    this.loadPersistedQuotaExhausted()
+
     // Try to connect to all Redis instances
+    // 已被标记熔断的实例跳过连接（它们的额度已耗尽，连了也只会失败）
     for (const item of this.pool) {
+      if (this.quotaExhaustedSet.has(item.id)) {
+        console.log(`[Redis] 跳过已熔断实例: ${item.id}`)
+        continue
+      }
       await this.createClient(item)
     }
 
@@ -406,6 +568,17 @@ class RedisManager {
       return null
     }
 
+    // ⛔ 2026-10-20 r317：整个选实例过程包在 _inSelection 里。
+    //   期间任何配额熔断都只记录、不触发 onQuotaExhausted（避免重建队列重入）。
+    this._inSelection++
+    try {
+      return await this._selectAvailableClient()
+    } finally {
+      this._inSelection--
+    }
+  }
+
+  async _selectAvailableClient() {
     // Try each Redis instance in priority order
     for (let i = 0; i < this.pool.length; i++) {
       const idx = (this.currentIndex + i) % this.pool.length
@@ -430,23 +603,27 @@ class RedisManager {
       }
 
       // Check if client is still alive
-      try {
-        const result = await client.ping()
-        if (result === 'PONG') {
-          this.currentIndex = idx
-          return client
-        }
-      } catch (err) {
-        const msg = err?.message || ''
-        console.warn(`[Redis:${item.id}] ping 失败，尝试下一个: ${msg}`)
-        // ping 失败时也检测配额（理论上不会，但防御性写法）
-        if (isQuotaExhaustedError(msg)) {
-          this.markQuotaExhausted(item.id, msg)
-        } else {
-          this.clients.delete(item.id)
-        }
-        continue
+      // ⛔ 2026-10-20 r317：原来这里用 PING 判活，但 Upstash 超额后 PING 仍回 PONG
+      //    ⇒ 必然选中烧穿的库 ⇒ 真实命令报错 ⇒ 熔断 ⇒ BullMQ 拆建风暴。
+      //    改用真实数据命令（GET 不存在的 key）：超额即报错，当场跳过该实例，
+      //    不触发任何 teardown/重建。数据命令成功也顺带证明连接真的可用。
+      const probe = await this.probeQuotaAlive(client)
+      if (probe.alive) {
+        this.currentIndex = idx
+        return client
       }
+      if (probe.quota) {
+        // 确认额度耗尽 ⇒ 标记并跳过（notify:false：此刻 Worker 可能还没建好，
+        // 触发重建会造成 initQueue 重入 ⇒ 双建队列 + 连接泄漏）
+        console.warn(`[Redis:${item.id}] 真实命令探活失败：额度已耗尽，跳过该实例`)
+        this.markQuotaExhausted(item.id, 'quota exhausted on data command probe', { notify: false })
+      } else {
+        // 非配额错误（网络抖动 / 连接被断）⇒ 丢弃这个 client 让下次重建，
+        // ⛔ 绝不能标记额度熔断：一次抖动就把健康实例永久踢出池子＝误伤。
+        console.warn(`[Redis:${item.id}] 真实命令探活失败（非配额原因），丢弃该连接并尝试下一个`)
+        this.clients.delete(item.id)
+      }
+      continue
     }
 
     console.error('[Redis] ❌ 所有实例均不可用')
