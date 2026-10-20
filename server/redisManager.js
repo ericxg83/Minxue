@@ -412,8 +412,7 @@ class RedisManager {
    * 要等下一次真实命令报错才重新标记。改为「仅在每月 1 号」解除一次，月度内熔断保持粘性；
    * 已恢复实例由 startBreakerProbe 的真实数据命令回探负责归队，无需冷启动兜底抢跑。
    */
-  ensureResetAfterMonthlyBoundary() {
-    const now = new Date()
+  ensureResetAfterMonthlyBoundary(now = new Date()) {
     if (now.getDate() !== 1) return
     const thisMonthKey = `${now.getFullYear()}-${now.getMonth()}`
     // 同进程同月已清过 ⇒ 幂等跳过（避免 1 号当天多次冷启动反复清空）
@@ -425,6 +424,12 @@ class RedisManager {
     console.log(`[Redis] 🔓 冷启动兜底（本月 1 号）：解除 ${this.quotaExhaustedSet.size} 个熔断标记`)
     this.quotaExhaustedSet.clear()
     this._lastResetMonth = thisMonthKey
+    // ⛔ 2026-10-20 r320：清完必须落盘 + 清退避，否则磁盘上仍留着一份「本月的」熔断标记
+    //   ⇒ 1 号当天再冷启动一次又会把它读回来，白跳过健康实例直到 15 分钟回探才纠正。
+    //   （跨月文件本来会被 loadPersistedQuotaExhausted 的月份校验丢弃，但 1 号当天
+    //     新写入的标记月份就是本月，校验拦不住，只能靠这里回写。）
+    this.persistQuotaExhausted()
+    this._connectBackoff.clear()
   }
 
   buildPool() {
