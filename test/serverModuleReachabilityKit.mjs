@@ -76,8 +76,7 @@ export const HAND_RUN = [
   { path: 'server/test_oss.js', reason: '手跑 OSS 直连测试件：头部自述「在 server 目录运行」' },
   { path: 'server/auto_debug.js', reason: '手跑调试件：自带 test() runner 的临时调试脚本' },
   { path: 'server/retryPendingTasks.js', reason: '手跑任务重试件：终端执行的重试 pending 任务一次性工具' },
-  { path: 'server/fixExistingAnswers.js', reason: '一次性修复件：头部自述使用方式 node server/fixExistingAnswers.js（补历史空答案）' },
-  { path: 'server/simple-server.js', reason: '2024 早期 mock 原型 express（mock 练习册数据演示件），零引用；去留另案（r299 报告留痕，勿当活服务）' }
+  { path: 'server/fixExistingAnswers.js', reason: '一次性修复件：头部自述使用方式 node server/fixExistingAnswers.js（补历史空答案）' }
 ]
 
 // ────────────────────────────────────────────────────────────────────────────

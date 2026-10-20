@@ -28,8 +28,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-/** 路由只在这些**声明文件**里找：`server/index.js`、`server/simple-server.js`、`server/routes/**` */
-const DECL_RE = /(?:^|\/)index\.js$|(?:^|\/)simple-server\.js$|(?:^|\/)routes\//
+/** 路由只在这些**声明文件**里找：`server/index.js`、`server/routes/**` */
+const DECL_RE = /(?:^|\/)index\.js$|(?:^|\/)routes\//
 
 /** 路由声明的形状：`app.get('/x')` / `router.post('/x')` */
 const ROUTE_RE = /\b(?:app|router)\.(get|post|put|patch|delete)\(\s*'(\/[^']*)'/g

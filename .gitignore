@@ -82,7 +82,6 @@ ans*.json
 appdiff.txt
 _scheduled_tasks.lock
 scheduled_tasks.lock
-server/simple-server.js
 server/routes/tasks.js
 minxue-app-debug-*.apk
 *-debug-*.apk
