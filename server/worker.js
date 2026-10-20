@@ -7856,8 +7856,10 @@ await job.updateProgress(80)
 //   resource_answers.answer_status='ai_draft'（暂存，等老师复核）
 //
 // 后续：
-//   - 老师 PC 复核改题 → syncDraftAnswerBank（server/index.js:1351）按 v2 矩阵升级
-//   - 老师点"完成复核" → server completeTaskReview 自动推 resources.status='published'
+//   - 老师 PC 复核改题 → syncDraftAnswerBank（server/index.js:1995）按实际口径回写（恒置 ai_draft）
+//   - 老师点"完成复核" → 走 ExamWorkbench PUT /resources/:id + PATCH /answers/status
+//     （⚠️ 2026-10-20 订正：原注释写的「server completeTaskReview」全仓不存在该函数，
+//      发布实际走 ExamWorkbench 两条路由，见 r280-P-A 尾注）
 //   - 已发布才被复用（2026-10-18：PC 答案库列表与移动端选择器已随 exam 路线下线）
 try {
   const { rows: taskMetaRows } = await query(

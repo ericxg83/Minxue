@@ -1966,22 +1966,36 @@ app.post('/api/questions', async (req, res) => {
 // 复核页改题 → 回写到批改时自动沉淀的那份草稿答案库。
 // 触发源（PUT /api/questions/:id）：answer / student_answer / is_correct / review_status 任一变化。
 //
-// v2 矩阵决定每题在 resource_answers 中的最终态：
-//   review_status='excluded'                       → answer_status='excluded'（保留行，AnswerBank 管线跳过）
-//   review_status=NULL（未复核）                   → answer=q.answer，answer_status='ai_draft'
-//   review_status='reviewed' && is_correct=true    → answer=student_answer（若非占位）否则 q.answer；answer_status='teacher_verified'
-//   review_status='reviewed' && is_correct=false   → 若 q.answer 被老师改过（≠ ai_answer）则用 q.answer + teacher_verified；否则 DELETE 行（错题且答案未修不入库）
-//   review_status='reviewed' && is_correct=null    → answer=q.answer，answer_status='ai_draft'
+// ⛔ 实际生效的唯一路径（2026-10-20 修 r280-P-A，负责人拍板「乙方案：删死分支」）：
+//   恒为 answer=（老师改写过的答案 || 草稿原答案），answer_status='ai_draft'。
 //
-// 三重限制确保只动"属于这份作业自己的草稿"：
+//   为什么删掉原「v2 矩阵」（历史包袱，r280 实证其分支自出生起就是死的）：
+//     该矩阵按 review_status='excluded' / 'reviewed' 分支，但 questions.review_status 的
+//     真实取值只有 5 个：NULL / correct / wrong / wrong_no_book / exclude
+//     （前端唯一真相 src/utils/reviewDecision.js 的 REVIEW_STATUS 同此）。
+//     **'excluded' 与 'reviewed' 两个值全表 0 行、git 全历史 0 次出现**（r280 生产库 3716 题实测）。
+//     ⇒ 矩阵承诺的三件事——「排除标 excluded」「复核升 teacher_verified」「错题未修答案 DELETE 行」
+//        ——**一次都没执行过**，每个输入都落到最后的 else 分支。
+//     原注释却把它们写成「v2 矩阵决定每题最终态」，看着在盯、其实没盯（r221 同族缺陷：
+//     注释描述了一套从未运行的规则，比没有规则更危险——后来者会以为已覆盖）。
+//   原分支对照（溯源用，改动前每个输入都走 else，行为零变化）：
+//     excluded                     → 恒走 else（未置excluded）
+//     reviewed && is_correct=true  → 恒走 else（未升 teacher_verified）
+//     reviewed && is_correct=false → 恒走 else（**未 DELETE 行**，错题答案仍留在库）
+//     reviewed && is_correct=null  → 恒走 else（置 ai_draft）
+//   影响面（r280 已查清、无用户可见故障，故不取「甲方案：改判据激活」）：
+//     ① teacher_verified 升级本就冗余——发布路径 updateResourceAnswerStatus 会整册 blanket 升级；
+//     ② DELETE 分支失效只让草稿库多留几行 AI 答案，发布闸 findDirtyAnswers + 资源级信任决策仍兜底；
+//     ③ per-question answer_status 无 UI 消费。
+//
+// 三重限制确保只动"属于这份作业自己的草稿"（未变）：
 //   1. resource.status='draft' —— 已发布的资源不能被单次复核偷偷改写；
 //   2. resource_answers.source='auto_sediment' —— 不碰 PDF 解析/教师录入的答案；
 //   3. 该答案库没有被别的任务共用 —— 共用时它已是多人参照物，只能走 PC 答案库详情页改。
 async function syncDraftAnswerBank(question) {
   if (!question?.task_id || question.question_number == null) return
   const { rows: matchRows } = await query(
-    `SELECT ra.id, ra.answer, ra.answer_status,
-            q.ai_answer, q.student_answer, q.is_correct, q.review_status
+    `SELECT ra.id, ra.answer, ra.answer_status
      FROM ${TABLES.RESOURCE_ANSWERS} ra
      JOIN ${TABLES.TASKS} t ON t.resource_id = ra.resource_id
      JOIN ${TABLES.QUESTIONS} q ON q.task_id = t.id AND q.question_number = ra.question_no
@@ -2000,43 +2014,13 @@ async function syncDraftAnswerBank(question) {
   )
   if (matchRows.length === 0) return
   const row = matchRows[0]
-  const aiAnswer = String(row.ai_answer || '').trim()
   const teacherAnswer = String(question.answer || '').trim()
-  const studentAnswer = String(question.student_answer || '').trim()
-  const isAnswerModified = teacherAnswer && teacherAnswer !== aiAnswer
-  const reviewStatus = question.review_status
-  const isCorrect = question.is_correct
 
-  // 决策
-  let nextAnswer = null
-  let nextStatus = 'ai_draft'
-
-  if (reviewStatus === 'excluded') {
-    nextStatus = 'excluded'
-    nextAnswer = teacherAnswer || row.answer || null
-  } else if (reviewStatus === 'reviewed' && isCorrect === true) {
-    nextStatus = 'teacher_verified'
-    nextAnswer = studentAnswer && studentAnswer !== 'null' && studentAnswer !== '未作答' && studentAnswer !== '此为主观题，无唯一标准答案'
-      ? studentAnswer
-      : teacherAnswer || row.answer
-  } else if (reviewStatus === 'reviewed' && isCorrect === false) {
-    if (isAnswerModified) {
-      nextStatus = 'teacher_verified'
-      nextAnswer = teacherAnswer
-    } else {
-      // 错题且答案未修 → 不入答案库
-      await query(`DELETE FROM ${TABLES.RESOURCE_ANSWERS} WHERE id = $1`, [row.id])
-      console.log(`[草稿答案库同步] task=${question.task_id.slice(0, 8)} 第${question.question_number}题 → 删除（错题且答案未修）`)
-      return
-    }
-  } else if (reviewStatus === 'reviewed' && (isCorrect === null || isCorrect === undefined)) {
-    nextStatus = 'ai_draft'
-    nextAnswer = teacherAnswer || row.answer
-  } else {
-    // review_status=NULL（未复核）→ 维持 ai_draft；answer 取最新 q.answer（已被 syncDraftAnswerBank 写过）
-    nextStatus = 'ai_draft'
-    nextAnswer = teacherAnswer || row.answer
-  }
+  // 唯一决策：恒置 ai_draft + 取老师改写过的答案（无则回退草稿原答案）。
+  // 此处曾有 4 条按 review_status 分布的死分支（'excluded' / 'reviewed' 两种取值全表不存在），
+  // 已按函数头注删除（r280-P-A）；**删除前后行为逐字相同**——每个输入原本都落这条 else。
+  const nextStatus = 'ai_draft'
+  const nextAnswer = teacherAnswer || row.answer
 
   await query(
     `UPDATE ${TABLES.RESOURCE_ANSWERS}
@@ -2192,7 +2176,8 @@ app.put('/api/questions/:id', async (req, res) => {
 
     // 复核页改题 → 同步回写自动沉淀的草稿答案库（不阻塞响应）
     // v4：监听 answer / student_answer / is_correct / review_status 任一变化
-    // 任一触发都会让 syncDraftAnswerBank 按 v2 矩阵重算该题的 answer_status
+    // 任一触发都会让 syncDraftAnswerBank 重算该题的 answer_status
+    // （2026-10-20 订正：原注释写「按 v2 矩阵重算」，该矩阵已作为死分支删除，见函数头注 r280-P-A）
     const triggeredByAnswerChange = 'answer' in req.body && answer != null && String(answer).trim()
     const triggeredByStudentAnswerChange = req.body.student_answer !== undefined && String(req.body.student_answer || '').trim()
     if (triggeredByAnswerChange || triggeredByStudentAnswerChange || hasIsCorrect || hasReviewStatus) {
