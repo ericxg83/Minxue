@@ -103,20 +103,14 @@
           </div>
         </div>
       </el-popover>
-      <el-tag v-if="archiveState === 'published'" type="success" size="small" effect="plain" class="tb-archive">
-        <el-icon><Check /></el-icon><span style="margin-left:4px">已发布</span>
-      </el-tag>
-      <el-tag v-else-if="archiveState === 'draft'" type="warning" size="small" effect="plain" class="tb-archive">
-        <el-icon><Document /></el-icon><span style="margin-left:4px">草稿</span>
-      </el-tag>
     </div>
 
     <div class="top-bar-right">
-      <!-- 重练卷不可复核：不展示任何复核动作（完成批改/留底/撤销都拿不到可信数据） -->
+      <!-- 重练卷不可复核：不展示任何复核动作（完成批改/撤销都拿不到可信数据） -->
       <el-tag v-if="!store.currentPaperReviewable" type="info" effect="plain" class="blocked-tag">
         该卷{{ blockedPaperHint }}，暂无可复核内容
       </el-tag>
-      <!-- [2026-09-27 视觉降噪] 低频动作（撤销 / 改批改方式 / 重新处理 / 留底）收进「更多」。
+      <!-- [2026-09-27 视觉降噪] 低频动作（撤销 / 改批改方式 / 重新处理）收进「更多」。
            [2026-09-28 菜单瘦身] 待补入清单已上顶栏常驻，「更多」只剩三类：会话开关 / 沉淀归档 / 低频改卷动作。
            [P0-2 主按钮矩阵 2026-09-27] 页面唯一 primary 随场景切换：
            批改进行中 → primary 是右栏判定区，「完成复核」降为 plain 次要（带 n/m）、「下一份」降为 tertiary；
@@ -262,10 +256,10 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, inject, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, Check, Document } from '@element-plus/icons-vue'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { useReviewStore } from '../../stores/reviewStore'
 import { retryTask, TASK_ROUTE_CONVERT_ENABLED } from '../../../services/apiService'
 import ConvertRouteDialog from './ConvertRouteDialog.vue'
@@ -320,11 +314,6 @@ const handleRouteConverted = async () => {
     await store.autoSelectPendingTask()
   }
 }
-
-// ReviewWorkspace 提供的 archiveState：hidden / draft / published
-//   draft → 首次复核（resource 还是 draft），点"完成复核"会触发留底确认
-//   published → 已留底，直接提交
-const archiveState = inject('archiveState', ref('hidden'))
 
 // [header 三合一] 进度 + 本卷缺元素欠账（原 ReviewWorkspace 上下文条，并入单条 header）
 const reviewProgressPercent = computed(() => {
@@ -419,7 +408,7 @@ watch(() => store.saveError, (err) => {
 
 // [2026-09-20 方案A] 零人工项自动完成复核成功 → 轻提示（store 只记录，这里弹提示）。
 // 进卷时整卷无需老师处理（无待判/未判定/处理中、无未入册错题门禁）即自动完成，
-// 老师看到提示后可翻看刚复核完的卷面、留底或点「下一份」。
+// 老师看到提示后可翻看刚复核完的卷面、点「下一份」。
 watch(() => store.autoReviewNotice, (notice) => {
   if (!notice) return
   ElMessage.success(`「${notice.taskName}」无需人工处理，已自动完成复核`)
@@ -1016,7 +1005,6 @@ const handleRetryTask = async () => {
   background: var(--wb-danger-soft, #FEE2E2); color: var(--wb-danger, #DC2626); font-size: 12px; font-weight: 600;
   cursor: pointer; white-space: nowrap;
 }
-.tb-archive { display: inline-flex; align-items: center; }
 .gate-skip-pop .gate-skip-tip { font-size: 12px; color: var(--wb-text-tertiary); padding-bottom: 6px; }
 .gate-skip-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .gate-skip-item:hover { background: var(--wb-bg-hover, #F3F4F6); }
@@ -1027,7 +1015,7 @@ const handleRetryTask = async () => {
 .gate-skip-stem { font-size: 12px; color: var(--wb-text-tertiary); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1280px) { .tb-progress__bar { display: none; } }
 /* ── 重练卷不可复核时的顶栏提示 ──
-   替代原复核动作按钮：这批卷没有学生答卷，任何「完成批改 / 留底」都没有可信数据可写 */
+   替代原复核动作按钮：这批卷没有学生答卷，任何「完成批改」都没有可信数据可写 */
 .blocked-tag {
   height: 28px;
   display: inline-flex;

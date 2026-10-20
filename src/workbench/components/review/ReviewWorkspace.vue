@@ -136,12 +136,11 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, provide, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { CircleCheck, Clock, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { useReviewStore } from '../../stores/reviewStore'
-import { getResource } from '../../../services/apiService'
 import ReviewTopBar from './ReviewTopBar.vue'
 import QuestionNavPanel from './QuestionNavPanel.vue'
 import PaperViewerPanel from './PaperViewerPanel.vue'
@@ -247,41 +246,13 @@ const blockedQuestionIds = computed(() => {
   return (t?._questionIds || t?.questionIds || []).filter(Boolean)
 })
 
-// 当前 task 关联 resource 的实际 status。
-// 必须用 GET /resources/:id 拿真实状态，不能从 task.status 推（B 学生复用 A 答案库时
-// task.status 仍是 done，会被误判为 draft，触发错误的"首次留底"弹窗）。
-const currentResourceStatus = ref(null)
-const loadResourceStatus = async (resourceId) => {
-  if (!resourceId) {
-    currentResourceStatus.value = null
-    return
-  }
-  try {
-    const r = await getResource(resourceId)
-    currentResourceStatus.value = r?.status || null
-  } catch (e) {
-    console.warn('[archive] 加载 resource 状态失败:', e?.message)
-    currentResourceStatus.value = null
-  }
-}
-watch(() => store.currentTask?.resource_id, (rid) => {
-  loadResourceStatus(rid)
-}, { immediate: true })
-
-// v4 答案库状态展示：
-//   hidden    → 非 exam 任务 / 没关联 resource，不展示
-//   draft     → exam 任务且 resource.status === 'draft'（首次复核，会触发留底确认）
-//   published → resource.status === 'published'（已留底，B/C/D 学生复核时）
-const archiveState = computed(() => {
-  const t = store.currentTask
-  if (!t) return 'hidden'
-  if (t.task_type !== 'exam') return 'hidden'
-  if (!t.resource_id) return 'hidden'
-  return currentResourceStatus.value === 'published' ? 'published' : 'draft'
-})
-
-// 暴露给 ReviewTopBar.handleComplete 弹"留底"确认用
-provide('archiveState', archiveState)
+// 2026-10-20 清理：这里原有 resource 状态轮询 + `provide('archiveState')` 全链路
+// （供顶栏显示「草稿／已发布」并触发留底确认）。2026-10-18 负责人裁决砍掉 exam
+// 答案库批改路线后，`archiveState` 的判据首行是 `task_type !== 'exam' → hidden`，
+// 而线上 exam 任务已 0 条（10-20 实测 tasks 表只有 general/workbook/wrong_retry/homework）
+// ⇒ 该状态恒为 hidden、两个 tag 永不显示，却仍会为带 resource_id 的历史任务发
+// GET /resources/:id。故整段与 apiService.getResource 一并删除。
+// ⛔ 若将来重建「答案库留底」，不要在这里复活轮询——先看 docs 里 10-18 的裁决记录。
 
 // ── ?q=<questionId>：外部入口直达某道题并自动打开编辑面板 ──
 // 唯一来源是错题本详情的「去原题编辑」（2026-10-10）。

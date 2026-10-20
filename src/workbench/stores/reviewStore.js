@@ -1229,21 +1229,6 @@ export const useReviewStore = defineStore('review', () => {
   // 当前卷的 paper 状态（image 模式为 null）
   const currentPaperState = computed(() => currentTask.value?._reviewState || null)
 
-  // 「留底」目标 task：优先 currentTask；为空时（全部复核完的 empty state）回退到
-  // 最新一份已复核的任务，确保老师即便把当前 task 清掉后仍能对"刚复核完的
-  // 那份"做留底。只看当前学生的 studentTasks，跨学生不串。
-  // 不限 task_type：server 已放开 save-as-answer-key 的 exam-only 限制，
-  // 任何已复核的 task（workbook / general / exam）都能留底。
-  const lastArchivableTask = computed(() => {
-    const cur = currentTask.value
-    if (cur && cur.status === 'reviewed') {
-      return cur
-    }
-    return reviewedTasks.value
-      .slice()
-      .sort((a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0))[0] || null
-  })
-
   // 其他待复核页（同一份练习卷的其他答题卡页图，不是其他试卷）
   const otherPendingPages = computed(() => {
     const t = currentTask.value
@@ -1851,10 +1836,9 @@ export const useReviewStore = defineStore('review', () => {
       const sorter = { done: 0, reviewed: 1 }
       studentTasks.value.sort((a, b) => (sorter[a.status] ?? 99) - (sorter[b.status] ?? 99))
     }
-    // 复核完成后停在当前 task（status='reviewed'），让老师自己决定：
-    //   ① 「📌 留底为答案库」沉淀答案进资源（canArchive 见 lastArchivableTask），
-    //   ② 「▶ 下一份」手动跳到下一份待复核试卷。
-    // 不再自动跳转，避免跳过"留底为答案库"窗口。题目列表保留以便翻看刚复核完的题。
+    // 复核完成后停在当前 task（status='reviewed'），由老师自己点「▶ 下一份」
+    // 手动跳到下一份待复核试卷（2026-10-18 留底为答案库下线后，这里只剩这一个去处）。
+    // 不自动跳转，题目列表保留以便翻看刚复核完的题。
   }
 
   // ── 闸1（L0 卷级自动完成）判定（2026-09-23 三层分流）────────
@@ -2180,7 +2164,6 @@ export const useReviewStore = defineStore('review', () => {
     issuedPapers,
     currentPaperState,
     currentPaperReviewable,
-    lastArchivableTask,
     // 复核完成门禁 / 空状态
     reviewAllDone,
     wrongGateVisible,

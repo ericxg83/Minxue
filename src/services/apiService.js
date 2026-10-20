@@ -1059,13 +1059,9 @@ export const upsertStudentWorksheetSetting = async (studentId, subject, workshee
 // 2026-10-18（负责人裁决）：「试卷答案库」随 exam 答案库批改路线一并下线——
 // getResources / createResource / deleteResource / updateResource / getResourceAnswers /
 // updateResourceAnswers / updateResourceAnswerStatus 已删（全仓无调用方）。
-// 仅保留 getResource（ReviewWorkspace 复核页读资源状态在用）；
-// resources 路由写端点自此无前端调用方，详见评审文档 _普通试卷-弱化或砍掉-产品评审-20261018.md。
-
-export const getResource = async (id) => {
-  const data = await apiRequest(`/resources/${id}`)
-  return data.resource
-}
+// 2026-10-20：最后的 getResource 也删了。它只被复核页的 archiveState 轮询使用，
+// 而那个状态对非 exam 任务恒为 hidden（线上 exam 任务 0 条）⇒ 已无前端调用方。
+// resources 路由自此前后端都不再有前端调用，详见 _普通试卷-弱化或砍掉-产品评审-20261018.md。
 
 export const uploadPdf = async (id, file, precomputedAnswers = null, isCombined = false) => {
   const fd = new FormData()
