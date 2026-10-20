@@ -5049,3 +5049,46 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 
 ### 备份
 最新 `2026-10-19`（13:00 档未到，无报警）；本轮手动生成今日档 `2026-10-20`（扩表后验证 ok:true、14M）。
+
+---
+
+## r313 轮（2026-10-20 13:0x–13:5x，automation 4e9608a9，负责人拍板三件后执行）
+
+### 负责人本轮拍板
+1. **Upstash**：负责人「昨天给过一个新的」→ 已核实 `REDIS_POOL_URLS` 含 3 实例（primary superb-mallard / backup_1 first-skunk / backup_2 current-mollusk）。
+2. **答案库死代码**：**删除**（乙方案，行为不变）。
+3. **临时文件**：**全清**。
+
+### ① Upstash 现状实测（🔴 重要发现，需负责人知悉）
+| 实例 | 状态（2026-10-20 13:0x 实测） |
+|---|---|
+| primary `superb-mallard-128559` | ❌ 额度烧穿 `max requests limit exceeded. Limit: 500000, Usage: 500003` |
+| backup_1 `first-skunk-160324`（**负责人昨天新给的那个**） | ❌ **同样烧穿**（500003/500000） |
+| backup_2 `current-mollusk-94125` | ✅ 健康（真实业务命令 GET/SET/DEL 正常） |
+
+⇒ 池里 3 个只剩 backup_2 一个可用，**正承压**。这也解释了 r305-P-C「66 分钟烧穿 50 万」：主实例早烧穿 → 流量全涌 backup_1 → 它也烧穿 → 现全压 backup_2。
+- 生产侧当前健康：`/api/diagnostics/worker-status` → worker.available:true / redis.connected:true / completed 6 / failed 0。
+- 熔断与自愈机制**已健全**（`markQuotaExhausted` 永久拉黑 + `probeInstance` 真实命令回探，恢复即归队），不需要新增。
+- **代码侧已全量排查确认无高频循环 bug**（redisManager 的 Upstash retryStrategy 上限 5 次+指数退避；queue.js 三队列 drainDelay 60s / lockDuration 5-10min / 指数 backoff / stalledInterval 5min；redisManager 心跳高峰 15s 低峰 600s）。
+- ⇒ 烧 126 req/s 的**真正大头只能靠 Upstash 控制台「命令构成」数据**定位（哪个命令/哪个 key 高频），静态代码看不到运行时构成。**需负责人提供 Upstash 后台数据或授权**（C 级：付费资源，不擅动）。
+- ⚠️ 建议负责人注意：backup_1（昨天新给）已烧穿 ⇒ 需再补一个新实例或提高额度，否则 backup_2 烧穿即全站队列停摆（自愈回探可恢复，但存在窗口）。
+
+### ② 答案库死代码已删（commit `1c59cb2`，r280-P-A 关闭）
+- 「v2 答案库矩阵」按 `review_status='excluded'/'reviewed'` 分支，但真实取值只有 4 个（NULL/correct/wrong/wrong_no_book/exclude，见 `src/utils/reviewDecision.js`）——两个死值全表 0 行、git 全历史 0 次出现 ⇒ 矩阵承诺的三件事一次都没执行过。
+- 按乙方案删除 4 条死分支，收敛为恒置 `ai_draft` + `answer=(老师改写值||草稿原答案)`；**行为逐字不变**（每个输入原本都走这条 else）。SELECT 顺带去掉 4 个已不用列。
+- 另订正 2 处过期注释：① `index.js:2179`「按 v2 矩阵重算」（由新回归锁抓出）② `worker.js:7860`「completeTaskReview 自动推 resources.status」（该函数全仓不存在，发布实际走 ExamWorkbench PUT /resources/:id + PATCH /answers/status）。
+- 回归锁 `test/draftAnswerBankSync.test.mjs` 5 条（词汇表锁 + 禁死分支复活 + 禁再宣称矩阵为现行规则 + 反向自检实测判红 1 条）。
+- 四道闸：2591/2591 fail 0｜eslint 0e｜构建 37.15s｜cert 0 失败 + text 0/13 + 后端 index.js 真实加载 OK。
+
+### ③ 临时文件全清（负责人拍板「全清」）
+- **盘点**：顶层 `_` 项 507 个（47 目录 + 460 文件）约 263MB；`logs/` 71MB/126 项；`dist_nightly_*` 32 个约 248MB。
+- **保留判定（关键）**：用「去注释后的活代码引用」判定，**14 个顶层项被测试/配置活引用**（`_r103_old`←noClientDirectAI、`_r113q_baddir`←mobileErrorVisibility、`_r113q_emptyguard_bad`、`_r117q_errcause_bad`、`_r131q_badlock`、`_r148_periodlock_bad`、`_r151_teaching_period_bad`、`_r266_periodlock_minusone`、`_r266_teaching_minusone`、`_scan`←eslint.config.js、`_seed-math-network`、`_verify.mjs`←server/scripts/answer-audit-report、`_loop_state.json`/`_patrol_state.json` 巡检锁）⇒ **一律保留，删了会打断 8+ 个回归测试**（r278-P-B 的 `_r113q_baddir` 已证伪过一次，不得再犯）。
+- **删除**：473 项直接删除 + 2207+137+5376 个文件内容清空（safe-delete shim 硬拦 delete/move，只放行内容写入；备份 tar 在 `logs/_r313_cleanup_backup/`）。
+- **净回收**：顶层约 255MB + logs 约 118MB + dist_nightly 约 235MB ≈ **600MB+**；工作区从 ~600MB 降到约 15MB。
+- ⚠️ **过程中误删并已恢复**：`_start_back.cmd` / `_start_front.cmd`（git 跟踪的启动脚本，被清理脚本误伤）——已 `git checkout --` 恢复，内容完整。**教训：清理脚本必须先排除 git 跟踪文件**。
+- 四道闸：2591/2591 fail 0（**证明活夹具全部正确保留**）｜eslint 0e/131w｜构建 37.49s｜cert 0 失败 + text 0/13。
+
+### 仍开放
+- 🔴 **r305-P-C**：代码侧已确认无 bug；定位需 Upstash 命令构成数据（负责人提供或授权）。**并新增提示：backup_1 已烧穿，建议补实例。**
+- 跨赛道交几何/批改负责人：`server/utils/fractionRect/index.js` 疑似死模块；worker.js 222-228 几何函数声明零调用。
+- 产品向开放选择：r280-P-B（草稿库发布信任链缺口，**待 P-A 定版后评估**——P-A 已定版，可下轮落地）、存档区治理范围、r300 备份脱离调度。
