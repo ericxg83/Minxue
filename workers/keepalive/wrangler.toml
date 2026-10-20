@@ -3,8 +3,15 @@
 # 独立于仓库根目录的 wrangler.toml（那是 Pages 配置，Pages Functions 不支持 cron）。
 # 部署：cd workers/keepalive && npx wrangler deploy
 #
-# 部署后可用 `npx wrangler tail` 看 cron 触发的日志，
-# 或直接访问 Worker 的 URL 手动探活一次。
+# ✅ 2026-10-20 17:5x 已实际部署（负责人授权的 Cloudflare 账号，OAuth 登录）：
+#    线上地址 https://minxue-render-keepalive.es-jsg-y.workers.dev
+#    Version ID 17fdad6f-4e4b-4629-a52b-3a815fd951f7，cron 已生效（*/5）。
+# ⚠️ 本机（中国大陆网络）访问 *.workers.dev 会被 DNS 污染（实测解析到
+#    2a03:2880:… / 104.244.46.208 这类非 Cloudflare 地址）⇒ 本地 curl 打不开
+#    **是网络封锁，不是 Worker 挂了**。要验证请看 Render 侧 uptime/bootAt 是否稳定，
+#    或换境外网络打开该 URL（返回体里带 peakGate 与 instance 状态）。
+#
+# 部署后可用 `npx wrangler tail` 看 cron 触发的日志（本机走代理会 502，境外网络可用）。
 
 name = "minxue-render-keepalive"
 main = "src/index.js"
