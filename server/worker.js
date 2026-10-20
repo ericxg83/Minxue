@@ -14,8 +14,8 @@ import crypto from 'crypto'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_PAGE_VENDOR_CHAIN, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
-import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, addWrongQuestions, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, addSelfContainedWrongQuestion } from './services/neonService.js'
+import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
 // cropAndUploadQuestionRegion 已于 2026-09-21 下线（整题裁片下线），不再 import。
@@ -28,7 +28,7 @@ import { generateTextFingerprint, generatePHash, PARSER_VERSION } from './utils/
 // 当前产品口径是「错题按身份键精确匹配」，相似度阈值不得用于自动合并错题。
 import { judgeAnswer, normalizeQuestionType, extractChoiceLetters, isGradingCommentAnswer, stripAnswerScaffolding, detectUnverifiableReference, describeUnverifiableReference, detectReferenceMismatch, UNJUDGED_REASONS } from './services/judgeService.js'
 import { aiJudgeAnswer, selectJudgeCandidates, AI_JUDGE_ENABLED } from './services/aiJudgeService.js'
-import { normalizeSectionName, splitSubAnswers, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, mergeCrossPageContinuation, buildCrossPageHint } from './services/answerParseService.js'
+import { normalizeSectionName, splitOcrQuestionsBySubNo, isSubRowConsistentWithWhole, mergeCrossPageContinuation, buildCrossPageHint } from './services/answerParseService.js'
 import { classifyQuestionLocally } from './utils/localTagger.js'
 // buildTaggingInput：打标输入口径的唯一实现（parent_stem + content + 选项）。
 // 2026-10-05 抽出，因「小问只看 content」导致 681 道多小问大题的知识点关联判错。
