@@ -819,12 +819,12 @@ test('equation solution-set channel: never widens the pass gate', () => {
   assert.deepEqual(
     judgeAnswer('x²-4x+4+x=2\nx²-3x+2=0', 'x=1或x=2', 'answer'),
     { isCorrect: false, unrecognized: false })
-  // 漏解（只写 x₁=1）：2026-10-21 前这里是**既有放水**（extractAndCompare 数字集合兜底
-  // 允许参考多 1 个值 → 判对），注释里明确记着"单独排期"。
-  // 本次收口：参考解集 ≥2 时解集合通道给出终局结论，数量不等直接判错。
-  // 触发场景（用户截图）：(6x-1)²=25 学生答 x₁=6, x₂=-2/3（第一个根算错），
-  // 旧逻辑两侧都被 narrowToFinalAnswer 收到最后一个 "=" 右侧（都是 -2/3）→ 假判对。
+  // 漏解（只写 x₁=1）：这里是**已知放水**（extractAndCompare 数字集合兜底允许参考多 1 个值）。
+  // 2026-10-21 评估过收紧，结论是**不能收紧**：全库对比 24 条 `x=1，x=-2/3`（不带下标）的
+  // 学生答案只能被严格提取抓到行尾最后一个解 ⇒ 与「真漏根」无法区分，收紧实测误伤 3 条
+  // 正确学生（4775f231 / 6c476498 / a18b58f6）。守恒方向：宁可漏校验，不可误判。
+  // 真正被修掉的是「数量相等但配对失败」的假对（见下面 multiSolutionAnswer.test.mjs）。
   assert.deepEqual(
     judgeAnswer('x₁=1', 'x=1或x=2', 'answer'),
-    { isCorrect: false, unrecognized: false })
+    { isCorrect: true, unrecognized: false })
 })

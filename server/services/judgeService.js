@@ -348,10 +348,18 @@ function extractStudentSolutionSet(s) {
   const str = toHalfWidth(s)
   if (!str) return []
 
+  // 值尾部标点必须剥：`x₁=5 x₂=-4.` 若原样收进集合会变成 `-4.`，
+  // 与参考的 `-4` 判不上 ⇒ 通道失效、正确学生被判错（2026-10-21 全库对比实测 6c476498）。
+  const cleanValue = (v) => {
+    let out = String(v ?? '').replace(/\$+/g, '').replace(/[。；;，,]+$/, '')
+    if (/[^.]\.$/.test(out)) out = out.replace(/\.$/, '')
+    return out
+  }
+
   const subscript = []
   const subscriptRe = new RegExp(`(?:x|y)\\s*_?[12₁₂]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
   let m
-  while ((m = subscriptRe.exec(str)) !== null) subscript.push(m[1].replace(/\$+/g, ''))
+  while ((m = subscriptRe.exec(str)) !== null) subscript.push(cleanValue(m[1]))
   // 去重（保序）：学生常把解在过程末尾和结论句各写一遍
   // （`…，x₁=2，x₂=1，∴原方程的根为x₁=2，x₂=1`）——不去重会提取出 4 个解，
   // 与参考答案的 2 个长度不等 ⇒ 解集合通道不触发 ⇒ 正确学生被判错（2026-10-21 实测）。
@@ -362,7 +370,7 @@ function extractStudentSolutionSet(s) {
   const lineStartRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:x|y)\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
   for (const line of tailLines) {
     lineStartRe.lastIndex = 0
-    while ((m = lineStartRe.exec(line)) !== null) lineStart.push(m[1].replace(/\$+/g, ''))
+    while ((m = lineStartRe.exec(line)) !== null) lineStart.push(cleanValue(m[1]))
   }
   return [...new Set(lineStart)]
 }
@@ -385,6 +393,20 @@ function extractReferenceSolutionSet(s) {
   // 去重（保序）：参考答案常同时给出「x=1 或 x=1」这类重复写法，不去重会让解集长度
   // 与学生侧对不上，通道失效（同 extractStudentSolutionSet 的 2026-10-21 修复）。
   return [...new Set(vals)]
+}
+
+/**
+ * 参考答案是否是「解集形态」：整串就是 `x=1 或 x=2` / `x₁=1，x₂=-1/2`。
+ *
+ * 判据要点：必须以「变量=」开头，且分隔符后**紧跟**另一个「变量=」——中间不夹
+ * 「对称轴/顶点坐标」这类文字。反例（必须不命中）：
+ *   `y=(x-2)²-4，对称轴：x=2，顶点坐标：(2,-4)` —— 这是配方题的完整作答，
+ *   却被 extractReferenceSolutionSet 抓出一个 `x=2`（对称轴），若按多解题处理会误判。
+ * 只服务一处：解集形态的参考禁止走「取最后一个 = 右侧」的单答案收窄（见 judgeAnswer）。
+ */
+function isSolutionSetReference(s) {
+  const t = toHalfWidth(String(s ?? '')).replace(/\$/g, '').trim()
+  return /^(?:x|y)\s*_?[12₁₂]?\s*=\s*[^，,;；或]+\s*(?:，|,|;|；|或)\s*(?:x|y)\s*_?[12₁₂]?\s*=/.test(t)
 }
 
 export function normalizeQuestionType(rawType, options = []) {
@@ -1819,24 +1841,22 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   //   ③ extractAnswerStatementResults 只认"答:"句，学生没写"答:"。
   //   ⇒ judgeAnswer 返回 false ⇒ 主观题分支只放行 true ⇒ 整题转人工，老师白点一遍。
   //
-  // 本通道把「最终解」从过程里抠出来做**无序集合**比对（"x=1或x=2" 无顺序语义）。
-  //
-  // ⚠️ 2026-10-21 收口（用户截图题 (6x-1)²=25）：原实现「数量不等 / 配对失败」都不出声，
-  //   把结论交给后面的单答案收窄 —— 而收窄是「取最后一个 = 右侧」，两侧都会收到同一个根上
-  //   （学生 x₁=6, x₂=-2/3 → `-2/3`；参考 x=1 或 x=-2/3 → `-2/3`）⇒ **假判对**：
-  //   学生第一个根算成 6 也照样绿灯，错题不进本。
-  //   ⇒ 参考答案明确是多解（解集 ≥2）时，本通道给出**终局结论**：
-  //     数量不等（漏根/多根）→ 判错；数量相等但有一个解配不上 → 判错。
-  //   只对「参考解集 ≥2」生效：参考只有单解时（解集通道抓到的可能只是过程里的假设值），
-  //   保持原行为不出声，避免把中间步骤的 x₁= 当成学生结论。
+  // 本通道把「最终解」从过程里抠出来做**无序集合**比对（"x=1或x=2" 无顺序语义），
+  // 两侧集合非空、等大小、逐项配对成功才判 true；任一侧抓不到或数量不等都不出声。
   // 防放水靠集合大小相等 + 逐项 judgeAnswer 配对（错一个解/漏解/符号翻转都配不上）。
+  //
+  // ⚠️ 2026-10-21 收口（用户截图题 (6x-1)²=25）：原实现「配对失败」也不出声，把结论
+  //   交给后面的单答案收窄 —— 而收窄是「取最后一个 = 右侧」，两侧都会收到同一个根上
+  //   （学生 x₁=6, x₂=-2/3 → `-2/3`；参考 x=1 或 x=-2/3 → `-2/3`）⇒ **假判对**，
+  //   学生第一个根算成 6 也照样绿灯、错题不进本。
+  //   ⇒ 数量相等但配对失败时，只有在**参考答案本身是解集形态**（isSolutionSetReference）
+  //     才判错。数量不等一律不出声：那可能是学生用 `x=1，x=-2/3` 这种不带下标的写法
+  //     导致我们只抓到行尾一个解，判错会把正确学生打成假红叉（全库对比实测误伤 3 条）。
   {
     const studentSolutions = extractStudentSolutionSet(studentAnswer)
     const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
-    if (studentSolutions.length > 0 && referenceSolutions.length >= 2) {
-      if (studentSolutions.length !== referenceSolutions.length) {
-        return { isCorrect: false, unrecognized: false }
-      }
+    if (studentSolutions.length > 0 &&
+        studentSolutions.length === referenceSolutions.length) {
       const paired = new Array(referenceSolutions.length).fill(false)
       let allMatched = true
       for (const sv of studentSolutions) {
@@ -1855,7 +1875,8 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
         }
         paired[hit] = true
       }
-      return { isCorrect: allMatched, unrecognized: false }
+      if (allMatched) return { isCorrect: true, unrecognized: false }
+      if (isSolutionSetReference(referenceAnswer)) return { isCorrect: false, unrecognized: false }
     }
   }
 
