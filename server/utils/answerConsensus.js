@@ -79,6 +79,13 @@ export function normalizeAnswerKey(answer) {
   // 取舍：中文数学卷里「数字 空格 数字/数字」几乎只出现在带分数，
   // 乘法会写成 `2×1/2` 或 `2·1/2`，所以按带分数解释是安全的。
   s = s.replace(/(\d+)\s+(\d+)\s*\/\s*(\d+)/g, (m, w, n, d) => `${Number(w) * Number(d) + Number(n)}/${d}`)
+  // 下标数字（x₁ / x₂ / a₃）→ 普通数字。2026-10-21 实测：
+  // 同一次多路求解给出 `x = -1 或 x = -7` 与 `x₁=-1，x₂=-7`，本来是同一个解集，
+  // 但剥「变量=」前缀的正则只认 `[a-zA-Z0-9/·*^()]`，下标 ₁ 不在其中 ⇒ 前缀剥不掉
+  // ⇒ 归一化键变成 `x1=-1,x2=-7` vs `-1,-7` ⇒ 白报一次分歧（本题 2/3 vs 1/3）。
+  // 下标在数学答案里只表示「第几个根 / 第几空」，折叠成普通数字不改变语义。
+  const SUB_DIGITS = '₀₁₂₃₄₅₆₇₈₉'
+  s = s.replace(/[₀-₉]/g, ch => String(SUB_DIGITS.indexOf(ch)))
   s = foldSuperscripts(s)
   for (const [re, to] of SYMBOL_FOLD) s = s.replace(re, to)
   // 指数形态统一：上标折叠产出的是 `x^(2)`，而模型常写 `x^2` —— 同一答案两个键。

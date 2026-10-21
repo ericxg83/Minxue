@@ -197,7 +197,7 @@ async function refineStoredImageBoxes ({ questions, pageBuffers }) {
   return { checked, fixed }
 }
 
-import { extractFinalAnswerFromAnalysis, isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
+import { extractFinalAnswerFromAnalysis, isNarrativeAnswer, isMultiValueAnswer } from './utils/aiParseSelfCheck.js'
 import { verifyComparisonAnswer } from './utils/comparisonAnswerVerifier.js'
 import { rescueReferenceAnswer } from './utils/referenceAnswerRescue.js'
 import { describeReferenceAnswerRisk } from './utils/referenceAnswerSelfCheck.js'
@@ -2348,6 +2348,17 @@ export function extractAnswerFromAnalysis(answer, analysis, options) {
   // 走回原 answer，等价于"无标记"分支。
   const extracted = extractFinalAnswerFromAnalysis(analysis)
   if (extracted && extracted !== answer) {
+    // ── 多值答案保护（2026-10-21）────────────────────────────────────────────
+    // 本题实测：引擎给出的 answer 是完整的 `x = -1 或 x = -7`，解析也写「所以 x = -1 或 x = -7」，
+    // 但旧 fallback 把解析末句抓成最后一个 "=" 右侧的 `-7` ⇒ 参考答案只剩一个根。
+    // 学生写「x₁=-7，x₂=-1」时判等层拿 `-7` 去比，**顺序不同结果就翻转**
+    // （同一道题两条记录：`x₁=-1, x₂=-7` 判对、`原方程的根为 x₁=-7, x₂=-1` 判错）。
+    // 守恒方向：这里只做「多值 → 单值」的降级保护，不碰任何单值答案的纠错通道
+    // （answer=`√5`、解析末行 `= 11/5` 那类仍照旧覆盖）。
+    if (isMultiValueAnswer(answer) && !isMultiValueAnswer(extracted)) {
+      console.log(`   [AnswerExtraction] 提取值「${extracted}」是多值答案「${answer}」的片段，保留原答案`)
+      return answer
+    }
     console.log(`   [AnswerExtraction] 答案标记匹配: ${extracted} (原: ${answer})`)
     return extracted
   }

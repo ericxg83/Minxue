@@ -114,6 +114,38 @@ export function cleanAnswerScaffold(value) {
 }
 
 /**
+ * 末行是否是「多根 / 多解声明」形态。
+ *
+ * 2026-10-21 实测（用户截图题 (x+5)²-2(x+5)=8）：
+ *   解析末句「所以 x = -1 或 x = -7。」被 `extractFinalAnswerFromAnalysis` 的 fallback
+ *   「末行 = X 结尾」抓成最后一个等号右边的 `-7`，写进 questions.answer ——
+ *   解析里明明两个根，参考答案只剩一个。学生写「x₁=-7，x₂=-1」时判等层拿 `-7` 去比，
+ *   顺序不同结果就翻转（实测同一份答案：一条判错、一条判对）。
+ *   ⇒ 这类行只取一个 "=" 右侧必然丢解，返回 null 让调用方保留 answer 字段原值。
+ *
+ * 判据刻意收窄（只认两种形态），避免误伤「y=3x²-6x+5, 83」这类单等号多值答案：
+ *   ① 同一行出现 ≥2 个等号（`x = -1 或 x = -7` / `x₁=2，x₂=3` / `y=3x-1, y=-x+2`）；
+ *   ② 含「或」且至少两个数值（`x 的值为 2 或 3`）—— 数学答案里「或」几乎只作多解分隔符。
+ */
+function isMultiSolutionLine(line) {
+  const s = String(line ?? '')
+  if (!s) return false
+  if ((s.match(/=/g) || []).length >= 2) return true
+  if (/或/.test(s) && (s.match(/-?\d+(?:\.\d+)?/g) || []).length >= 2) return true
+  return false
+}
+
+/**
+ * 答案字段是否是「多值答案」（多空 / 多根，逗号分号或「或」分隔）。
+ * 用于防止「提取出来的单个值」把完整的多值答案覆盖掉（见 worker.extractAnswerFromAnalysis）。
+ */
+export function isMultiValueAnswer(value) {
+  const s = String(value ?? '').trim()
+  if (!s) return false
+  return s.split(/[，,;；]|或/).map(x => x.trim()).filter(Boolean).length >= 2
+}
+
+/**
  * 从 analysis 文本中抽"最终答案"字段。
  * 直接复用 worker.js 现有逻辑（CAP/SEP 模板避小数点误切 + tail(800) 截断）。
  * 返回的字符串是模型声称的最终答案，可包含逗号/分号分隔的多空答案。
@@ -158,6 +190,9 @@ export function extractFinalAnswerFromAnalysis(analysis) {
   // Fallback：analysis 末行以"= X"结尾，X 含数字/根号/字母/分数。
   // 取末行（按换行/句号切），避免抓到中间步骤的等式右边。
   const lastLine = tail.split(/[\n。]/).filter(s => s.trim()).pop() || tail
+  // 多解声明行（`x = -1 或 x = -7`）不取最后一个 "=" 右侧：那只代表其中一个根，
+  // 会把完整答案截成单值（2026-10-21 实测事故，见 isMultiSolutionLine 注释）。
+  if (isMultiSolutionLine(lastLine)) return null
   const m = lastLine.match(/=\s*([^=\n]+\S)\s*[.。]?\s*$/)
   if (m && m[1]) {
     const extracted = m[1].trim()

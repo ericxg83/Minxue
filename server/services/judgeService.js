@@ -352,7 +352,10 @@ function extractStudentSolutionSet(s) {
   const subscriptRe = new RegExp(`(?:x|y)\\s*_?[12₁₂]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
   let m
   while ((m = subscriptRe.exec(str)) !== null) subscript.push(m[1].replace(/\$+/g, ''))
-  if (subscript.length > 0) return subscript
+  // 去重（保序）：学生常把解在过程末尾和结论句各写一遍
+  // （`…，x₁=2，x₂=1，∴原方程的根为x₁=2，x₂=1`）——不去重会提取出 4 个解，
+  // 与参考答案的 2 个长度不等 ⇒ 解集合通道不触发 ⇒ 正确学生被判错（2026-10-21 实测）。
+  if (subscript.length > 0) return [...new Set(subscript)]
 
   const tailLines = str.split(/\n/).map(l => l.trim()).filter(Boolean).slice(-3)
   const lineStart = []
@@ -361,7 +364,7 @@ function extractStudentSolutionSet(s) {
     lineStartRe.lastIndex = 0
     while ((m = lineStartRe.exec(line)) !== null) lineStart.push(m[1].replace(/\$+/g, ''))
   }
-  return lineStart
+  return [...new Set(lineStart)]
 }
 
 /**
@@ -379,7 +382,9 @@ function extractReferenceSolutionSet(s) {
     let m
     while ((m = re.exec(seg)) !== null) vals.push(m[1].replace(/\$+/g, ''))
   }
-  return vals
+  // 去重（保序）：参考答案常同时给出「x=1 或 x=1」这类重复写法，不去重会让解集长度
+  // 与学生侧对不上，通道失效（同 extractStudentSolutionSet 的 2026-10-21 修复）。
+  return [...new Set(vals)]
 }
 
 export function normalizeQuestionType(rawType, options = []) {
@@ -1814,16 +1819,24 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   //   ③ extractAnswerStatementResults 只认"答:"句，学生没写"答:"。
   //   ⇒ judgeAnswer 返回 false ⇒ 主观题分支只放行 true ⇒ 整题转人工，老师白点一遍。
   //
-  // 本通道把「最终解」从过程里抠出来做**无序集合**比对（"x=1或x=2" 无顺序语义），
-  // 两侧集合非空、等大小、逐项配对成功才判 true；任一侧抓不到或数量不等都不出声，
-  // 权威结果仍是后面各路径。与主观题分支「只放行判对」的刻意不对称一致：
-  // 最坏情况只是假绿，不产生假红叉、不误入错题本。
+  // 本通道把「最终解」从过程里抠出来做**无序集合**比对（"x=1或x=2" 无顺序语义）。
+  //
+  // ⚠️ 2026-10-21 收口（用户截图题 (6x-1)²=25）：原实现「数量不等 / 配对失败」都不出声，
+  //   把结论交给后面的单答案收窄 —— 而收窄是「取最后一个 = 右侧」，两侧都会收到同一个根上
+  //   （学生 x₁=6, x₂=-2/3 → `-2/3`；参考 x=1 或 x=-2/3 → `-2/3`）⇒ **假判对**：
+  //   学生第一个根算成 6 也照样绿灯，错题不进本。
+  //   ⇒ 参考答案明确是多解（解集 ≥2）时，本通道给出**终局结论**：
+  //     数量不等（漏根/多根）→ 判错；数量相等但有一个解配不上 → 判错。
+  //   只对「参考解集 ≥2」生效：参考只有单解时（解集通道抓到的可能只是过程里的假设值），
+  //   保持原行为不出声，避免把中间步骤的 x₁= 当成学生结论。
   // 防放水靠集合大小相等 + 逐项 judgeAnswer 配对（错一个解/漏解/符号翻转都配不上）。
   {
     const studentSolutions = extractStudentSolutionSet(studentAnswer)
     const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
-    if (studentSolutions.length > 0 &&
-        studentSolutions.length === referenceSolutions.length) {
+    if (studentSolutions.length > 0 && referenceSolutions.length >= 2) {
+      if (studentSolutions.length !== referenceSolutions.length) {
+        return { isCorrect: false, unrecognized: false }
+      }
       const paired = new Array(referenceSolutions.length).fill(false)
       let allMatched = true
       for (const sv of studentSolutions) {
@@ -1842,7 +1855,7 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
         }
         paired[hit] = true
       }
-      if (allMatched) return { isCorrect: true, unrecognized: false }
+      return { isCorrect: allMatched, unrecognized: false }
     }
   }
 
