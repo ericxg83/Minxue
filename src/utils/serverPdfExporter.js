@@ -49,6 +49,80 @@ export async function getKatexCssWithInlineFonts() {
   return _katexFontsCssCache
 }
 
+/** 等 iframe 文档 ready（写完后 readyState 可能还是 loading）。 */
+function waitDocReady(idoc) {
+  if (idoc.readyState !== 'loading') return Promise.resolve()
+  return new Promise((resolve) => {
+    idoc.addEventListener('DOMContentLoaded', () => resolve(), { once: true })
+    setTimeout(resolve, 1000)
+  })
+}
+
+/**
+ * 把 body HTML 画进某个文档，并跑完 KaTeX + 字体预加载 + 度量稳定。
+ *
+ * ⛔ 这是「页面预览」与「导出 PDF」**唯一**的排版入口：
+ *    PDF 走 renderViaIframe → 序列化 outerHTML → 服务端 Chromium 出 PDF；
+ *    预览走 paintPreviewIntoIframe → 文档留在 iframe 里给老师滚动看。
+ *    两者用同一份 bodyHtml + 同一个 buildPaperCSS，所以「预览长什么样、印出来就什么样」。
+ *
+ * @param {Document} idoc 目标文档（iframe.contentDocument）
+ * @param {object} o
+ * @param {string} o.bodyHtml
+ * @param {string} [o.extraCss] 追加样式（讲义/组卷的专属版式）
+ * @param {string} [o.qrContent] 批改二维码（重练卷用）
+ */
+async function paintDocument(idoc, { bodyHtml, extraCss = '', qrContent }) {
+  const inlinedCss = await getKatexCssWithInlineFonts()
+
+  idoc.open()
+  idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${buildPaperCSS()}\n${extraCss}</style></head><body>${bodyHtml}</body></html>`)
+  idoc.close()
+
+  await waitDocReady(idoc)
+
+  // 注入二维码
+  if (qrContent) {
+    try { applyQRToContainer(idoc, qrContent) } catch (e) {
+      console.warn('[serverPdfExporter] QR 注入失败:', e)
+    }
+  }
+
+  // KaTeX auto-render 解析 $...$ / $$...$$
+  try {
+    renderMathInContainer(idoc)
+  } catch (e) {
+    console.warn('[serverPdfExporter] KaTeX 渲染失败:', e)
+  }
+
+  // 预加载 KaTeX 字体（等 fonts.ready）
+  try {
+    await preloadKatexFonts(idoc)
+  } catch (e) {
+    console.warn('[serverPdfExporter] 字体预加载失败:', e)
+  }
+
+  // 等 KaTeX 完成所有度量：2 帧 + 兜底 400ms
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  void idoc.body?.offsetWidth
+  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+  await new Promise((r) => setTimeout(r, 400))
+
+  return idoc
+}
+
+/**
+ * 页面内预览：把卷子画进调用方给的 iframe 并**保留**（供滚动/缩放），不序列化。
+ * @param {HTMLIFrameElement} iframeEl
+ * @param {{bodyHtml:string, extraCss?:string}} o
+ * @returns {Promise<Document>}
+ */
+export async function paintPreviewIntoIframe(iframeEl, { bodyHtml, extraCss = '' }) {
+  const idoc = iframeEl?.contentDocument || iframeEl?.contentWindow?.document
+  if (!idoc) throw new Error('预览容器未就绪，请重试')
+  return paintDocument(idoc, { bodyHtml, extraCss })
+}
+
 /**
  * 通用「iframe 渲染管线」：把一段 body HTML 送进隐藏 iframe，
  * 跑 KaTeX auto-render + 二维码注入 + 字体预加载，再把渲染完的 DOM 序列化回来。
@@ -58,14 +132,12 @@ export async function getKatexCssWithInlineFonts() {
  * 任何新出口（如试卷题库讲义）都必须走这里，不能各写一份。
  *
  * @param {object} o
- * @param {string} o.headCss   <head> 里的样式（通常 = 内联字体 CSS + buildPaperCSS()）
  * @param {string} o.bodyHtml  <body> 内容
+ * @param {string} [o.extraCss] 追加在 buildPaperCSS 之后的样式
  * @param {string} [o.qrContent]
  * @returns {Promise<string>} 完整 HTML 字符串
  */
-async function renderViaIframe({ headCss, bodyHtml, qrContent }) {
-  const inlinedCss = await getKatexCssWithInlineFonts()
-
+async function renderViaIframe({ bodyHtml, extraCss = '', qrContent }) {
   // 创建 hidden iframe（不能用 display:none，否则 KaTeX 渲染不出来）
   const holder = document.createElement('div')
   holder.style.cssText = 'position:fixed;left:0;top:0;width:794px;z-index:2147483647;background:#fff;opacity:0;pointer-events:none;'
@@ -77,50 +149,7 @@ async function renderViaIframe({ headCss, bodyHtml, qrContent }) {
   holder.appendChild(iframe)
 
   try {
-    const iwin = iframe.contentWindow
-    const idoc = iwin.document
-
-    // 写入完整 HTML（CSS 已内联字体）
-    idoc.open()
-    idoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>${inlinedCss}\n${headCss}</style></head><body>${bodyHtml}</body></html>`)
-    idoc.close()
-
-    // 等 DOM ready
-    if (idoc.readyState === 'loading') {
-      await new Promise((resolve) => {
-        const onReady = () => resolve()
-        idoc.addEventListener('DOMContentLoaded', onReady, { once: true })
-        setTimeout(resolve, 1000)
-      })
-    }
-
-    // 注入二维码
-    if (qrContent) {
-      try { applyQRToContainer(idoc, qrContent) } catch (e) {
-        console.warn('[serverPdfExporter] QR 注入失败:', e)
-      }
-    }
-
-    // KaTeX auto-render 解析 $...$ / $$...$$
-    try {
-      renderMathInContainer(idoc)
-    } catch (e) {
-      console.warn('[serverPdfExporter] KaTeX 渲染失败:', e)
-    }
-
-    // 预加载 KaTeX 字体（等 fonts.ready）
-    try {
-      await preloadKatexFonts(idoc)
-    } catch (e) {
-      console.warn('[serverPdfExporter] 字体预加载失败:', e)
-    }
-
-    // 等 KaTeX 完成所有度量：2 帧 + 兜底 400ms
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-    void idoc.body?.offsetWidth
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-    await new Promise((r) => setTimeout(r, 400))
-
+    const idoc = await paintDocument(iframe.contentDocument, { bodyHtml, extraCss, qrContent })
     // 序列化 outerHTML
     return idoc.documentElement.outerHTML
   } finally {
@@ -145,7 +174,7 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
   const bodyHtml = embedPaperCssInBody
     ? `<div class="minxue-exam"><style>${buildPaperCSS('.minxue-exam')}</style>${paperBody}</div>`
     : paperBody
-  return renderViaIframe({ headCss: buildPaperCSS(), bodyHtml, qrContent })
+  return renderViaIframe({ bodyHtml, qrContent })
 }
 
 /**
@@ -154,7 +183,7 @@ export async function renderFullHTML({ title, studentName, questions, showAnswer
  *（⛔ 它刻意不复用 buildPaperBody —— 那套会按题型重排重编号，会丢原卷题号）。
  */
 export async function renderCustomBodyToHTML({ bodyHtml, extraCss = '' }) {
-  return renderViaIframe({ headCss: `${buildPaperCSS()}\n${extraCss}`, bodyHtml })
+  return renderViaIframe({ bodyHtml, extraCss })
 }
 
 /**

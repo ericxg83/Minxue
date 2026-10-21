@@ -284,11 +284,12 @@
       </template>
     </el-dialog>
 
-    <!-- 出卷前必须能看：直接把 PDF 甩给老师等于盲出（负责人 2026-10-21 指出） -->
+    <!-- 出卷前必须能看：直接把 PDF 甩给老师等于盲出（负责人 2026-10-21 指出）。
+         预览方式是「在页面里看卷子」（灰底白纸、可缩放），不是丢一个 PDF 阅读器。 -->
     <el-dialog
       v-model="showPreview"
-      width="960px"
-      top="3vh"
+      width="96vw"
+      top="2vh"
       :close-on-click-modal="false"
       class="pb-preview-dialog"
       @closed="closePreview"
@@ -306,26 +307,34 @@
               @click="switchPreviewKind(t.key)"
             >{{ t.label }}</button>
           </div>
+          <div class="pb-preview__zoom">
+            <button type="button" title="缩小" @click="setZoom(-0.1)">−</button>
+            <span>{{ Math.round(zoom * 100) }}%</span>
+            <button type="button" title="放大" @click="setZoom(0.1)">＋</button>
+          </div>
         </div>
       </template>
 
       <div class="pb-preview__body">
-        <div v-if="previewing" class="pb-preview__loading">
+        <iframe
+          ref="previewFrame"
+          class="pb-preview__frame"
+          title="试卷预览"
+          sandbox="allow-same-origin allow-scripts"
+        />
+        <div v-if="previewing" class="pb-preview__mask">
           <span class="pb-spinner" aria-hidden="true"></span>
-          <p>正在排版…首次生成需要十几秒</p>
+          <p>正在排版…</p>
         </div>
-        <iframe v-else-if="previewUrl" :src="previewUrl" class="pb-preview__frame" title="试卷预览" />
-        <div v-else class="pb-preview__loading"><p>没有可预览的内容</p></div>
       </div>
 
       <template #footer>
         <div class="pb-preview__foot">
           <span class="pb-preview__meta">{{ previewMeta }}</span>
           <div class="pb-preview__ops">
-            <a v-if="previewUrl" class="pb-link" :href="previewUrl" target="_blank" rel="noopener">新标签页打开</a>
             <el-button text :disabled="previewing" @click="refreshPreview">重新生成</el-button>
             <el-button @click="showPreview = false">关闭</el-button>
-            <el-button type="primary" :disabled="!previewBlob || previewing" @click="downloadPreview">
+            <el-button type="primary" :loading="downloading" :disabled="previewing" @click="downloadPdf">
               下载 PDF
             </el-button>
           </div>
@@ -336,7 +345,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Plus, UploadFilled, Search, View, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/ui/PageHeader.vue'
@@ -369,8 +378,7 @@ import {
   composePaperTotals,
   composePaperFilename,
 } from '../../utils/paperBasket'
-import { renderCustomBodyToHTML, exportServerPDF } from '../../utils/serverPdfExporter'
-import { saveFileToDevice } from '../../utils/nativeDownload'
+import { renderCustomBodyToHTML, exportServerPDF, paintPreviewIntoIframe } from '../../utils/serverPdfExporter'
 import { ossThumbUrl } from '../../utils/ossThumb'
 
 const PAGE_SIZE = 200
@@ -384,17 +392,27 @@ const truncated = ref(false)
 const limit = ref(PAGE_SIZE)
 
 // 预览：出卷前必须先看到卷子（负责人 2026-10-21：「直接出试卷了？？？」）
+// 方式是**在页面里看卷子**（灰底白纸 / 可缩放 / 页数），不是弹一个 PDF 阅读器。
 const showPreview = ref(false)
 const previewing = ref(false)
+const downloading = ref(false)
 const previewKind = ref('student')
-const previewUrl = ref('')
-const previewBlob = ref(null)
-const previewFilename = ref('')
+const previewFrame = ref(null)
+const zoom = ref(1)
+const previewPages = ref(0)
 const PREVIEW_TABS = [
   { key: 'student', label: '练习卷' },
   { key: 'teacher', label: '教师卷（含答案）' },
   { key: 'handout', label: '讲题讲义' },
 ]
+
+// 预览舞台样式（注入到 iframe 文档里）：灰底 + 居中的白纸，接近学科网那种看法。
+// ⛔ 这些样式绝不能写进 buildPaperCSS —— 那是给**打印**用的，纸上不该有灰底和阴影。
+const PREVIEW_STAGE_CSS = `
+html,body{background:#e6e4de}
+body{padding:16px 0 32px}
+.page{background:#fff;margin:0 auto;box-shadow:0 1px 10px rgba(0,0,0,.14)}
+`
 
 const filterPaper = ref('all')
 const filterQuestionNos = ref('')
@@ -700,65 +718,66 @@ const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer
 
 // ── 预览 → 下载（先看再存，绝不盲出）──
 //
-// 为什么预览的是**最终 PDF 本体**，而不是在页面里再排一次版：
-//   ① 页面排版与 PDF 排版是两条渲染器（浏览器 DOM vs 服务端 Chromium），
-//      自己再排一份就一定会出现「预览好看、下载变形」；
-//   ② 复用 exportServerPDF 的 returnPdfBlob 分支（错题重练卷/周报早就在用），
-//      零新增排版实现。
-// 代价是预览要等一次服务端渲染（十几秒），所以弹窗先开、里面给 loading。
+// 预览形态：把卷子**画进 iframe 给老师滚动看**（灰底白纸 + 缩放），学科网那种看法。
+// 排版动作复用 paintPreviewIntoIframe —— 与「导出 PDF」共用同一个 paintDocument，
+// 同一份 bodyHtml + 同一个 buildPaperCSS，所以预览和下载不会各排一套。
+// 下载仍走服务端 Chromium（矢量、字体、分页都对），点下载才生成，不在预览时预先生成。
 
-const buildPaperBlob = async (kind) => {
+/** 按版本产出 bodyHtml + 专属样式 + 文件名（预览与下载共用）。 */
+const buildPaperHtml = (kind) => {
   if (kind === 'handout') {
     const groups = groupHandoutQuestions(basket.value.slice())
     // 讲义版式：保留原卷题号、按卷分组（⛔ 不复用组卷版式，那套会重排重编号）
     const title = groups.length === 1 ? `${groups[0].paperName} 讲题讲义` : `${groups.length} 套卷 讲题讲义`
-    const bodyHtml = buildHandoutBody({
-      title,
-      groups,
-      showAnswers: true,
-      showImage: composeWithImage.value,
-    })
-    const html = await renderCustomBodyToHTML({ bodyHtml, extraCss: buildHandoutCSS() })
-    const res = await exportServerPDF({ html, filename: title, returnPdfBlob: true })
-    return { blob: res.pdfBlob, filename: title }
+    return {
+      bodyHtml: buildHandoutBody({ title, groups, showAnswers: true, showImage: composeWithImage.value }),
+      extraCss: buildHandoutCSS(),
+      filename: title,
+    }
   }
-
   const withAnswers = kind === 'teacher'
-  const bodyHtml = buildComposePaperBody({
-    title: composeTitle.value,
-    subtitle: composeSubtitle(),
-    blocks: blocks.value,
-    showAnswers: withAnswers,
-    showImage: composeWithImage.value,
-  })
-  const html = await renderCustomBodyToHTML({ bodyHtml, extraCss: buildComposePaperCSS() })
-  const filename = composePaperFilename(
-    composeTitle.value,
-    totals.value.questionCount,
-    todayStr()
-  ) + (withAnswers ? '_教师卷' : '')
-  const res = await exportServerPDF({ html, filename, pageNumbers: true, returnPdfBlob: true })
-  return { blob: res.pdfBlob, filename }
+  return {
+    bodyHtml: buildComposePaperBody({
+      title: composeTitle.value,
+      subtitle: composeSubtitle(),
+      blocks: blocks.value,
+      showAnswers: withAnswers,
+      showImage: composeWithImage.value,
+    }),
+    extraCss: buildComposePaperCSS(),
+    filename: composePaperFilename(composeTitle.value, totals.value.questionCount, todayStr())
+      + (withAnswers ? '_教师卷' : ''),
+  }
 }
 
-const revokePreviewUrl = () => {
-  if (previewUrl.value) {
-    URL.revokeObjectURL(previewUrl.value)
-    previewUrl.value = ''
-  }
+const applyZoom = () => {
+  const doc = previewFrame.value?.contentDocument
+  if (doc?.body) doc.body.style.zoom = String(zoom.value)
+}
+
+const setZoom = (delta) => {
+  zoom.value = Math.min(1.6, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+  applyZoom()
 }
 
 const refreshPreview = async () => {
+  if (!basket.value.length) return
   previewing.value = true
-  previewBlob.value = null
-  revokePreviewUrl()
   try {
-    const { blob, filename } = await buildPaperBlob(previewKind.value)
-    previewBlob.value = blob
-    previewFilename.value = filename
-    previewUrl.value = URL.createObjectURL(blob)
+    const { bodyHtml, extraCss } = buildPaperHtml(previewKind.value)
+    // 等 iframe 真正挂到 DOM 上再画（弹窗刚打开时 ref 还是 null）
+    await nextTick()
+    const doc = await paintPreviewIntoIframe(previewFrame.value, {
+      bodyHtml,
+      extraCss: `${extraCss}\n${PREVIEW_STAGE_CSS}`,
+    })
+    // A4 在 96dpi 下约 1123px 高：按实际内容高度估页数，给老师一个「会印几页」的预期
+    const h = doc?.body?.scrollHeight || 0
+    previewPages.value = h ? Math.max(1, Math.ceil(h / 1123)) : 0
+    zoom.value = 1
+    applyZoom()
   } catch (e) {
-    ElMessage.error(e?.payload?.message || e.message || '生成预览失败')
+    ElMessage.error(e?.payload?.message || e.message || '预览失败')
     showPreview.value = false
   } finally {
     previewing.value = false
@@ -773,35 +792,51 @@ const openPreview = async (kind = 'student') => {
 }
 
 const switchPreviewKind = (kind) => {
-  if (previewKind.value === kind && previewBlob.value) return
+  if (previewKind.value === kind && previewPages.value) return
   previewKind.value = kind
   refreshPreview()
 }
 
-// 关窗即释放 blob（不释放会一直占内存，反复预览几次页面就卡）
+// 关窗清空 iframe 文档（不清会一直留着上一次的排版与字体，反复预览越来越吃内存）
 const closePreview = () => {
-  revokePreviewUrl()
-  previewBlob.value = null
+  const doc = previewFrame.value?.contentDocument
+  if (doc) {
+    doc.open()
+    doc.write('')
+    doc.close()
+  }
+  previewPages.value = 0
 }
 
-const downloadPreview = async () => {
-  if (!previewBlob.value) return
+const downloadPdf = async () => {
+  if (!basket.value.length) return
+  downloading.value = true
   try {
-    const r = await saveFileToDevice(previewBlob.value, `${previewFilename.value}.pdf`)
-    ElMessage.success(`已保存：${r.savedTo}`)
+    const { bodyHtml, extraCss, filename } = buildPaperHtml(previewKind.value)
+    const html = await renderCustomBodyToHTML({ bodyHtml, extraCss })
+    await exportServerPDF({
+      html,
+      filename,
+      // 讲义不印页码（按卷分组的讲题稿，页码没意义）
+      pageNumbers: previewKind.value !== 'handout',
+    })
+    ElMessage.success(`已生成：${filename}.pdf`)
   } catch (e) {
-    ElMessage.error(e?.message || '保存失败')
+    ElMessage.error(e?.payload?.message || e.message || '生成 PDF 失败')
+  } finally {
+    downloading.value = false
   }
 }
 
 const previewMeta = computed(() => {
   if (previewing.value) return '正在排版…'
-  if (!previewBlob.value) return ''
+  if (!previewPages.value) return ''
   const label = PREVIEW_TABS.find(t => t.key === previewKind.value)?.label || ''
+  const pages = `约 ${previewPages.value} 页`
   if (previewKind.value === 'handout') {
-    return `${label} · ${summary.value.count} 题 · 保留原卷题号`
+    return `${label} · ${summary.value.count} 题 · 保留原卷题号 · ${pages}`
   }
-  return `${label} · 共 ${totals.value.questionCount} 题 · 满分 ${totals.value.totalScore} 分`
+  return `${label} · 共 ${totals.value.questionCount} 题 · 满分 ${totals.value.totalScore} 分 · ${pages}`
 })
 
 watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; loadQuestions() })
@@ -966,6 +1001,12 @@ onUnmounted(stopPolling)
 .pb-preview__head { display: flex; align-items: center; gap: 16px; }
 .pb-preview__head strong { font-size: 14px; }
 .pb-preview__tabs { display: flex; gap: 4px; }
+.pb-preview__zoom { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666; }
+.pb-preview__zoom button {
+  width: 24px; height: 24px; border: 1px solid #ddd; background: #fff;
+  border-radius: 5px; cursor: pointer; line-height: 1; color: #555;
+}
+.pb-preview__zoom button:hover { border-color: #185fa5; color: #185fa5; }
 .pb-tab {
   border: 0; background: transparent; padding: 4px 10px; border-radius: 6px;
   font-size: 12px; color: #666; cursor: pointer;
@@ -973,11 +1014,17 @@ onUnmounted(stopPolling)
 .pb-tab:hover { background: #f5f4f0; }
 .pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
 .pb-preview__body {
-  height: 70vh; background: #f0efea;
-  display: flex; align-items: center; justify-content: center;
+  position: relative;
+  height: calc(94vh - 132px);
+  min-height: 420px;
+  background: #e6e4de;
 }
-.pb-preview__frame { width: 100%; height: 100%; border: 0; background: #fff; }
-.pb-preview__loading { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #888; font-size: 13px; }
+.pb-preview__frame { width: 100%; height: 100%; border: 0; background: transparent; display: block; }
+.pb-preview__mask {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  background: rgba(240, 239, 234, 0.78); color: #555; font-size: 13px;
+}
 .pb-spinner {
   width: 22px; height: 22px; border: 2px solid #ddd; border-top-color: #185fa5;
   border-radius: 50%; animation: pb-spin 0.8s linear infinite;

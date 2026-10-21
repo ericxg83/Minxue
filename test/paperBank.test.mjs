@@ -157,9 +157,21 @@ test('反向自检：套用重练卷版式、或用下标当题号，都必须�
 test('★ 讲义渲染管线复用同一条 iframe 通道（字体预加载/KaTeX 度量只允许有一份实现）', () => {
   const src = read('src/utils/serverPdfExporter.js')
   const fails = []
-  const seg = anchoredSlice(src, 'async function renderViaIframe(', 2600, 'serverPdfExporter.js', fails)
+  // 2026-10-21：排版动作从 renderViaIframe 抽成 paintDocument，
+  // 供「导出 PDF」与「页面内预览」共用 —— 判据锚点随之迁移，语义未变：
+  // 谁负责画，谁就必须做 KaTeX 字体预加载。
+  const seg = anchoredSlice(src, 'async function paintDocument(', 2600, 'serverPdfExporter.js', fails)
   if (seg !== null && !/preloadKatexFonts/.test(seg)) {
-    fails.push('renderViaIframe 必须做 KaTeX 字体预加载（否则服务端渲染根号/分数线会散架）')
+    fails.push('paintDocument 必须做 KaTeX 字体预加载（否则服务端渲染根号/分数线会散架）')
+  }
+  // 两个出口都必须走同一条通道，不得各写一套
+  const segPdf = anchoredSlice(src, 'async function renderViaIframe(', 1600, 'serverPdfExporter.js', fails)
+  if (segPdf !== null && !/paintDocument\(/.test(segPdf)) {
+    fails.push('renderViaIframe 必须走 paintDocument，不得自建一套渲染')
+  }
+  const segPreview = anchoredSlice(src, 'export async function paintPreviewIntoIframe(', 700, 'serverPdfExporter.js', fails)
+  if (segPreview !== null && !/paintDocument\(/.test(segPreview)) {
+    fails.push('页面预览必须走 paintDocument，否则预览与 PDF 会漂移')
   }
   const seg2 = anchoredSlice(src, 'export async function renderCustomBodyToHTML(', 400, 'serverPdfExporter.js', fails)
   if (seg2 !== null && !/renderViaIframe\(/.test(seg2)) {

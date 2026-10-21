@@ -281,38 +281,49 @@ test('★ 填空题只在原文没有空线时才补横线（否则上下两道�
 })
 
 // ─────────────────────────────────────────────────────────────
-// ⑦ 出卷前必须能预览（负责人 2026-10-21：「直接出试卷了？？？」）
+// ⑦ 出卷前必须能预览（负责人 2026-10-21：「直接出试卷了？？？」
+//    → 一版改成弹 PDF 阅读器，被否：「我希望是学科网那种预览方式」）
 // ─────────────────────────────────────────────────────────────
 
 const PAGE = 'src/workbench/views/PaperBankWorkbench.vue'
 
-test('★ 出卷必须先预览：所有 PDF 生成都走 returnPdfBlob，不得直接触发下载', () => {
+test('★ 预览必须是「页面里看卷子」（HTML 画进 iframe），不是丢一个 PDF 阅读器', () => {
+  const s = stripComments(read(PAGE))
+  assert.ok(/paintPreviewIntoIframe/.test(s), '预览必须走 paintPreviewIntoIframe')
+  assert.ok(/ref="previewFrame"/.test(s), '预览容器必须是 iframe')
+  assert.ok(!/URL\.createObjectURL/.test(s), '不得再用 PDF blob 当预览（那是浏览器阅读器，不是学科网那种看法）')
+  assert.ok(!/<iframe[^>]*:src="previewUrl"/.test(s), 'iframe 不得指向 PDF 地址')
+})
+
+test('★ PDF 只在点「下载」时生成，且全页只有一处（预览不得预先生成）', () => {
   const s = stripComments(read(PAGE))
   const calls = (s.match(/exportServerPDF\(/g) || []).length
-  const blobs = (s.match(/returnPdfBlob:\s*true/g) || []).length
-  assert.ok(calls > 0, '页面必须调用 exportServerPDF')
-  assert.equal(blobs, calls, '每个 exportServerPDF 调用都必须 returnPdfBlob:true —— 少一个就等于「点了就下载」')
-
-  // 下载动作只允许出现在预览之后
-  assert.ok(/saveFileToDevice/.test(s), '下载必须走 saveFileToDevice（从预览里的 blob 落盘）')
-  assert.ok(/openPreview/.test(s), '必须有预览入口')
-  assert.ok(!/const exportCompose\b/.test(s), '不得保留「直接出练习卷」的函数')
-  assert.ok(!/const exportHandout\b/.test(s), '不得保留「直接出讲义」的函数')
+  assert.equal(calls, 1, 'PDF 生成必须收敛到唯一的下载动作')
+  assert.ok(/const downloadPdf\s*=/.test(s), '下载必须是独立动作')
+  // 预览里出现 PDF 生成 = 又变回「先出 PDF 再给看」
+  const previewSeg = s.slice(s.indexOf('const refreshPreview'), s.indexOf('const openPreview'))
+  assert.ok(!/exportServerPDF|renderCustomBodyToHTML/.test(previewSeg), '预览过程不得生成 PDF')
 })
 
-test('★ 预览渲染的是最终 PDF 本体（iframe + blob），不是页面内再排一次版', () => {
-  const s = read(PAGE)
-  assert.ok(/<iframe[^>]*:src="previewUrl"/.test(s), '预览必须是 iframe 指向 blob 地址')
-  assert.ok(/URL\.createObjectURL/.test(s), '必须由 blob 生成预览地址')
-  assert.ok(/URL\.revokeObjectURL/.test(s), '关窗必须释放 blob（否则反复预览会吃内存）')
-  // 三个页签都必须在同一个弹窗里，切换即重新生成
-  assert.ok(/PREVIEW_TABS/.test(s), '必须有版本页签（练习卷 / 教师卷 / 讲义）')
-  assert.ok(/switchPreviewKind/.test(s), '页签切换必须触发重新生成')
+test('★ 预览与下载共用同一份 bodyHtml（否则「预览好看、下载变形」）', () => {
+  const s = stripComments(read(PAGE))
+  assert.ok(/const buildPaperHtml\s*=/.test(s), '必须有唯一的 buildPaperHtml')
+  assert.ok((s.match(/buildPaperHtml\(/g) || []).length >= 2, '预览与下载都必须通过它取 bodyHtml')
+  assert.equal((s.match(/buildComposePaperBody\(/g) || []).length, 1, '组卷 bodyHtml 只允许构造一次')
+  assert.equal((s.match(/buildHandoutBody\(/g) || []).length, 1, '讲义 bodyHtml 只允许构造一次')
 })
 
-test('反向自检：直接 await exportServerPDF 而不带 returnPdfBlob 必须判红', () => {
-  const bad = stripComments("await exportServerPDF({ html, filename, pageNumbers: true })")
-  const calls = (bad.match(/exportServerPDF\(/g) || []).length
-  const blobs = (bad.match(/returnPdfBlob:\s*true/g) || []).length
-  assert.notEqual(blobs, calls)
+test('★ 预览舞台样式（灰底/纸张阴影）不得混进打印版式', () => {
+  const page = read(PAGE)
+  assert.ok(/PREVIEW_STAGE_CSS/.test(page), '灰底白纸样式应放在页面侧')
+  assert.ok(page.includes('#e6e4de'), '预览要有灰底（学科网那种观感）')
+  const compose = read(COMPOSE)
+  assert.ok(!compose.includes('#e6e4de'), '灰底不能写进打印版式 —— 印出来会是一整页灰')
+  assert.ok(!/box-shadow/.test(stripComments(compose)), '纸张阴影不能写进打印版式')
+})
+
+test('反向自检：用 blob PDF 当预览（浏览器阅读器）必须判红', () => {
+  const bad = stripComments("const url = URL.createObjectURL(blob); showPreview.value = true")
+  assert.ok(/URL\.createObjectURL/.test(bad), '这是被负责人否掉的旧形态')
+  assert.ok(!/paintPreviewIntoIframe/.test(bad))
 })
