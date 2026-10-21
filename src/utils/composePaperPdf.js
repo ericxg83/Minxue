@@ -36,6 +36,9 @@ export function buildComposePaperCSS() {
 .cz-block-meta{font-size:12px;color:#444;font-weight:normal;margin-left:6px}
 .q-score{font-size:11px;color:#8A8A8A;white-space:nowrap;flex-shrink:0}
 .cz-answer-section{margin-top:18px;page-break-before:always}
+/* 屏幕预览里没有「分页」这回事，答案区会紧贴最后一道题，加一条虚线分隔；
+   ⛔ 只在 screen 生效 —— 打印时答案区本来就另起一页，顶上不该出现一条虚线。 */
+@media screen{.cz-answer-section{margin-top:26px;padding-top:14px;border-top:1px dashed #cfcfcf}}
 .cz-answer-head{font-size:16px;font-weight:bold;text-align:center;margin:6px 0 10px;letter-spacing:2px}
 .cz-answer-block{font-size:12px;font-weight:bold;margin:8px 0 4px;color:#333}
 .cz-answer-item{font-size:12px;line-height:1.8;margin-bottom:3px;padding-left:4px}
