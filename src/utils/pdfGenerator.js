@@ -4,7 +4,7 @@ import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
 import { isSvgCode } from './geometryDisplay'
 import { renderContent, auditLoopDotRendering } from './mathText'
-import { normalizeOptions } from './optionText'
+import { normalizeOptions, optionColumns } from './optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、服务端重练卷 PDF 共用同一套实现
 import { resolveQuestionDisplayStem } from './questionStem'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
@@ -295,8 +295,8 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
       }
       if (q.options && q.options.length > 0) {
         const opts = normalizeOptions(q.options)
-        const maxLen = Math.max(...opts.map(o => String(o || '').length))
-        const cols = maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
+        // 列数口径收敛到 optionText#optionColumns（按**显示宽度**估，不按 LaTeX 源码长度）
+        const cols = optionColumns(q.options)
         html += `<div class="opts opts-${cols}">`
         opts.forEach((opt, i) => {
           html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContent(opt)}</span>`

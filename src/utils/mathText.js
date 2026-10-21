@@ -768,6 +768,28 @@ function renderContent(text) {
     .join('')
 }
 
+/**
+ * 行内渲染：与 renderContent 同一条口径，但**永不升级成独立公式**。
+ *
+ * 用途：选项、答案、表格单元格这类「必然是行内项」的位置。
+ * 事故形态（2026-10-21 组卷预览）：选项内容整段都是公式（如 `\frac{1}{3}\vec{a}`）时，
+ * renderContent 的独立公式启发式会把整段判成 $$...$$ ⇒ 选项变成居中放大的块，
+ * A/B/C/D 四个字母各自悬在巨大公式上方，卷面直接散架。
+ * 「整段只有公式」不等于「这是独立公式」，还要看它**出现在哪个位置**。
+ */
+function renderContentInline(text) {
+  if (!text) return ''
+  const blocks = splitMarkdownTables(text)
+  if (blocks.length === 1 && blocks[0].type === 'text') {
+    return renderInlineContent(blocks[0].text, { forceInline: true })
+  }
+  return blocks
+    .map(b => (b.type === 'table'
+      ? renderMarkdownTableHtml(b, cell => renderInlineContent(cell, { forceInline: true }))
+      : renderInlineContent(b.text, { forceInline: true })))
+    .join('')
+}
+
 /** 单一文本段 → 行内 HTML（原 renderContent 的实现，逐字未动）。 */
 function renderInlineContent(text, opts = {}) {
   if (!text) return ''
@@ -824,6 +846,7 @@ export {
   SUP_BASE,
   SUB_BASE,
   renderContent,
+  renderContentInline,
   splitMarkdownTables,
   splitMarkdownTableCells,
   auditLoopDotRendering,

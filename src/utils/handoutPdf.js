@@ -18,8 +18,8 @@
  *   · 难度星级 difficultyStars（retryPaperOrder，与错题卷/周末班讲义同口径）
  *   · KaTeX 内联字体 katexCss（否则 html2canvas / 服务端 Chromium 渲染根号会散架）
  */
-import { renderContent } from './mathText'
-import { normalizeOptions } from './optionText'
+import { renderContent, renderContentInline } from './mathText'
+import { normalizeOptions, optionColumns } from './optionText'
 import { buildPaperCSS } from './pdfGenerator'
 import { difficultyStars } from './retryPaperOrder'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
@@ -84,11 +84,10 @@ function renderHandoutQuestion(q, showAnswers) {
 
   const opts = normalizeOptions(q.options)
   if (opts.length) {
-    const maxLen = Math.max(...opts.map(o => String(o || '').length))
-    const cols = maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
+    const cols = optionColumns(q.options)
     html += `<div class="opts opts-${cols}">`
     opts.forEach((opt, i) => {
-      html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContent(opt)}</span>`
+      html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContentInline(opt)}</span>`
     })
     html += `</div>`
   }
@@ -102,7 +101,7 @@ function renderHandoutQuestion(q, showAnswers) {
 
   if (showAnswers) {
     if (q.answer) {
-      html += `<div class="answer-key">参考答案：${renderContent(q.answer)}</div>`
+      html += `<div class="answer-key">参考答案：${renderContentInline(q.answer)}</div>`
       // 答案来源留痕：卷面印刷 vs 老师手填 vs 模型解出，必须让老师看得见
       if (q.answer_source && q.answer_source !== 'printed') {
         const label = q.answer_source === 'manual' ? '老师手填' : 'AI 解出'

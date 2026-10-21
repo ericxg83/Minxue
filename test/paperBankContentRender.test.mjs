@@ -21,9 +21,11 @@ import { dirname, resolve } from 'node:path'
 
 import {
   renderContent,
+  renderContentInline,
   splitMarkdownTables,
   splitMarkdownTableCells,
 } from '../src/utils/mathText.js'
+import { optionColumns } from '../src/utils/optionText.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')
@@ -97,6 +99,32 @@ test('★ 不含表格的文本输出必须与旧实现逐字相同（58 条真�
   assert.equal(renderContent(null), '')
 })
 
+test('★ 行内渲染永不升级成独立公式（选项/答案/单元格用这个）', () => {
+  const pureMath = '\\frac{1}{3}\\vec{a}'
+  // 独立渲染会变成 $$...$$（居中放大块）——正是组卷预览里 A/B/C/D 散架的形态
+  assert.ok(renderContent(pureMath).startsWith('$$'), '前置：renderContent 对纯公式判独立公式')
+  assert.equal(renderContentInline(pureMath), `$${pureMath}$`, '行内渲染必须产出单个 $')
+  assert.ok(!renderContentInline(pureMath).includes('$$'), '不得出现 $$')
+  // 中文混排时两者一致（行内本来就是行内）
+  assert.equal(renderContentInline('求 $x$ 的值'), renderContent('求 $x$ 的值'))
+  // 表格仍能渲染，且单元格是行内
+  const html = renderContentInline('| x | 0 |\n|---|---|\n| y | 1 |')
+  assert.ok(html.includes('md-table'))
+  assert.ok(!html.includes('$$'))
+  assert.equal(renderContentInline(''), '')
+  assert.equal(renderContentInline(null), '')
+})
+
+test('★ 选项列数按**显示宽度**算，不按 LaTeX 源码长度', () => {
+  // 源码 24 字符，实际只显示 "sin B = 1/3" 十来格 → 应排 2 列而不是 1 列
+  assert.equal(optionColumns(['\\sin B = \\frac{1}{3}', '\\cos B = \\frac{1}{3}', '\\tan B = \\frac{\\sqrt{2}}{3}', '\\cot B = \\frac{\\sqrt{2}}{3}']), 2)
+  assert.equal(optionColumns(['1,2', '3,4', '5,6', '7,8']), 4, '短选项排 4 列')
+  assert.equal(optionColumns(['1,2,3,4', '2,4,4,8', '1.5,3,4.5,6', '3,4,5,6']), 2, '中等长度排 2 列')
+  assert.equal(optionColumns(['一大段很长很长很长很长很长很长的选项文字', '另一段也很长很长很长很长很长很长的选项']), 2, '20 字上下排 2 列')
+  assert.equal(optionColumns(['这是一段明显超过二十个字的超长选项文本内容用来占满整行', '另一段同样超过二十个字的超长选项文本内容用来占满整行']), 1, '超长排 1 列')
+  assert.equal(optionColumns([]), 1)
+  assert.equal(optionColumns(null), 1)
+})
 test('反向自检：少了分隔行就绝不出表格（判据必须靠分隔行，不能只看竖线）', () => {
   const noSep = '| x | ... | 0 |\n| y | ... | 1 |'
   assert.ok(!renderContent(noSep).includes('md-table'), '缺分隔行不得渲染成表格')

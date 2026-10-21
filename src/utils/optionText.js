@@ -64,3 +64,32 @@ export const formatOptionsForPrompt = (options) => {
   if (!Array.isArray(list) || list.length === 0) return ''
   return list.map((opt, i) => `${String.fromCharCode(65 + i)}. ${opt}`).join('；')
 }
+
+/**
+ * 选项**显示宽度**估算（不含 LaTeX 源码开销）。
+ *
+ * 为什么不能直接用 String.length：选项里的公式源码比实际显示的宽得多，
+ * `\sin B = \frac{1}{3}` 有 20 个字符，屏幕上只占 "sin B = 1/3" 十来格。
+ * 按源码长度判列数会把本可排 4 列的题排成 1 列 —— 4 个选项占 4 行，卷面立刻变稀。
+ * 命令名按 1 个字符计（`\sin` 实际显示 "sin"，量级一致），花括号/定界符不计。
+ */
+const optionDisplayWidth = (raw) => String(raw == null ? '' : raw)
+  .replace(/\\[a-zA-Z]+/g, 'x')
+  .replace(/[{}$\\]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .length
+
+/**
+ * 选项排几列（4 / 2 / 1）。全站选项排版唯一口径 ——
+ * pdfGenerator（重练卷）、handoutPdf（讲义）、composePaperPdf（组卷）都走这里，
+ * ⛔ 不要再各写一份 `maxLen <= 8 ? 4 : ...`。
+ * @param {any} options 选项数组
+ * @returns {1|2|4}
+ */
+export const optionColumns = (options) => {
+  const list = normalizeOptions(options)
+  if (!Array.isArray(list) || list.length === 0) return 1
+  const maxLen = Math.max(...list.map(optionDisplayWidth))
+  return maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
+}
