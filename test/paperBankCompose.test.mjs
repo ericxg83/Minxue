@@ -301,8 +301,48 @@ test('★ PDF 只在点「下载」时生成，且全页只有一处（预览不
   assert.equal(calls, 1, 'PDF 生成必须收敛到唯一的下载动作')
   assert.ok(/const downloadPdf\s*=/.test(s), '下载必须是独立动作')
   // 预览里出现 PDF 生成 = 又变回「先出 PDF 再给看」
-  const previewSeg = s.slice(s.indexOf('const refreshPreview'), s.indexOf('const openPreview'))
-  assert.ok(!/exportServerPDF|renderCustomBodyToHTML/.test(previewSeg), '预览过程不得生成 PDF')
+  const start = s.indexOf('const repaintPreview')
+  const end = s.indexOf('const downloadPdf')
+  assert.ok(start > 0 && end > start, '必须能找到重排函数与下载函数')
+  const repaintSeg = s.slice(start, end)
+  assert.ok(!/exportServerPDF|renderCustomBodyToHTML/.test(repaintSeg), '重排过程不得生成 PDF')
+})
+
+// ─────────────────────────────────────────────────────────────
+// ⑧ 实时预览（负责人 2026-10-21：「点题要实时预览，不满意即时删题」）
+// ─────────────────────────────────────────────────────────────
+
+test('★ 试题篮一变就重排：watch(basket, deep) → 防抖 → repaintPreview', () => {
+  const s = stripComments(read(PAGE))
+  assert.ok(/watch\(basket,[\s\S]{0,80}\{\s*deep:\s*true\s*\}/.test(s), '必须深度监听 basket')
+  assert.ok(/const scheduleRepaint\s*=/.test(s), '必须有防抖入口（连续删三题只重排一次）')
+  assert.ok(/clearTimeout\(repaintTimer\)/.test(s), '防抖必须清掉上一次的定时器')
+  assert.ok(/watch\(\[composeTitle, composeWithImage\]/.test(s), '改卷名/印原图也要重排')
+})
+
+test('★ 重排要能丢弃过期结果（连续操作只认最后一次）', () => {
+  const s = stripComments(read(PAGE))
+  assert.ok(/repaintToken/.test(s), '必须用序号 token')
+  assert.ok(/token\s*!==\s*repaintToken/.test(s), '过期结果必须丢弃，否则旧卷面会覆盖新卷面')
+})
+
+test('★ 预览里必须能直接删题/改分（不用退回选题）', () => {
+  const s = read(PAGE)
+  const start = s.indexOf('pb-work__list')
+  const end = s.indexOf('pb-work__paper')
+  assert.ok(start > 0 && end > start, '必须存在预览左清单')
+  const seg = s.slice(start, end)
+  assert.ok(/@click\.stop="onRemove\(it\.id\)"/.test(seg), '清单里必须能移出题目')
+  assert.ok(/@change="onScoreChange\(it\.id, \$event\)"/.test(seg), '清单里必须能改分')
+  assert.ok(/@click\.stop="onMove\(it\.id, -1\)"/.test(seg), '清单里必须能上下移')
+  assert.ok(/locateQ\(it\.id\)/.test(seg), '点清单要能定位到卷面上那道题')
+})
+
+test('★ 卷面上每题要带 data-qid（否则「点清单定位」是空功能）', () => {
+  const compose = read(COMPOSE)
+  assert.ok(/data-qid=/.test(compose), 'renderComposeQuestion 必须输出 data-qid')
+  const page = read(PAGE)
+  assert.ok(/\[data-qid=/.test(page), '定位必须按 data-qid 查')
 })
 
 test('★ 预览与下载共用同一份 bodyHtml（否则「预览好看、下载变形」）', () => {

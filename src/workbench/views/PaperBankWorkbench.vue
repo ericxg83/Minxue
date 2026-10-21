@@ -4,7 +4,7 @@
       <PageHeader
         eyebrow="教学资源 / 题库"
         title="试卷题库"
-        description="把纸质卷（拍照或 PDF）转成结构化题目；挑题进试题篮 → 出练习卷 / 教师卷，或按原卷题号出讲题讲义"
+        description="纸质卷 → 结构化题库；挑题 → 卷面预览 → 出练习卷 / 教师卷 / 讲题讲义"
       >
         <template #actions>
           <ActionButton variant="secondary" @click="openCreateDialog">
@@ -16,8 +16,52 @@
         </template>
       </PageHeader>
 
-      <div class="pb-layout">
-        <!-- ═══ 左：卷列表 ═══ -->
+      <!-- 模式条：选题 ⇄ 卷面预览。预览是**活的**——删题/改分/改卷名都会实时重排。 -->
+      <div class="pb-modebar">
+        <div class="pb-seg">
+          <button type="button" class="pb-seg__btn" :class="{ 'is-active': viewMode === 'pick' }" @click="setMode('pick')">
+            选题
+          </button>
+          <button type="button" class="pb-seg__btn" :class="{ 'is-active': viewMode === 'preview' }" @click="setMode('preview')">
+            卷面预览<em v-if="summary.count">{{ summary.count }}</em>
+          </button>
+        </div>
+
+        <template v-if="viewMode === 'preview'">
+          <div class="pb-tabs">
+            <button
+              v-for="t in PREVIEW_TABS"
+              :key="t.key"
+              type="button"
+              class="pb-tab"
+              :class="{ 'is-active': previewKind === t.key }"
+              @click="switchPreviewKind(t.key)"
+            >{{ t.label }}</button>
+          </div>
+          <div class="pb-zoom">
+            <button type="button" title="缩小" @click="setZoom(-0.1)">−</button>
+            <button type="button" class="pb-zoom__pct" title="点一下恢复「适应宽度」" @click="fitZoom(true)">
+              {{ Math.round(zoom * 100) }}%
+            </button>
+            <button type="button" title="放大" @click="setZoom(0.1)">＋</button>
+          </div>
+        </template>
+
+        <div class="pb-modebar__right">
+          <template v-if="viewMode === 'preview'">
+            <span class="pb-meta">{{ previewMeta }}</span>
+            <el-button type="primary" size="small" :loading="downloading" :disabled="!summary.count" @click="downloadPdf">
+              下载 PDF
+            </el-button>
+          </template>
+          <span v-else class="pb-modebar__hint">
+            勾题进试题篮；切到「卷面预览」后，删题 / 改分 / 改卷名都会即时重排
+          </span>
+        </div>
+      </div>
+
+      <!-- ═══ 选题模式 ═══ -->
+      <div v-if="viewMode === 'pick'" class="pb-layout">
         <aside class="pb-col pb-col--papers">
           <div class="pb-panel">
             <div class="pb-panel__head">
@@ -55,18 +99,17 @@
 
           <div class="pb-panel pb-panel--tip">
             <strong>怎么用</strong>
-            <p>① 左侧选卷 → ② 中间挑题加入试题篮 → ③ 右上角出卷。</p>
-            <p>「出练习卷」重排题号、留答题空；「讲义」保留原卷题号，讲题时对得上。</p>
+            <p>① 左侧选卷 → ② 中间挑题 → ③ 切到「卷面预览」删题改分，满意再下载。</p>
+            <p>「练习卷」重排题号、留答题空；「讲义」保留原卷题号，讲题时对得上。</p>
           </div>
         </aside>
 
-        <!-- ═══ 中：题目区 ═══ -->
         <main class="pb-col pb-col--questions">
           <FilterBar class="pb-filter">
             <template #leading>
               <div class="pb-summary">
                 <strong>{{ questions.length }}{{ truncated ? '+' : '' }} 道题</strong>
-                <span>{{ filterSummary }}</span>
+                <span>已选 {{ summary.count }} 题</span>
               </div>
             </template>
             <WorkbenchSelect v-model="filterType" :options="typeFilterOptions" width="104px" aria-label="按题型筛选" />
@@ -168,7 +211,6 @@
           </div>
         </main>
 
-        <!-- ═══ 右：试题篮 ═══ -->
         <aside class="pb-col pb-col--basket">
           <div class="pb-basket">
             <div class="pb-basket__head">
@@ -190,7 +232,7 @@
               <div class="pb-basket__list">
                 <div v-for="b in blocks" :key="b.key" class="pb-bk-block">
                   <div class="pb-bk-block__head">{{ b.label }} · {{ b.count }} 题 · {{ b.score }} 分</div>
-                  <div v-for="g in b.groups" :key="g.no" class="pb-bk-group">
+                  <div v-for="g in b.groups" :key="g.no">
                     <div v-for="it in g.items" :key="it.id" class="pb-bk-item">
                       <span class="pb-bk-item__no">{{ it.sub_label }}</span>
                       <span class="pb-bk-item__src" :title="it.resource_name">{{ it.resource_name }}</span>
@@ -221,11 +263,11 @@
               </div>
 
               <div class="pb-basket__actions">
-                <ActionButton variant="primary" @click="openPreview('student')">
-                  <el-icon><View /></el-icon>预览试卷
+                <ActionButton variant="primary" @click="setMode('preview')">
+                  <el-icon><View /></el-icon>看卷面
                 </ActionButton>
                 <div class="pb-basket__sub">
-                  <span>先看卷子再下载</span>
+                  <span>删题改分实时重排</span>
                   <el-button text @click="clearBasket">清空</el-button>
                 </div>
               </div>
@@ -233,10 +275,76 @@
 
             <div v-else class="pb-basket__empty">
               在中间题目上打勾，题目会进到这里。<br />
-              可拖动排序、逐题改分值，卷面会按题型自动分大题。
+              点「看卷面」进入实时预览。
             </div>
           </div>
         </aside>
+      </div>
+
+      <!-- ═══ 卷面预览模式（左：可删可改的清单；右：实时重排的卷子）═══ -->
+      <div v-else class="pb-work">
+        <aside class="pb-work__list">
+          <div class="pb-work__head">
+            <strong>已选 {{ summary.count }} 题</strong>
+            <span>{{ summary.totalScore }} 分</span>
+          </div>
+
+          <div class="pb-work__form">
+            <label class="pb-field">
+              <span>卷名</span>
+              <input v-model="composeTitle" placeholder="如：周末练习（三）" />
+            </label>
+            <label class="pb-check"><input v-model="composeWithImage" type="checkbox" />印原题图</label>
+          </div>
+
+          <div class="pb-work__items">
+            <div v-for="b in blocks" :key="b.key">
+              <div class="pb-work__block">{{ b.label }} · {{ b.count }} 题 · {{ b.score }} 分</div>
+              <div v-for="g in b.groups" :key="g.no">
+                <div v-for="it in g.items" :key="it.id" class="pb-work__item" @click="locateQ(it.id)">
+                  <span class="pb-work__no">{{ it.sub_label }}</span>
+                  <span class="pb-work__src" :title="it.resource_name">{{ it.resource_name }}</span>
+                  <input
+                    class="pb-work__score"
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    :value="it.score"
+                    aria-label="本题分值"
+                    @click.stop
+                    @change="onScoreChange(it.id, $event)"
+                  />
+                  <button type="button" class="pb-work__op" title="上移" @click.stop="onMove(it.id, -1)">↑</button>
+                  <button type="button" class="pb-work__op" title="下移" @click.stop="onMove(it.id, 1)">↓</button>
+                  <button type="button" class="pb-work__op is-danger" title="移出卷子" @click.stop="onRemove(it.id)">×</button>
+                </div>
+              </div>
+            </div>
+            <div v-if="!summary.count" class="pb-work__empty">还没选任何题。</div>
+          </div>
+
+          <button type="button" class="pb-work__add" @click="setMode('pick')">＋ 继续加题</button>
+        </aside>
+
+        <div class="pb-work__paper">
+          <div class="pb-work__stage" ref="stageRef">
+            <iframe
+              v-show="summary.count"
+              ref="previewFrame"
+              class="pb-work__frame"
+              title="卷面预览"
+              sandbox="allow-same-origin allow-scripts"
+            />
+            <div v-if="!summary.count" class="pb-work__blank">
+              <p>试题篮是空的</p>
+              <el-button type="primary" @click="setMode('pick')">去选题</el-button>
+            </div>
+            <div v-if="repainting && summary.count" class="pb-work__mask">
+              <span class="pb-spinner" aria-hidden="true"></span>
+              <span>重排中…</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -281,64 +389,6 @@
       <template #footer>
         <el-button @click="showUploadDialog = false">取消</el-button>
         <el-button type="primary" :disabled="!uploadPaperId || !pickedFiles.length" :loading="uploading" @click="handleUpload">开始解析</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 出卷前必须能看：直接把 PDF 甩给老师等于盲出（负责人 2026-10-21 指出）。
-         预览方式是「在页面里看卷子」（灰底白纸、可缩放），不是丢一个 PDF 阅读器。 -->
-    <el-dialog
-      v-model="showPreview"
-      width="96vw"
-      top="2vh"
-      :close-on-click-modal="false"
-      class="pb-preview-dialog"
-      @closed="closePreview"
-    >
-      <template #header>
-        <div class="pb-preview__head">
-          <strong>试卷预览</strong>
-          <div class="pb-preview__tabs">
-            <button
-              v-for="t in PREVIEW_TABS"
-              :key="t.key"
-              type="button"
-              class="pb-tab"
-              :class="{ 'is-active': previewKind === t.key }"
-              @click="switchPreviewKind(t.key)"
-            >{{ t.label }}</button>
-          </div>
-          <div class="pb-preview__zoom">
-            <button type="button" title="缩小" @click="setZoom(-0.1)">−</button>
-            <span>{{ Math.round(zoom * 100) }}%</span>
-            <button type="button" title="放大" @click="setZoom(0.1)">＋</button>
-          </div>
-        </div>
-      </template>
-
-      <div class="pb-preview__body">
-        <iframe
-          ref="previewFrame"
-          class="pb-preview__frame"
-          title="试卷预览"
-          sandbox="allow-same-origin allow-scripts"
-        />
-        <div v-if="previewing" class="pb-preview__mask">
-          <span class="pb-spinner" aria-hidden="true"></span>
-          <p>正在排版…</p>
-        </div>
-      </div>
-
-      <template #footer>
-        <div class="pb-preview__foot">
-          <span class="pb-preview__meta">{{ previewMeta }}</span>
-          <div class="pb-preview__ops">
-            <el-button text :disabled="previewing" @click="refreshPreview">重新生成</el-button>
-            <el-button @click="showPreview = false">关闭</el-button>
-            <el-button type="primary" :loading="downloading" :disabled="previewing" @click="downloadPdf">
-              下载 PDF
-            </el-button>
-          </div>
-        </div>
       </template>
     </el-dialog>
   </div>
@@ -391,29 +441,6 @@ const uploading = ref(false)
 const truncated = ref(false)
 const limit = ref(PAGE_SIZE)
 
-// 预览：出卷前必须先看到卷子（负责人 2026-10-21：「直接出试卷了？？？」）
-// 方式是**在页面里看卷子**（灰底白纸 / 可缩放 / 页数），不是弹一个 PDF 阅读器。
-const showPreview = ref(false)
-const previewing = ref(false)
-const downloading = ref(false)
-const previewKind = ref('student')
-const previewFrame = ref(null)
-const zoom = ref(1)
-const previewPages = ref(0)
-const PREVIEW_TABS = [
-  { key: 'student', label: '练习卷' },
-  { key: 'teacher', label: '教师卷（含答案）' },
-  { key: 'handout', label: '讲题讲义' },
-]
-
-// 预览舞台样式（注入到 iframe 文档里）：灰底 + 居中的白纸，接近学科网那种看法。
-// ⛔ 这些样式绝不能写进 buildPaperCSS —— 那是给**打印**用的，纸上不该有灰底和阴影。
-const PREVIEW_STAGE_CSS = `
-html,body{background:#e6e4de}
-body{padding:16px 0 32px}
-.page{background:#fff;margin:0 auto;box-shadow:0 1px 10px rgba(0,0,0,.14)}
-`
-
 const filterPaper = ref('all')
 const filterQuestionNos = ref('')
 const filterType = ref('all')
@@ -428,6 +455,32 @@ const composeTitle = ref('')
 const composeWithImage = ref(false)
 const editingId = ref('')
 
+// 视图模式：选题 ⇄ 卷面预览（预览绑着 basket，改了就重排）
+const viewMode = ref('pick')
+const previewKind = ref('student')
+const previewFrame = ref(null)
+const stageRef = ref(null)
+const zoom = ref(1)
+// 用户手动缩放过就不再自动「适应宽度」（否则每改一题都被拽回默认比例）
+const userZoomed = ref(false)
+const previewPages = ref(0)
+const repainting = ref(false)
+const downloading = ref(false)
+const PREVIEW_TABS = [
+  { key: 'student', label: '练习卷' },
+  { key: 'teacher', label: '教师卷（含答案）' },
+  { key: 'handout', label: '讲题讲义' },
+]
+
+// 预览舞台样式（注入到 iframe 文档里）：灰底 + 居中白纸。
+// ⛔ 这些绝不能写进 buildPaperCSS —— 那是打印样式，纸上不该有灰底和阴影。
+const PREVIEW_STAGE_CSS = `
+html,body{background:#e6e4de}
+body{padding:16px 0 32px}
+.page{background:#fff;margin:0 auto;box-shadow:0 1px 10px rgba(0,0,0,.14)}
+.q-flash{outline:2px solid #185fa5;outline-offset:4px;border-radius:4px;transition:outline-color .3s}
+`
+
 const showCreateDialog = ref(false)
 const showUploadDialog = ref(false)
 const createForm = ref({ name: '', grade: '', subject: '数学', examDate: null })
@@ -438,6 +491,8 @@ const pickedFiles = ref([])
 const fileInput = ref(null)
 
 let pollTimer = null
+let repaintTimer = null
+let repaintToken = 0
 
 const totalQuestionCount = computed(() => papers.value.reduce((n, p) => n + (p.question_count || 0), 0))
 const blocks = computed(() => groupBasket(basket.value))
@@ -462,8 +517,6 @@ const tagFilterOptions = computed(() => ([
   { label: '全部标签', value: 'all' },
   ...tagOptions.value.map(t => ({ label: t, value: t })),
 ]))
-
-const filterSummary = computed(() => `已选 ${summary.value.count} 题`)
 
 // 筛选后为空时给可行动提示（⛔ 不能只写「没有题目」）
 const emptyHint = computed(() => {
@@ -716,12 +769,11 @@ const startPolling = () => {
 }
 const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-// ── 预览 → 下载（先看再存，绝不盲出）──
+// ── 卷面预览（活的：basket 一变就重排）──
 //
-// 预览形态：把卷子**画进 iframe 给老师滚动看**（灰底白纸 + 缩放），学科网那种看法。
 // 排版动作复用 paintPreviewIntoIframe —— 与「导出 PDF」共用同一个 paintDocument，
 // 同一份 bodyHtml + 同一个 buildPaperCSS，所以预览和下载不会各排一套。
-// 下载仍走服务端 Chromium（矢量、字体、分页都对），点下载才生成，不在预览时预先生成。
+// 下载仍走服务端 Chromium（矢量、字体、分页都对），点下载才生成。
 
 /** 按版本产出 bodyHtml + 专属样式 + 文件名（预览与下载共用）。 */
 const buildPaperHtml = (kind) => {
@@ -755,57 +807,92 @@ const applyZoom = () => {
   if (doc?.body) doc.body.style.zoom = String(zoom.value)
 }
 
-const setZoom = (delta) => {
-  zoom.value = Math.min(1.6, Math.max(0.5, Math.round((zoom.value + delta) * 10) / 10))
+/**
+ * 适应宽度：A4 卷面固定 794px，侧栏一挤就会被横向裁掉右半边（分值、选项全看不见）。
+ * 所以默认按容器宽度算出缩放比；老师手动缩放过后不再自动覆盖。
+ * @param {boolean} [force] 点百分比数字时强制回到适应宽度
+ */
+const fitZoom = (force = false) => {
+  if (userZoomed.value && !force) return
+  if (force) userZoomed.value = false
+  const box = stageRef.value?.clientWidth || 0
+  if (!box) return
+  const z = Math.min(1, Math.max(0.4, Math.round(((box - 28) / 794) * 100) / 100))
+  zoom.value = z
   applyZoom()
 }
 
-const refreshPreview = async () => {
-  if (!basket.value.length) return
-  previewing.value = true
+const setZoom = (delta) => {
+  userZoomed.value = true
+  zoom.value = Math.min(1.6, Math.max(0.4, Math.round((zoom.value + delta) * 10) / 10))
+  applyZoom()
+}
+
+/** 真正重排一次。用 token 丢弃过期结果（连续删题时只认最后一次）。 */
+const repaintPreview = async () => {
+  if (viewMode.value !== 'preview') return
+  if (!basket.value.length) {
+    // 删空要立刻把「约 N 页」清掉，否则会残留上一次的页数
+    repaintToken++
+    repainting.value = false
+    previewPages.value = 0
+    return
+  }
+  const token = ++repaintToken
+  repainting.value = true
   try {
     const { bodyHtml, extraCss } = buildPaperHtml(previewKind.value)
-    // 等 iframe 真正挂到 DOM 上再画（弹窗刚打开时 ref 还是 null）
     await nextTick()
     const doc = await paintPreviewIntoIframe(previewFrame.value, {
       bodyHtml,
       extraCss: `${extraCss}\n${PREVIEW_STAGE_CSS}`,
     })
-    // A4 在 96dpi 下约 1123px 高：按实际内容高度估页数，给老师一个「会印几页」的预期
+    if (token !== repaintToken) return // 已经有更新的一次重排在跑，这次结果作废
+    fitZoom() // 先按容器算比例（用户手动缩放过则跳过）
+    // scrollHeight 是**布局像素**，不受 zoom 影响，所以页数始终按 A4=1123px 算
     const h = doc?.body?.scrollHeight || 0
     previewPages.value = h ? Math.max(1, Math.ceil(h / 1123)) : 0
-    zoom.value = 1
-    applyZoom()
   } catch (e) {
-    ElMessage.error(e?.payload?.message || e.message || '预览失败')
-    showPreview.value = false
+    if (token === repaintToken) ElMessage.error(e?.payload?.message || e.message || '预览失败')
   } finally {
-    previewing.value = false
+    if (token === repaintToken) repainting.value = false
   }
 }
 
-const openPreview = async (kind = 'student') => {
-  if (!basket.value.length) return ElMessage.warning('试题篮是空的')
-  previewKind.value = kind
-  showPreview.value = true
-  await refreshPreview()
+/** 防抖：连续删三题只重排一次。 */
+const scheduleRepaint = (delay = 220) => {
+  if (viewMode.value !== 'preview') return
+  clearTimeout(repaintTimer)
+  repaintTimer = setTimeout(() => { repaintPreview() }, delay)
+}
+
+const setMode = async (mode) => {
+  viewMode.value = mode
+  if (mode === 'preview') {
+    await nextTick()
+    repaintPreview()
+  }
+}
+
+// 窗口变宽变窄时重新算「适应宽度」（手动缩放过就不动）
+const onWindowResize = () => {
+  if (viewMode.value === 'preview') fitZoom()
 }
 
 const switchPreviewKind = (kind) => {
-  if (previewKind.value === kind && previewPages.value) return
+  if (previewKind.value === kind) return
   previewKind.value = kind
-  refreshPreview()
+  repaintPreview()
 }
 
-// 关窗清空 iframe 文档（不清会一直留着上一次的排版与字体，反复预览越来越吃内存）
-const closePreview = () => {
+/** 点清单里的某题 → 滚到卷面上那一道并闪一下（不用自己找）。 */
+const locateQ = (id) => {
   const doc = previewFrame.value?.contentDocument
-  if (doc) {
-    doc.open()
-    doc.write('')
-    doc.close()
-  }
-  previewPages.value = 0
+  const el = doc?.querySelector(`[data-qid="${String(id).replace(/"/g, '\\"')}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  el.classList.add('q-flash')
+  setTimeout(() => { try { el.classList.remove('q-flash') } catch { /* 已重排 */ } }, 1200)
 }
 
 const downloadPdf = async () => {
@@ -829,7 +916,7 @@ const downloadPdf = async () => {
 }
 
 const previewMeta = computed(() => {
-  if (previewing.value) return '正在排版…'
+  if (repainting.value) return '重排中…'
   if (!previewPages.value) return ''
   const label = PREVIEW_TABS.find(t => t.key === previewKind.value)?.label || ''
   const pages = `约 ${previewPages.value} 页`
@@ -838,6 +925,10 @@ const previewMeta = computed(() => {
   }
   return `${label} · 共 ${totals.value.questionCount} 题 · 满分 ${totals.value.totalScore} 分 · ${pages}`
 })
+
+// basket 任何变化（加/删/排序/改分）都自动重排 —— 这就是「实时预览」
+watch(basket, () => { scheduleRepaint() }, { deep: true })
+watch([composeTitle, composeWithImage], () => { scheduleRepaint(320) })
 
 watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; loadQuestions() })
 watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; loadQuestions() })
@@ -852,11 +943,53 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  window.addEventListener('resize', onWindowResize)
 })
-onUnmounted(stopPolling)
+onUnmounted(() => {
+  stopPolling()
+  clearTimeout(repaintTimer)
+  window.removeEventListener('resize', onWindowResize)
+})
 </script>
 
 <style scoped>
+/* ── 模式条 ── */
+.pb-modebar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 12px; margin-bottom: 12px;
+  background: #fff; border: 1px solid #ebe9e4; border-radius: 10px;
+}
+.pb-seg { display: flex; gap: 2px; padding: 2px; background: #f4f2ee; border-radius: 8px; }
+.pb-seg__btn {
+  border: 0; background: transparent; padding: 5px 14px; border-radius: 6px;
+  font-size: 12.5px; color: #666; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+}
+.pb-seg__btn:hover { color: #333; }
+.pb-seg__btn.is-active { background: #fff; color: #185fa5; font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.pb-seg__btn em {
+  font-style: normal; font-size: 11px; background: #eef2ff; color: #185fa5;
+  border-radius: 9px; padding: 0 6px; line-height: 16px;
+}
+.pb-tabs { display: flex; gap: 2px; }
+.pb-tab {
+  border: 0; background: transparent; padding: 5px 9px; border-radius: 6px;
+  font-size: 12px; color: #666; cursor: pointer;
+}
+.pb-tab:hover { background: #f5f4f0; }
+.pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
+.pb-zoom { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #666; }
+.pb-zoom button {
+  width: 22px; height: 22px; border: 1px solid #e2e0da; background: #fff;
+  border-radius: 5px; cursor: pointer; line-height: 1; color: #555;
+}
+.pb-zoom button:hover { border-color: #185fa5; color: #185fa5; }
+.pb-zoom button.pb-zoom__pct { width: 46px; border-color: transparent; background: transparent; font-size: 12px; }
+.pb-zoom button.pb-zoom__pct:hover { border-color: #e2e0da; }
+.pb-modebar__right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.pb-modebar__hint { font-size: 11.5px; color: #999; }
+.pb-meta { font-size: 11.5px; color: #888; }
+
+/* ── 选题模式：三栏 ── */
 .pb-layout {
   display: grid;
   grid-template-columns: 232px minmax(0, 1fr) 284px;
@@ -871,7 +1004,7 @@ onUnmounted(stopPolling)
   .pb-panel--tip { display: none; }
 }
 
-/* ── 左：卷列表 ── */
+/* 左：卷列表 */
 .pb-col--papers { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 12px; }
 .pb-panel { background: #fff; border: 1px solid #ebe9e4; border-radius: 10px; padding: 10px; }
 .pb-panel__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
@@ -903,7 +1036,7 @@ onUnmounted(stopPolling)
 .pb-paper__ops button:hover { color: #185fa5; text-decoration: underline; }
 .pb-paper__ops button.is-danger:hover { color: #a32d2d; }
 
-/* ── 中：题目区 ── */
+/* 中：题目区 */
 .pb-col--questions { min-width: 0; }
 .pb-summary { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
 .pb-summary strong { font-size: 13px; }
@@ -955,15 +1088,14 @@ onUnmounted(stopPolling)
 }
 .pb-more:hover { border-color: #a9b4f0; color: #185fa5; }
 
-/* ── 右：试题篮 ── */
-.pb-col--basket { position: sticky; top: 12px; }
-.pb-basket { background: #fff; border: 1px solid #e4e1d8; border-radius: 10px; padding: 12px; }
+/* 右：试题篮 */
+.pb-basket { background: #fff; border: 1px solid #e4e1d8; border-radius: 10px; padding: 12px; position: sticky; top: 12px; }
 .pb-basket__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
 .pb-basket__head strong { font-size: 13px; }
 .pb-basket__head span { font-size: 11px; color: #666; }
 .pb-basket__dist { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: #777; margin-bottom: 6px; }
 .pb-basket__warn { font-size: 11px; color: #993c1d; background: #fdf3ee; border-radius: 5px; padding: 4px 6px; margin-bottom: 6px; line-height: 1.5; }
-.pb-basket__list { max-height: 42vh; overflow-y: auto; margin: 0 -4px 8px; padding: 0 4px; }
+.pb-basket__list { max-height: 46vh; overflow-y: auto; margin: 0 -4px 8px; padding: 0 4px; }
 .pb-bk-block__head { font-size: 11px; color: #555; font-weight: 500; margin: 8px 0 4px; }
 .pb-bk-item { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 3px 0; }
 .pb-bk-item__no { font-weight: 500; min-width: 26px; }
@@ -984,54 +1116,72 @@ onUnmounted(stopPolling)
 .pb-basket__sub { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #aaa; }
 .pb-basket__empty { font-size: 11.5px; color: #999; line-height: 1.8; padding: 10px 2px; }
 
-.pb-hint { font-size: 13px; color: #666; line-height: 1.7; margin-bottom: 12px; }
-.pb-upload-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
-.pb-picked { font-size: 12px; color: #666; }
-</style>
+/* ── 预览模式：左清单 + 右纸 ── */
+.pb-work {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+@media (max-width: 1300px) {
+  .pb-work { grid-template-columns: 250px minmax(0, 1fr); gap: 10px; }
+}
+.pb-work__list {
+  background: #fff; border: 1px solid #e4e1d8; border-radius: 10px;
+  padding: 12px; display: flex; flex-direction: column;
+  max-height: calc(100vh - 210px); position: sticky; top: 12px;
+}
+.pb-work__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+.pb-work__head strong { font-size: 13px; }
+.pb-work__head span { font-size: 11px; color: #666; }
+.pb-work__form { border-bottom: 1px solid #f0ede6; padding-bottom: 8px; margin-bottom: 6px; }
+.pb-work__items { flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.pb-work__block { font-size: 11px; color: #555; font-weight: 500; margin: 8px 0 4px; }
+.pb-work__item {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11.5px; padding: 4px 4px; border-radius: 6px; cursor: pointer;
+}
+.pb-work__item:hover { background: #f6f5f1; }
+.pb-work__no { font-weight: 500; min-width: 26px; }
+.pb-work__src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #999; font-size: 10.5px; }
+.pb-work__score {
+  width: 40px; font-size: 11px; padding: 2px 3px; text-align: right;
+  border: 1px solid #e2e0da; border-radius: 4px;
+}
+.pb-work__op { border: 0; background: transparent; color: #999; font-size: 12px; cursor: pointer; padding: 0 1px; }
+.pb-work__op:hover { color: #185fa5; }
+.pb-work__op.is-danger:hover { color: #a32d2d; }
+.pb-work__empty { font-size: 12px; color: #aaa; padding: 20px 4px; text-align: center; }
+.pb-work__add {
+  margin-top: 8px; width: 100%; padding: 7px; border: 1px dashed #ddd; border-radius: 8px;
+  background: #fff; color: #666; font-size: 12px; cursor: pointer;
+}
+.pb-work__add:hover { border-color: #a9b4f0; color: #185fa5; }
 
-<!--
-  预览弹窗的样式**不能**写在 scoped 块里：el-dialog 会 teleport 到 body，
-  拿不到本组件的 data-v 属性 ⇒ scoped 规则永远不匹配。
-  这里用 .pb-preview-dialog 前缀限定作用域，不会污染其它页面。
--->
-<style>
-.pb-preview-dialog .el-dialog__header { padding: 12px 18px 10px; margin: 0; border-bottom: 1px solid #eee; }
-.pb-preview-dialog .el-dialog__body { padding: 0; }
-.pb-preview-dialog .el-dialog__footer { padding: 10px 18px; border-top: 1px solid #eee; }
-.pb-preview__head { display: flex; align-items: center; gap: 16px; }
-.pb-preview__head strong { font-size: 14px; }
-.pb-preview__tabs { display: flex; gap: 4px; }
-.pb-preview__zoom { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #666; }
-.pb-preview__zoom button {
-  width: 24px; height: 24px; border: 1px solid #ddd; background: #fff;
-  border-radius: 5px; cursor: pointer; line-height: 1; color: #555;
+.pb-work__paper {
+  border: 1px solid #e4e1d8; border-radius: 10px; overflow: hidden;
+  height: calc(100vh - 210px); min-height: 420px; background: #e6e4de;
 }
-.pb-preview__zoom button:hover { border-color: #185fa5; color: #185fa5; }
-.pb-tab {
-  border: 0; background: transparent; padding: 4px 10px; border-radius: 6px;
-  font-size: 12px; color: #666; cursor: pointer;
-}
-.pb-tab:hover { background: #f5f4f0; }
-.pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
-.pb-preview__body {
-  position: relative;
-  height: calc(94vh - 132px);
-  min-height: 420px;
-  background: #e6e4de;
-}
-.pb-preview__frame { width: 100%; height: 100%; border: 0; background: transparent; display: block; }
-.pb-preview__mask {
+.pb-work__stage { position: relative; width: 100%; height: 100%; }
+.pb-work__frame { width: 100%; height: 100%; border: 0; background: transparent; display: block; }
+.pb-work__blank {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 10px;
-  background: rgba(240, 239, 234, 0.78); color: #555; font-size: 13px;
+  align-items: center; justify-content: center; gap: 12px; color: #999; font-size: 13px;
+}
+.pb-work__mask {
+  position: absolute; top: 10px; right: 12px;
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255, 255, 255, 0.92); border: 1px solid #e2e0da; border-radius: 14px;
+  padding: 3px 10px 3px 6px; font-size: 11px; color: #666;
+  pointer-events: none;
 }
 .pb-spinner {
-  width: 22px; height: 22px; border: 2px solid #ddd; border-top-color: #185fa5;
+  width: 12px; height: 12px; border: 2px solid #ddd; border-top-color: #185fa5;
   border-radius: 50%; animation: pb-spin 0.8s linear infinite;
 }
 @keyframes pb-spin { to { transform: rotate(360deg); } }
-.pb-preview__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.pb-preview__meta { font-size: 12px; color: #888; }
-.pb-preview__ops { display: flex; align-items: center; gap: 10px; }
-.pb-preview__ops .pb-link { font-size: 12px; }
+
+.pb-hint { font-size: 13px; color: #666; line-height: 1.7; margin-bottom: 12px; }
+.pb-upload-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.pb-picked { font-size: 12px; color: #666; }
 </style>

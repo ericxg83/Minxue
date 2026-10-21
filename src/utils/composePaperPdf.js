@@ -60,7 +60,7 @@ function answerSourceNote(source) {
 function renderComposeQuestion(item, { showImage = false, answerLines = 3 } = {}) {
   const typeClass = item.question_type === 'choice' ? 'q-choice'
     : item.question_type === 'fill' ? 'q-fill' : 'q-answer'
-  let html = `<div class="question ${typeClass}">`
+  let html = `<div class="question ${typeClass}" data-qid="${escapeHtml(item.id || '')}">`
   html += `<div class="q-head"><span class="q-num">${escapeHtml(item.sub_label)}.</span>`
   html += `<span class="q-text">${renderContent(item.content || '')}</span>`
   html += `<span class="q-score">${item.score} 分</span></div>`

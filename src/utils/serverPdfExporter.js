@@ -72,7 +72,7 @@ function waitDocReady(idoc) {
  * @param {string} [o.extraCss] 追加样式（讲义/组卷的专属版式）
  * @param {string} [o.qrContent] 批改二维码（重练卷用）
  */
-async function paintDocument(idoc, { bodyHtml, extraCss = '', qrContent }) {
+async function paintDocument(idoc, { bodyHtml, extraCss = '', qrContent, settleMs = 400 }) {
   const inlinedCss = await getKatexCssWithInlineFonts()
 
   idoc.open()
@@ -102,25 +102,25 @@ async function paintDocument(idoc, { bodyHtml, extraCss = '', qrContent }) {
     console.warn('[serverPdfExporter] 字体预加载失败:', e)
   }
 
-  // 等 KaTeX 完成所有度量：2 帧 + 兜底 400ms
+  // 等 KaTeX 完成所有度量：2 帧 + 兜底等待
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
   void idoc.body?.offsetWidth
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
-  await new Promise((r) => setTimeout(r, 400))
+  if (settleMs > 0) await new Promise((r) => setTimeout(r, settleMs))
 
   return idoc
 }
 
 /**
  * 页面内预览：把卷子画进调用方给的 iframe 并**保留**（供滚动/缩放），不序列化。
- * @param {HTMLIFrameElement} iframeEl
- * @param {{bodyHtml:string, extraCss?:string}} o
- * @returns {Promise<Document>}
+ *
+ * settleMs 传小值：400ms 是给「服务端序列化快照」留的余量，页面预览是活文档、
+ * 字体又是内联 data URL，等两帧就够。改题后要立刻看到结果，不能每次都等半秒。
  */
-export async function paintPreviewIntoIframe(iframeEl, { bodyHtml, extraCss = '' }) {
+export async function paintPreviewIntoIframe(iframeEl, { bodyHtml, extraCss = '', settleMs = 160 }) {
   const idoc = iframeEl?.contentDocument || iframeEl?.contentWindow?.document
   if (!idoc) throw new Error('预览容器未就绪，请重试')
-  return paintDocument(idoc, { bodyHtml, extraCss })
+  return paintDocument(idoc, { bodyHtml, extraCss, settleMs })
 }
 
 /**
