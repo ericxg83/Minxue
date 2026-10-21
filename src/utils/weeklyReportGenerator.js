@@ -101,12 +101,11 @@ function ktRowIcon(index) {
  */
 function periodLabelText(period) {
   if (!period) return ''
-  const y1 = String(period.start || '').slice(0, 4)
-  const y2 = String(period.end || '').slice(0, 4)
-  // 跨度异常大 ⇒ 是「全部」模式
-  if (y1 === '2000' || y2 === '2099') {
-    return y1 && y1 !== '2000' ? `学习周期：${y1} 年至今` : '学习周期：全部记录'
-  }
+  // ⛔ 按 mode 分支，不要匹配 period.start/end 里的 2000 / 2099 魔数字符串：
+  //   period.js 给「全部」模式打哨兵（2000-01-01 ~ 2099-12-31），封面借此区分
+  //   「全部记录」与真实日期区间；哨兵一旦改动，字符串匹配会静默失效。
+  //   period 对象始终带 mode（weeklyReport.js 三处 period 都写进去了），以它为准。
+  if (period.mode === 'all') return '学习周期：全部记录'
   return `学习周期：${period.start} ~ ${period.end}`
 }
 
