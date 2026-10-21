@@ -1,4 +1,3 @@
-import html2canvas from 'html2canvas'
 import qrcode from 'qrcode-generator'
 import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
