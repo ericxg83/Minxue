@@ -221,14 +221,13 @@
               </div>
 
               <div class="pb-basket__actions">
-                <ActionButton variant="primary" :loading="exporting === 'student'" @click="exportCompose(false)">
-                  <el-icon><Document /></el-icon>出练习卷
+                <ActionButton variant="primary" @click="openPreview('student')">
+                  <el-icon><View /></el-icon>预览试卷
                 </ActionButton>
-                <ActionButton :loading="exporting === 'teacher'" @click="exportCompose(true)">
-                  <el-icon><DocumentCopy /></el-icon>出教师卷（含答案）
-                </ActionButton>
-                <el-button text :loading="exporting === 'handout'" @click="exportHandout">按原卷题号出讲义</el-button>
-                <el-button text @click="clearBasket">清空</el-button>
+                <div class="pb-basket__sub">
+                  <span>先看卷子再下载</span>
+                  <el-button text @click="clearBasket">清空</el-button>
+                </div>
               </div>
             </template>
 
@@ -284,12 +283,61 @@
         <el-button type="primary" :disabled="!uploadPaperId || !pickedFiles.length" :loading="uploading" @click="handleUpload">开始解析</el-button>
       </template>
     </el-dialog>
+
+    <!-- 出卷前必须能看：直接把 PDF 甩给老师等于盲出（负责人 2026-10-21 指出） -->
+    <el-dialog
+      v-model="showPreview"
+      width="960px"
+      top="3vh"
+      :close-on-click-modal="false"
+      class="pb-preview-dialog"
+      @closed="closePreview"
+    >
+      <template #header>
+        <div class="pb-preview__head">
+          <strong>试卷预览</strong>
+          <div class="pb-preview__tabs">
+            <button
+              v-for="t in PREVIEW_TABS"
+              :key="t.key"
+              type="button"
+              class="pb-tab"
+              :class="{ 'is-active': previewKind === t.key }"
+              @click="switchPreviewKind(t.key)"
+            >{{ t.label }}</button>
+          </div>
+        </div>
+      </template>
+
+      <div class="pb-preview__body">
+        <div v-if="previewing" class="pb-preview__loading">
+          <span class="pb-spinner" aria-hidden="true"></span>
+          <p>正在排版…首次生成需要十几秒</p>
+        </div>
+        <iframe v-else-if="previewUrl" :src="previewUrl" class="pb-preview__frame" title="试卷预览" />
+        <div v-else class="pb-preview__loading"><p>没有可预览的内容</p></div>
+      </div>
+
+      <template #footer>
+        <div class="pb-preview__foot">
+          <span class="pb-preview__meta">{{ previewMeta }}</span>
+          <div class="pb-preview__ops">
+            <a v-if="previewUrl" class="pb-link" :href="previewUrl" target="_blank" rel="noopener">新标签页打开</a>
+            <el-button text :disabled="previewing" @click="refreshPreview">重新生成</el-button>
+            <el-button @click="showPreview = false">关闭</el-button>
+            <el-button type="primary" :disabled="!previewBlob || previewing" @click="downloadPreview">
+              下载 PDF
+            </el-button>
+          </div>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { Plus, UploadFilled, Search, Document, DocumentCopy, Tickets } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Search, View, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/ui/PageHeader.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -322,6 +370,7 @@ import {
   composePaperFilename,
 } from '../../utils/paperBasket'
 import { renderCustomBodyToHTML, exportServerPDF } from '../../utils/serverPdfExporter'
+import { saveFileToDevice } from '../../utils/nativeDownload'
 import { ossThumbUrl } from '../../utils/ossThumb'
 
 const PAGE_SIZE = 200
@@ -331,9 +380,21 @@ const questions = ref([])
 const loading = ref(false)
 const creating = ref(false)
 const uploading = ref(false)
-const exporting = ref('')
 const truncated = ref(false)
 const limit = ref(PAGE_SIZE)
+
+// 预览：出卷前必须先看到卷子（负责人 2026-10-21：「直接出试卷了？？？」）
+const showPreview = ref(false)
+const previewing = ref(false)
+const previewKind = ref('student')
+const previewUrl = ref('')
+const previewBlob = ref(null)
+const previewFilename = ref('')
+const PREVIEW_TABS = [
+  { key: 'student', label: '练习卷' },
+  { key: 'teacher', label: '教师卷（含答案）' },
+  { key: 'handout', label: '讲题讲义' },
+]
 
 const filterPaper = ref('all')
 const filterQuestionNos = ref('')
@@ -637,57 +698,111 @@ const startPolling = () => {
 }
 const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-// ── 三个出口 ──
+// ── 预览 → 下载（先看再存，绝不盲出）──
+//
+// 为什么预览的是**最终 PDF 本体**，而不是在页面里再排一次版：
+//   ① 页面排版与 PDF 排版是两条渲染器（浏览器 DOM vs 服务端 Chromium），
+//      自己再排一份就一定会出现「预览好看、下载变形」；
+//   ② 复用 exportServerPDF 的 returnPdfBlob 分支（错题重练卷/周报早就在用），
+//      零新增排版实现。
+// 代价是预览要等一次服务端渲染（十几秒），所以弹窗先开、里面给 loading。
 
-const exportCompose = async (withAnswers) => {
-  if (!basket.value.length) return ElMessage.warning('试题篮是空的')
-  exporting.value = withAnswers ? 'teacher' : 'student'
-  try {
-    const bodyHtml = buildComposePaperBody({
-      title: composeTitle.value,
-      subtitle: composeSubtitle(),
-      blocks: blocks.value,
-      showAnswers: withAnswers,
-      showImage: composeWithImage.value,
-    })
-    const html = await renderCustomBodyToHTML({ bodyHtml, extraCss: buildComposePaperCSS() })
-    const filename = composePaperFilename(
-      composeTitle.value,
-      totals.value.questionCount,
-      todayStr()
-    ) + (withAnswers ? '_教师卷' : '')
-    await exportServerPDF({ html, filename, pageNumbers: true })
-    ElMessage.success(withAnswers ? '教师卷已生成' : '练习卷已生成')
-  } catch (e) {
-    ElMessage.error(e?.payload?.message || e.message || '生成 PDF 失败')
-  } finally {
-    exporting.value = ''
-  }
-}
-
-const exportHandout = async () => {
-  if (!basket.value.length) return ElMessage.warning('试题篮是空的')
-  exporting.value = 'handout'
-  try {
-    const picked = basket.value.slice()
-    const groups = groupHandoutQuestions(picked)
+const buildPaperBlob = async (kind) => {
+  if (kind === 'handout') {
+    const groups = groupHandoutQuestions(basket.value.slice())
     // 讲义版式：保留原卷题号、按卷分组（⛔ 不复用组卷版式，那套会重排重编号）
+    const title = groups.length === 1 ? `${groups[0].paperName} 讲题讲义` : `${groups.length} 套卷 讲题讲义`
     const bodyHtml = buildHandoutBody({
-      title: groups.length === 1 ? `${groups[0].paperName} 讲题讲义` : `${groups.length} 套卷 讲题讲义`,
+      title,
       groups,
       showAnswers: true,
       showImage: composeWithImage.value,
     })
     const html = await renderCustomBodyToHTML({ bodyHtml, extraCss: buildHandoutCSS() })
-    const filename = (groups.length === 1 ? `${groups[0].paperName} 讲题讲义` : `${groups.length} 套卷 讲题讲义`)
-    await exportServerPDF({ html, filename })
-    ElMessage.success('讲义已生成')
-  } catch (e) {
-    ElMessage.error(e?.payload?.message || e.message || '生成讲义失败')
-  } finally {
-    exporting.value = ''
+    const res = await exportServerPDF({ html, filename: title, returnPdfBlob: true })
+    return { blob: res.pdfBlob, filename: title }
+  }
+
+  const withAnswers = kind === 'teacher'
+  const bodyHtml = buildComposePaperBody({
+    title: composeTitle.value,
+    subtitle: composeSubtitle(),
+    blocks: blocks.value,
+    showAnswers: withAnswers,
+    showImage: composeWithImage.value,
+  })
+  const html = await renderCustomBodyToHTML({ bodyHtml, extraCss: buildComposePaperCSS() })
+  const filename = composePaperFilename(
+    composeTitle.value,
+    totals.value.questionCount,
+    todayStr()
+  ) + (withAnswers ? '_教师卷' : '')
+  const res = await exportServerPDF({ html, filename, pageNumbers: true, returnPdfBlob: true })
+  return { blob: res.pdfBlob, filename }
+}
+
+const revokePreviewUrl = () => {
+  if (previewUrl.value) {
+    URL.revokeObjectURL(previewUrl.value)
+    previewUrl.value = ''
   }
 }
+
+const refreshPreview = async () => {
+  previewing.value = true
+  previewBlob.value = null
+  revokePreviewUrl()
+  try {
+    const { blob, filename } = await buildPaperBlob(previewKind.value)
+    previewBlob.value = blob
+    previewFilename.value = filename
+    previewUrl.value = URL.createObjectURL(blob)
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '生成预览失败')
+    showPreview.value = false
+  } finally {
+    previewing.value = false
+  }
+}
+
+const openPreview = async (kind = 'student') => {
+  if (!basket.value.length) return ElMessage.warning('试题篮是空的')
+  previewKind.value = kind
+  showPreview.value = true
+  await refreshPreview()
+}
+
+const switchPreviewKind = (kind) => {
+  if (previewKind.value === kind && previewBlob.value) return
+  previewKind.value = kind
+  refreshPreview()
+}
+
+// 关窗即释放 blob（不释放会一直占内存，反复预览几次页面就卡）
+const closePreview = () => {
+  revokePreviewUrl()
+  previewBlob.value = null
+}
+
+const downloadPreview = async () => {
+  if (!previewBlob.value) return
+  try {
+    const r = await saveFileToDevice(previewBlob.value, `${previewFilename.value}.pdf`)
+    ElMessage.success(`已保存：${r.savedTo}`)
+  } catch (e) {
+    ElMessage.error(e?.message || '保存失败')
+  }
+}
+
+const previewMeta = computed(() => {
+  if (previewing.value) return '正在排版…'
+  if (!previewBlob.value) return ''
+  const label = PREVIEW_TABS.find(t => t.key === previewKind.value)?.label || ''
+  if (previewKind.value === 'handout') {
+    return `${label} · ${summary.value.count} 题 · 保留原卷题号`
+  }
+  return `${label} · 共 ${totals.value.questionCount} 题 · 满分 ${totals.value.totalScore} 分`
+})
 
 watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; loadQuestions() })
 watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; loadQuestions() })
@@ -831,9 +946,45 @@ onUnmounted(stopPolling)
 .pb-field input { flex: 1; min-width: 0; font-size: 12px; padding: 4px 7px; border: 1px solid #ddd; border-radius: 5px; }
 .pb-check { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #777; margin-bottom: 8px; }
 .pb-basket__actions { display: flex; flex-direction: column; gap: 6px; }
+.pb-basket__sub { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #aaa; }
 .pb-basket__empty { font-size: 11.5px; color: #999; line-height: 1.8; padding: 10px 2px; }
 
 .pb-hint { font-size: 13px; color: #666; line-height: 1.7; margin-bottom: 12px; }
 .pb-upload-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .pb-picked { font-size: 12px; color: #666; }
+</style>
+
+<!--
+  预览弹窗的样式**不能**写在 scoped 块里：el-dialog 会 teleport 到 body，
+  拿不到本组件的 data-v 属性 ⇒ scoped 规则永远不匹配。
+  这里用 .pb-preview-dialog 前缀限定作用域，不会污染其它页面。
+-->
+<style>
+.pb-preview-dialog .el-dialog__header { padding: 12px 18px 10px; margin: 0; border-bottom: 1px solid #eee; }
+.pb-preview-dialog .el-dialog__body { padding: 0; }
+.pb-preview-dialog .el-dialog__footer { padding: 10px 18px; border-top: 1px solid #eee; }
+.pb-preview__head { display: flex; align-items: center; gap: 16px; }
+.pb-preview__head strong { font-size: 14px; }
+.pb-preview__tabs { display: flex; gap: 4px; }
+.pb-tab {
+  border: 0; background: transparent; padding: 4px 10px; border-radius: 6px;
+  font-size: 12px; color: #666; cursor: pointer;
+}
+.pb-tab:hover { background: #f5f4f0; }
+.pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
+.pb-preview__body {
+  height: 70vh; background: #f0efea;
+  display: flex; align-items: center; justify-content: center;
+}
+.pb-preview__frame { width: 100%; height: 100%; border: 0; background: #fff; }
+.pb-preview__loading { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #888; font-size: 13px; }
+.pb-spinner {
+  width: 22px; height: 22px; border: 2px solid #ddd; border-top-color: #185fa5;
+  border-radius: 50%; animation: pb-spin 0.8s linear infinite;
+}
+@keyframes pb-spin { to { transform: rotate(360deg); } }
+.pb-preview__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.pb-preview__meta { font-size: 12px; color: #888; }
+.pb-preview__ops { display: flex; align-items: center; gap: 10px; }
+.pb-preview__ops .pb-link { font-size: 12px; }
 </style>

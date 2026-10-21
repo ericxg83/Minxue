@@ -279,3 +279,40 @@ test('★ 填空题只在原文没有空线时才补横线（否则上下两道�
   assert.ok(/\\\\underline/.test(s), '判据要认 \\underline（题库 OCR 的写法）')
   assert.ok(/!hasBlankMark/.test(s), '只有在没空线时才补 fill-line')
 })
+
+// ─────────────────────────────────────────────────────────────
+// ⑦ 出卷前必须能预览（负责人 2026-10-21：「直接出试卷了？？？」）
+// ─────────────────────────────────────────────────────────────
+
+const PAGE = 'src/workbench/views/PaperBankWorkbench.vue'
+
+test('★ 出卷必须先预览：所有 PDF 生成都走 returnPdfBlob，不得直接触发下载', () => {
+  const s = stripComments(read(PAGE))
+  const calls = (s.match(/exportServerPDF\(/g) || []).length
+  const blobs = (s.match(/returnPdfBlob:\s*true/g) || []).length
+  assert.ok(calls > 0, '页面必须调用 exportServerPDF')
+  assert.equal(blobs, calls, '每个 exportServerPDF 调用都必须 returnPdfBlob:true —— 少一个就等于「点了就下载」')
+
+  // 下载动作只允许出现在预览之后
+  assert.ok(/saveFileToDevice/.test(s), '下载必须走 saveFileToDevice（从预览里的 blob 落盘）')
+  assert.ok(/openPreview/.test(s), '必须有预览入口')
+  assert.ok(!/const exportCompose\b/.test(s), '不得保留「直接出练习卷」的函数')
+  assert.ok(!/const exportHandout\b/.test(s), '不得保留「直接出讲义」的函数')
+})
+
+test('★ 预览渲染的是最终 PDF 本体（iframe + blob），不是页面内再排一次版', () => {
+  const s = read(PAGE)
+  assert.ok(/<iframe[^>]*:src="previewUrl"/.test(s), '预览必须是 iframe 指向 blob 地址')
+  assert.ok(/URL\.createObjectURL/.test(s), '必须由 blob 生成预览地址')
+  assert.ok(/URL\.revokeObjectURL/.test(s), '关窗必须释放 blob（否则反复预览会吃内存）')
+  // 三个页签都必须在同一个弹窗里，切换即重新生成
+  assert.ok(/PREVIEW_TABS/.test(s), '必须有版本页签（练习卷 / 教师卷 / 讲义）')
+  assert.ok(/switchPreviewKind/.test(s), '页签切换必须触发重新生成')
+})
+
+test('反向自检：直接 await exportServerPDF 而不带 returnPdfBlob 必须判红', () => {
+  const bad = stripComments("await exportServerPDF({ html, filename, pageNumbers: true })")
+  const calls = (bad.match(/exportServerPDF\(/g) || []).length
+  const blobs = (bad.match(/returnPdfBlob:\s*true/g) || []).length
+  assert.notEqual(blobs, calls)
+})
