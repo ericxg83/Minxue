@@ -217,7 +217,10 @@ ${s}.answer-analysis.is-empty{color:#999}
 ${s}.footer{text-align:center;font-size:11px;color:#999;margin-top:16px;padding-top:6px;border-top:1px solid #ddd}
 ${s}.qr-container{position:absolute;top:20px;right:32px;text-align:center;background:#fff;padding:4px}
 ${s}.qr-canvas{width:130px;height:130px;display:block}
-${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}`
+${s}.qr-text{font-size:10px;color:#333;margin-top:3px;font-weight:bold;letter-spacing:1px}
+${s}.md-table{border-collapse:collapse;margin:4px 0 4px 32px;font-size:12px;page-break-inside:avoid}
+${s}.md-table th,${s}.md-table td{border:1px solid #8A8A8A;padding:2px 9px;line-height:1.6;white-space:nowrap;text-align:center}
+${s}.md-table th{background:#F1F2F8;font-weight:bold}`
 }
 
 /** 试卷主体 HTML（.page 内容），PDF 与预览共用

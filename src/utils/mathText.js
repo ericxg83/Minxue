@@ -646,6 +646,99 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
+// ── Markdown 管道表（2026-10-21）──────────────────────────────────────────
+//
+// 为什么需要：试卷题库的 OCR 会把卷面上的「对应关系表」原样写成 markdown
+// （实测题库 parent_stem：`…如下表所示。\n| x | ... | 0 | 1 | 2 | 3 | ... |\n|---|---|…`）。
+// 界面此前用纯文本插值显示，老师看到的就是满屏 `|` 和 `---`。
+// 这里在**渲染层**兜底（而不是解析层），因为：① 存量数据不用回填；
+// ② 页面与 PDF 共用 renderContent 这一条口径，不会出现「页面有表、印出来没表」。
+//
+// ⛔ 判据必须**同时**满足「表头行含 |」+「下一行是分隔行」才算表格。
+// 单看 `|` 会误伤绝对值：题库第 9 题正文就有 `$|\vec{a}|=3$`（同一个 `|` 字符）。
+const MD_TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/
+
+/** 按 `|` 切单元格；`$...$` 内部的 `|`（绝对值/行列式）不切。 */
+function splitMarkdownTableCells(line) {
+  const s = String(line == null ? '' : line).trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells = []
+  let cur = ''
+  let inMath = false
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i]
+    if (ch === '\\' && s[i + 1] === '$') { cur += '$'; i++; continue }
+    if (ch === '$') { inMath = !inMath; cur += ch; continue }
+    if (ch === '|' && !inMath) { cells.push(cur.trim()); cur = ''; continue }
+    cur += ch
+  }
+  cells.push(cur.trim())
+  return cells
+}
+
+function parseMarkdownTableAligns(sepLine) {
+  return splitMarkdownTableCells(sepLine).map((c) => {
+    const left = c.startsWith(':')
+    const right = c.endsWith(':')
+    if (left && right) return 'center'
+    if (right) return 'right'
+    return '' // 默认左对齐（数学/数字由浏览器按内容排）
+  })
+}
+
+/**
+ * 把文本切成文本块与表格块。不含表格时**返回原文一个块**（逐字不变），
+ * 所以所有既有调用方的输出不受影响。
+ * @returns {Array<{type:'text',text:string}|{type:'table',header:string[],aligns:string[],rows:string[][]}>}
+ */
+function splitMarkdownTables(text) {
+  const src = String(text == null ? '' : text)
+  if (!src.includes('|') || !src.includes('\n')) return [{ type: 'text', text: src }]
+  const lines = src.split('\n')
+  const out = []
+  let buf = []
+  const flush = () => { if (buf.length) { out.push({ type: 'text', text: buf.join('\n') }); buf = [] } }
+  let i = 0
+  while (i < lines.length) {
+    const header = lines[i]
+    const sep = lines[i + 1]
+    if (header.includes('|') && sep != null && sep.includes('|') && MD_TABLE_SEPARATOR.test(sep)) {
+      const body = []
+      let j = i + 2
+      while (j < lines.length && lines[j].includes('|') && lines[j].trim() !== '') {
+        body.push(splitMarkdownTableCells(lines[j]))
+        j++
+      }
+      flush()
+      out.push({
+        type: 'table',
+        header: splitMarkdownTableCells(header),
+        aligns: parseMarkdownTableAligns(sep),
+        rows: body,
+      })
+      i = j
+      continue
+    }
+    buf.push(header)
+    i++
+  }
+  flush()
+  return out
+}
+
+/** 表格块 → HTML。单元格内容仍走同一条内容渲染（所以格内的 $...$ 公式照常渲染）。 */
+function renderMarkdownTableHtml(tbl, renderCell) {
+  const alignStyle = (i) => (tbl.aligns[i] ? ` style="text-align:${tbl.aligns[i]}"` : '')
+  const head = tbl.header
+    .map((c, i) => `<th${alignStyle(i)}>${renderCell(c)}</th>`)
+    .join('')
+  const body = tbl.rows
+    .map(r => `<tr>${r.map((c, i) => `<td${alignStyle(i)}>${renderCell(c)}</td>`).join('')}</tr>`)
+    .join('')
+  return `<table class="md-table"><thead><tr>${head}</tr></thead>`
+    + (body ? `<tbody>${body}</tbody>` : '')
+    + '</table>'
+}
+
 /**
  * 渲染内容：中文保持纯文本，数学片段用严格 $...$（行内）/ $$...$$（独立）定界符包裹。
  * 返回可安全注入 DOM 的 HTML 字符串。
@@ -657,15 +750,33 @@ function escapeHtml(text) {
  *     全库会有 338 处行内项（选项 174 / 答案 91 / 题干 73）被凭空升级成 $$ 居中块
  *     —— 选项、小问、答案都是行内项，居中不是版式意图，只是这个启发式的副作用。
  *     判定保持"原本就只有一个数学表达式"才算独立公式，分段改口径就不会掀动版式。
+ *
+ * 2026-10-21：外层先按 markdown 管道表切块。无表格时走原路径，输出逐字不变。
  */
 function renderContent(text) {
+  if (!text) return ''
+  const blocks = splitMarkdownTables(text)
+  if (blocks.length === 1 && blocks[0].type === 'text') {
+    return renderInlineContent(blocks[0].text)
+  }
+  return blocks
+    .map(b => (b.type === 'table'
+      // 单元格里的数学必须**永远行内**：单格只有 `x` 时按独立公式判定会输出 $$x$$，
+      // 表格里就变成居中的放大块，一格一个巨型字母。
+      ? renderMarkdownTableHtml(b, cell => renderInlineContent(cell, { forceInline: true }))
+      : renderInlineContent(b.text)))
+    .join('')
+}
+
+/** 单一文本段 → 行内 HTML（原 renderContent 的实现，逐字未动）。 */
+function renderInlineContent(text, opts = {}) {
   if (!text) return ''
   const processed = preprocessMath(String(text))
   const segments = splitToSegments(processed)
   const decisionSegs = splitToSegments(processed, { glueInnerSpaces: false })
   const decisionMath = decisionSegs.filter(s => s.isMath && s.text)
   const decisionHasText = decisionSegs.some(s => !s.isMath && s.text.trim().length > 0)
-  const standalone = decisionMath.length === 1 && !decisionHasText
+  const standalone = !opts.forceInline && decisionMath.length === 1 && !decisionHasText
   let html = ''
   for (const seg of segments) {
     if (seg.isMath && seg.text) {
@@ -713,5 +824,7 @@ export {
   SUP_BASE,
   SUB_BASE,
   renderContent,
+  splitMarkdownTables,
+  splitMarkdownTableCells,
   auditLoopDotRendering,
 }

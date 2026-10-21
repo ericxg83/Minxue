@@ -157,3 +157,30 @@ function fallbackErrorHtml(content) {
 
 const renderedHtml = computed(() => renderToHtml(props.content, props.forceInline))
 </script>
+
+<style scoped>
+/* markdown 管道表（renderContent 输出 <table class="md-table">）。
+   容器是 pre-wrap，表格内必须切回 normal，否则单元格里的换行/缩进会被当空白撑开。 */
+/* v-html 的内容不参与 scoped 编译（拿不到 data-v 属性），必须用 :deep()
+   才能命中 —— 直接写 .md-table 会编译成 .md-table[data-v-xxx]，永远不匹配。 */
+:deep(.md-table) {
+  white-space: normal;
+  border-collapse: collapse;
+  margin: 6px 0;
+  font-size: 12px;
+  max-width: 100%;
+}
+:deep(.md-table) th,
+:deep(.md-table) td {
+  border: 1px solid #b8b8b8;
+  padding: 3px 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+  text-align: center;
+}
+:deep(.md-table) th {
+  background: #f1f2f8;
+  font-weight: 500;
+  color: #333;
+}
+</style>
