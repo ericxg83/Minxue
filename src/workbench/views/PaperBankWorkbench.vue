@@ -4,7 +4,7 @@
       <PageHeader
         eyebrow="教学资源 / 题库"
         title="试卷题库"
-        description="纸质卷 → 结构化题库；挑题 → 卷面预览 → 出练习卷 / 教师卷 / 讲题讲义"
+        description="左边挑题，右边卷子实时长出来；不想要的题直接在卷面上叉掉"
       >
         <template #actions>
           <ActionButton variant="secondary" @click="openCreateDialog">
@@ -16,52 +16,14 @@
         </template>
       </PageHeader>
 
-      <!-- 模式条：选题 ⇄ 卷面预览。预览是**活的**——删题/改分/改卷名都会实时重排。 -->
-      <div class="pb-modebar">
-        <div class="pb-seg">
-          <button type="button" class="pb-seg__btn" :class="{ 'is-active': viewMode === 'pick' }" @click="setMode('pick')">
-            选题
-          </button>
-          <button type="button" class="pb-seg__btn" :class="{ 'is-active': viewMode === 'preview' }" @click="setMode('preview')">
-            卷面预览<em v-if="summary.count">{{ summary.count }}</em>
-          </button>
-        </div>
-
-        <template v-if="viewMode === 'preview'">
-          <div class="pb-tabs">
-            <button
-              v-for="t in PREVIEW_TABS"
-              :key="t.key"
-              type="button"
-              class="pb-tab"
-              :class="{ 'is-active': previewKind === t.key }"
-              @click="switchPreviewKind(t.key)"
-            >{{ t.label }}</button>
-          </div>
-          <div class="pb-zoom">
-            <button type="button" title="缩小" @click="setZoom(-0.1)">−</button>
-            <button type="button" class="pb-zoom__pct" title="点一下恢复「适应宽度」" @click="fitZoom(true)">
-              {{ Math.round(zoom * 100) }}%
-            </button>
-            <button type="button" title="放大" @click="setZoom(0.1)">＋</button>
-          </div>
-        </template>
-
-        <div class="pb-modebar__right">
-          <template v-if="viewMode === 'preview'">
-            <span class="pb-meta">{{ previewMeta }}</span>
-            <el-button type="primary" size="small" :loading="downloading" :disabled="!summary.count" @click="downloadPdf">
-              下载 PDF
-            </el-button>
-          </template>
-          <span v-else class="pb-modebar__hint">
-            勾题进试题篮；切到「卷面预览」后，删题 / 改分 / 改卷名都会即时重排
-          </span>
-        </div>
-      </div>
-
-      <!-- ═══ 选题模式 ═══ -->
-      <div v-if="viewMode === 'pick'" class="pb-layout">
+      <div
+        class="pb-layout"
+        :style="{
+          '--pw': previewWidth + 'px',
+          ...(narrow ? { paddingBottom: paperCollapsed ? '62px' : 'calc(46vh + 18px)' } : {}),
+        }"
+      >
+        <!-- 左：卷列表 -->
         <aside class="pb-col pb-col--papers">
           <div class="pb-panel">
             <div class="pb-panel__head">
@@ -99,11 +61,12 @@
 
           <div class="pb-panel pb-panel--tip">
             <strong>怎么用</strong>
-            <p>① 左侧选卷 → ② 中间挑题 → ③ 切到「卷面预览」删题改分，满意再下载。</p>
-            <p>「练习卷」重排题号、留答题空；「讲义」保留原卷题号，讲题时对得上。</p>
+            <p>① 左侧选卷 → ② 中间勾题 → ③ 右边卷子实时变；不满意在卷面上叉掉。</p>
+            <p>改分值：点卷面上的「4 分」。卷子太窄就拖右边框或点全屏。</p>
           </div>
         </aside>
 
+        <!-- 中：题目区 -->
         <main class="pb-col pb-col--questions">
           <FilterBar class="pb-filter">
             <template #leading>
@@ -112,11 +75,11 @@
                 <span>已选 {{ summary.count }} 题</span>
               </div>
             </template>
-            <WorkbenchSelect v-model="filterType" :options="typeFilterOptions" width="104px" aria-label="按题型筛选" />
-            <WorkbenchSelect v-model="filterDifficulty" :options="difficultyFilterOptions" width="104px" aria-label="按难度筛选" />
-            <WorkbenchSelect v-model="filterTag" :options="tagFilterOptions" width="100px" aria-label="按标签筛选" />
-            <WorkbenchInput v-model="filterQuestionNos" clearable placeholder="题号 19,24" width="116px" aria-label="按题号筛选" />
-            <WorkbenchInput v-model="filterKeyword" clearable placeholder="搜索题干" width="132px" aria-label="搜索题干" />
+            <WorkbenchSelect v-model="filterType" :options="typeFilterOptions" width="100px" aria-label="按题型筛选" />
+            <WorkbenchSelect v-model="filterDifficulty" :options="difficultyFilterOptions" width="100px" aria-label="按难度筛选" />
+            <WorkbenchSelect v-model="filterTag" :options="tagFilterOptions" width="96px" aria-label="按标签筛选" />
+            <WorkbenchInput v-model="filterQuestionNos" clearable placeholder="题号 19,24" width="112px" aria-label="按题号筛选" />
+            <WorkbenchInput v-model="filterKeyword" clearable placeholder="搜索题干" width="124px" aria-label="搜索题干" />
             <template #actions><el-button text @click="resetFilters">重置</el-button></template>
           </FilterBar>
 
@@ -211,140 +174,81 @@
           </div>
         </main>
 
-        <aside class="pb-col pb-col--basket">
-          <div class="pb-basket">
-            <div class="pb-basket__head">
-              <strong>试题篮</strong>
-              <span v-if="summary.count">{{ summary.count }} 题 · {{ summary.totalScore }} 分</span>
-              <span v-else>空</span>
+        <!-- 右：试卷（常驻，勾题即长出来；每题可删、分值可点改） -->
+        <aside
+          class="pb-col pb-col--paper"
+          :class="{
+            'is-full': paperFull,
+            'is-fixed': narrow && !paperFull,
+            'is-collapsed': paperCollapsed && !paperFull,
+          }"
+          :style="narrow && !paperFull ? fixedStyle : null"
+        >
+          <div class="pb-drag" title="拖动调整卷面宽度" @mousedown="startDrag" />
+
+          <div class="pb-paper-panel">
+            <div class="pb-paper-panel__head">
+              <button
+                v-if="narrow"
+                type="button"
+                class="pb-icon-btn"
+                :title="paperCollapsed ? '展开卷面' : '收起卷面'"
+                @click="paperCollapsed = !paperCollapsed"
+              >{{ paperCollapsed ? '▴' : '▾' }}</button>
+              <div class="pb-tabs">
+                <button
+                  v-for="t in PREVIEW_TABS"
+                  :key="t.key"
+                  type="button"
+                  class="pb-tab"
+                  :class="{ 'is-active': previewKind === t.key }"
+                  @click="switchPreviewKind(t.key)"
+                >{{ t.label }}</button>
+              </div>
+              <div class="pb-paper-panel__ops">
+                <span class="pb-paper-panel__meta">{{ paperMeta }}</span>
+                <button type="button" class="pb-icon-btn" title="缩小" @click="setZoom(-0.1)">−</button>
+                <button type="button" class="pb-icon-btn pb-icon-btn--pct" title="恢复「适应宽度」" @click="fitZoom(true)">
+                  {{ Math.round(zoom * 100) }}%
+                </button>
+                <button type="button" class="pb-icon-btn" title="放大" @click="setZoom(0.1)">＋</button>
+                <button type="button" class="pb-icon-btn" :title="paperFull ? '还原' : '全屏看卷子'" @click="paperFull = !paperFull">
+                  {{ paperFull ? '⤡' : '⤢' }}
+                </button>
+              </div>
             </div>
 
-            <template v-if="summary.count">
-              <div class="pb-basket__dist">
-                <span v-for="b in PAPER_BASKET_BLOCKS" :key="b.key" v-show="summary.byType[b.key].count">
-                  {{ b.label }} {{ summary.byType[b.key].count }}
-                </span>
-              </div>
-              <div v-if="summary.missingAnswer" class="pb-basket__warn">
-                其中 {{ summary.missingAnswer }} 题没有参考答案，教师卷会印「未录入」
-              </div>
+            <div class="pb-paper-panel__form">
+              <label class="pb-field">
+                <span>卷名</span>
+                <input v-model="composeTitle" placeholder="如：周末练习（三）" />
+              </label>
+              <label class="pb-check"><input v-model="composeWithImage" type="checkbox" />印原题图</label>
+              <button type="button" class="pb-link" :disabled="!summary.count" @click="clearBasket">清空</button>
+              <el-button type="primary" size="small" :loading="downloading" :disabled="!summary.count" @click="downloadPdf">
+                下载 PDF
+              </el-button>
+            </div>
 
-              <div class="pb-basket__list">
-                <div v-for="b in blocks" :key="b.key" class="pb-bk-block">
-                  <div class="pb-bk-block__head">{{ b.label }} · {{ b.count }} 题 · {{ b.score }} 分</div>
-                  <div v-for="g in b.groups" :key="g.no">
-                    <div v-for="it in g.items" :key="it.id" class="pb-bk-item">
-                      <span class="pb-bk-item__no">{{ it.sub_label }}</span>
-                      <span class="pb-bk-item__src" :title="it.resource_name">{{ it.resource_name }}</span>
-                      <input
-                        class="pb-bk-item__score"
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        :value="it.score"
-                        aria-label="本题分值"
-                        @change="onScoreChange(it.id, $event)"
-                      />
-                      <span class="pb-bk-item__unit">分</span>
-                      <button type="button" class="pb-bk-item__op" title="上移" @click="onMove(it.id, -1)">↑</button>
-                      <button type="button" class="pb-bk-item__op" title="下移" @click="onMove(it.id, 1)">↓</button>
-                      <button type="button" class="pb-bk-item__op is-danger" title="移出" @click="onRemove(it.id)">×</button>
-                    </div>
-                  </div>
-                </div>
+            <div ref="stageRef" class="pb-paper-panel__stage">
+              <iframe
+                v-show="summary.count"
+                ref="previewFrame"
+                class="pb-paper-panel__frame"
+                title="卷面预览"
+                sandbox="allow-same-origin allow-scripts"
+              />
+              <div v-if="!summary.count" class="pb-paper-panel__blank">
+                <p>勾选的题会实时出现在这里</p>
+                <span>卷面可滚动；题目上悬停出现 × 可以删掉</span>
               </div>
-
-              <div class="pb-basket__form">
-                <label class="pb-field">
-                  <span>卷名</span>
-                  <input v-model="composeTitle" placeholder="如：周末练习（三）" />
-                </label>
-                <label class="pb-check"><input v-model="composeWithImage" type="checkbox" />印原题图（几何题需要）</label>
+              <div v-if="repainting && summary.count" class="pb-paper-panel__mask">
+                <span class="pb-spinner" aria-hidden="true"></span>
+                <span>重排中…</span>
               </div>
-
-              <div class="pb-basket__actions">
-                <ActionButton variant="primary" @click="setMode('preview')">
-                  <el-icon><View /></el-icon>看卷面
-                </ActionButton>
-                <div class="pb-basket__sub">
-                  <span>删题改分实时重排</span>
-                  <el-button text @click="clearBasket">清空</el-button>
-                </div>
-              </div>
-            </template>
-
-            <div v-else class="pb-basket__empty">
-              在中间题目上打勾，题目会进到这里。<br />
-              点「看卷面」进入实时预览。
             </div>
           </div>
         </aside>
-      </div>
-
-      <!-- ═══ 卷面预览模式（左：可删可改的清单；右：实时重排的卷子）═══ -->
-      <div v-else class="pb-work">
-        <aside class="pb-work__list">
-          <div class="pb-work__head">
-            <strong>已选 {{ summary.count }} 题</strong>
-            <span>{{ summary.totalScore }} 分</span>
-          </div>
-
-          <div class="pb-work__form">
-            <label class="pb-field">
-              <span>卷名</span>
-              <input v-model="composeTitle" placeholder="如：周末练习（三）" />
-            </label>
-            <label class="pb-check"><input v-model="composeWithImage" type="checkbox" />印原题图</label>
-          </div>
-
-          <div class="pb-work__items">
-            <div v-for="b in blocks" :key="b.key">
-              <div class="pb-work__block">{{ b.label }} · {{ b.count }} 题 · {{ b.score }} 分</div>
-              <div v-for="g in b.groups" :key="g.no">
-                <div v-for="it in g.items" :key="it.id" class="pb-work__item" @click="locateQ(it.id)">
-                  <span class="pb-work__no">{{ it.sub_label }}</span>
-                  <span class="pb-work__src" :title="it.resource_name">{{ it.resource_name }}</span>
-                  <input
-                    class="pb-work__score"
-                    type="number"
-                    min="0"
-                    step="0.5"
-                    :value="it.score"
-                    aria-label="本题分值"
-                    @click.stop
-                    @change="onScoreChange(it.id, $event)"
-                  />
-                  <button type="button" class="pb-work__op" title="上移" @click.stop="onMove(it.id, -1)">↑</button>
-                  <button type="button" class="pb-work__op" title="下移" @click.stop="onMove(it.id, 1)">↓</button>
-                  <button type="button" class="pb-work__op is-danger" title="移出卷子" @click.stop="onRemove(it.id)">×</button>
-                </div>
-              </div>
-            </div>
-            <div v-if="!summary.count" class="pb-work__empty">还没选任何题。</div>
-          </div>
-
-          <button type="button" class="pb-work__add" @click="setMode('pick')">＋ 继续加题</button>
-        </aside>
-
-        <div class="pb-work__paper">
-          <div class="pb-work__stage" ref="stageRef">
-            <iframe
-              v-show="summary.count"
-              ref="previewFrame"
-              class="pb-work__frame"
-              title="卷面预览"
-              sandbox="allow-same-origin allow-scripts"
-            />
-            <div v-if="!summary.count" class="pb-work__blank">
-              <p>试题篮是空的</p>
-              <el-button type="primary" @click="setMode('pick')">去选题</el-button>
-            </div>
-            <div v-if="repainting && summary.count" class="pb-work__mask">
-              <span class="pb-spinner" aria-hidden="true"></span>
-              <span>重排中…</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -396,7 +300,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Plus, UploadFilled, Search, View, Tickets } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Search, Tickets } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/ui/PageHeader.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -417,11 +321,9 @@ import {
 import { buildHandoutBody, buildHandoutCSS, groupHandoutQuestions } from '../../utils/handoutPdf'
 import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/composePaperPdf'
 import {
-  PAPER_BASKET_BLOCKS,
   addBasketItem,
   removeBasketItem,
   setBasketItemScore,
-  moveBasketItem,
   isInBasket,
   groupBasket,
   basketSummary,
@@ -449,36 +351,51 @@ const filterTag = ref('all')
 const filterKeyword = ref('')
 const tagOptions = ref([])
 
-// 试题篮（前端状态，不落库）
+// 试题篮（前端状态，不落库）。卷面就是篮子 —— 不再有单独的篮子面板。
 const basket = ref([])
 const composeTitle = ref('')
 const composeWithImage = ref(false)
 const editingId = ref('')
 
-// 视图模式：选题 ⇄ 卷面预览（预览绑着 basket，改了就重排）
-const viewMode = ref('pick')
+// 右侧卷面（常驻，和题目列表同一页）
 const previewKind = ref('student')
 const previewFrame = ref(null)
 const stageRef = ref(null)
 const zoom = ref(1)
-// 用户手动缩放过就不再自动「适应宽度」（否则每改一题都被拽回默认比例）
 const userZoomed = ref(false)
 const previewPages = ref(0)
 const repainting = ref(false)
 const downloading = ref(false)
+const paperFull = ref(false)
+// 窄屏（≤1239px）放不下「列表 + 可读的卷面」并排 ⇒ 卷面改成整宽的底部常驻面板，可收起。
+const narrow = ref(false)
+const paperCollapsed = ref(false)
+// 卷面栏初始宽度：按窗口宽度取，窄屏别把题目列表挤死（老师随时可拖宽）
+const previewWidth = ref(Math.round(Math.min(620, Math.max(560, (window.innerWidth || 1440) * 0.30))))
 const PREVIEW_TABS = [
   { key: 'student', label: '练习卷' },
-  { key: 'teacher', label: '教师卷（含答案）' },
-  { key: 'handout', label: '讲题讲义' },
+  { key: 'teacher', label: '教师卷' },
+  { key: 'handout', label: '讲义' },
 ]
 
-// 预览舞台样式（注入到 iframe 文档里）：灰底 + 居中白纸。
-// ⛔ 这些绝不能写进 buildPaperCSS —— 那是打印样式，纸上不该有灰底和阴影。
+// 预览舞台样式（注入 iframe 文档）：灰底 + 居中白纸 + 每题悬停出现「×」、分值可点改。
+// ⛔ 灰底/阴影/删除按钮绝不能写进 buildPaperCSS —— 那是打印样式，纸上不该有这些。
 const PREVIEW_STAGE_CSS = `
 html,body{background:#e6e4de}
-body{padding:16px 0 32px}
+body{padding:14px 0 28px}
 .page{background:#fff;margin:0 auto;box-shadow:0 1px 10px rgba(0,0,0,.14)}
-.q-flash{outline:2px solid #185fa5;outline-offset:4px;border-radius:4px;transition:outline-color .3s}
+.question{position:relative}
+.question > .pb-del{
+  position:absolute;right:0;top:0;width:18px;height:18px;line-height:16px;padding:0;
+  border:1px solid #E6C9C9;background:#fff;color:#B4436C;border-radius:50%;
+  font-size:12px;cursor:pointer;opacity:0;transition:opacity .12s;
+}
+.question:hover > .pb-del{opacity:1}
+.question > .pb-del:hover{background:#FDECEF;border-color:#D4537E}
+.q-score{cursor:pointer;border-bottom:1px dashed #C9C6BE}
+.q-score:hover{color:#185FA5;border-bottom-color:#185FA5}
+.pb-score-input{width:46px;font-size:11px;padding:0 3px;border:1px solid #185FA5;border-radius:3px;text-align:right}
+.question-group:has(> .question:hover) .q-stem{background:#fbfbfd}
 `
 
 const showCreateDialog = ref(false)
@@ -612,10 +529,9 @@ const toggle = (q) => {
 }
 
 const onRemove = (id) => { basket.value = removeBasketItem(basket.value, id) }
-const onMove = (id, delta) => { basket.value = moveBasketItem(basket.value, id, delta) }
-const onScoreChange = (id, ev) => {
-  basket.value = setBasketItemScore(basket.value, id, ev?.target?.value)
-}
+// 组卷不提供手动排序：卷面按题型分大题，同题型内保持勾选顺序。
+// moveBasketItem 仍留在 paperBasket.js（有回归锁），需要时再接 UI。
+// 改分统一走卷面上点「4 分」→ beginScoreEdit → setBasketItemScore。
 const clearBasket = () => { basket.value = [] }
 
 const defaultTitle = () => {
@@ -731,7 +647,7 @@ const handleUpload = async () => {
 const askDeletePaper = async (p) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除「${p.name}」及它的 ${p.question_count || 0} 道题？已放进试题篮的题也会一起消失。`,
+      `确定删除「${p.name}」及它的 ${p.question_count || 0} 道题？卷面上的题也会一起消失。`,
       '删除试卷',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
@@ -769,7 +685,7 @@ const startPolling = () => {
 }
 const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-// ── 卷面预览（活的：basket 一变就重排）──
+// ── 卷面（常驻，basket 一变就重排）──
 //
 // 排版动作复用 paintPreviewIntoIframe —— 与「导出 PDF」共用同一个 paintDocument，
 // 同一份 bodyHtml + 同一个 buildPaperCSS，所以预览和下载不会各排一套。
@@ -808,8 +724,8 @@ const applyZoom = () => {
 }
 
 /**
- * 适应宽度：A4 卷面固定 794px，侧栏一挤就会被横向裁掉右半边（分值、选项全看不见）。
- * 所以默认按容器宽度算出缩放比；老师手动缩放过后不再自动覆盖。
+ * 适应宽度：A4 卷面固定 794px，右栏一窄就被横向裁掉右半边（分值、选项全看不见）。
+ * 所以默认按容器宽度算比例；老师手动缩放过就不再自动覆盖。
  * @param {boolean} [force] 点百分比数字时强制回到适应宽度
  */
 const fitZoom = (force = false) => {
@@ -817,20 +733,85 @@ const fitZoom = (force = false) => {
   if (force) userZoomed.value = false
   const box = stageRef.value?.clientWidth || 0
   if (!box) return
-  const z = Math.min(1, Math.max(0.4, Math.round(((box - 28) / 794) * 100) / 100))
+  const z = Math.min(1, Math.max(0.35, Math.round(((box - 22) / 794) * 100) / 100))
   zoom.value = z
   applyZoom()
 }
 
 const setZoom = (delta) => {
   userZoomed.value = true
-  zoom.value = Math.min(1.6, Math.max(0.4, Math.round((zoom.value + delta) * 10) / 10))
+  zoom.value = Math.min(1.6, Math.max(0.3, Math.round((zoom.value + delta) * 10) / 10))
   applyZoom()
+}
+
+/**
+ * 给卷面注入「就地编辑」能力：
+ *   · 每题右上角一个 ×（悬停出现）→ 移出卷子；
+ *   · 「4 分」点一下变输入框 → 改分值。
+ * 为什么注入而不是把按钮做进 composePaperPdf：那份 HTML 同时用于**打印**，
+ * 打印件上不能出现删除按钮和输入框。交互只属于预览这一侧。
+ */
+const decoratePaper = (doc) => {
+  if (!doc) return
+  doc.querySelectorAll('.question[data-qid]').forEach((el) => {
+    const id = el.getAttribute('data-qid')
+    if (!id) return
+
+    if (!el.querySelector(':scope > .pb-del')) {
+      const btn = doc.createElement('button')
+      btn.type = 'button'
+      btn.className = 'pb-del'
+      btn.textContent = '×'
+      btn.title = '从卷子移出这道题'
+      btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); onRemove(id) })
+      el.appendChild(btn)
+    }
+
+    const score = el.querySelector('.q-score')
+    if (score && !score.dataset.bound) {
+      score.dataset.bound = '1'
+      score.title = '点一下改分值'
+      score.addEventListener('click', () => beginScoreEdit(doc, id, score))
+    }
+  })
+}
+
+const beginScoreEdit = (doc, id, span) => {
+  if (span.querySelector('input')) return
+  const cur = String(parseFloat(String(span.textContent || '').replace(/[^\d.]/g, '')) || 0)
+  const input = doc.createElement('input')
+  input.type = 'number'
+  input.min = '0'
+  input.step = '0.5'
+  input.value = cur
+  input.className = 'pb-score-input'
+  const text = span.textContent
+  span.textContent = ''
+  span.appendChild(input)
+  input.focus()
+  input.select()
+
+  let done = false
+  const restore = () => {
+    // 提交后卷面会整体重排，这里的 DOM 会被替换；只有取消时才需要还原
+    if (done) return
+    done = true
+    span.textContent = text
+  }
+  const commit = () => {
+    if (done) return
+    done = true
+    basket.value = setBasketItemScore(basket.value, id, input.value)
+  }
+  input.addEventListener('blur', commit)
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur() }
+    if (e.key === 'Escape') { e.preventDefault(); done = true; restore() }
+  })
 }
 
 /** 真正重排一次。用 token 丢弃过期结果（连续删题时只认最后一次）。 */
 const repaintPreview = async () => {
-  if (viewMode.value !== 'preview') return
   if (!basket.value.length) {
     // 删空要立刻把「约 N 页」清掉，否则会残留上一次的页数
     repaintToken++
@@ -840,6 +821,7 @@ const repaintPreview = async () => {
   }
   const token = ++repaintToken
   repainting.value = true
+  const keepScroll = previewFrame.value?.contentDocument?.documentElement?.scrollTop || 0
   try {
     const { bodyHtml, extraCss } = buildPaperHtml(previewKind.value)
     await nextTick()
@@ -848,51 +830,64 @@ const repaintPreview = async () => {
       extraCss: `${extraCss}\n${PREVIEW_STAGE_CSS}`,
     })
     if (token !== repaintToken) return // 已经有更新的一次重排在跑，这次结果作废
+    decoratePaper(doc)
     fitZoom() // 先按容器算比例（用户手动缩放过则跳过）
+    // 改一题就把卷面滚回顶部很难用：保持原来的阅读位置
+    if (keepScroll) doc.documentElement.scrollTop = keepScroll
     // scrollHeight 是**布局像素**，不受 zoom 影响，所以页数始终按 A4=1123px 算
     const h = doc?.body?.scrollHeight || 0
     previewPages.value = h ? Math.max(1, Math.ceil(h / 1123)) : 0
   } catch (e) {
-    if (token === repaintToken) ElMessage.error(e?.payload?.message || e.message || '预览失败')
+    if (token === repaintToken) ElMessage.error(e?.payload?.message || e.message || '卷面渲染失败')
   } finally {
     if (token === repaintToken) repainting.value = false
   }
 }
 
-/** 防抖：连续删三题只重排一次。 */
-const scheduleRepaint = (delay = 220) => {
-  if (viewMode.value !== 'preview') return
+/** 防抖：连续勾/删几题只重排一次。 */
+const scheduleRepaint = (delay = 200) => {
   clearTimeout(repaintTimer)
   repaintTimer = setTimeout(() => { repaintPreview() }, delay)
-}
-
-const setMode = async (mode) => {
-  viewMode.value = mode
-  if (mode === 'preview') {
-    await nextTick()
-    repaintPreview()
-  }
-}
-
-// 窗口变宽变窄时重新算「适应宽度」（手动缩放过就不动）
-const onWindowResize = () => {
-  if (viewMode.value === 'preview') fitZoom()
 }
 
 const switchPreviewKind = (kind) => {
   if (previewKind.value === kind) return
   previewKind.value = kind
+  repaintToken++ // 让在跑的那次作废（版式都换了）
   repaintPreview()
 }
 
-/** 点清单里的某题 → 滚到卷面上那一道并闪一下（不用自己找）。 */
-const locateQ = (id) => {
-  const doc = previewFrame.value?.contentDocument
-  const el = doc?.querySelector(`[data-qid="${String(id).replace(/"/g, '\\"')}"]`)
-  if (!el) return
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
-  el.classList.add('q-flash')
-  setTimeout(() => { try { el.classList.remove('q-flash') } catch { /* 已重排 */ } }, 1200)
+// ── 拖拽调宽（卷面太窄看不清时自己拉）──
+const startDrag = (ev) => {
+  ev.preventDefault()
+  const startX = ev.clientX
+  const startW = previewWidth.value
+  const onMove = (e) => {
+    const next = Math.min(Math.max(startW + (startX - e.clientX), 320), 920)
+    previewWidth.value = next
+    fitZoom(true)
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    fitZoom(true)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+// 窄屏：卷面改成整宽底部常驻面板。left 要避开左侧导航，所以实测容器左边界。
+const paperLeft = ref(0)
+const measureLeft = () => {
+  const el = document.querySelector('.paper-bank .wb-page__inner') || document.querySelector('.paper-bank')
+  if (el) paperLeft.value = Math.max(0, Math.round(el.getBoundingClientRect().left))
+}
+const fixedStyle = computed(() => ({ left: `${paperLeft.value}px`, right: '12px' }))
+
+const onWindowResize = () => {
+  narrow.value = window.innerWidth <= 1499
+  measureLeft()
+  fitZoom()
 }
 
 const downloadPdf = async () => {
@@ -915,25 +910,30 @@ const downloadPdf = async () => {
   }
 }
 
-const previewMeta = computed(() => {
+const paperMeta = computed(() => {
   if (repainting.value) return '重排中…'
-  if (!previewPages.value) return ''
-  const label = PREVIEW_TABS.find(t => t.key === previewKind.value)?.label || ''
-  const pages = `约 ${previewPages.value} 页`
+  if (!summary.value.count) return '还没有题'
+  const pages = previewPages.value ? `约 ${previewPages.value} 页` : ''
   if (previewKind.value === 'handout') {
-    return `${label} · ${summary.value.count} 题 · 保留原卷题号 · ${pages}`
+    return [`${summary.value.count} 题`, '原卷题号', pages].filter(Boolean).join(' · ')
   }
-  return `${label} · 共 ${totals.value.questionCount} 题 · 满分 ${totals.value.totalScore} 分 · ${pages}`
+  return [`${summary.value.count} 题`, `${summary.value.totalScore} 分`, pages].filter(Boolean).join(' · ')
 })
 
-// basket 任何变化（加/删/排序/改分）都自动重排 —— 这就是「实时预览」
+// basket 任何变化（勾/删/改分）都自动重排 —— 这就是「同一页面里实时预览」
 watch(basket, () => { scheduleRepaint() }, { deep: true })
-watch([composeTitle, composeWithImage], () => { scheduleRepaint(320) })
+watch([composeTitle, composeWithImage], () => { scheduleRepaint(300) })
+watch(paperFull, async () => { await nextTick(); fitZoom(true) })
 
 watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; loadQuestions() })
 watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; loadQuestions() })
 
+const onKeydown = (e) => {
+  if (e.key === 'Escape' && paperFull.value) paperFull.value = false
+}
+
 onMounted(async () => {
+  narrow.value = window.innerWidth <= 1499
   loading.value = true
   try {
     await loadPapers()
@@ -943,64 +943,64 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+  await nextTick()
+  measureLeft()
   window.addEventListener('resize', onWindowResize)
+  window.addEventListener('keydown', onKeydown)
 })
 onUnmounted(() => {
   stopPolling()
   clearTimeout(repaintTimer)
   window.removeEventListener('resize', onWindowResize)
+  window.removeEventListener('keydown', onKeydown)
 })
 </script>
 
 <style scoped>
-/* ── 模式条 ── */
-.pb-modebar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 8px 12px; margin-bottom: 12px;
-  background: #fff; border: 1px solid #ebe9e4; border-radius: 10px;
-}
-.pb-seg { display: flex; gap: 2px; padding: 2px; background: #f4f2ee; border-radius: 8px; }
-.pb-seg__btn {
-  border: 0; background: transparent; padding: 5px 14px; border-radius: 6px;
-  font-size: 12.5px; color: #666; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
-}
-.pb-seg__btn:hover { color: #333; }
-.pb-seg__btn.is-active { background: #fff; color: #185fa5; font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-.pb-seg__btn em {
-  font-style: normal; font-size: 11px; background: #eef2ff; color: #185fa5;
-  border-radius: 9px; padding: 0 6px; line-height: 16px;
-}
-.pb-tabs { display: flex; gap: 2px; }
-.pb-tab {
-  border: 0; background: transparent; padding: 5px 9px; border-radius: 6px;
-  font-size: 12px; color: #666; cursor: pointer;
-}
-.pb-tab:hover { background: #f5f4f0; }
-.pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
-.pb-zoom { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #666; }
-.pb-zoom button {
-  width: 22px; height: 22px; border: 1px solid #e2e0da; background: #fff;
-  border-radius: 5px; cursor: pointer; line-height: 1; color: #555;
-}
-.pb-zoom button:hover { border-color: #185fa5; color: #185fa5; }
-.pb-zoom button.pb-zoom__pct { width: 46px; border-color: transparent; background: transparent; font-size: 12px; }
-.pb-zoom button.pb-zoom__pct:hover { border-color: #e2e0da; }
-.pb-modebar__right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-.pb-modebar__hint { font-size: 11.5px; color: #999; }
-.pb-meta { font-size: 11.5px; color: #888; }
-
-/* ── 选题模式：三栏 ── */
+/* ── 三栏：卷列表 | 题目 | 卷面（常驻） ── */
 .pb-layout {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr) 284px;
-  gap: 14px;
+  grid-template-columns: 196px minmax(0, 1fr) var(--pw, 560px);
+  gap: 12px;
   align-items: start;
 }
-@media (max-width: 1400px) {
-  .pb-layout { grid-template-columns: 200px minmax(0, 1fr) 256px; gap: 12px; }
+@media (max-width: 1500px) {
+  .pb-layout { grid-template-columns: 176px minmax(0, 1fr) min(var(--pw, 560px), 34vw); gap: 10px; }
 }
-@media (max-width: 1180px) {
-  .pb-layout { grid-template-columns: 176px minmax(0, 1fr) 236px; gap: 10px; }
+/* 窄屏放不下「题目列表 + 能看清的卷面」并排：卷面改成整宽的底部常驻面板（同一页，可收起） */
+@media (max-width: 1499px) {
+  .pb-layout {
+    grid-template-columns: 150px minmax(0, 1fr);
+    grid-template-areas: 'papers questions' 'paper paper';
+    row-gap: 10px;
+    padding-bottom: 8px;
+  }
+  .pb-col--papers { grid-area: papers; }
+  .pb-col--questions { grid-area: questions; }
+  .pb-col--paper {
+    grid-area: paper;
+    position: relative;
+    z-index: 6;
+    height: clamp(260px, 46vh, 620px);
+  }
+  .pb-col--paper.is-fixed {
+    position: fixed;
+    /* ⛔ 必须显式 top:auto：基础规则里 .pb-col--paper 有 top:12px，
+       fixed 下同时给 top 和 bottom 会变成「贴顶」，底部常驻就跑到页面上去了 */
+    top: auto;
+    bottom: 8px;
+    z-index: 1200;
+    height: clamp(260px, 46vh, 620px);
+  }
+  .pb-col--paper.is-collapsed { height: 42px; min-height: 0; }
+  .pb-col--paper.is-collapsed .pb-paper-panel__form,
+  .pb-col--paper.is-collapsed .pb-paper-panel__stage { display: none; }
+  .pb-col--paper .pb-paper-panel {
+    height: 100%;
+    min-height: 0;
+    box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.10);
+  }
+  .pb-drag { display: none; }
   .pb-panel--tip { display: none; }
 }
 
@@ -1074,6 +1074,7 @@ onUnmounted(() => {
 .pb-row__foot { display: flex; gap: 12px; margin-top: 6px; }
 .pb-link { border: 0; background: transparent; padding: 0; font-size: 11px; color: #8a8a8a; cursor: pointer; text-decoration: none; }
 .pb-link:hover { color: #185fa5; text-decoration: underline; }
+.pb-link:disabled { color: #ccc; cursor: default; text-decoration: none; }
 .pb-editor { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #ececec; }
 .pb-editor label { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #777; }
 .pb-editor select, .pb-editor input {
@@ -1088,92 +1089,73 @@ onUnmounted(() => {
 }
 .pb-more:hover { border-color: #a9b4f0; color: #185fa5; }
 
-/* 右：试题篮 */
-.pb-basket { background: #fff; border: 1px solid #e4e1d8; border-radius: 10px; padding: 12px; position: sticky; top: 12px; }
-.pb-basket__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
-.pb-basket__head strong { font-size: 13px; }
-.pb-basket__head span { font-size: 11px; color: #666; }
-.pb-basket__dist { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; color: #777; margin-bottom: 6px; }
-.pb-basket__warn { font-size: 11px; color: #993c1d; background: #fdf3ee; border-radius: 5px; padding: 4px 6px; margin-bottom: 6px; line-height: 1.5; }
-.pb-basket__list { max-height: 46vh; overflow-y: auto; margin: 0 -4px 8px; padding: 0 4px; }
-.pb-bk-block__head { font-size: 11px; color: #555; font-weight: 500; margin: 8px 0 4px; }
-.pb-bk-item { display: flex; align-items: center; gap: 4px; font-size: 11.5px; padding: 3px 0; }
-.pb-bk-item__no { font-weight: 500; min-width: 26px; }
-.pb-bk-item__src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #999; font-size: 10.5px; }
-.pb-bk-item__score {
-  width: 42px; font-size: 11px; padding: 2px 3px; text-align: right;
-  border: 1px solid #ddd; border-radius: 4px;
+/* 右：卷面面板 */
+.pb-col--paper { position: sticky; top: 12px; min-width: 0; }
+.pb-col--paper.is-full {
+  position: fixed; inset: 12px; z-index: 2100;
+  background: #fff; border-radius: 12px; border: 1px solid #e4e1d8;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
+  padding: 10px; display: flex;
 }
-.pb-bk-item__unit { font-size: 10px; color: #aaa; }
-.pb-bk-item__op { border: 0; background: transparent; color: #999; font-size: 12px; cursor: pointer; padding: 0 1px; }
-.pb-bk-item__op:hover { color: #185fa5; }
-.pb-bk-item__op.is-danger:hover { color: #a32d2d; }
-.pb-basket__form { border-top: 1px solid #f0ede6; padding-top: 8px; }
-.pb-field { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #777; margin-bottom: 6px; }
-.pb-field input { flex: 1; min-width: 0; font-size: 12px; padding: 4px 7px; border: 1px solid #ddd; border-radius: 5px; }
-.pb-check { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #777; margin-bottom: 8px; }
-.pb-basket__actions { display: flex; flex-direction: column; gap: 6px; }
-.pb-basket__sub { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #aaa; }
-.pb-basket__empty { font-size: 11.5px; color: #999; line-height: 1.8; padding: 10px 2px; }
+.pb-drag {
+  position: absolute; left: -7px; top: 0; bottom: 0; width: 12px;
+  cursor: col-resize; z-index: 3;
+}
+.pb-drag::after {
+  content: ''; position: absolute; left: 5px; top: 50%; width: 2px; height: 42px;
+  margin-top: -21px; border-radius: 2px; background: #dcd9d0;
+}
+.pb-drag:hover::after { background: #185fa5; }
+.pb-col--paper.is-full .pb-drag { display: none; }
 
-/* ── 预览模式：左清单 + 右纸 ── */
-.pb-work {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  gap: 14px;
-  align-items: start;
-}
-@media (max-width: 1300px) {
-  .pb-work { grid-template-columns: 250px minmax(0, 1fr); gap: 10px; }
-}
-.pb-work__list {
+.pb-paper-panel {
   background: #fff; border: 1px solid #e4e1d8; border-radius: 10px;
-  padding: 12px; display: flex; flex-direction: column;
-  max-height: calc(100vh - 210px); position: sticky; top: 12px;
+  display: flex; flex-direction: column; overflow: hidden;
+  height: calc(100vh - 190px); min-height: 420px;
 }
-.pb-work__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
-.pb-work__head strong { font-size: 13px; }
-.pb-work__head span { font-size: 11px; color: #666; }
-.pb-work__form { border-bottom: 1px solid #f0ede6; padding-bottom: 8px; margin-bottom: 6px; }
-.pb-work__items { flex: 1; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
-.pb-work__block { font-size: 11px; color: #555; font-weight: 500; margin: 8px 0 4px; }
-.pb-work__item {
-  display: flex; align-items: center; gap: 3px;
-  font-size: 11.5px; padding: 4px 4px; border-radius: 6px; cursor: pointer;
-}
-.pb-work__item:hover { background: #f6f5f1; }
-.pb-work__no { font-weight: 500; min-width: 26px; }
-.pb-work__src { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #999; font-size: 10.5px; }
-.pb-work__score {
-  width: 40px; font-size: 11px; padding: 2px 3px; text-align: right;
-  border: 1px solid #e2e0da; border-radius: 4px;
-}
-.pb-work__op { border: 0; background: transparent; color: #999; font-size: 12px; cursor: pointer; padding: 0 1px; }
-.pb-work__op:hover { color: #185fa5; }
-.pb-work__op.is-danger:hover { color: #a32d2d; }
-.pb-work__empty { font-size: 12px; color: #aaa; padding: 20px 4px; text-align: center; }
-.pb-work__add {
-  margin-top: 8px; width: 100%; padding: 7px; border: 1px dashed #ddd; border-radius: 8px;
-  background: #fff; color: #666; font-size: 12px; cursor: pointer;
-}
-.pb-work__add:hover { border-color: #a9b4f0; color: #185fa5; }
+.pb-col--paper.is-full .pb-paper-panel { flex: 1; height: auto; border: 0; border-radius: 0; }
 
-.pb-work__paper {
-  border: 1px solid #e4e1d8; border-radius: 10px; overflow: hidden;
-  height: calc(100vh - 210px); min-height: 420px; background: #e6e4de;
+.pb-paper-panel__head {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; border-bottom: 1px solid #f0ede6;
 }
-.pb-work__stage { position: relative; width: 100%; height: 100%; }
-.pb-work__frame { width: 100%; height: 100%; border: 0; background: transparent; display: block; }
-.pb-work__blank {
+.pb-tabs { display: flex; gap: 2px; }
+.pb-tab {
+  border: 0; background: transparent; padding: 4px 8px; border-radius: 6px;
+  font-size: 12px; color: #666; cursor: pointer;
+}
+.pb-tab:hover { background: #f5f4f0; }
+.pb-tab.is-active { background: #eef2ff; color: #185fa5; font-weight: 500; }
+.pb-paper-panel__ops { margin-left: auto; display: flex; align-items: center; gap: 4px; }
+.pb-paper-panel__meta { font-size: 11px; color: #888; margin-right: 4px; white-space: nowrap; }
+.pb-icon-btn {
+  width: 22px; height: 22px; border: 1px solid #e2e0da; background: #fff;
+  border-radius: 5px; cursor: pointer; line-height: 1; color: #555; font-size: 12px;
+}
+.pb-icon-btn:hover { border-color: #185fa5; color: #185fa5; }
+.pb-icon-btn--pct { width: 44px; border-color: transparent; background: transparent; }
+.pb-icon-btn--pct:hover { border-color: #e2e0da; }
+
+.pb-paper-panel__form {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px; border-bottom: 1px solid #f0ede6; background: #fbfaf7;
+}
+.pb-field { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #777; flex: 1; min-width: 0; }
+.pb-field input { flex: 1; min-width: 0; font-size: 12px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 5px; }
+.pb-check { display: flex; align-items: center; gap: 4px; font-size: 11px; color: #777; white-space: nowrap; }
+
+.pb-paper-panel__stage { position: relative; flex: 1; min-height: 0; background: #e6e4de; }
+.pb-paper-panel__frame { width: 100%; height: 100%; border: 0; background: transparent; display: block; }
+.pb-paper-panel__blank {
   position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 12px; color: #999; font-size: 13px;
+  align-items: center; justify-content: center; gap: 6px; color: #999; font-size: 13px;
 }
-.pb-work__mask {
-  position: absolute; top: 10px; right: 12px;
+.pb-paper-panel__blank span { font-size: 11.5px; color: #aaa; }
+.pb-paper-panel__mask {
+  position: absolute; top: 8px; right: 8px;
   display: flex; align-items: center; gap: 6px;
   background: rgba(255, 255, 255, 0.92); border: 1px solid #e2e0da; border-radius: 14px;
-  padding: 3px 10px 3px 6px; font-size: 11px; color: #666;
-  pointer-events: none;
+  padding: 3px 10px 3px 6px; font-size: 11px; color: #666; pointer-events: none;
 }
 .pb-spinner {
   width: 12px; height: 12px; border: 2px solid #ddd; border-top-color: #185fa5;

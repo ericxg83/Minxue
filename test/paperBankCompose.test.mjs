@@ -326,23 +326,41 @@ test('★ 重排要能丢弃过期结果（连续操作只认最后一次）', (
   assert.ok(/token\s*!==\s*repaintToken/.test(s), '过期结果必须丢弃，否则旧卷面会覆盖新卷面')
 })
 
-test('★ 预览里必须能直接删题/改分（不用退回选题）', () => {
-  const s = read(PAGE)
-  const start = s.indexOf('pb-work__list')
-  const end = s.indexOf('pb-work__paper')
-  assert.ok(start > 0 && end > start, '必须存在预览左清单')
-  const seg = s.slice(start, end)
-  assert.ok(/@click\.stop="onRemove\(it\.id\)"/.test(seg), '清单里必须能移出题目')
-  assert.ok(/@change="onScoreChange\(it\.id, \$event\)"/.test(seg), '清单里必须能改分')
-  assert.ok(/@click\.stop="onMove\(it\.id, -1\)"/.test(seg), '清单里必须能上下移')
-  assert.ok(/locateQ\(it\.id\)/.test(seg), '点清单要能定位到卷面上那道题')
+test('★ 卷面上必须能直接删题/改分（不回篮子、不跳页）', () => {
+  const s = stripComments(read(PAGE))
+  assert.ok(/const decoratePaper\s*=/.test(s), '必须有 decoratePaper 注入交互')
+  assert.ok(/className = 'pb-del'/.test(s), '每题要注入删除按钮')
+  assert.ok(/onRemove\(id\)/.test(s), '删除按钮要真的移除')
+  assert.ok(/const beginScoreEdit\s*=/.test(s), '分值要能点开编辑')
+  assert.ok(/setBasketItemScore\(basket\.value, id, input\.value\)/.test(s), '改分要真的写回篮子')
+  // 交互只属于预览侧：打印件上不能出现删除按钮
+  assert.ok(!/pb-del/.test(read(COMPOSE)), '打印版式里不能出现删除按钮')
 })
 
-test('★ 卷面上每题要带 data-qid（否则「点清单定位」是空功能）', () => {
+test('★ 单页布局：不得再有「选题 / 预览」模式切换（负责人 2026-10-21 否掉了跳页）', () => {
+  const s = read(PAGE)
+  assert.ok(!/viewMode/.test(s), '不得再有视图模式状态')
+  assert.ok(!/setMode\(/.test(s), '不得再有模式切换函数')
+  // 题目列表与卷面必须同时在一屏
+  assert.ok(/class="pb-layout"/.test(s), '必须是单一三栏布局')
+  assert.ok(/pb-col--questions/.test(s) && /pb-col--paper/.test(s), '题目区与卷面区必须并存')
+})
+
+test('★ 窄屏卷面贴底：is-fixed 必须显式 top:auto（否则跑到页面顶部）', () => {
+  const s = read(PAGE)
+  assert.match(
+    s,
+    /\.pb-col--paper\.is-fixed\s*\{[\s\S]{0,200}?top:\s*auto/,
+    '基础规则里的 top:12px 会被 fixed 继承 —— 缺 top:auto 底部常驻面板会贴到页顶'
+  )
+})
+
+test('★ 卷面上每题要带 data-qid（删题/改分靠它定位到具体哪一道）', () => {
   const compose = read(COMPOSE)
   assert.ok(/data-qid=/.test(compose), 'renderComposeQuestion 必须输出 data-qid')
-  const page = read(PAGE)
-  assert.ok(/\[data-qid=/.test(page), '定位必须按 data-qid 查')
+  const page = stripComments(read(PAGE))
+  assert.ok(/\.question\[data-qid\]/.test(page), '注入交互必须按 .question[data-qid] 找题')
+  assert.ok(/getAttribute\('data-qid'\)/.test(page), '必须从元素上取回题目 id')
 })
 
 test('★ 预览与下载共用同一份 bodyHtml（否则「预览好看、下载变形」）', () => {
