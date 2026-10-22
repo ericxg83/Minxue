@@ -98,3 +98,50 @@ test('多解题：过程与结论重复写同一组解 → 仍判对（解集去
     judgeAnswer('解：x²-x-2x+2=0，x²-3x+2=0，(x-2)(x-1)=0，x₁=2，x₂=1，∴原方程的根为x₁=2，x₂=1', 'x=1或x=2', 'answer'),
     { isCorrect: true, unrecognized: false })
 })
+
+// ── ④ 2026-10-22 用户截图：根式共轭根 + LaTeX 下标（#13 / #10）───────────────
+//
+// 事故：x²-4x+2=0 参考答案只有 `2-√2`，3x(x-2)=10-5x 只有 `-5/3`。
+// 参考答案缺根 ⇒ 解集合通道因「数量不等」直接不出声 ⇒ 同一份正确解按不同顺序
+// 书写一条判对一条判错（id=383820e1 true / id=d81b6335 false）。
+// 另外多路求解本已一致，却因 `x_1=` 这个 LaTeX 下标前缀剥不掉而白报「多数一致 2/3」。
+
+test('多路归一：LaTeX 下标前缀与 √(2)/√2 必须折叠成同一键', () => {
+  assert.equal(
+    answersEquivalent('x₁=2+√2, x₂=2-√2', 'x_1=2+\\sqrt{2}, x_2=2-\\sqrt{2}'),
+    true)
+  const v = voteAnswers(['x1=2+√2, x2=2-√2', 'x1=2+√2, x2=2-√2', 'x_1=2+\\sqrt{2}, x_2=2-\\sqrt{2}'])
+  assert.equal(v.verdict, 'unanimous')
+  assert.equal(v.groups.length, 1)
+})
+
+test('多解题：根式共轭根顺序相反 → 判对（解集先于按序符号闸）', () => {
+  // 按序比对时 `2-√2` 去对 `2+√2`，会命中「只差一个负号」早退闸直接判错。
+  // 方程两根无顺序语义，解集无序配对必须先行。
+  for (const student of [
+    'x₁=2-√2, x₂=2+√2',
+    '原方程的根为 x₁=2-√2, x₂=2+√2',
+    'x₂=2-√2, x₁=2+√2',
+  ]) {
+    assert.deepEqual(
+      judgeAnswer(student, 'x₁=2+√2, x₂=2-√2', 'answer'),
+      { isCorrect: true, unrecognized: false },
+      `应判对：${student}`)
+  }
+})
+
+test('多解题：根式共轭根错一个 → 仍判错（顺序无关不放水）', () => {
+  assert.equal(judgeAnswer('x₁=2+√2, x₂=2+√2', 'x₁=2+√2, x₂=2-√2', 'answer').isCorrect, false)
+  assert.equal(judgeAnswer('x₁=2+√2, x₂=-2-√2', 'x₁=2+√2, x₂=2-√2', 'answer').isCorrect, false)
+  assert.equal(judgeAnswer('2-√2', '2+√2', 'answer').isCorrect, false)
+})
+
+test('多解题：学生用「x=A或x=B」无下标写法 → 判对', () => {
+  // 参考答案补全后，这类写法若抓不到第二个根就会因「数量不等」被判错（783308b3 实测）。
+  assert.deepEqual(
+    judgeAnswer('解：9x²=12，x²=4/3，x=2/3√3或x=-2/3√3', 'x₁=2√3/3, x₂=-2√3/3', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  assert.equal(
+    judgeAnswer('x=2/3√3或x=-2/3√3', 'x₁=2√3/3, x₂=2√3/3', 'answer').isCorrect,
+    false)
+})

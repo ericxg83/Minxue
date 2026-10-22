@@ -365,6 +365,19 @@ function extractStudentSolutionSet(s) {
   // 与参考答案的 2 个长度不等 ⇒ 解集合通道不触发 ⇒ 正确学生被判错（2026-10-21 实测）。
   if (subscript.length > 0) return [...new Set(subscript)]
 
+  // 无下标形态（2026-10-22）：`x=2/3√3或x=-2/3√3`、`x=1，x=2`。
+  // 参考答案补全成两根后，这类写法原先只抓得到行尾一个解 ⇒ 与参考的 2 个长度不等
+  // ⇒ 解集通道不触发 ⇒ 答对的学生被判错（783308b3 实测：补答案前 true、补后 false）。
+  // 只在**下标形态抓不到**时才走这里，且要求按 或/和/与 拆出的段里至少 2 段落成「变量=值」。
+  {
+    const alt = []
+    for (const seg of str.split(/或|和|与/)) {
+      const mm = seg.match(/(?:^|[\s∴，,。;；])(?:x|y)\s*=\s*([^\s=＝，,;；\n或]+)\s*[。.，,；;）)】]*$/)
+      if (mm) alt.push(cleanValue(mm[1]))
+    }
+    if (alt.length >= 2) return [...new Set(alt)]
+  }
+
   const tailLines = str.split(/\n/).map(l => l.trim()).filter(Boolean).slice(-3)
   const lineStart = []
   const lineStartRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:x|y)\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
@@ -407,6 +420,40 @@ function extractReferenceSolutionSet(s) {
 function isSolutionSetReference(s) {
   const t = toHalfWidth(String(s ?? '')).replace(/\$/g, '').trim()
   return /^(?:x|y)\s*_?[12₁₂]?\s*=\s*[^，,;；或]+\s*(?:，|,|;|；|或)\s*(?:x|y)\s*_?[12₁₂]?\s*=/.test(t)
+}
+
+/**
+ * 方程「解集合」**无序**配对。返回 true / false / null（null = 不作判断）。
+ *
+ * 两个根没有顺序语义：`x₁=2+√2, x₂=2-√2` 与 `x₁=2-√2, x₂=2+√2` 是同一个解集。
+ * 判等层原先只有「按序逐段」通道，顺序相反的正确答案会被下面的多空符号早退闸
+ * （2-√2 对 2+√2：去符号后结构相同、负号个数不同 ⇒ 认定符号写反）直接kill。
+ *
+ * @param {object} opts
+ *   decideFalse  配对失败时是否下「错」的结论。只有在参考答案本身是解集形态
+ *                （isSolutionSetReference）时才允许 —— 那说明两侧都完整给出了根，
+ *                数量相等却配不上，确实是错解。false 时一律返回 null 交给原路径。
+ */
+function matchSolutionSets(studentAnswer, referenceAnswer, questionType, { decideFalse = false } = {}) {
+  const studentSolutions = extractStudentSolutionSet(studentAnswer)
+  const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
+  if (!studentSolutions.length || studentSolutions.length !== referenceSolutions.length) return null
+
+  const paired = new Array(referenceSolutions.length).fill(false)
+  for (const sv of studentSolutions) {
+    let hit = -1
+    for (let i = 0; i < referenceSolutions.length; i++) {
+      if (paired[i]) continue
+      // sv/rv 都是 "=" 右侧的裸值（不含 x= 形态）⇒ 不会再次触发本通道，递归深度有界
+      if (judgeAnswer(sv, referenceSolutions[i], questionType).isCorrect === true) {
+        hit = i
+        break
+      }
+    }
+    if (hit < 0) return decideFalse && isSolutionSetReference(referenceAnswer) ? false : null
+    paired[hit] = true
+  }
+  return true
 }
 
 export function normalizeQuestionType(rawType, options = []) {
@@ -1689,6 +1736,17 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     }
   }
 
+  // ── 方程「解集合」无序配对（2026-10-22，必须先于按序通道）──────────────
+  // 用户截图 #13：学生 `x₁=2-√2, x₂=2+√2`、参考 `x₁=2+√2, x₂=2-√2` —— 同一解集，
+  // 书写顺序相反。按序配对时第一段 `2-√2` 去对 `2+√2`，正好命中下面「多空符号早退闸」
+  // （去符号后结构相同、负号个数不同 ⇒ 认定学生符号写反）**直接判错**，
+  // 根本走不到后面的解集通道。方程两根无顺序语义，故解集必须先判。
+  // 只取 true 出口：配对不成立时不在此下结论（后面的按序通道仍是权威）。
+  if (studentParts.length > 1 && refParts.length > 1 &&
+      matchSolutionSets(studentAnswer, referenceAnswer, questionType) === true) {
+    return { isCorrect: true, unrecognized: false }
+  }
+
   // ── 多空符号早退闸（2026-10-15，10491c62 终极收口）──────────────────────
   // 为什么必须在逐段循环**之前**独立成闸：下方的数值兜底层全是「剥了再比」——
   //   · extractAndCompare / extractNumericValues 不认符号；
@@ -1853,31 +1911,10 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   //     才判错。数量不等一律不出声：那可能是学生用 `x=1，x=-2/3` 这种不带下标的写法
   //     导致我们只抓到行尾一个解，判错会把正确学生打成假红叉（全库对比实测误伤 3 条）。
   {
-    const studentSolutions = extractStudentSolutionSet(studentAnswer)
-    const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
-    if (studentSolutions.length > 0 &&
-        studentSolutions.length === referenceSolutions.length) {
-      const paired = new Array(referenceSolutions.length).fill(false)
-      let allMatched = true
-      for (const sv of studentSolutions) {
-        let hit = -1
-        for (let i = 0; i < referenceSolutions.length; i++) {
-          if (paired[i]) continue
-          // sv/rv 都是 "=" 右侧的裸值（不含 x= 形态）⇒ 不会再次触发本通道，递归深度有界
-          if (judgeAnswer(sv, referenceSolutions[i], questionType).isCorrect === true) {
-            hit = i
-            break
-          }
-        }
-        if (hit < 0) {
-          allMatched = false
-          break
-        }
-        paired[hit] = true
-      }
-      if (allMatched) return { isCorrect: true, unrecognized: false }
-      if (isSolutionSetReference(referenceAnswer)) return { isCorrect: false, unrecognized: false }
-    }
+    // 逻辑已抽到 matchSolutionSets（同一实现被上面提前的「解集先于按序」复用），
+    // 此处保留原语义：配对成功判对；配对失败且参考本身是解集形态才判错。
+    const hit = matchSolutionSets(studentAnswer, referenceAnswer, questionType, { decideFalse: true })
+    if (hit !== null) return { isCorrect: hit, unrecognized: false }
   }
 
   // 单答案场景：标准比较流程
