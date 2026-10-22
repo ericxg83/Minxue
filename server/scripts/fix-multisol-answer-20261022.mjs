@@ -299,6 +299,10 @@ async function main() {
     RETURNING id
   `, [plan.map(p => p.id)])
   console.log(`清除「多路求解存疑」标注：${cleared.rowCount} 条`)
+
+  // finalizeRejudgeResult 内部的 is_complete 回写是 fire-and-forget，pool.end() 紧接着执行
+  // 会让它撞上「Cannot use a pool after calling end on the pool」。等一拍再结束进程。
+  await new Promise(r => setTimeout(r, 1500))
 }
 
 await main()
