@@ -224,6 +224,42 @@ export function collectInFlightTaskIds(jobs) {
 }
 
 /**
+ * 把队列里的 job 分成「真在跑」和「僵尸」两类（2026-10-22）。
+ *
+ * ⛔ 事故：本地 6 个作业从 10-21 19:20 起全部卡「批改中」，最久超过一天，其中 4 个的
+ *    job 因为持锁进程被关机/重启带走而永久停在 active。`scanProcessingStuck` 只看
+ *    「队列里有没有这个 taskId」，于是逐个打印「已在队列中」跳过；BullMQ 自己的
+ *    stalled 回收又要等 lockDuration + stalledInterval 两段。两套自愈互相以为对方会处理
+ *    ⇒ 谁都不动，任务无限期挂着。**判「在跑」的判据必须是锁还活着，不是 active 列表里有它。**
+ *
+ * active 的 job 用 `bull:<queue>:<id>:lock` 的 PTTL 判活（活着的 worker 每 lockDuration/2
+ * 续租一次，所以 PTTL 恒为正；进程死了 key 自然过期，PTTL 返回 -2）。
+ * 其余态（waiting/delayed）本身就是合法在途，直接算在跑。
+ *
+ * @returns {{ live: Set<string>, orphans: object[] }} orphans 需调用方尝试 remove 后再重投，
+ *   否则僵尸 job 锁过期后会被 BullMQ 再投一次 ⇒ 同一份作业被处理两遍（题目表被删了重建，
+ *   前端看到的就是「0/33 → 又 0/33」反复归零）。
+ */
+export async function splitInFlightJobs(queue, jobs) {
+  const live = new Set()
+  const orphans = []
+  let conn = null
+  try { conn = await queue.client } catch { conn = null }
+  for (const job of Array.isArray(jobs) ? jobs : []) {
+    const taskId = job?.data?.taskId
+    if (!taskId) continue
+    let state = job.state
+    try { state = await job.getState() } catch { /* 取不到态就按 getJobs 给的值 */ }
+    if (state !== 'active' || !conn) { live.add(taskId); continue }
+    let ttl = 0
+    try { ttl = await conn.pttl(`bull:${queue.name}:${job.id}:lock`) } catch { ttl = 0 }
+    if (ttl > 0) live.add(taskId)
+    else orphans.push(job)
+  }
+  return { live, orphans }
+}
+
+/**
  * 「这个失败任务，系统还会不会自己救回来？」—— 第 90 轮新增。
  *
  * 起因：自动重试其实一直在跑（5 分钟一轮），但失败任务在**下次扫描之前**（最长 5 分钟，
@@ -308,7 +344,15 @@ export function describeAutoRetry(task, now = Date.now()) {
 class PendingTaskRecovery {
   constructor() {
     this.scanInterval = null
-    this.scanIntervalMs = parseInt(process.env.PENDING_TASK_SCAN_INTERVAL) || 5 * 60 * 1000 // 5 minutes
+    // ⛔ 扫描间隔一律钳到 ≤5 分钟（2026-10-22）。
+    //    `.env` 里曾有 PENDING_TASK_SCAN_INTERVAL=3600000（60 分钟），本意是省点 DB 查询，
+    //    实际后果是「任务一旦被漏投，最多要等一小时才自愈」——用户侧就是「卡一天」。
+    //    这一轮扫描只有 4 条轻量 SELECT，多跑几次的代价可以忽略；恢复延迟才是致命的。
+    const MAX_SCAN_INTERVAL_MS = 5 * 60 * 1000
+    this.scanIntervalMs = Math.min(
+      parseInt(process.env.PENDING_TASK_SCAN_INTERVAL) || MAX_SCAN_INTERVAL_MS,
+      MAX_SCAN_INTERVAL_MS
+    )
     this.isRunning = false
   }
 
@@ -616,7 +660,10 @@ class PendingTaskRecovery {
       }
 
       const inFlightJobs = await queue.getJobs(IN_FLIGHT_JOB_STATES)
-      const inFlightTaskIds = collectInFlightTaskIds(inFlightJobs)
+      const { live: inFlightTaskIds, orphans } = await splitInFlightJobs(queue, inFlightJobs)
+      const orphanByTask = new Map(
+        orphans.filter(j => j?.data?.taskId).map(j => [j.data.taskId, j])
+      )
 
       let recoveredCount = 0
       let skippedCount = 0
@@ -626,6 +673,21 @@ class PendingTaskRecovery {
             console.log(`[PendingTaskRecovery] ⏭️ ${task.original_name} 已在队列中`)
             continue
           }
+
+          // 僵尸 job（active 但锁已过期）必须先摘掉再重投：否则锁过期后被 BullMQ 再投一次，
+          // 同一份作业两个 job 并行跑 ⇒ 题目表反复删建、前端计数「0/33 又变 0/33」反复归零。
+          const orphanJob = orphanByTask.get(task.id)
+          if (orphanJob) {
+            try {
+              await orphanJob.remove()
+              console.log(`[PendingTaskRecovery] 🧹 摘掉僵尸 job ${orphanJob.id}（task=${String(task.id).substring(0, 8)}）`)
+            } catch (e) {
+              console.warn(`[PendingTaskRecovery] ⚠️ 僵尸 job ${orphanJob.id} 摘除失败，本轮跳过: ${e.message}`)
+              skippedCount++
+              continue
+            }
+          }
+
 
           // ── 黑白名单：stuck 前 last_error 已知为配额/限流/图片错误 → 拒绝恢复 ──
           const verdict = classifyLastError(task.last_error)

@@ -4879,6 +4879,25 @@ async function countBackfillRemaining() {  const { rows } = await query(
 }
 
 /**
+ * 回填链的下一批延迟：**批改任务在跑时让位**（5 分钟后再来），否则沿用 15s。
+ * 事故背景见 runBackfillTags 尾部注释：冷启动回填 275 道 + 批改同时抢 AI 配额，
+ * 批改被限流拖到「一页 OCR 50-180s」，用户侧就是「一天还没批完」。
+ * 只读一条轻量 SELECT；查询失败退回 15s，绝不让回填因判据失败而停摆。
+ */
+async function backfillYieldDelayMs() {
+  try {
+    const { rows } = await query(
+      `SELECT 1 FROM ${TABLES.TASKS} WHERE status IN ('processing', 'pending') LIMIT 1`
+    )
+    if (rows.length > 0) {
+      console.log('[BackfillTags] ⏸ 有批改任务在跑，回填让位 5 分钟后再续（不与批改抢 AI 配额）')
+      return 5 * 60 * 1000
+    }
+  } catch { /* 判据查询失败按默认节奏 */ }
+  return 15000
+}
+
+/**
  * 回填核心逻辑（小批量）：每次只捞 limit 道「缺标签 或 缺难度」的题目，逐题重生成并写回。
  * free 实例内存/CPU 有限，单批控制在 ~20 题 / 20 余秒内结束，避免长任务被 OOM/spin-down 腰斩。
  * chain=true 时，一批跑完若仍有剩余，自动延时触发下一批，直到全部补齐。
@@ -5006,11 +5025,18 @@ async function runBackfillTags({ limit = 20, trigger = 'manual', chain = false }
     // 仅当本批确有产出（updated>0）才继续，避免主备全挂时空转刷屏。
     if (chain && backfillProgress.remaining > 0 && backfillProgress.updated > 0) {
       const nextRemaining = backfillProgress.remaining
+      // ⛔ 让位给批改（2026-10-22）：批改任务在跑时，回填必须让开 AI 配额。
+      //   事故：6 个作业卡了一整天，后端日志里 BackfillTags 连跑 14 批（275 道题）、
+      //   错因诊断/配图清扫同时开工，批改只能捡漏 —— 现场就是
+      //   `[AI] 检测到限流，并发降至 1` 与 `429 冷却 60s` 交替，一页 OCR 要 50-180s。
+      //   冷启动是回填的常态触发点，而冷启动往往正是老师刚上传完作业的时候。
+      //   判据只读：有 processing/pending 任务就让位（延后 5 分钟再看），没有就按原 15s 接力。
+      const delayMs = await backfillYieldDelayMs()
       setTimeout(() => {
         console.log(`[BackfillTags] (chain) 仍剩 ${nextRemaining} 道，触发下一批...`)
         runBackfillTags({ limit, trigger: 'chain', chain: true })
           .catch(e => console.error('[BackfillTags] 链式回填异常:', e.message))
-      }, 15000)
+      }, delayMs)
     }
   }
 }
