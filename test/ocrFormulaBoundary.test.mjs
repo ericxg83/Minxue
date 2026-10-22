@@ -44,3 +44,18 @@ test('server/worker.js 的 workbookPrompt 含分数边界规则', () => {
 // r103：原第三条「src/config/ai.js 的 buildOCRPrompt（前端拍照路径）」已随前端直调 AI
 // 整体删除而失效——学生拍照批改一直由服务端 worker 精简管线/通用管线完成，
 // 上方两条服务端断言（server/config/ai.js + server/worker.js 双 prompt）是权威防线。
+
+// 2026-10-22：整页英语语法专项（"8AU3 Exercise 5"）被模型返回 questions: []，
+// 而 0 题会触发「单页重试 × 模型轮换 × 任务重投」的连锁重试（实测一页能烧一小时），
+// 一个作业因此卡了一整天。修法是在 buildOCRPrompt 里补第 14 条硬规则：
+// 英语题必须逐题输出，只有整页确实无题才允许空数组。
+test('buildOCRPrompt 必须显式禁止英语页返回空 questions', async () => {
+  const { buildOCRPrompt } = await import(pathToFileURL(resolve(ROOT, 'server/config/ai.js')).href)
+  const prompt = buildOCRPrompt()
+  assert.ok(prompt.includes('英语题必须逐题输出'), '缺少「英语题必须逐题输出」这条硬规则')
+  assert.ok(prompt.includes('"questions": []'), '必须点名被禁的输出形态"questions": []')
+  assert.ok(
+    prompt.includes('只有整页确实一道题都没有'),
+    '必须给出唯一允许空数组的例外（纯答案页/空白页/封面/目录），否则模型会拿它当万能借口'
+  )
+})
