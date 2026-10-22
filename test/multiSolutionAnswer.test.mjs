@@ -162,3 +162,39 @@ test('多解题：三根/四根也按无序集合比（换元题的 y₁/y₂ �
     judgeAnswer(student4, 'x₁=1, x₂=-4, x₃=-1, x₄=-3', 'answer').isCorrect,
     false)
 })
+
+// ── ⑤ 参考答案用 ± 合并写法（2026-10-22 用户截图 #23）───────────────────────
+//
+// 题：x²-2x=3/2，参考答案 `(2±√10)/2`，学生 `x₁=1+√10/2，x₂=1-√10/2` —— 同一个解集。
+// 两处断点：① 参考整串没有 "x=" ⇒ 解集通道抓不到；② 值正则遇空格即停，
+// 学生 `x₁ = 1 + √10/2` 只抓到 `1`。两处都修后才能配对。
+
+test('± 合并参考答案：学生写两根分开 → 判对（值内含空格也算）', () => {
+  for (const student of [
+    'x₁=1+√10/2，x₂=1-√10/2',
+    'x₁ = 1 + √10/2，x₂ = 1 - √10/2',
+    '∴原方程的解为x₁=1+√10/2，x₂=1-√10/2',
+  ]) {
+    assert.deepEqual(
+      judgeAnswer(student, '(2±√10)/2', 'answer'),
+      { isCorrect: true, unrecognized: false },
+      `应判对：${student}`)
+  }
+})
+
+test('± 合并参考答案：学生漏写一个根 → 判错', () => {
+  assert.equal(judgeAnswer('x₁=1+√10/2', '(2±√10)/2', 'answer').isCorrect, false)
+  assert.equal(judgeAnswer('x₁=1+√10/2, x₂=1-√10/3', '(2±√10)/2', 'answer').isCorrect, false)
+})
+
+test('± 合并参考答案：两侧写法互换（学生写 ±、参考写两根）→ 判对', () => {
+  assert.deepEqual(
+    judgeAnswer('x=2±√2', 'x₁=2+√2, x₂=2-√2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+})
+
+test('± 合并参考答案：LaTeX 的 \\pm 与 ± 是同一形态', () => {
+  assert.deepEqual(
+    judgeAnswer('$\\pm 10$', '±10', 'fill'),
+    { isCorrect: true, unrecognized: false })
+})

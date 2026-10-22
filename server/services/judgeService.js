@@ -351,16 +351,25 @@ function extractStudentSolutionSet(s, variable = null) {
 
   // 值尾部标点必须剥：`x₁=5 x₂=-4.` 若原样收进集合会变成 `-4.`，
   // 与参考的 `-4` 判不上 ⇒ 通道失效、正确学生被判错（2026-10-21 全库对比实测 6c476498）。
+  // 值内部的空格要**抹掉而不是截断**：学生/OCR 常写 `x₁ = 1 + √10/2`，
+  // 旧值正则遇空格即停，只抓到 `1` ⇒ 与参考的两支配不上 ⇒ 答对判错（2026-10-22 截图 #23）。
   const cleanValue = (v) => {
-    let out = String(v ?? '').replace(/\$+/g, '').replace(/[。；;，,]+$/, '')
+    let out = String(v ?? '').replace(/\$+/g, '').replace(/\s+/g, '').replace(/[。；;，,]+$/, '')
     if (/[^.]\.$/.test(out)) out = out.replace(/\.$/, '')
     return out
   }
 
   const subscript = []
-  const subscriptRe = new RegExp(`(?:${V})\\s*_?[1-9₁-₉]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
+  // 值取到「下一个下标声明 / 分隔符 / 中文叙述 / 行尾」为止：既能容纳 `1 + √10/2` 里的空格，
+  // 又不会在 `x₁=2 x₂=-5/3` 这种无逗号写法里把 x₁ 的值吃成 `2x₂=-5/3`，
+  // 也不会把 `x₄=-1 ∴原方程的解为…` 的叙述尾巴收进值里。
+  const subscriptRe = new RegExp(
+    `(?:${V})\\s*_?[1-9₁-₉]\\s*=\\s*(.+?)(?=\\s*(?:${V})\\s*_?[1-9₁-₉]\\s*=|[,，;；。\\n]|[\\u4e00-\\u9fff∴]|$)`, 'g')
   let m
-  while ((m = subscriptRe.exec(str)) !== null) subscript.push(cleanValue(m[1]))
+  while ((m = subscriptRe.exec(str)) !== null) {
+    const v = cleanValue(m[1])
+    if (v) subscript.push(v)
+  }
   // 去重（保序）：学生常把解在过程末尾和结论句各写一遍
   // （`…，x₁=2，x₂=1，∴原方程的根为x₁=2，x₂=1`）——不去重会提取出 4 个解，
   // 与参考答案的 2 个长度不等 ⇒ 解集合通道不触发 ⇒ 正确学生被判错（2026-10-21 实测）。
@@ -398,13 +407,37 @@ function extractStudentSolutionSet(s, variable = null) {
 function extractReferenceSolutionSet(s, variable = null) {
   const str = toHalfWidth(s)
   if (!str) return []
+
+  // ── ± 合并写法（2026-10-22 用户截图 #23）────────────────────────────────
+  // 参考答案 `(2±√10)/2` 就是两个根，学生却写 `x₁=1+√10/2, x₂=1-√10/2`（同一个解集）。
+  // 不展开 ⇒ 解集通道抓不到参考值（整串没有 "x="）⇒ 落到单值收窄 ⇒ 学生末尾那根
+  // `1-√10/2` 与带 ± 的整串比不相等 ⇒ 明明答对却判错。
+  // 只在整串**恰好一个 ±** 且两支都是纯数学式时展开，避免误伤 `√(2±3)` 这类内含式。
+  {
+    const idx = str.indexOf('±')
+    if (idx >= 0 && str.indexOf('±', idx + 1) < 0) {
+      const stripVar = (t) => t.replace(/^[a-zA-Z]\s*_?[1-9₁-₉]?\s*=\s*/, '').trim()
+      const plus = stripVar(str.replace(/±/g, '+'))
+      const minus = stripVar(str.replace(/±/g, '-'))
+      if (plus.length <= 24 && minus.length <= 24 &&
+          isPureMathFragment(plus) && isPureMathFragment(minus)) {
+        return [plus, minus]
+      }
+    }
+  }
+
   const V = variable || 'x|y'
   const vals = []
-  const re = new RegExp(`(?:${V})\\s*(?:_?[1-9₁-₉])?\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
+  // 值用 `.+?` 到段尾而不是「不含空格的 token」：参考答案也会写成 `x₁ = 1 + √10/2`，
+  // 遇空格截断会把值抓成 `1`，与学生的 `1+√10/2` 对不上（同学生侧 2026-10-22 修复）。
+  const re = new RegExp(`(?:${V})\\s*(?:_?[1-9₁-₉])?\\s*=\\s*(.+?)[。.，,；;）)】\\s]*$`, 'g')
   for (const seg of str.split(/或|和|与|及|、|，|,|\|/)) {
     re.lastIndex = 0
     let m
-    while ((m = re.exec(seg)) !== null) vals.push(m[1].replace(/\$+/g, ''))
+    while ((m = re.exec(seg)) !== null) {
+      const v = String(m[1]).replace(/\$+/g, '').replace(/\s+/g, '')
+      if (v) vals.push(v)
+    }
   }
   // 去重（保序）：参考答案常同时给出「x=1 或 x=1」这类重复写法，不去重会让解集长度
   // 与学生侧对不上，通道失效（同 extractStudentSolutionSet 的 2026-10-21 修复）。
@@ -422,6 +455,9 @@ function extractReferenceSolutionSet(s, variable = null) {
  */
 function isSolutionSetReference(s) {
   const t = toHalfWidth(String(s ?? '')).replace(/\$/g, '').trim()
+  // ± 合并写法同样是「完整给出两个根」：`(2±√10)/2`、`x=2±√2`。
+  // 学生给了两个根却与这两支配不上 ⇒ 确实是错解，可以给终局判错（见 matchSolutionSets）。
+  if (t.split('±').length === 2 && isPureMathFragment(t)) return true
   return /^(?:x|y)\s*_?[1-9₁-₉]?\s*=\s*[^，,;；或]+\s*(?:，|,|;|；|或)\s*(?:x|y)\s*_?[1-9₁-₉]?\s*=/.test(t)
 }
 
