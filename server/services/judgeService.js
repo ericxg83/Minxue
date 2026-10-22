@@ -344,9 +344,10 @@ const SOLUTION_VALUE_RE = '[^\\s=＝，,;；\\n]+'
  *      这类公式型答案（答案本体是等式，x= 后面还有内容，锚定后不认）。
  *      强形态不加行尾锚定：学生常把多个解写一行（"x₁=2，x₂=1"）。
  */
-function extractStudentSolutionSet(s) {
+function extractStudentSolutionSet(s, variable = null) {
   const str = toHalfWidth(s)
   if (!str) return []
+  const V = variable || 'x|y'
 
   // 值尾部标点必须剥：`x₁=5 x₂=-4.` 若原样收进集合会变成 `-4.`，
   // 与参考的 `-4` 判不上 ⇒ 通道失效、正确学生被判错（2026-10-21 全库对比实测 6c476498）。
@@ -357,7 +358,7 @@ function extractStudentSolutionSet(s) {
   }
 
   const subscript = []
-  const subscriptRe = new RegExp(`(?:x|y)\\s*_?[12₁₂]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
+  const subscriptRe = new RegExp(`(?:${V})\\s*_?[1-9₁-₉]\\s*=\\s*(${SOLUTION_VALUE_RE})`, 'g')
   let m
   while ((m = subscriptRe.exec(str)) !== null) subscript.push(cleanValue(m[1]))
   // 去重（保序）：学生常把解在过程末尾和结论句各写一遍
@@ -371,8 +372,9 @@ function extractStudentSolutionSet(s) {
   // 只在**下标形态抓不到**时才走这里，且要求按 或/和/与 拆出的段里至少 2 段落成「变量=值」。
   {
     const alt = []
+    const altRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:${V})\\s*=\\s*([^\\s=＝，,;；\\n或]+)\\s*[。.，,；;）)】]*$`)
     for (const seg of str.split(/或|和|与/)) {
-      const mm = seg.match(/(?:^|[\s∴，,。;；])(?:x|y)\s*=\s*([^\s=＝，,;；\n或]+)\s*[。.，,；;）)】]*$/)
+      const mm = seg.match(altRe)
       if (mm) alt.push(cleanValue(mm[1]))
     }
     if (alt.length >= 2) return [...new Set(alt)]
@@ -380,7 +382,7 @@ function extractStudentSolutionSet(s) {
 
   const tailLines = str.split(/\n/).map(l => l.trim()).filter(Boolean).slice(-3)
   const lineStart = []
-  const lineStartRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:x|y)\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
+  const lineStartRe = new RegExp(`(?:^|[\\s∴，,。;；])(?:${V})\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
   for (const line of tailLines) {
     lineStartRe.lastIndex = 0
     while ((m = lineStartRe.exec(line)) !== null) lineStart.push(cleanValue(m[1]))
@@ -393,11 +395,12 @@ function extractStudentSolutionSet(s) {
  * 每段内抓 x=/x₁=/x₂= 声明，且**必须顶到段尾**（"x = 1 + √2" 这种带尾巴的
  * 公式段不认，防止学生漏写尾巴也被放过去）。抓不到 → 空数组（通道不触发）。
  */
-function extractReferenceSolutionSet(s) {
+function extractReferenceSolutionSet(s, variable = null) {
   const str = toHalfWidth(s)
   if (!str) return []
+  const V = variable || 'x|y'
   const vals = []
-  const re = new RegExp(`(?:x|y)\\s*(?:_?[12₁₂])?\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
+  const re = new RegExp(`(?:${V})\\s*(?:_?[1-9₁-₉])?\\s*=\\s*(${SOLUTION_VALUE_RE})[。.，,；;）)】\\s]*$`, 'g')
   for (const seg of str.split(/或|和|与|及|、|，|,|\|/)) {
     re.lastIndex = 0
     let m
@@ -419,7 +422,7 @@ function extractReferenceSolutionSet(s) {
  */
 function isSolutionSetReference(s) {
   const t = toHalfWidth(String(s ?? '')).replace(/\$/g, '').trim()
-  return /^(?:x|y)\s*_?[12₁₂]?\s*=\s*[^，,;；或]+\s*(?:，|,|;|；|或)\s*(?:x|y)\s*_?[12₁₂]?\s*=/.test(t)
+  return /^(?:x|y)\s*_?[1-9₁-₉]?\s*=\s*[^，,;；或]+\s*(?:，|,|;|；|或)\s*(?:x|y)\s*_?[1-9₁-₉]?\s*=/.test(t)
 }
 
 /**
@@ -435,8 +438,14 @@ function isSolutionSetReference(s) {
  *                数量相等却配不上，确实是错解。false 时一律返回 null 交给原路径。
  */
 function matchSolutionSets(studentAnswer, referenceAnswer, questionType, { decideFalse = false } = {}) {
-  const studentSolutions = extractStudentSolutionSet(studentAnswer)
-  const referenceSolutions = extractReferenceSolutionSet(referenceAnswer)
+  // 只在参考只含**一个变量**的根时限定变量：换元题的学生答案里同时有 y₁/y₂（辅助元）
+  // 和 x₁..x₄（真正的根），不限定就把 y 的值混进 x 的解集 ⇒ 集合长度对不上 ⇒ 通道失效
+  // （8ee17d64 实测：(x²+3x)²-2(x²+3x)-8=0，学生四个根全对却被判错）。
+  const refVars = new Set(
+    [...String(referenceAnswer ?? '').matchAll(/[a-zA-Z]\s*_?[1-9₁-₉]/g)].map(m => m[0][0]))
+  const variable = refVars.size === 1 ? [...refVars][0] : null
+  const studentSolutions = extractStudentSolutionSet(studentAnswer, variable)
+  const referenceSolutions = extractReferenceSolutionSet(referenceAnswer, variable)
   if (!studentSolutions.length || studentSolutions.length !== referenceSolutions.length) return null
 
   const paired = new Array(referenceSolutions.length).fill(false)

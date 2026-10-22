@@ -145,3 +145,20 @@ test('多解题：学生用「x=A或x=B」无下标写法 → 判对', () => {
     judgeAnswer('x=2/3√3或x=-2/3√3', 'x₁=2√3/3, x₂=2√3/3', 'answer').isCorrect,
     false)
 })
+
+test('多解题：三根/四根也按无序集合比（换元题的 y₁/y₂ 不得混进 x 的解集）', () => {
+  const student4 = '设x²+3x=y y²-2y-8=0 (y-4)(y+2)=0 y₁=4, y₂=-2 '
+    + '当y=4时 x²+3x-4=0 (x+4)(x-1)=0 x₁=-4, x₂=1 '
+    + '当y=-2时 x²+3x+2=0 (x+2)(x+1)=0 x₃=-2, x₄=-1 '
+    + '∴原方程的解为x₁=-4, x₂=1, x₃=-2, x₄=-1'
+  assert.deepEqual(
+    judgeAnswer(student4, 'x₁=1, x₂=-4, x₃=-1, x₄=-2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  assert.deepEqual(
+    judgeAnswer('x₁=0, x₂=3, x₃=-3', 'x₁=-3, x₂=0, x₃=3', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 四根错一个 → 判错
+  assert.equal(
+    judgeAnswer(student4, 'x₁=1, x₂=-4, x₃=-1, x₄=-3', 'answer').isCorrect,
+    false)
+})

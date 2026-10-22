@@ -28,24 +28,14 @@ const BAK_Q = 'questions_bak_20261022_multisol'
 const BAK_C = 'question_cache_bak_20261022_multisol'
 const pool = getPool()
 
-const SUB = { '1': '₁', '2': '₂', '₀': '₀', '₁': '₁', '₂': '₂' }
-const VALUE_RE = '[^\\s=，,;；。\\n）)]+'
+const SUB_DIGITS = '₁₂₃₄₅₆₇₈₉'
+// 值到分隔符/空白/等号为止。**不排除括号**：根式与分数常写成 `(2+√3)/2`，
+// 早先的字符类把 `)` 排除在外，抓到 `(2+√3` 后括号不配对就被丢弃，
+// 于是 9776fb58（4x²-8x+1=0）这条一直修不掉。括号配对校验放在 cleanRootValue 里。
+const VALUE_RE = '[^\\s=，,;；。\\n]+'
 
-/** 取某个变量第 n 个根的**最后一次**声明（终值），抓不到返回 null */
-function lastRootDecl(text, variable, rootNo) {
-  const re = new RegExp(`([a-zA-Z])\\s*_?${rootNo === 1 ? '[1₁]' : '[2₂]'}\\s*=\\s*(${VALUE_RE})`, 'g')
-  let hit = null, m
-  while ((m = re.exec(text)) !== null) {
-    // 排除复合下标：解析里「x₁x₂=c/a」「x₁+x₂=-b/a」是韦达定理的积与和，
-    // 不是第二个根。判据是匹配起点前一个字符不能是下标/字母/正负号。
-    // 实测误伤 82ed165b：`x₁x₂=-4/1=-4` 被读成 x₂=-4/1，答案差点被改成 `x₂=-4/1`。
-    const prev = text[m.index - 1] || ''
-    if (/[0-9₁₂₁₂a-zA-Z+＋\-−]/.test(prev)) continue
-    hit = m
-  }
-  if (!hit) return null
-  if (hit[1] !== variable) return null
-  const v = hit[2].replace(/[。.，,；;]+$/, '').replace(/\$+/g, '')
+function cleanRootValue(raw) {
+  const v = String(raw || '').replace(/[。.，,；;]+$/, '').replace(/\$+/g, '')
   if (!v || v.length > 28) return null
   if ((v.match(/\(/g) || []).length !== (v.match(/\)/g) || []).length) return null
   if ((v.match(/\{/g) || []).length !== (v.match(/\}/g) || []).length) return null
@@ -55,7 +45,35 @@ function lastRootDecl(text, variable, rootNo) {
   // LaTeX 命令（\frac / \sqrt）本身由反斜杠开头，先剥掉再判剩余是否含字母。
   const bare = v.replace(/\\[a-zA-Z]+/g, '')
   if (/[a-zA-Z]/.test(bare)) return null
+  // 未化简的表达式不是根：手写 `√(16-12)`、`√((-4)²-4×3)` 是解析里的代值过程，
+  // 题干实际问的是别的量。实测误伤 6829a06c：「ax²-4x+c=0 的两根分别是
+  // x₁=(4+√((-4)²-4×3))/2 …，那么 a=___」答案 1，被这条过程式改成了两个根。
+  if (/\u221a\([^()]*[+\-*/\u00d7\u00f7][^()]*\)/.test(bare)) return null
   return v
+}
+
+/**
+ * 收集某变量所有带下标的根声明，取**每个下标最后一次**出现（终值）。
+ * 下标不限于 1/2：9776fb58 是两根、56902690 是三次方程三根（x₁/x₂/x₃）。
+ * 返回 Map<下标数字, 值>。
+ */
+function collectRootDecls(text, variable) {
+  const re = new RegExp(`([a-zA-Z])\\s*_?([1-9${SUB_DIGITS}])\\s*=\\s*(${VALUE_RE})`, 'g')
+  const map = new Map()
+  let m
+  while ((m = re.exec(text)) !== null) {
+    // 排除复合下标：解析里「x₁x₂=c/a」「x₁+x₂=-b/a」是韦达定理的积与和，
+    // 不是第二个根。判据是匹配起点前一个字符不能是下标/字母/正负号。
+    // 实测误伤 82ed165b：`x₁x₂=-4/1=-4` 被读成 x₂=-4/1，答案差点被改成 `x₂=-4/1`。
+    const prev = text[m.index - 1] || ''
+    if (/[0-9₁₂₃₄₅₆₇₈₉a-zA-Z+＋\-−]/.test(prev)) continue
+    if (m[1] !== variable) continue
+    const idx = SUB_DIGITS.includes(m[2]) ? SUB_DIGITS.indexOf(m[2]) + 1 : Number(m[2])
+    const v = cleanRootValue(m[3])
+    if (!v) continue
+    map.set(idx, v)
+  }
+  return map
 }
 
 /**
@@ -70,9 +88,14 @@ export function extractRootPair(analysis) {
   const tail = text.slice(-300)
 
   for (const variable of ['x', 'y', 'm', 'n', 'a', 'k']) {
-    const v1 = lastRootDecl(tail, variable, 1)
-    const v2 = lastRootDecl(tail, variable, 2)
-    if (v1 && v2 && !answersEquivalent(v1, v2)) return { variable, values: [v1, v2] }
+    const map = collectRootDecls(tail, variable)
+    if (map.size < 2) continue
+    // 下标必须从 1 起连续（x₁/x₂ 或 x₁/x₂/x₃）：缺下标说明抓到的是过程残片
+    const keys = [...map.keys()].sort((x, y) => x - y)
+    if (keys[0] !== 1 || keys.some((k, i) => k !== i + 1)) continue
+    const values = keys.map(k => map.get(k))
+    if (values.some((v, i) => values.some((w, j) => i < j && answersEquivalent(v, w)))) continue
+    return { variable, values }
   }
 
   // 无下标形态：末句里同一变量两次赋值，用「或」或逗号分隔
@@ -90,6 +113,31 @@ export function extractRootPair(analysis) {
     if (values.length >= 2) return { variable, values }
   }
   return null
+}
+
+/**
+ * 严格复核：学生的根与新答案的根**逐项数值等价**才算真对。
+ *
+ * judgeAnswer 里还有「数字集合子集」这类宽松兜底：学生 `2√3+2√2` 的数字 {2,3}
+ * 全部落在参考 `(√6+2√3)/3` 的数字 {6,2,3} 里 ⇒ 判对，而两者数值差 3 倍
+ * （7d0eb929 实测）。补全答案时若只看 judgeAnswer，就会把这条错答从判错翻成判对。
+ */
+function rootsStrictlyMatch(studentAnswer, newAnswer, questionType) {
+  const variable = /^([a-zA-Z])/.exec(String(newAnswer).trim())?.[1] || 'x'
+  const stu = collectRootDecls(String(studentAnswer || ''), variable)
+  const ref = collectRootDecls(String(newAnswer), variable)
+  if (stu.size !== ref.size || !stu.size) return false
+  const used = new Set()
+  for (const v of stu.values()) {
+    let hit = null
+    for (const [k, w] of ref) {
+      if (used.has(k)) continue
+      if (answersEquivalent(v, w)) { hit = k; break }
+    }
+    if (hit == null) return false
+    used.add(hit)
+  }
+  return used.size === ref.size
 }
 
 /** answer 是否是「单值」（不含多空分隔符） */
@@ -163,13 +211,20 @@ async function main() {
 
   const plan = []
   for (const h of hits) {
-    const [v1, v2] = h.pair.values
     const v = h.pair.variable
-    const newAnswer = `${v}₁=${v1}, ${v}₂=${v2}`
+    const subs = '₁₂₃₄₅₆₇₈₉'
+    const newAnswer = h.pair.values
+      .map((val, i) => `${v}${subs[i] || i + 1}=${val}`)
+      .join(', ')
     if (String(newAnswer).trim() === String(h.answer).trim()) continue
     const before = judgeAnswer(h.student_answer || '', h.answer, h.question_type)
     const after = judgeAnswer(h.student_answer || '', newAnswer, h.question_type)
-    plan.push({ ...h, newAnswer, before, after })
+    // 补答案把判定从「错」翻成「对」时，必须学生真答对（根逐项数值等价）。
+    // judgeAnswer 的宽松兜底（数字集合子集 / 整串数学等价）会把明显不同的根式判成同一个，
+    // 7d0eb929 就是这样：学生 2√3+2√2、参考 (√6+2√3)/3，补全后假判对。
+    const flipToTrue = after.isCorrect === true && before.isCorrect !== true
+    const trusted = !flipToTrue || rootsStrictlyMatch(h.student_answer, newAnswer, h.question_type)
+    plan.push({ ...h, newAnswer, before, after, trusted })
   }
 
   const flips = plan.filter(p => p.before.isCorrect !== p.after.isCorrect)
@@ -181,7 +236,7 @@ async function main() {
     console.log(`题 ${p.id.slice(0, 8)} | ${String(p.content).replace(/\s+/g, ' ').slice(0, 46)}`)
     console.log(`  答案：${p.answer}  →  ${p.newAnswer}   (${p.answer_source}, ${p.created_at.toISOString().slice(0, 16)})`)
     console.log(`  学生：${String(p.student_answer || '').replace(/\s+/g, ' ').slice(0, 64)}`)
-    console.log(`  判定：${String(p.before.isCorrect)}  →  ${String(p.after.isCorrect)}   review_status=${p.review_status ?? 'null'}`)
+    console.log(`  判定：${String(p.before.isCorrect)}  →  ${String(p.after.isCorrect)}   review_status=${p.review_status ?? 'null'}${p.trusted ? '' : '  [判定存疑，不重判]'}`)
   }
 
   if (!APPLY) {
@@ -215,8 +270,9 @@ async function main() {
   }
   console.log(`答案已更新：questions ${plan.length} 条 / question_cache ${cacheFixed} 条`)
 
-  let settled = 0, skippedReviewed = 0, unchanged = 0, failed = 0
+  let settled = 0, skippedReviewed = 0, unchanged = 0, failed = 0, untrusted = 0
   for (const p of plan) {
+    if (!p.trusted) { untrusted += 1; continue }
     if (p.review_status != null) { skippedReviewed += 1; continue }
     if (p.after.isCorrect === p.is_correct) { unchanged += 1; continue }
     if (!p.student_id) { unchanged += 1; continue }
@@ -235,7 +291,7 @@ async function main() {
       console.error(`  结算失败 q=${p.id.slice(0, 8)}: ${e.message}`)
     }
   }
-  console.log(`重判结算：${settled} 条（结论未变 ${unchanged}，已复核跳过 ${skippedReviewed}，失败 ${failed}）`)
+  console.log(`重判结算：${settled} 条（结论未变 ${unchanged}，已复核跳过 ${skippedReviewed}，判定存疑跳过 ${untrusted}，失败 ${failed}）`)
 
   const cleared = await pool.query(`
     UPDATE questions SET ai_answer_risk_reason = NULL, updated_at = NOW()
