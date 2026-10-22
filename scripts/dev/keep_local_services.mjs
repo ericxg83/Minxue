@@ -30,7 +30,7 @@
  */
 import { spawn } from 'node:child_process'
 import { appendFile, mkdir } from 'node:fs/promises'
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync, unlinkSync, openSync, closeSync, statSync, renameSync, appendFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnLocal } from '../../server/utils/localSpawn.js'
@@ -143,16 +143,43 @@ function listeners(port) {
   return [...pids]
 }
 
+// ── 服务日志落盘（2026-10-22）──────────────────────────────────────────────
+// 历史 spawn 用 stdio:'ignore'，把后端 stdout/stderr **全部丢弃**。代价在 2026-10-22 暴露：
+// 「6 个批改任务卡一整天」排查时后端反复重启，可日志里既没有崩溃堆栈、也没有
+// index.js 早就埋好的「[生命周期] 进程退出 code=…」面包屑——只能靠重启时间反推，
+// 排障最大的黑洞就是没证据。改为追加写 logs/<服务>-live.log（后端崩溃原因一眼可读）。
+// 只留一代 .1（>5MB 轮转），避免日志无限增长。
+const LOG_MAX_BYTES = 5 * 1024 * 1024
+function openServiceLog(name) {
+  const file = resolve(ROOT, 'logs', `${name}-live.log`)
+  try {
+    if (existsSync(file) && statSync(file).size > LOG_MAX_BYTES) {
+      const bak = `${file}.1`
+      if (existsSync(bak)) unlinkSync(bak)
+      renameSync(file, bak)
+    }
+    appendFileSync(file, `\n===== ${new Date().toISOString()} 守护拉起 ${name} =====\n`)
+    return openSync(file, 'a')
+  } catch {
+    return 'ignore' // 落盘失败不能连累拉起服务
+  }
+}
+
 function spawnService(svc) {
   const env = { ...process.env }
   if (existsSync(ESBUILD_PATH)) env.ESBUILD_BINARY_PATH = ESBUILD_PATH
+  const logFd = openServiceLog(svc.name)
   const child = spawn(process.execPath, svc.args, {
     cwd: ROOT,
     detached: true,
-    stdio: 'ignore',
+    // 子进程继承 fd 写日志；父进程随即关闭自己的句柄，不留泄漏
+    stdio: logFd === 'ignore' ? 'ignore' : ['ignore', logFd, logFd],
     windowsHide: true,
     env,
   })
+  if (typeof logFd === 'number') {
+    try { closeSync(logFd) } catch { /* 已继承，关父句柄失败不影响子进程 */ }
+  }
   child.unref()
 }
 
