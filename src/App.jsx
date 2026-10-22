@@ -421,6 +421,9 @@ export default function App() {
           setReprintQuestions(questions || [])
         } catch (error) {
           console.error('加载题目失败:', error)
+          // PrintPreview 直接吃 questions 渲染；静默清空会让老师拿到空白重印卷且不知道为什么
+          // （与作业/错题列表同口径：加载失败必须有可见反馈，不得停在「空白页」误导）
+          Toast.show({ message: '重印题目加载失败，请重试', type: 'error', duration: 2500 })
           setReprintQuestions([])
         }
       }

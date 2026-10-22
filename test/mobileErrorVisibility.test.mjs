@@ -15,9 +15,10 @@
  *
  * 反向自检：harness 套在修复前旧文件（_r105q_old/）上必须判红，否则是空锁。
  */
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
+import os from 'node:os'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { anchoredSlice, anchoredRange } from './sourceLockKit.mjs'
@@ -176,6 +177,12 @@ export function collectFailures(dir) {
     const leSeg = anchoredSlice(app, "console.error('加载试卷失败:', error)", 400, LE_LABEL, fails)
     if (leSeg !== null && !leSeg.includes('Toast.show')) fails.push(LE_LABEL)
 
+    // r327：重印题目加载失败必须 Toast——PrintPreview 直接吃 questions 渲染，
+    // 静默清空=空白重印卷且无反馈（与作业/错题列表同口径：加载失败必须有可见反馈）
+    const RP_LABEL = 'App.jsx: 重印题目加载失败必须 Toast（静默清空会让老师拿到空白重印卷）'
+    const rpSeg = anchoredSlice(app, "console.error('加载题目失败:', error)", 400, RP_LABEL, fails)
+    if (rpSeg !== null && !rpSeg.includes('Toast.show')) fails.push(RP_LABEL)
+
     // r112q（提案⑱-2）：错题本两个加载函数落地前必须校验当前学生，防串数据
     const GUARD = 'useStudentStore.getState().currentStudent?.id !== studentId'
     const WB_FN_LABEL = 'App.jsx: loadWrongBookData 缺「切换学生竞态」守卫（⑱-2）'
@@ -236,6 +243,30 @@ test('锁健全性（r300）：去重竞态判据套 c3e1e85 修复前形状必�
   assert.equal(wrongBookCatchFailure(postFix), null, '修复后形状必须判绿')
 })
 
+// r327 专用反向自检：重印题目失败判据必须能区分「无 Toast 的修复前形状」（判红）
+// 与「加 Toast 的修复后形状」（判绿）——双向证明该判据非空锁且不误伤。
+test('锁健全性（r327）：重印题目失败判据套「无 Toast」坏样本必须判红、套「有 Toast」好样本必须判绿', () => {
+  const dir = join(os.tmpdir(), '_r327_reprint_probe', 'src')
+  mkdirSync(dir, { recursive: true })
+  const RP = '重印题目加载失败必须 Toast'
+  try {
+    // 坏样本：重印题目 catch 无 Toast（PrintPreview 直接吃 questions，静默清空=空白重印卷）
+    writeFileSync(join(dir, 'App.jsx'),
+      `const loadReprint = async () => { try { await getQuestionsByIds(ids) } catch (error) { console.error('加载题目失败:', error); setReprintQuestions([]) } }`)
+    const bad = collectFailures(dir)
+    assert.ok(bad.some((f) => f.includes(RP)), `坏样本（无 Toast）必须判红，实际: ${JSON.stringify(bad)}`)
+
+    // 好样本：重印题目 catch 有 Toast
+    writeFileSync(join(dir, 'App.jsx'),
+      `const loadReprint = async () => { try { await getQuestionsByIds(ids) } catch (error) { console.error('加载题目失败:', error); Toast.show({ message: '重印题目加载失败，请重试', type: 'error' }); setReprintQuestions([]) } }`)
+    const good = collectFailures(dir)
+    assert.ok(!good.some((f) => f.includes(RP)), `好样本（有 Toast）必须判绿，实际: ${JSON.stringify(good)}`)
+  } finally {
+    // 忽略清理失败（本机 safe-delete shim 会把 rmSync 改走 trash 并报错；临时目录在仓库外，残留无害）
+    try { rmSync(join(os.tmpdir(), '_r327_reprint_probe'), { recursive: true, force: true }) } catch {}
+  }
+})
+
 test('锁健全性：判据套合成坏样本必须判红（防空锁，不依赖 git 状态）', () => {
   // 早期用 _r105q_old（每轮从 HEAD 重导）做反向自检；但历史修复已合入 HEAD 后，
   // HEAD 对所有旧规则都已合规→旧树 0 红，阈值会误报。改为内联构造一份「全坏」
@@ -268,7 +299,8 @@ test('锁健全性：判据套合成坏样本必须判红（防空锁，不依�
      const c = () => { try {} catch (error) { console.error('加载任务失败:', error) } }
      const d = () => { try {} catch (error) { console.error('加载错题失败:', error) } }
      const e2 = () => { try {} catch (error) { console.error('加载更多错题失败:', error) } }
-     const f = () => { try {} catch (error) { console.error('加载试卷失败:', error) } }`)
+     const f = () => { try {} catch (error) { console.error('加载试卷失败:', error) } }
+     const g = () => { try {} catch (error) { console.error('加载题目失败:', error) } }`)
 
   const probe = collectFailures(base)
   // 合成树故意踩遍全部判据，实际命中应 ≥14（学生 3catch+antd+删除顺序+防连点
