@@ -910,3 +910,48 @@ test('equation solution-set channel: never widens the pass gate', () => {
     judgeAnswer('x₁=1', 'x=1或x=2', 'answer'),
     { isCorrect: true, unrecognized: false })
 })
+
+// ── 符号表达式 vs 纯数值：数值通道不得放水（2026-10-23 用户截图 #33）──────────
+// 截图题：化简 √a² + √(a+b)² - |b-a|，参考 -a-2b。
+// 学生把 |a+b| 展开成 +(a+b)（应为 -a-b）：
+//   |a| + |a+b| - |b-a|
+//   -a + a - b - b + a =        ← 第二项符号错
+//   a - 2b
+// 旧实现判对，原因是数值通道只认数字：parseValueWithUnit 把字母与**前导负号**一起剥掉，
+// "a-2b" 与 "-a-2b" 都算成 2；extractAndCompare 的数字集合同样是 {2} vs {2}。
+// 两根支柱：① 收窄到最终答案后再跑一次「只差符号」闸；② 符号表达式 vs 纯数值禁用数值通道。
+test('symbolic answers: process-form answer differing only by a sign is judged wrong', () => {
+  // 用户截图原样（多行推导 + 末行结论）
+  assert.deepEqual(
+    judgeAnswer('$|a|+|a+b|-|b-a|$\n$-a+a-b-b+a=a-2b$', '-a-2b', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('a-2b', '-a-2b', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('a - 2b', '-a-2b', 'answer'), { isCorrect: false, unrecognized: false })
+})
+
+test('symbolic answers: numeric-only replies never match a symbolic reference', () => {
+  // 改前全部判对（数字碰巧相同）：'2'/'x=2' 对 -a-2b、'x=8' 对 5≤x≤8、'0' 对 -5≤x≤0
+  assert.deepEqual(judgeAnswer('2', '-a-2b', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x=2', '-a-2b', 'answer'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x=8', '5≤x≤8', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('0', '-5≤x≤0', 'fill'), { isCorrect: false, unrecognized: false })
+  assert.deepEqual(judgeAnswer('√3', '√3(p+q)', 'fill'), { isCorrect: false, unrecognized: false })
+  // 反向（学生写符号、参考是纯数值）同样不得靠数字放行
+  assert.deepEqual(judgeAnswer('3^(n-2)', '1', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
+test('symbolic answers: equivalent notations still pass (do not over-tighten)', () => {
+  // 同类项换序
+  assert.deepEqual(judgeAnswer('-2b-a', '-a-2b', 'answer'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('3b+2a', '2a+3b', 'answer'), { isCorrect: true, unrecognized: false })
+  // LaTeX 与中文括号/√ 混写（全库 5669f82a 实测：整片拦掉会误伤）
+  assert.deepEqual(
+    judgeAnswer('(x-\\frac{3+\\sqrt{5}}{2})(x-\\frac{3-\\sqrt{5}}{2})', '（x-（3+√5）/2）（x-（3-√5）/2）', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // Unicode 上标 vs LaTeX 幂
+  assert.deepEqual(judgeAnswer('2²ⁿ+2²ᵐ', '2^{2n}+2^{2m}', 'answer'), { isCorrect: true, unrecognized: false })
+  // 带单位 / 分数等价行为不变
+  assert.deepEqual(judgeAnswer('5 cm', '5厘米', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('4.8', '24/5', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('x=-2', '-2', 'fill'), { isCorrect: true, unrecognized: false })
+})

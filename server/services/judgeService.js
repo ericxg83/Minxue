@@ -257,7 +257,12 @@ export function detectReferenceMismatch({ sheetType, referenceAnswer, answerType
 export const UNJUDGED_REASONS = Object.freeze({
   no_reference_answer: '缺少参考答案，无法自动判定',
   unverifiable_reference: '参考答案无法自动核对（含略/见解析/答案不唯一）',
-  subjective: '主观题需人工判定',
+  // 2026-10-23 文案改口（负责人截图 #20：学生 3/4、参考 3/4，却标「主观题需人工判定」）。
+  // 旧文案是「解答题一律不自动判、直接转人工」那条旧规则的化石：它把**题型**说成了
+  // 需要人工的原因，读起来像「解答题天生无法自动批改」。而现行实现是**先判等**，
+  // 只有「判不出等价」或「识别置信度不足」才回落人工（见 worker.js 的 SUBJECTIVE_TYPES 分支）。
+  // 老师要的是「为什么这题轮到我」，所以文案只描述事实：AI 核过、没能确认一致。
+  subjective: '解答题已自动核对，未能确认与参考答案一致，请人工核对',
   low_confidence: '识别置信度不足，需人工确认',
   reference_mismatch: '参考答案与本题不匹配，已转为人工判定',
   // 任务整体失败/中止（2026-09-22）：此时题目连参考答案都没来得及生成，
@@ -790,12 +795,84 @@ function parseValueWithUnit(s) {
 }
 
 /**
+ * 判断一个答案（收窄到最终答案后）是不是**符号表达式**（含变量字母）。
+ *
+ * 背景：`parseValueWithUnit` 会把非数字/运算符字符全部剥掉再 eval，字母与正负号一起被吃：
+ *   `-a-2b` → `2`、`a-2b` → `2`（前导负号被"前导运算符残渣"规则一并剥掉）、`2a+3b` → `23`。
+ * 于是含变量的参考答案在数值通道里退化成一个数字，任何"数字碰巧相同"的作答都会判对
+ * （2026-10-23 用户截图 #33：化简 √a²+√(a+b)²-|b-a|，参考 -a-2b，学生写成 a-2b ⇒ 判对）。
+ * 符号等价必须由 isMathEquivalent（代入测试值逐点比）判定，数值通道对它没有判据力。
+ *
+ * 判据刻意收窄，避免误伤"带单位/带中文叙述"的数值答案：
+ *   · 连续字母不算（cm/kg/min/ml、AB=∠ 两端字母、sin/cos 这类函数名）；
+ *   · 字母的左右邻居必须是数学符号（数字、运算符、括号、等号、空格、边界…），
+ *     「a的值为 3」里贴汉字的不算（那是叙述，不是表达式）；
+ *   · 数字后紧跟的单字母单位（5 m / 4.8h / 5kg 已由连续字母覆盖）不算变量。
+ */
+const UNIT_SINGLE_LETTERS = new Set(['m', 's', 'g', 'h', 't', 'l'])
+function isSymbolicAnswer(value) {
+  const text = narrowToFinalAnswer(String(value ?? '')) || String(value ?? '')
+  const chars = [...text]
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]
+    if (!/[A-Za-z]/.test(ch)) continue
+    const prev = chars[i - 1] ?? ''
+    const next = chars[i + 1] ?? ''
+    if (/[A-Za-z]/.test(prev) || /[A-Za-z]/.test(next)) continue
+    const mathNeighbor = (c) => c === '' || /[0-9+\-−–—*\/^()（）\[\]【】{}｛｝|=<>≤≥√·.．,，。:：;；\s%°]/.test(c)
+    if (!mathNeighbor(prev) || !mathNeighbor(next)) continue
+    const prevOfPrev = chars[i - 2] ?? ''
+    const unitAfterNumber = UNIT_SINGLE_LETTERS.has(ch.toLowerCase()) &&
+      (/[0-9]/.test(prev) || (/\s/.test(prev) && /[0-9]/.test(prevOfPrev)))
+    if (unitAfterNumber) continue
+    return true
+  }
+  return false
+}
+
+/**
+ * 「纯数值型」：除数字、运算符、括号、百分号、根号外没有任何字符（LaTeX 命令、汉字、
+ * 变量字母都不算）。用于区分「学生确实只写了个数」与「学生用了别的写法」。
+ */
+function isPurelyNumericAnswer(value) {
+  const text = narrowToFinalAnswer(String(value ?? '')) || String(value ?? '')
+  const rest = text.replace(/[0-9\s+\-−–—×÷*\/^().,，。:：;；=<>≤≥%√∛°\[\]{}（）²³⁴⁵⁶⁷⁸⁹⁰¹]/g, '')
+  return rest === ''
+}
+
+/**
+ * 数值通道（parseValueWithUnit 的"剥字母再 eval" + extractAndCompare 的数字集合）是否适用。
+ *
+ * 这两条通道都只认数字，字母、正负号、算子全部丢弃：
+ *   `-a-2b` → 2、`a-2b` → 2（前导负号被"前导运算符残渣"规则一并剥掉）、`2a+3b` → 23。
+ * 于是含变量的参考答案会退化成一袋数字，任何"数字碰巧相同"的作答都判对
+ * （2026-10-23 用户截图 #33 就是这条通道：参考 -a-2b，学生写成 a-2b 判对）。
+ *
+ * 只在**形态不对称**时禁用：
+ *   · 一侧是符号表达式、另一侧是「纯数值」（学生只写了个数）⇒ 数值通道没有判据力，
+ *     一律不放行（`2` / `x=8` / `0` 与 `-a-2b`、`5≤x≤8`、`-5≤x≤0` 不能再判对）；
+ *   · 两侧都是符号表达式时**保留**原行为 —— 大量正确答案依赖它容忍 ²/^2、LaTeX、
+ *     Unicode 上标等写法差异（全库审计：整片拦掉会翻转 123 条，其中多数是真对的答案）；
+ *   · 非纯数值的另一侧（LaTeX 命令、带单位的汉字叙述、`\ge 2` 这类）也不拦，
+ *     避免把"学生漏写变量名但值写对"的填空题误判成错。
+ */
+function blocksNumericFallback(a, b) {
+  const symA = isSymbolicAnswer(a)
+  const symB = isSymbolicAnswer(b)
+  if (symA === symB) return false
+  const plain = symA ? b : a
+  return isPurelyNumericAnswer(plain)
+}
+
+/**
  * Pure numeric equivalence check that strips units/letters and compares values.
  * Handles "37/3km" vs "12+1/3KM", "1/2" vs "0.5", "4.8H" vs "4.8小时",
  * and cross-unit equivalents like "120秒" vs "2分钟" / "3千米" vs "3000米".
  * Uses a sanitizing regex (no eval of arbitrary code, no variables).
  */
 function isNumericEquivalent(a, b) {
+  // 符号表达式 vs 纯数值：数值永远不可能相等（判据见 blocksNumericFallback）
+  if (blocksNumericFallback(a, b)) return false
   const numA = parseValueWithUnit(a)
   const numB = parseValueWithUnit(b)
   if (numA == null || numB == null) return false
@@ -1599,6 +1676,10 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
 
   // Helper: 单个答案片段的数值提取比较
   const extractAndCompare = (rawS, rawR) => {
+    // 符号表达式 vs 纯数值：数字袋子没有判据力（'2' 与 '-a-2b' 曾判对）。
+    // 判据与 isNumericEquivalent 共用 blocksNumericFallback。
+    if (blocksNumericFallback(rawS, rawR)) return false
+
     const extractNumericValues = (raw) => {
       let s = String(raw || '')
       s = s.replace(/\\div/gi, '/')
@@ -2057,6 +2138,21 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (sS && rS && sS === rS && /[0-9A-Za-z\u4e00-\u9fa5]/.test(sS)) {
       return { isCorrect: true, unrecognized: false }
     }
+  }
+
+  // ── 过程型答案的「只差负号」早退闸（2026-10-23，用户截图 #33）──────────────
+  // 上面 1555 附近的整串符号闸比较的是**原始学生答案**：学生写了解题过程时整串永远
+  // 不等于参考，闸门必然失效，随后 isNumericEquivalent 把字母与前导负号一起剥掉
+  // （"a-2b" 与 "-a-2b" 都算成 2）⇒ 判对。
+  // 截图题：化简 √a² + √(a+b)² - |b-a|，参考 -a-2b，学生把 |a+b| 展开成 +(a+b)：
+  //   |a| + |a+b| - |b-a|
+  //   -a + a - b - b + a =        ← 第二项应为 -a-b，写成 +a-b
+  //   a - 2b
+  // 收窄后 "a-2b" vs 参考 "-a-2b" 正是「去符号后结构相同、负号个数不同」，
+  // 用它再跑一次同一判据（signOnlyMismatch 内含归一/统一分隔符）。
+  // 方向只判错，不放对；两侧都是符号表达式时 isMathEquivalent 仍会先行给出等价结论。
+  if (signOnlyMismatch(narrowedStudent, referenceAnswer)) {
+    return { isCorrect: false, unrecognized: false }
   }
 
   // Pure numeric equivalence with unit tolerance
