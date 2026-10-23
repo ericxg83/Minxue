@@ -312,17 +312,31 @@ export function voteAnswers(answers) {
 /**
  * 把投票结果转成给老师看的一句话（写进 questions.ai_answer_risk_reason）。
  * 一致 / 单样本 返回 null —— 没有问题就不要制造噪音。
+ *
+ * ── 措辞人话化（2026-10-23 负责人要求「允许多种答案的，文案里要具体写明」）──────
+ * 旧文案「参考答案存疑：多路求解多数一致（候选：…，求解通道 …）」是给排查人看的黑话：
+ * 老师说「什么叫多路求解」「就这一道题难道有多个答案吗」—— 看不懂就等于没有提示。
+ * 新文案做三件事：
+ *   ① 把「多路求解」换成「不同模型给出的答案」，一眼能懂分歧从哪来；
+ *   ② **具体列出每一种答案**（原样保留答案文本，不做归一化展示）；
+ *   ③ 明写「若这几种都成立，学生写任一种都算对」—— 这正是老师最需要的判据：
+ *      英语 begin to do / begin doing 这类双解、数学同一值的不同写法，都属于此列。
+ * 注意文案只描述分歧事实，**不替老师断言哪种成立**（系统判不了语法），
+ * 也不参与任何判定 —— 消费方只看 ai_answer_risk_reason 是否为空来标记「待核对」。
  */
 export function describeConsensus(consensus, { engine = null } = {}) {
   if (!consensus || consensus.total < 2) return null
   if (consensus.verdict === 'unanimous') return null
-  const list = consensus.groups
+  const groups = consensus.groups || []
+  const list = groups
     .map(g => `${g.answer}（${g.count}/${consensus.total}）`)
-    .join(' / ')
-  const tag = consensus.verdict === 'majority' ? '多路求解多数一致' : '多路求解结果分歧'
-  const engineNote = engine ? `，求解通道 ${engine}` : ''
+    .join('、')
+  const head = consensus.verdict === 'majority'
+    ? `这道题不同模型给出了 ${groups.length} 种答案：${list}。若这几种写法都成立，学生写任一种都算对，请核对`
+    : `这道题不同模型给出了 ${groups.length} 种答案、彼此不一致：${list}。请重点核对后再决定`
   const consistencyNote = Number.isFinite(consensus.selfConsistentCount) && Number.isFinite(consensus.sampleCount)
-    ? `，其中与解析自洽 ${consensus.selfConsistentCount}/${consensus.sampleCount}`
+    ? `（其中与解析自洽 ${consensus.selfConsistentCount}/${consensus.sampleCount}）`
     : ''
-  return `参考答案存疑：${tag}（候选：${list}${engineNote}${consistencyNote}），请人工核对`
+  const engineNote = engine ? `。求解通道 ${engine}` : ''
+  return `参考答案存疑：${head}${consistencyNote}${engineNote}`
 }

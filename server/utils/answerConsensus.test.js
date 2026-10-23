@@ -119,12 +119,24 @@ test('文案：一致或单样本不产生噪音', () => {
   assert.equal(describeConsensus(voteAnswers(['±10'])), null)
 })
 
-test('文案：分歧必须列出候选与票数，并带上求解通道', () => {
+test('文案：分歧必须列出每一种答案、票数与求解通道，并写明「多种写法都算对」', () => {
   const text = describeConsensus(voteAnswers(['±5', '±10', '±10']), { engine: 'Huihuiyun:deepseek-v4-flash' })
+  // 人话化：不再出现「多路求解」这种排查黑话
+  assert.ok(!text.includes('多路求解'), text)
+  // 具体写明有几种答案
+  assert.ok(text.includes('2 种答案'), text)
   assert.ok(text.includes('±10（2/3）'), text)
   assert.ok(text.includes('±5（1/3）'), text)
+  // 老师最需要的那句：多种写法都成立时，学生写任一种都算对
+  assert.ok(text.includes('学生写任一种都算对'), text)
   assert.ok(text.includes('Huihuiyun:deepseek-v4-flash'), text)
-  assert.ok(text.includes('人工核对'), text)
+})
+
+test('文案：三路互不相同要说明「彼此不一致」，不得谎称有共识', () => {
+  const text = describeConsensus(voteAnswers(['±2√5', '±5', '±10']))
+  assert.ok(text.includes('3 种答案'), text)
+  assert.ok(text.includes('彼此不一致'), text)
+  assert.ok(!text.includes('都算对'), text)
 })
 
 test('归一化：剥掉「答案 + 自证尾巴」（2026-09-21 存量重跑实测）', () => {
