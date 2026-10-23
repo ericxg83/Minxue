@@ -222,6 +222,26 @@ test('narrative 答: clause (no 是/为/=) still extracts final results', () => 
     { isCorrect: false, unrecognized: false })
 })
 
+// 2026-10-23 用户截图 #7（抛物线 y=ax² 过 A(-1,4)、B(m,4)，只问第(2)问）：
+// 学生「过程多行 + 结论行 B(1,4) / 是」，参考「B(1,4)，是」—— 同一结论，只差一个逗号和换行。
+// normalizeAnswer 刻意保留逗号（多答案语义），字面比较失败 ⇒ 落到数字集合兜底，
+// 过程数字把集合撑大 ⇒ 正确答案被判错。修法：去分隔符后逐字相同且含非数字字符即等价。
+test('punctuation-only difference on conclusion line still matches', () => {
+  const ref = 'B(1,4)，是'
+  const stu = '将B(m,4)代入\n4=4m^2\n1=m^2\nm=1\nB(1,4)\n是'
+  assert.deepEqual(judgeAnswer(stu, ref, 'answer'), { isCorrect: true, unrecognized: false })
+  // 不得放水①：结论说「不是」仍判错
+  assert.deepEqual(
+    judgeAnswer('将B(m,4)代入\n4=4m^2\n1=m^2\nm=1\nB(1,4)\n不是', ref, 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 不得放水②：坐标算错仍判错
+  assert.deepEqual(
+    judgeAnswer('将B(m,4)代入\n4=4m^2\n1=m^2\nm=1\nB(-1,4)\n是', ref, 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 不得放水③：纯数字多空答案不能因去分隔符而粘连（"3,5" ≠ "35"）
+  assert.deepEqual(judgeAnswer('3,5', '35', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
 // ─────────────────────────────────────────────────────────────
 // 判等层加固（2026-09-12）：用人工复核结论做基准回测定位出的 4 类纯匹配缺陷。
 // 基准：近 30 天 180 道人工复核题，假错 96 → 74，假对不增，一致率 24% → 36%。

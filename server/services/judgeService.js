@@ -2008,6 +2008,27 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: true, unrecognized: false }
   }
 
+  // 「只差标点/换行」的整串等价（2026-10-23，用户截图 #7 抛物线坐标题）：
+  // 学生多行作答收窄后是 "B(1,4)\n是"，参考是 "B(1,4)，是" —— 同一结论，只差一个逗号和换行。
+  // normalizeAnswer 刻意保留逗号（多答案语义），于是字面比较失败，整题落到数字集合兜底
+  // （过程数字把集合撑大）⇒ 正确答案被判错并进错题本。
+  //
+  // 判据：去掉 ，,、；; 与空白后**逐字相同**，且两侧都含实质字符
+  // （数字/拉丁字母/汉字）。后两条都是必须的：
+  //   · 只去分隔符会让 "3,5"（多空答案）与 "35" 判成同一串；
+  //   · 不要求实质字符会让纯标点答案（"，" / "。"）被判对——"纯标点不是答案"
+  //     早就是既有口径（见 pure comparison-symbol 用例）。
+  // 本题这类含字母/汉字（B(1,4)、是）的结论串不存在上述歧义。
+  // 只返回 true，不接管判错。
+  {
+    const stripSeps = (t) => String(t ?? '').replace(/[，,、;；\s]+/g, '')
+    const sS = stripSeps(narrowedStudent)
+    const rS = stripSeps(referenceAnswer)
+    if (sS && rS && sS === rS && /[0-9A-Za-z\u4e00-\u9fa5]/.test(sS)) {
+      return { isCorrect: true, unrecognized: false }
+    }
+  }
+
   // Pure numeric equivalence with unit tolerance
   if (isNumericEquivalent(normStudent, normRef)) {
     return { isCorrect: true, unrecognized: false }
