@@ -79,6 +79,19 @@ test('ratio answers compare by value, not by digit set', () => {
   assert.deepEqual(judgeAnswer(`${SQRT}6:2`, `${SQRT}3:2`, 'fill'), { isCorrect: false, unrecognized: false })
 })
 
+// 2026-10-23 用户截图 #7（位似面积比）：参考「1:4」、学生「1/4」——同一结论两种写法
+// （a:b 的比值就是 a/b），旧实现三条通道全挂 ⇒ 正确答案被判错并进错题本。
+// 只认「左右项与分子分母逐项相等」，顺序反 / 连比一律不认。
+test('ratio vs fraction: a:b equals a/b, but never reversed', () => {
+  assert.deepEqual(judgeAnswer('1/4', '1:4', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('1:4', '1/4', 'fill'), { isCorrect: true, unrecognized: false })
+  assert.deepEqual(judgeAnswer('1 / 4', '1:4', 'fill'), { isCorrect: true, unrecognized: false })
+  // 顺序颠倒不是同一件事
+  assert.deepEqual(judgeAnswer('3/2', '2:3', 'fill'), { isCorrect: false, unrecognized: false })
+  // 三项连比不适用本规则
+  assert.deepEqual(judgeAnswer('1/4', '1:4:9', 'fill'), { isCorrect: false, unrecognized: false })
+})
+
 // 答案脚手架剥离：只吃行首闭集词，绝不误伤句中同形词或纯叙述答案
 test('stripAnswerScaffolding removes only leading narrative shells', () => {
   const CN = (s) => s

@@ -2018,6 +2018,33 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     return { isCorrect: true, unrecognized: false }
   }
 
+  // 「比 ↔ 比值」等价（2026-10-23，用户截图 #7 位似面积比）：
+  // 参考「1:4」、学生「1/4」—— 同一个结论的两种写法（a:b 的比值就是 a/b），
+  // 但既有通道全挂：normalize 后字面不等；parseRatioValues 只认带冒号的一侧
+  // （"1/4" split(':') 只有 1 段 → null，比例通道根本不进）；isNumericEquivalent /
+  // isMathEquivalent 都读不懂 "1:4" ⇒ 正确答案被判错并进错题本。
+  //
+  // 判据刻意收窄：两侧各解析成两项 [a,b] / [a',b']，**逐项相等**才认。
+  // 顺序不能反（「2:3」vs「3/2」不是同一件事），三项及以上的连比不匹配本规则
+  // （仍走下方原有比例通道）。只返回 true，不接管判错。
+  {
+    const RATIO_PAIR_RE = /^([0-9]+(?:\.[0-9]+)?)\s*[:：∶]\s*([0-9]+(?:\.[0-9]+)?)$/
+    const FRACTION_PAIR_RE = /^([0-9]+(?:\.[0-9]+)?)\s*\/\s*([0-9]+(?:\.[0-9]+)?)$/
+    const toPair = (re, v) => {
+      const m = String(v ?? '').trim().match(re)
+      return m ? [Number(m[1]), Number(m[2])] : null
+    }
+    const pairEq = (p, q) => !!p && !!q &&
+      Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9
+    const sAsFrac = toPair(FRACTION_PAIR_RE, studentAnswer)
+    const rAsRatio = toPair(RATIO_PAIR_RE, referenceAnswer)
+    const sAsRatio = toPair(RATIO_PAIR_RE, studentAnswer)
+    const rAsFrac = toPair(FRACTION_PAIR_RE, referenceAnswer)
+    if (pairEq(sAsFrac, rAsRatio) || pairEq(sAsRatio, rAsFrac)) {
+      return { isCorrect: true, unrecognized: false }
+    }
+  }
+
   // 比例答案（"√6:2" vs "√3:√2"）：整串是一个比，比里各项的顺序有意义，
   // 两边都能逐段求出数值时以比例判定为最终结果——不能落到下面
   // extractAndCompare 的"排序后数字集合"兜底，那会把 2:3 和 3:2 判成对。
