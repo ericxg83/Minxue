@@ -2,7 +2,7 @@ import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds, get
 import { triggerCustomHTMLPrint } from './browserPrint'
 import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
-import { buildPaperCSS, renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
+import { renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
 import { periodWord } from './reportPeriodWord'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
