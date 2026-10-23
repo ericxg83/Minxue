@@ -183,6 +183,32 @@ test('answer-statement (答:) final results match reference', () => {
     { isCorrect: false, unrecognized: false })
 })
 
+// 2026-10-23 用户截图：解答题 #17（+4.2-(-15.6)=19.8m / +4.2-(-30.5)=34.7m）。
+// 「答：点A比点B高19.8m，点A比点C高34.7m」这类**叙述式答句**不含「是/为/等于/=」，
+// 旧 extractAnswerStatementResults 直接返回 [] ⇒ 答句通道失效，落到 extractAndCompare；
+// 而过程数字（4.2 / 15.6 / 30.5）撑大学生数字集合 ⇒ 正确答案被判错（假红叉进错题本）。
+// 修法：答句无「是/为」时，按分句取唯一数字（每分句恰好一个数字，否则整体放弃）。
+test('narrative 答: clause (no 是/为/=) still extracts final results', () => {
+  const stu = '+4.2 - (-15.6) = 19.8m\n+4.2 - (-30.5) = 34.7m\n答：点A比点B高19.8m，点A比点C高34.7m'
+  assert.deepEqual(judgeAnswer(stu, '19.8，34.7', 'answer'), { isCorrect: true, unrecognized: false })
+
+  // 不得放水①：第二问真答错（30.5 ≠ 34.7）仍判错
+  assert.deepEqual(
+    judgeAnswer('+4.2 - (-15.6) = 19.8m\n+4.2 - (-30.5) = 30.5m\n答：点A比点B高19.8m，点A比点C高30.5m',
+      '19.8，34.7', 'answer'),
+    { isCorrect: false, unrecognized: false })
+
+  // 不得放水②：只答一问（段数不足）不判对
+  assert.deepEqual(
+    judgeAnswer('+4.2 - (-15.6) = 19.8m\n答：点A比点B高19.8m', '19.8，34.7', 'answer'),
+    { isCorrect: false, unrecognized: false })
+
+  // 不得放水③：分句里出现多个数字（过程/题干混入）→ 整体放弃，不猜
+  assert.deepEqual(
+    judgeAnswer('答：A比B高19.8m，C比D高34.7m 和 12m', '19.8，34.7', 'answer'),
+    { isCorrect: false, unrecognized: false })
+})
+
 // ─────────────────────────────────────────────────────────────
 // 判等层加固（2026-09-12）：用人工复核结论做基准回测定位出的 4 类纯匹配缺陷。
 // 基准：近 30 天 180 道人工复核题，假错 96 → 74，假对不增，一致率 24% → 36%。

@@ -302,6 +302,18 @@ export function findDirtyAnswers(rows) {
  * 即整体放弃（返回空数组），宁可走保守路径也不猜测。
  * 只作为"判对"的补充通道，提取结果与参考段数一致且逐段等值才算对；
  * 学生真答错时提取值与参考不等，仍落到原有判错路径。
+ *
+ * ── 叙述式答句（2026-10-23，用户截图 #17）──────────────────────────────
+ * 「答：点A比点B高19.8m，点A比点C高34.7m」这类结论句**不含**「是/为/等于/=」，
+ * 旧实现直接 return [] ⇒ 通道失效，整题落到 `extractAndCompare` 的数值集合兜底；
+ * 而学生答案里的过程数字（4.2 / 15.6 / 30.5）把集合撑大 ⇒ 与参考 {19.8, 34.7}
+ * 对不上 ⇒ **正确答案被判错**（假红叉进错题本、污染掌握度）。
+ *
+ * 新增分支只在「原规则一个匹配都没有」时才走，且判据刻意收窄：
+ *   · 答句按 ，、； 切成 ≥2 个分句；
+ *   · 每个分句**恰好一个数字**（分句里出现多个数字 = 过程/题干混入，整体放弃，不猜）；
+ *   · 提取结果仍要与参考段数相等、逐段等值（由调用方判），才可能判对。
+ * 因此「点A比点B高19.8m，比点C高30.5m」这类真答错仍判错（值不等，通道不出声）。
  */
 function extractAnswerStatementResults(s) {
   const str = String(s || '')
@@ -313,7 +325,19 @@ function extractAnswerStatementResults(s) {
     const matches = [
       ...clause.matchAll(/(?:是|为|等于|=)\s*([0-9]+(?:\.[0-9]+)?(?:\s*\/\s*[0-9]+)?)/g)
     ]
-    if (matches.length === 0) return []
+    if (matches.length === 0) {
+      // 叙述式答句兜底：逐分句取唯一数字（见函数头注释）
+      const segs = clause.split(/[，,；;]/).map(t => t.trim()).filter(Boolean)
+      if (segs.length < 2) return []
+      const segVals = []
+      for (const seg of segs) {
+        const nums = [...seg.matchAll(/[0-9]+(?:\.[0-9]+)?/g)].map(m => m[0])
+        if (nums.length !== 1) return []
+        segVals.push(nums[0])
+      }
+      results.push(...segVals)
+      continue
+    }
     results.push(matches[matches.length - 1][1].replace(/\s+/g, ''))
   }
   return results
