@@ -87,7 +87,7 @@ import multer from 'multer'
 import { query, TABLES, TASK_STATUS } from './config/neon.js'
 import { uploadFilesWithRetry } from './services/uploadRetryManager.js'
 import { createUploadReport, logUploadReport } from './services/uploadReportLogger.js'
-import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, replaceResourceAnswers, addWrongQuestions, deleteQuestionsByTaskId, updateQuestionDenormalizedSvg, updateQuestionAssetCleanData } from './services/neonService.js'
+import { createJudgement, batchUpdateQuestionTags, getQuestionAssets, getQuestionAssetsByType, addWrongQuestions, deleteQuestionsByTaskId, updateQuestionDenormalizedSvg, updateQuestionAssetCleanData } from './services/neonService.js'
 // [人工兜底重绘] 教师手改几何结构 → 服务端确定性渲 SVG → 发布干净图 URL
 import { renderGeometrySvg } from './utils/geometrySvg.js'
 import { publishCleanGeometryUrl } from './utils/geom/cleanGeometryUrl.js'
