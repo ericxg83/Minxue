@@ -242,6 +242,29 @@ test('punctuation-only difference on conclusion line still matches', () => {
   assert.deepEqual(judgeAnswer('3,5', '35', 'fill'), { isCorrect: false, unrecognized: false })
 })
 
+// 2026-10-23 用户截图 #23（二次函数 △PAB 直角三角形，两解）：
+// 参考给一般式「y = 1/2x² - x - 3/2 或 y = -1/2x² + x + 3/2」，
+// 学生给顶点式「y=1/2(x-1)²-2 / y=-1/2(x-1)²+2」，两解连写一行。
+// 单表达式 isMathEquivalent 已能判顶点式↔一般式等价，但整串比较读不懂「或」与第二个 y=，
+// narrowToFinalAnswer 又只留最后一个解 ⇒ 两个解都对却判错。修法：逐个扫 y= 表达式一一配对。
+test('multiple function expressions pair up across vertex/general form', () => {
+  const ref = 'y = 1/2 x² - x - 3/2 或 y = -1/2 x² + x + 3/2'
+  const stu = 'a-b+c=0 9a-3b+c=0 a+b+c=2 解得 a=1/2 b=-1 c=-3/2 ... y=1/2(x-1)²-2 y=-1/2(x-1)²+2'
+  assert.deepEqual(judgeAnswer(stu, ref, 'answer'), { isCorrect: true, unrecognized: false })
+  // 两解顺序颠倒同样算对（解集无序）
+  assert.deepEqual(
+    judgeAnswer('y=-1/2(x-1)²+2 y=1/2(x-1)²-2', ref, 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 不得放水①：只写一个解（数量不等）仍判错
+  assert.deepEqual(
+    judgeAnswer('解得 a=1/2 b=-1 c=-3/2 y=1/2(x-1)²-2', ref, 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 不得放水②：第二个解常数项写错仍判错
+  assert.deepEqual(
+    judgeAnswer('y=1/2(x-1)²-2 y=-1/2(x-1)²+3', ref, 'answer'),
+    { isCorrect: false, unrecognized: false })
+})
+
 // ─────────────────────────────────────────────────────────────
 // 判等层加固（2026-09-12）：用人工复核结论做基准回测定位出的 4 类纯匹配缺陷。
 // 基准：近 30 天 180 道人工复核题，假错 96 → 74，假对不增，一致率 24% → 36%。

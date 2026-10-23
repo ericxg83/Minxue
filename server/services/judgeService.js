@@ -1202,6 +1202,36 @@ function isMathEquivalent(expr1, expr2) {
 }
 
 /**
+ * 从答案串里扫出所有「y = <表达式>」的主体（2026-10-23，用户截图 #23）。
+ *
+ * 参考常用「或」连接多个解（"y = 1/2x² - x - 3/2 或 y = -1/2x² + x + 3/2"），
+ * 学生常把两个解连写在一行（"… y=1/2(x-1)²-2 y=-1/2(x-1)²+2"）——
+ * 整串交给 isMathEquivalent 读不懂「或」和第二个 y=，而 narrowToFinalAnswer
+ * 只保留最后一个 "=" 右侧 ⇒ 会丢掉一个解。
+ *
+ * 每个主体已剥掉尾部的标点与「或」连接词。不含 y= 时返回空数组（通道不触发）。
+ */
+function scanYExpressions(text) {
+  const s = String(text ?? '')
+  const hits = []
+  const re = /(?:^|[^a-zA-Z])y\s*=/g
+  let m
+  while ((m = re.exec(s)) !== null) hits.push(m.index + m[0].lastIndexOf('y'))
+  const out = []
+  for (let i = 0; i < hits.length; i++) {
+    const eq = s.indexOf('=', hits[i])
+    if (eq < 0) continue
+    const end = i + 1 < hits.length ? hits[i + 1] : s.length
+    const body = s.slice(eq + 1, end)
+      .replace(/[。；;，,]\s*$/, '')
+      .replace(/\s*或\s*$/, '')
+      .trim()
+    if (body) out.push(body)
+  }
+  return out
+}
+
+/**
  * 求表达式的数值；含变量或求不出来返回 null。
  */
 function evalMathValue(input) {
@@ -2037,6 +2067,37 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
   // String mismatch — try mathematical equivalence
   if (isMathEquivalent(narrowedStudent, referenceAnswer)) {
     return { isCorrect: true, unrecognized: false }
+  }
+
+  // ── 多个函数表达式的「逐解配对」（2026-10-23，用户截图 #23）───────────────
+  // 参考「y = 1/2x² - x - 3/2 或 y = -1/2x² + x + 3/2」，
+  // 学生「… y=1/2(x-1)²-2 y=-1/2(x-1)²+2」（顶点式，两解连写一行）。
+  // 单个表达式用 isMathEquivalent 已能判「顶点式 ↔ 一般式」等价（实测通过），
+  // 但整串比较读不懂「或」与连写的第二个 y=，narrowToFinalAnswer 又只留最后一个解
+  // ⇒ 两个解都对却判错。
+  //
+  // 这里把两侧的 y= 表达式逐个扫出，一一配对，**全部配对成功且数量相等**才判对：
+  // 少写一个解（数量不等）不判对；某个解配不上也不判对。
+  // 只返回 true，不接管判错。
+  {
+    const sExprs = scanYExpressions(studentAnswer)
+    const rExprs = scanYExpressions(referenceAnswer)
+    if (sExprs.length > 0 && sExprs.length === rExprs.length) {
+      const matched = new Set()
+      const allMatched = sExprs.every(se => {
+        for (let i = 0; i < rExprs.length; i++) {
+          if (matched.has(i)) continue
+          if (isMathEquivalent(se, rExprs[i])) {
+            matched.add(i)
+            return true
+          }
+        }
+        return false
+      })
+      if (allMatched && matched.size === rExprs.length) {
+        return { isCorrect: true, unrecognized: false }
+      }
+    }
   }
 
   // 「比 ↔ 比值」等价（2026-10-23，用户截图 #7 位似面积比）：
