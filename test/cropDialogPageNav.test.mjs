@@ -54,6 +54,16 @@ test('裁剪弹窗有页图列表与翻页入口（跨页配图的唯一出口�
   assert.match(PANEL, /@click="gotoCropPage\(cropPageIdx \+ 1\)"/, '缺少「下一页」按钮接线')
 })
 
+test('裁剪弹窗宽度必须有界（width="auto" 会撑满整个窗口）', () => {
+  // el-dialog 的 width 走 --el-dialog-width，auto 会被解析成块级 auto → 弹窗占满视口，
+  // 图缩在左边、右边一大片白（2026-10-25 报障「这个页面突然全屏」）。
+  const dialogOpen = PANEL.indexOf('v-model="cropDialogVisible"')
+  assert.ok(dialogOpen > 0, '未找到裁剪弹窗')
+  const head = PANEL.slice(dialogOpen, dialogOpen + 600)
+  assert.doesNotMatch(head, /width="auto"/, '裁剪弹窗不允许再用 width="auto"')
+  assert.match(head, /width="min\(\d+px, \d+vw\)"/, '裁剪弹窗必须给有界宽度（min(Npx, Nvw)）')
+})
+
 test('openCropDialog：默认落到题干页，页图列表来自 currentPaperPages', () => {
   const body = fnBody(PANEL, 'openCropDialog')
   assert.match(body, /store\.currentPaperPages/, '页图列表必须取自 store.currentPaperPages')

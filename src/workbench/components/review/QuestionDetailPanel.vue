@@ -401,10 +401,13 @@
 
     <!-- ═══ 原卷裁剪对话框（双模式）═══
          figure    → 裁剪结果作为「配图」上传（白底化/去手写），沿用原行为
-         recognize → 裁剪结果直接送视觉模型重识别题干/选项/答案，补全残缺题目 -->
+         recognize → 裁剪结果直接送视觉模型重识别题干/选项/答案，补全残缺题目
+         宽度必须给死（不能用 width="auto"）：auto 在 el-dialog 里解析成块级撑满，
+         弹窗会占满整个窗口、图缩在左边一片白（2026-10-25 报障「突然全屏」）。 -->
     <el-dialog v-model="cropDialogVisible"
       :title="cropMode === 'recognize' ? '框选这道题所在的区域' : '从原卷截图'"
-      width="auto"
+      width="min(720px, 94vw)"
+      class="crop-dialog"
       :close-on-click-modal="false" destroy-on-close append-to-body>
       <!-- 多页试卷：题干与配图常被排版拆到相邻两页（图印在第 2 页），
            若只锁定题干页，老师根本无从框到配图 → 弹窗内直接给翻页入口 -->
@@ -420,18 +423,20 @@
           下一页 <el-icon><ArrowRight /></el-icon>
         </el-button>
       </div>
-      <div class="crop-container" ref="cropContainerRef">
-        <img :src="cropImageSource" class="crop-image" :class="{ 'crop-image--paged': cropPages.length > 1 }" ref="cropImageRef"
-          @load="cropImageLoaded"
-          @error="cropImageError"
-          @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
-          @mouseleave="onCropMouseUp" draggable="false" />
-        <div v-if="cropSelection" class="crop-selection"
-          :style="{
-            left: cropSelection.x + 'px', top: cropSelection.y + 'px',
-            width: cropSelection.w + 'px', height: cropSelection.h + 'px'
-          }"></div>
-        <div v-if="cropSizeLabel" class="crop-size-label">{{ cropSizeLabel }}</div>
+      <div class="crop-stage">
+        <div class="crop-container" ref="cropContainerRef">
+          <img :src="cropImageSource" class="crop-image" :class="{ 'crop-image--paged': cropPages.length > 1 }" ref="cropImageRef"
+            @load="cropImageLoaded"
+            @error="cropImageError"
+            @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
+            @mouseleave="onCropMouseUp" draggable="false" />
+          <div v-if="cropSelection" class="crop-selection"
+            :style="{
+              left: cropSelection.x + 'px', top: cropSelection.y + 'px',
+              width: cropSelection.w + 'px', height: cropSelection.h + 'px'
+            }"></div>
+          <div v-if="cropSizeLabel" class="crop-size-label">{{ cropSizeLabel }}</div>
+        </div>
       </div>
       <div v-if="cropMode === 'recognize'" class="crop-mode-hint">
         把这道题的<b>题干和选项一起</b>框进来（默认已按题目位置预选，可直接调整）。
@@ -2304,7 +2309,7 @@ const handleRetryGeometry = async () => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .crop-page-indicator {
   font-size: 13px;
@@ -2315,6 +2320,11 @@ const handleRetryGeometry = async () => {
   font-style: normal;
   color: var(--wb-text-tertiary);
 }
+/* 图片舞台：横向居中，避免宽弹窗里图贴左、右侧一大片空白 */
+.crop-stage {
+  display: flex;
+  justify-content: center;
+}
 .crop-container {
   position: relative;
   display: inline-block;
@@ -2323,13 +2333,16 @@ const handleRetryGeometry = async () => {
   line-height: 0;
 }
 .crop-image {
-  max-width: 780px;
-  max-height: 70vh;
+  /* 用视口宽度兜底而不是百分比：弹窗宽度固定后，百分比会与 inline-block
+     收缩宽度互相依赖（循环解析），实测会把图撑出弹窗。
+     上限 660 = 弹窗 720 − body 左右内边距 32 − 余量 28 */
+  max-width: min(660px, calc(100vw - 120px));
+  max-height: min(62vh, calc(100vh - 380px));
   display: block;
 }
 /* 多页时上方多出翻页条，压一点图高，避免弹窗总高溢出视口 */
 .crop-image--paged {
-  max-height: 62vh;
+  max-height: min(54vh, calc(100vh - 380px));
 }
 .crop-selection {
   position: absolute;
@@ -2338,16 +2351,17 @@ const handleRetryGeometry = async () => {
   pointer-events: none;
   z-index: 10;
 }
+/* 尺寸标签挪到图内左上角：原来挂在图下方 -26px 处，既压住下面的提示条，
+   又多占一行高度（弹窗本来就快顶满视口） */
 .crop-size-label {
   position: absolute;
-  bottom: -26px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 13px;
+  top: 8px;
+  left: 8px;
+  font-size: 12px;
   color: var(--wb-primary);
   font-weight: 600;
-  background: rgba(255,255,255,0.9);
-  padding: 2px 10px;
+  background: rgba(255,255,255,0.86);
+  padding: 1px 8px;
   border-radius: var(--wb-radius-xs);
   white-space: nowrap;
   pointer-events: none;
@@ -2357,8 +2371,8 @@ const handleRetryGeometry = async () => {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 32px;
-  padding-top: 12px;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid var(--wb-border);
 }
 .crop-preview-label {
@@ -2368,14 +2382,14 @@ const handleRetryGeometry = async () => {
   flex-shrink: 0;
 }
 .crop-preview-img {
-  max-height: 100px;
+  max-height: 72px;
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius-xs);
   object-fit: contain;
 }
 /* 「重新识别」模式下框选区域的操作提示 */
 .crop-mode-hint {
-  margin-top: 32px;
+  margin-top: 10px;
   padding: 8px 12px;
   border-radius: var(--wb-radius-xs);
   background: var(--wb-primary-light, #ecf5ff);
