@@ -406,8 +406,22 @@
       :title="cropMode === 'recognize' ? '框选这道题所在的区域' : '从原卷截图'"
       width="auto"
       :close-on-click-modal="false" destroy-on-close append-to-body>
+      <!-- 多页试卷：题干与配图常被排版拆到相邻两页（图印在第 2 页），
+           若只锁定题干页，老师根本无从框到配图 → 弹窗内直接给翻页入口 -->
+      <div v-if="cropPages.length > 1" class="crop-page-bar">
+        <el-button size="small" :disabled="cropPageIdx <= 0" @click="gotoCropPage(cropPageIdx - 1)">
+          <el-icon><ArrowLeft /></el-icon> 上一页
+        </el-button>
+        <span class="crop-page-indicator">
+          第 {{ cropPageIdx + 1 }} / {{ cropPages.length }} 页
+          <em v-if="!cropOnQuestionPage">（本题题干在第 {{ cropQuestionPageNo ?? '—' }} 页）</em>
+        </span>
+        <el-button size="small" :disabled="cropPageIdx >= cropPages.length - 1" @click="gotoCropPage(cropPageIdx + 1)">
+          下一页 <el-icon><ArrowRight /></el-icon>
+        </el-button>
+      </div>
       <div class="crop-container" ref="cropContainerRef">
-        <img :src="cropImageSource" class="crop-image" ref="cropImageRef"
+        <img :src="cropImageSource" class="crop-image" :class="{ 'crop-image--paged': cropPages.length > 1 }" ref="cropImageRef"
           @load="cropImageLoaded"
           @error="cropImageError"
           @mousedown="onCropMouseDown" @mousemove="onCropMouseMove" @mouseup="onCropMouseUp"
@@ -421,6 +435,15 @@
       </div>
       <div v-if="cropMode === 'recognize'" class="crop-mode-hint">
         把这道题的<b>题干和选项一起</b>框进来（默认已按题目位置预选，可直接调整）。
+      </div>
+      <!-- 配图模式的多页提示：跨页排版的题，配图在下一页，框题干页只会得到空图 -->
+      <div v-else-if="cropPages.length > 1" class="crop-mode-hint crop-mode-hint--muted">
+        <template v-if="!q?.geometry_image_url">
+          本题还没采集到配图，题干页上只有文字时，配图很可能印在相邻页 —— 点上方<b>翻页</b>找到后框选。
+        </template>
+        <template v-else>
+          题干和配图被排到两页时，点上方<b>翻页</b>找到印着配图的那一页，再框选。
+        </template>
       </div>
       <div v-if="cropPreviewUrl" class="crop-preview-bar">
         <span class="crop-preview-label">预览</span>
@@ -877,6 +900,22 @@ const cropLoading = ref(false)
 // 'figure'   = 裁剪结果当配图（原有行为）
 // 'recognize' = 裁剪结果送视觉模型重识别题干/选项/答案（整页 OCR 漏选项时的补全手段）
 const cropMode = ref('figure')
+// 弹窗内可翻的页图列表 + 当前页索引 + 本题题干所在页号（1-based，仅用于展示/判页）
+// 为什么需要：题干和配图常被排版拆到相邻两页，此前只按 q.page_number 锁定一页，
+// 配图在下一页时老师无法翻过去框选（2026-10-25 反馈：填空题 #9 缺配图正是这种）。
+const cropPages = ref([])
+const cropPageIdx = ref(0)
+const cropQuestionPageNo = ref(null)
+// 当前是否停在题干页。只有题干页才可用 q 的 bbox 预选（bbox 是题干页坐标，
+// 套到别页会框到无关区域）；单页/兜底页不设限，保持原行为。
+const cropOnQuestionPage = computed(() => {
+  if (cropPages.value.length <= 1) return true
+  const page = cropPages.value[cropPageIdx.value]
+  if (!page) return false
+  // 旧数据没有 page_number：仍把弹窗默认落地的首页当作题干页（保持原预选行为）
+  if (cropQuestionPageNo.value == null) return cropPageIdx.value === 0
+  return Number(page.page_number) === Number(cropQuestionPageNo.value)
+})
 
 // 打开原卷裁剪弹窗。mode 决定「确认」后走哪条链路。
 const openCropDialog = (mode) => {
@@ -885,17 +924,20 @@ const openCropDialog = (mode) => {
     ElMessage.warning('当前试卷无原图')
     return
   }
-  // 多页试卷：按当前题目的 page_number 找到对应页的原图；
+  // 多页试卷：默认定位到本题题干所在页，但允许在弹窗内翻到相邻页（配图常印在下一页）。
   // 单页/找不到页图时兜底用首页或 task.image_url。
   const question = store.currentReviewQuestion
   const pageNum = question?.page_number
-  const pages = store.currentPaperPages
-  let pageImage = ''
-  if (pageNum != null && pages.length > 0) {
-    const page = pages.find(p => p.page_number === pageNum)
-    pageImage = page?.image_url || ''
+  const pages = (store.currentPaperPages || []).filter(p => p?.image_url)
+  cropPages.value = pages.length ? pages.slice() : (task.image_url ? [{ page_number: 1, image_url: task.image_url }] : [])
+  cropQuestionPageNo.value = pageNum ?? null
+  let startIdx = 0
+  if (pageNum != null) {
+    const hit = cropPages.value.findIndex(p => Number(p.page_number) === Number(pageNum))
+    if (hit >= 0) startIdx = hit
   }
-  if (!pageImage) pageImage = pages[0]?.image_url || task.image_url || ''
+  cropPageIdx.value = startIdx
+  const pageImage = cropPages.value[startIdx]?.image_url || task.image_url || ''
   if (!pageImage) {
     ElMessage.warning('当前试卷无原图')
     return
@@ -906,6 +948,19 @@ const openCropDialog = (mode) => {
   cropPreviewUrl.value = ''
   cropSizeLabel.value = ''
   cropDialogVisible.value = true
+}
+
+// 弹窗内翻页：换页必须清掉上一页的框与预览，否则会把第 1 页框出的区域裁到第 2 页图上
+const gotoCropPage = (idx) => {
+  const pages = cropPages.value
+  if (idx < 0 || idx >= pages.length) return
+  const next = pages[idx]?.image_url
+  if (!next || idx === cropPageIdx.value) return
+  cropPageIdx.value = idx
+  cropImageSource.value = next
+  cropSelection.value = null
+  cropPreviewUrl.value = ''
+  cropSizeLabel.value = ''
 }
 
 const handleCropFromPaper = () => openCropDialog('figure')
@@ -951,6 +1006,13 @@ const cropImageLoaded = () => {
   // 按题目 bbox（text_bbox ∪ image_bbox）自动预选裁剪框，省去老师手动框
   const img = cropImageRef.value
   if (!img) return
+  // 翻到非题干页时不能套用 bbox（那是题干页坐标），清空框让老师重新框配图
+  if (!cropOnQuestionPage.value) {
+    cropSelection.value = null
+    cropPreviewUrl.value = ''
+    cropSizeLabel.value = ''
+    return
+  }
   const rect = img.getBoundingClientRect()
   if (!rect.width || !rect.height) return
   // allowOutOfRange：这里只做「自动预选」，越界部分稍后由下方 Math.min 夹到图片内，
@@ -2236,6 +2298,23 @@ const handleRetryGeometry = async () => {
 }
 
 /* ═══ 原卷裁剪 ═══ */
+/* 多页翻页条：题干页与配图页分离时的唯一出口 */
+.crop-page-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.crop-page-indicator {
+  font-size: 13px;
+  color: var(--wb-text-secondary);
+  white-space: nowrap;
+}
+.crop-page-indicator em {
+  font-style: normal;
+  color: var(--wb-text-tertiary);
+}
 .crop-container {
   position: relative;
   display: inline-block;
@@ -2247,6 +2326,10 @@ const handleRetryGeometry = async () => {
   max-width: 780px;
   max-height: 70vh;
   display: block;
+}
+/* 多页时上方多出翻页条，压一点图高，避免弹窗总高溢出视口 */
+.crop-image--paged {
+  max-height: 62vh;
 }
 .crop-selection {
   position: absolute;
@@ -2300,7 +2383,11 @@ const handleRetryGeometry = async () => {
   font-size: 13px;
   line-height: 1.6;
 }
-
+/* 中性提示（配图模式的多页翻页说明），不抢主色 */
+.crop-mode-hint--muted {
+  background: var(--wb-bg-secondary, #f5f7fa);
+  color: var(--wb-text-tertiary);
+}
 /* ── 截图粘贴对话框（OCR 答案入口）── */
 .ops-paste-hint {
   display: flex;
