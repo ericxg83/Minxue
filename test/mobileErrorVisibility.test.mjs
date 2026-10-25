@@ -263,7 +263,7 @@ test('锁健全性（r327）：重印题目失败判据套「无 Toast」坏样�
     assert.ok(!good.some((f) => f.includes(RP)), `好样本（有 Toast）必须判绿，实际: ${JSON.stringify(good)}`)
   } finally {
     // 忽略清理失败（本机 safe-delete shim 会把 rmSync 改走 trash 并报错；临时目录在仓库外，残留无害）
-    try { rmSync(join(os.tmpdir(), '_r327_reprint_probe'), { recursive: true, force: true }) } catch {}
+    try { rmSync(join(os.tmpdir(), '_r327_reprint_probe'), { recursive: true, force: true }) } catch { /* 忽略清理失败：safe-delete shim 可能把 rmSync 改走 trash 并报错，仓库外临时目录残留无害 */ }
   }
 })
 
