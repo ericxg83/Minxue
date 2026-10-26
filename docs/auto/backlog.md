@@ -5149,3 +5149,24 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 ## 2026-10-22 提案（r328 巡检）
 
 - [ ] **r328-P-A（B，PDF 跨文档周期标签一致性）**：学习诊断 PDF（`src/utils/weeklyReportGenerator.js:665-667` `buildDiagnosisHTML` 封面徽章）使用 `WEEK N` / `ALL` 英文周期标签；家长分享卡（`server/services/shareCardTemplate.js:262-268`）已改为人类中文「本周」/「上周」/「N周前」/「成长总览」。两者均属老师转发给家长的产出物，标签口径不一致——同一类缺陷，分享卡侧 r211/r217 已修。PDF 跨文档视觉/标签口径属产品决策（r114 先例：PDF 跨文档一致性只提不擅改），本轮未擅改，待拍板。修复方向：徽章改用与分享卡同源的中文周期词（offset 区分本周/上周/N周前；month 用 `M月`；all 用「成长总览」）。
+
+## 2026-10-26 提案（r342 巡检 · 只读核查轮）
+
+- [ ] **r342-P-A（A 级·行为不变性能优化，待负责人拍板后落地）：`GET /api/weekly-report` 全班 N×4 聚合折叠为 4 条 `GROUP BY student_id`**
+  - **证据（只读实测，非推理）**：
+    - 端点 `server/routes/weeklyReport.js:529-654`：先 `SELECT … FROM students`（1 条），再 `Promise.all(studentRows.map(...))` —— 对**每个学生**串行跑 **4 条**查询（任务 `:547` / 题量正确率 `:560` / 新增错题 `:574` / 生命周期 `:584`），即 **N×4 = 84 条**（N≈21，见 `students` 表实测 21 名）。
+    - 21 名学生经 `Promise.all` 并发 → 峰值 **21 并发连接**，而连接池 `server/config/neon.js:130` `max: 10` → **溢出排队**（pg 优雅排队不报错，但拖延迟+挤占其他请求连接）。
+    - 消费者：**① PC 工作台「学习诊断」全班概览页 `WeeklyReportWorkbench.vue:544`（`getAllWeeklyReports`）——老师不选学生直接开此页即命中，属热路径**；**② 批量 PDF 生成 `weeklyReportGenerator.js:1474`**。
+  - **结论**：这是教科书级 N+1（更准确是 N×4）。不是缺陷（无错误、结果正确），是浪费型查询 + 池压力，且**随学生数线性放大**。
+  - **修复方向（行为不变）**：把 4 类「按学生聚合」各自改成 1 条 `GROUP BY student_id` 的批量查询，再用 `Map<studentId, stats>` 在 JS 里组装成原有 `reports:[{student,stats}]` 形状：
+    - tasks：`SELECT student_id, COUNT(*)::int total, COUNT(*) FILTER(WHERE status IN('done','reviewed'))::int completed … GROUP BY student_id`
+    - questions：`SELECT student_id, COUNT(*) total, COUNT(*) FILTER(correct) correct, COUNT(*) FILTER(wrong) wrong … WHERE is_complete=TRUE GROUP BY student_id`
+    - wrong count：`SELECT student_id, COUNT(*)::int count … GROUP BY student_id`
+    - lifecycle：`SELECT student_id, lifecycle_status, COUNT(*)::int … GROUP BY student_id, lifecycle_status`（再用 `splitMasteryStates` 收口）
+  - **收益**：84 条 → **4 条**；连接并发从 21 降到 ≤4（远低于池上限 10）；延迟从「4 串+排队」降到「4 并行」；学生数增长不再放大。
+  - **风险与保留点（提案须点名）**：
+    1. **失败粒度**：现代码对每名学生独立 `try/catch`，单生取数失败 → 该生 `stats:null` + `partialFailure` 上报（`:614-632`），消费方据此区分「失败」与「无数据」。批量改法若某条批量查询整体失败，应保留「结果集里缺某生 ⇒ 该生 `stats:null`」的组装逻辑，使 `partialFailure` 语义不丢。
+    2. **`healPeriodCompletenessQuietly(null,…)` 已全班只跑一次（`:541`，良好），改法保留。**
+    3. 返回体字段名逐字不变（`student/stats` 及 9 个 stat 字段），前端 `WeeklyReportWorkbench.vue` 与 `weeklyReportGenerator.js` 消费端零改动（铁律1）。
+  - **验证计划**：新增 `test/weeklyReportClassBulk.test.mjs` —— 用内联合成旧版（4×N 循环）/ 新版（4 批量）行为对照：① 同输入两组输出 `reports` 逐生 `stats` 深相等；② 反向自检：注入「漏某生组装」→ 旧/新判红点名；③ 单测套件全绿（含既有 `dashboardCaliber` 等）。四道闸：npm test 全绿 + lint 0 新增 error + 隔离构建 + 冒烟读 DOM（全班概览页渲染不变）。
+  - **级别判定**：归 A（行为不变性能优化），但 **r341 指定本子面「先提案不擅改」** ⇒ 本轮只落提案，待负责人拍板后落地；属本 automation 认领赛道（服务端基础设施·非批改 `weeklyReport.js`），无需跨赛道。
