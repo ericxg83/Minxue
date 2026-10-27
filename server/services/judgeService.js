@@ -2097,6 +2097,64 @@ export function judgeAnswer(studentAnswer, referenceAnswer, questionType) {
     if (hit !== null) return { isCorrect: hit, unrecognized: false }
   }
 
+  // ── 「或」连接的多值参考答案 vs 学生分类讨论分支（2026-10-27，负责人截图 #14）──
+  // 参考 "10或-10"、学生按 ± 分类讨论写完两支结论：
+  //   ∵x=±3 y=±7
+  //   ∴当x=3时y=-7
+  //   ∴当x=-3时y=7
+  //   x-y=3-(-7)=10 或
+  //   =-3-7=-10
+  // 既有通道全部够不着：splitAnswers/splitAnswersLoose 都不认「或」⇒ 参考永远 1 段，
+  // 逐段/多空通道全部进不去；解集通道只认 x=/y= 形态；收窄只留最后一个 "=" 右侧
+  // ⇒ 解答题分支只放行判对 ⇒ 学生明明两支都对，被挂「AI 未判定」转人工。
+  //
+  // 判据刻意窄（只放行判对，配不上不出声，仍走原路径）：
+  //   · 参考含「或」，按或拆段后 ≥2 段、每段归一化后是纯数学片段且不含 '='
+  //     （含等式的解集/函数族各有专属通道，不在此抢）；
+  //   · 学生答案也含「或」，按或拆支，每支取最后一行最后一个 '=' 右侧的值
+  //     （整支无 '=' 就用整支），任一支取不到值就整体放弃；
+  //   · 两序列**支数相等**且能一一配对：归一化后逐字相等或 isMathEquivalent。
+  //     两个判据都带符号（"-10" 配不上 "10"），只差负号的分支配不上 ⇒ 不判对。
+  //   · 支数不相等（少写一支 / 多写一支）不判对 —— 分类讨论题缺一支即不完整。
+  {
+    const refOrSegs = String(referenceAnswer ?? '').split('或').map(t => t.trim()).filter(Boolean)
+    if (refOrSegs.length >= 2) {
+      const canon = (v) => normalizeAnswer(v)
+      const refVals = refOrSegs.map(canon)
+      // 归一化后仍是纯数学片段才认：汉字叙述段（"综上" 等）不构成多值参考
+      if (refVals.every(v => v && isPureMathFragment(v) && !v.includes('='))) {
+        const stuOrBranches = String(studentAnswer ?? '').split('或').map(t => t.trim()).filter(Boolean)
+        if (stuOrBranches.length === refOrSegs.length) {
+          const branchValue = (branch) => {
+            const lines = branch.split('\n').map(x => x.trim()).filter(Boolean)
+            if (lines.length === 0) return ''
+            const lastLine = lines[lines.length - 1]
+            const i = lastLine.lastIndexOf('=')
+            return i >= 0 ? lastLine.slice(i + 1) : lastLine
+          }
+          const stuVals = stuOrBranches.map(b => canon(branchValue(b)))
+          if (stuVals.every(v => v && isPureMathFragment(v))) {
+            const used = new Set()
+            const allPaired = stuVals.every(sv => {
+              for (let i = 0; i < refVals.length; i++) {
+                if (used.has(i)) continue
+                // 归一化逐字相等（带符号、带单位同形）或真实数学等价（1/2 ↔ 0.5）
+                if (sv === refVals[i] || isMathEquivalent(sv, refVals[i])) {
+                  used.add(i)
+                  return true
+                }
+              }
+              return false
+            })
+            if (allPaired && used.size === refVals.length) {
+              return { isCorrect: true, unrecognized: false }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // 单答案场景：标准比较流程
   // 双侧收窄：参考答案也走 narrowToFinalAnswer，去掉"a = ..., y = ..."这种过程噪声
   // 仅收窄到最后一个 "=" 右侧；收窄后为空时退回原串，避免误伤。

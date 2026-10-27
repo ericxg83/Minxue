@@ -955,3 +955,44 @@ test('symbolic answers: equivalent notations still pass (do not over-tighten)', 
   assert.deepEqual(judgeAnswer('4.8', '24/5', 'fill'), { isCorrect: true, unrecognized: false })
   assert.deepEqual(judgeAnswer('x=-2', '-2', 'fill'), { isCorrect: true, unrecognized: false })
 })
+
+// ── 「或」连接的多值参考答案 vs 学生分类讨论分支（2026-10-27，负责人截图 #14）──
+// 参考 "10或-10"、学生按 ± 分类讨论写完两支结论（∵x=±3 y=±7 … x-y=3-(-7)=10 或 =-3-7=-10）
+// 既有通道全部够不着（splitAnswers 不认「或」、解集通道只认 x=/y=）⇒ 解答题只放行判对
+// ⇒ 正确学生被挂「AI 未判定」转人工。新通道：或拆支、每支取最后一个 = 右侧、一一配对。
+test('multi-value reference joined by 或: case-discussion branches pair up', () => {
+  // 负责人截图 #14 原题（questions d53a69e8）：两支结论都对 ⇒ 判对
+  assert.deepEqual(
+    judgeAnswer('∵x=±3 y=±7\n∴当x=3时y=-7\n∴当x=-3时y=7\nx-y=3-(-7)=10 或\n=-3-7=-10', '10或-10', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 裸重述（学生直接写 10或-10）也判对
+  assert.deepEqual(judgeAnswer('10或-10', '10或-10', 'answer'), { isCorrect: true, unrecognized: false })
+  // 分支书写顺序无语义（解集无序）
+  assert.deepEqual(
+    judgeAnswer('x-y=(-3)-7=-10 或 x-y=3-(-7)=10', '10或-10', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 分数等价经 isMathEquivalent 配对
+  assert.deepEqual(judgeAnswer('a=1/2 或 a=0.5', '0.5或1/2', 'answer'), { isCorrect: true, unrecognized: false })
+})
+
+test('multi-value reference joined by 或: wrong/missing branches never pass', () => {
+  // 只差负号的分支配不上（配对判据带符号）：学生第二支算成 +10
+  assert.deepEqual(
+    judgeAnswer('x-y=3-(-7)=10 或 x-y=(-3)-(-7)=10', '10或-10', 'answer'),
+    { isCorrect: false, unrecognized: false })
+  // 少写一支（支数不等）不判对
+  assert.deepEqual(judgeAnswer('x-y=3-(-7)=10', '10或-10', 'answer'), { isCorrect: false, unrecognized: false })
+  // 多写一支不判对
+  assert.deepEqual(judgeAnswer('a=1 或 a=2 或 a=3', '1或2', 'answer'), { isCorrect: false, unrecognized: false })
+  // 分支值配不上
+  assert.deepEqual(judgeAnswer('a=1 或 a=3', '1或2', 'answer'), { isCorrect: false, unrecognized: false })
+  // 参考含等式（解集形态 x=1或x=2）不走本通道，仍由解集通道裁决 —— 行为不变
+  assert.deepEqual(
+    judgeAnswer('x²-3x+2=0\nx₁=2\nx₂=1', 'x=1或x=2', 'answer'),
+    { isCorrect: true, unrecognized: false })
+  // 学生没写「或」（键值叙述列点形态）不进本通道：老师已确认的判错不得翻案
+  // （questions 5004c09a：参考 21或-21、学生逐支算的是 x-y，is_correct=false 为老师终审结论）
+  assert.deepEqual(
+    judgeAnswer('x=±3 y=±7\nx=3 y=7 3-7=-4 √\nx=-3 y=-7 -3-(-7)=4 ×\nx=3 y=-7 3-(-7)=10 ×\nx=-3 y=7 -3-7=-10 √', '21或-21', 'answer'),
+    { isCorrect: false, unrecognized: false })
+})
