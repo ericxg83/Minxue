@@ -405,10 +405,12 @@ Vue Workbench Stores:
    - 问题: 无 `Authorization` 头、API 密钥或会话中间件，`studentId` 作为参数明文传递
    - 影响: 生产环境存在安全风险
 
-5. **`getExamsByStudent` 存在 N+1 查询**
-   - 位置: [src/services/apiService.js](src/services/apiService.js)
-   - 问题: 先取所有已完成任务，对每个任务逐一调 `getQuestionsByTask`
-   - 影响: 学生任务数较多时前端请求瀑布，可能导致白屏
+5. **`getExamsByStudent` 死导出（N+1 查询）— 已删除**
+   - 原位置: [src/services/apiService.js](src/services/apiService.js)
+   - 原问题: 先取所有已完成任务，对每个任务逐一调 `getQuestionsByTask`（N+1 前端请求瀑布）
+   - 处置: 该函数自 2026-10-04 死导出扫描起即为无人调用的死代码；真实「试卷」加载器
+     `getGeneratedExamsByStudent` 走单端点 `/generated-exams/student/:id`，无 N+1。
+     2026-10-27 日常巡查 r344 已删除 `getExamsByStudent`（见 `docs/auto/reports/2026-10-27-r344.md`）。
 
 ### 🟡 中等 (可能引发功能异常或性能问题)
 

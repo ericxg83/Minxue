@@ -310,49 +310,6 @@ export const getDashboardDailyTrend = async (days = 7) => {
   return data
 }
 
-export const getExamsByStudent = async (studentId, useCache = true) => {
-  const cacheKey = `exams_cache_${studentId}`
-
-  if (useCache) {
-    const cached = readCache(cacheKey, CACHE_MAX_AGE.EXAMS)
-    if (cached) return cached
-  }
-
-  const data = await apiRequest(`/tasks/student/${studentId}`)
-  const tasks = data.tasks || []
-  const doneTasks = tasks.filter(t => t.status === 'done')
-
-  // Fetch questions for each task to calculate AI grading progress
-  const result = await Promise.all(doneTasks.map(async (task) => {
-    let questions = []
-    try {
-      questions = await getQuestionsByTask(task.id, false)
-    } catch (e) {
-      console.warn(`Failed to fetch questions for task ${task.id}:`, e)
-    }
-    const totalCount = questions.length || task.result?.questionCount || 0
-    // Count AI-graded questions (questions with student_answer or ai_answer)
-    const gradedCount = questions.filter(q => q.student_answer || q.ai_answer || q.is_correct !== undefined).length
-
-    return {
-      id: task.id,
-      student_id: task.student_id,
-      name: task.original_name || '未命名试卷',
-      exam_no: '',
-      thumbnail: task.image_url || '',
-      question_count: totalCount,
-      ai_graded_count: gradedCount,
-      status: task.result ? 'done' : 'ungraded',
-      created_at: task.created_at,
-      graded_at: null,
-      raw_task: task
-    }
-  }))
-
-  if (doneTasks.length) writeCache(cacheKey, result)
-  return result
-}
-
 export const createTask = async (taskData) => {
   const data = await apiRequest('/tasks/create-by-url', {
     method: 'POST',
