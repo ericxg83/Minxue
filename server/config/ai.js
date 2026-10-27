@@ -664,6 +664,21 @@ export const ANSWER_SOLVE_VISION_VENDOR_CHAIN = [
   { vendor: 'Bailian', model: 'qwen3.8-flash' },
   { vendor: 'SenseNova', model: 'kimi-k3' },
 ]
+
+// 图表资产转录链（2026-10-27 血压题 −20 误读成 −25 事故沉淀）：
+//   chart_image 裁剪图做「逐字转录」存 question_assets.chart_ocr_text，供答案侧
+//   figureNumberGuard 交叉核对"解析引用的数字是否真的在图里"。
+//   ⚠️ 顺序与 ANSWER_SOLVE_VISION_VENDOR_CHAIN **刻意相反**：解题方是 qwen3.8-flash，
+//   转录方换 kimi-k3 主 —— 两个不同模型对同一处数字犯同样误读的概率远低于同模型自核
+//   （同模型转录等于让犯错的人自己批卷，护栏形同虚设）。
+//   ① SenseNova kimi-k3 —— 主：免费、输出最干净（答案页实测 0/6 夹带）；整页慢是固有特性，
+//      但单张表格裁剪图 token 极少，实测秒级
+//   ② Bailian qwen3.8-flash —— 兜：转录任务比解题简单得多，同模型在此场景的可靠性可接受
+export const CHART_OCR_VENDOR_CHAIN = [
+  { vendor: 'SenseNova', model: 'kimi-k3' },
+  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+]
+
 // 练习册学生答案页 OCR（批改场景 JSON + 选项 + 配图字段）：
 //   ① SenseNova deepseek-flash —— 主：免费、18.5s、JSON 3/3、唯一选项填满、5 场景参数全稳
 //   ② Bailian qwen3.8-flash —— 兜底：批改场景唯一无灾难缺陷的次选（57.3s 慢但 JSON 稳）

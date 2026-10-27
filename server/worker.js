@@ -39,6 +39,7 @@ import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator
 import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
+import { checkFigureNumberConsistency } from './utils/figureNumberGuard.js'
 import { aiParseSelfCheck, detectAnswerCopiedFromStudent, buildTextOnlyResolveInput } from './utils/aiParseSelfCheck.js'
 // 批改收尾即判「零人工项则自动完成复核」（此前只有老师点进复核页才判，见服务文件头）
 import { maybeAutoReviewTask } from './services/autoReviewService.js'
@@ -2900,6 +2901,32 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
     return notes
   }
 
+  // 图表数字引用核对（2026-10-27 图表数字护栏，血压题 −20→−25 事故沉淀）：
+  //   答案引擎看图解题时可能把图中数据抄错（−20 读成 −25），而解析算式**内部自洽**
+  //   （验算闸拦不住）、图表数值又只存在于图片里（题干文本无对照）⇒ 误读参考答案静默落库。
+  //   chart_image 资产的逐字转录（chart_ocr_text）提供了第二数据源：解析算式链引用的
+  //   数据项必须能在 题干/图表转录 里找到，找不到 ⇒ 挂参考答案风险。
+  //   只标风险不拦批改：判错+风险留待处理（2026-10-13 口径），判对+风险放行 ——
+  //   误报的代价是一个 ⚠ 标签，漏报的代价是学生被冤判错（后者贵得多）。
+  //   转录未就绪/无转录的题直接跳过（fail-open），绝不为护栏拖慢批改。
+  const chartFigureGuardNote = (q, analysis) => {
+    const figText = chartOcrMap.get(q.id)
+    if (!figText || !analysis) return null
+    let guard
+    try {
+      guard = checkFigureNumberConsistency({
+        analysis,
+        content: q.content,
+        parentStem: q.parent_stem,
+        figureTexts: [figText],
+      })
+    } catch {
+      return null
+    }
+    if (!guard || guard.ok) return null
+    return `解析算式引用了题干/配图中不存在的数据（${guard.missing.join('、')}），参考答案可能基于图表误读，请核对`
+  }
+
   /**
    * 英语 III/IV 单空答案闸：答案里出现并列分隔符 ⇒ 引擎又按整篇作答了。
    * 不做「挑一个词」的猜测（无判据，猜错比留白更坏）⇒ 拒收并转人工。
@@ -2968,6 +2995,7 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
   // （一次批量查询成本极低）；预判闸本身仍由 shouldSkipForMissingFigure 内部开关控制，
   // 关掉闸时只是不拦、照常走视觉，不影响读图能力。
   const figureUrlMap = new Map()
+  let chartOcrMap = new Map()
   try {
     const figIds = needAnswer.map(q => q.id).filter(Boolean)
     if (figIds.length) {
@@ -2976,6 +3004,19 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
         [figIds]
       )
       for (const r of figRows) figureUrlMap.set(r.id, r.geometry_image_url)
+      // 图表转录批量预取（2026-10-27 图表数字护栏）：chart_image 资产的 chart_ocr_text
+      // 是答案引擎看图解题前已异步落库的逐字转录（见 geometryAssetQueue / utils/chartOcr.js）。
+      // 拿不到（转录未就绪/失败/历史资产）⇒ 该题跳过核对（fail-open），绝不为此等待。
+      try {
+        const { rows: chartRows } = await query(
+          `SELECT question_id, chart_ocr_text FROM ${TABLES.QUESTION_ASSETS}
+            WHERE question_id = ANY($1) AND asset_type = 'chart_image' AND chart_ocr_text IS NOT NULL`,
+          [figIds]
+        )
+        chartOcrMap = new Map(chartRows.map((r) => [r.question_id, r.chart_ocr_text]))
+      } catch (e) {
+        console.warn(`   ⚠️ [图表转录预取] 读取失败，本批跳过图表数字核对: ${e.message}`)
+      }
     }
   } catch (e) {
     console.warn(`   ⚠️ [配图回查] 读取配图字段失败，本批不启用预判/视觉求解（不影响正常解析）：${e.message}`)
@@ -3091,7 +3132,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
               q.answer = finalAnswer
               if (cached.analysis) q.analysis = cached.analysis
               updatedCount++
-              await flagReferenceAnswerRisk(q, finalAnswer, cached.analysis)
+              await flagReferenceAnswerRisk(q, finalAnswer, cached.analysis,
+                [chartFigureGuardNote(q, cached.analysis)].filter(Boolean))
 
               // 非关键写入：fire-and-forget
               if (finalAnswer !== cached.answer) {
@@ -3325,7 +3367,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
           if (answerAnalysis) q.analysis = answerAnalysis
           updatedCount++
           console.log(`     题目 ${q.id.substring(0, 8)}: 答案 ${oldAnswer || '(空)'} → ${finalAnswer}`)
-          await flagReferenceAnswerRisk(q, finalAnswer, answerAnalysis, buildAnswerTrustNotes(result))
+          await flagReferenceAnswerRisk(q, finalAnswer, answerAnalysis,
+            [...buildAnswerTrustNotes(result), chartFigureGuardNote(q, answerAnalysis)].filter(Boolean))
 
           fireForget(() => saveQuestionSubject(q, result.subject), `学科 q=${q.id.substring(0, 8)}`)
         } catch (err) {

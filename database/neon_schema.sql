@@ -165,6 +165,11 @@ CREATE TABLE IF NOT EXISTS question_assets (
     retry_count INTEGER DEFAULT 0,
     last_error TEXT,
     processed_at TIMESTAMP WITH TIME ZONE,
+    -- 图表资产逐字转录（2026-10-27 图表数字护栏）：chart_image 裁剪图的 verbatim 文本，
+    -- 由 utils/chartOcr.js 建行后异步写入（kimi-k3 主/qwen 兜，与解题链异构防同源误读）。
+    -- 供 worker.js figureNumberGuard 交叉核对"解析算式引用的数字是否真在图里"；
+    -- NULL = 未转录（护栏 fail-open 跳过该题）。
+    chart_ocr_text TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

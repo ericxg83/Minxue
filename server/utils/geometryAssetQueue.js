@@ -32,13 +32,15 @@
  * @module utils/geometryAssetQueue
  */
 
-import { createQuestionAsset, updateQuestionDenormalizedSvg } from '../services/neonService.js'
+import { createQuestionAsset, updateQuestionDenormalizedSvg, setQuestionAssetChartOcr, getChartOcrTextByUrl } from '../services/neonService.js'
 import { renderGeometrySvg } from './geometrySvg.js'
 import { buildFunctionGraphSvg } from './functionGraph/index.js'
 // 数轴确定性图元通道（P2-7）：题面写明数值/解集时当场出图，不烧视觉额度、不目测坐标
 import { buildNumberAxisSvg } from './numberAxis/index.js'
 import { publishCleanGeometryUrl } from './geom/cleanGeometryUrl.js'
 import { checkFigureReference, FIGURE_GATE_MESSAGE } from './geometryFigureGate.js'
+// 图表资产逐字转录（2026-10-27 图表数字护栏）：数值只存在于图片里时，答案侧文本闸全盲
+import { ocrChartCropImage } from './chartOcr.js'
 
 /**
  * 给「有配图的题」建 question_assets 行，并把需要视觉重绘的收集成 pending 列表。
@@ -151,6 +153,28 @@ export async function registerGeometryAssets({
       tikz_json: tikzJson,
       last_error: assetError,
     })
+    // 图表资产逐字转录（2026-10-27 图表数字护栏）：
+    //   chart_image 的数值只存在于图片里（题干文本没有），不转录则答案侧
+    //   figureNumberGuard 对"解析引用了图里没有的数"全盲（血压题 −20→−25 事故）。
+    //   fire-and-forget：不拖慢建行；转录秒级完成，而答案生成在 10~150s 之后，竞态可忽略；
+    //   失败静默（chart_ocr_text 留空 ⇒ 该题跳过核对），绝不打断批改主流程。
+    //   同一张裁剪图（同题不同学生共享 crop，实测 1774 行只对应 15 张唯一图）
+    //   直接复用库内已有转录，省掉重复视觉调用。
+    if (imageType === 'chart' && created?.id && q.geometry_image_url) {
+      const assetId = created.id
+      const cropUrl = q.geometry_image_url
+      ;(async () => {
+        try {
+          const existing = await getChartOcrTextByUrl(cropUrl)
+          if (existing) {
+            await setQuestionAssetChartOcr(assetId, existing)
+            return
+          }
+          const r = await ocrChartCropImage(cropUrl)
+          if (r.ok) await setQuestionAssetChartOcr(assetId, r.text)
+        } catch { /* 护栏 fail-open */ }
+      })()
+    }
     if (tikzStatus === 'pending' && created?.id) {
       pending.push({ assetId: created.id, questionId: q.id })
     }

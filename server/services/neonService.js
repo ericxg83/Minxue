@@ -1043,6 +1043,40 @@ export const updateQuestionAssetTikz = async (assetId, upd) => {
 }
 
 /**
+ * 写入图表资产的逐字转录文本（2026-10-27 图表数字护栏）。
+ * 由 utils/chartOcr.js 在资产建行后异步调用（fire-and-forget）；
+ * 写 NULL 无意义，文本为空时调用方直接不调。失败由调用方吞掉（护栏 fail-open）。
+ * @param {string} assetId question_assets.id
+ * @param {string} text 逐字转录文本
+ */
+export const setQuestionAssetChartOcr = async (assetId, text) => {
+  await query(
+    `UPDATE ${TABLES.QUESTION_ASSETS}
+     SET chart_ocr_text = $2,
+         updated_at = NOW()
+     WHERE id = $1`,
+    [assetId, String(text || '').trim() || null]
+  )
+}
+
+/**
+ * 查同一张裁剪图是否已有转录文本（2026-10-27 图表数字护栏）。
+ * 同题不同学生的资产行共享同一张 crop（实测 1774 行只对应 15 张唯一图）——
+ * 建新行时先查同类行，命中即可复用转录，省掉一次视觉调用。
+ * @param {string} croppedImageUrl
+ * @returns {Promise<string|null>}
+ */
+export const getChartOcrTextByUrl = async (croppedImageUrl) => {
+  const { rows } = await query(
+    `SELECT chart_ocr_text FROM ${TABLES.QUESTION_ASSETS}
+      WHERE cropped_image_url = $1 AND chart_ocr_text IS NOT NULL
+      LIMIT 1`,
+    [croppedImageUrl]
+  )
+  return rows[0]?.chart_ocr_text || null
+}
+
+/**
  * 更新题目的几何图净化层数据
  * @param {string} questionId
  * @param {Object} data - { clean_geometry_image_url, clean_geometry_svg, geometry_crop_type, geometry_structure_json }
