@@ -541,70 +541,98 @@ router.get('/', async (req, res) => {
     await healPeriodCompletenessQuietly(null, periodStart, periodEnd,
       `全班周报 mode=${mode}`)
 
-    const reports = await Promise.all(studentRows.map(async (student) => {
+    // ── 全班聚合：4 类「按学生」查询各自折叠为 1 条 GROUP BY student_id 批量查询 ──
+    // 原 N×4=84 条（N≈21）→ 4 条；连接并发 21→≤4（低于池上限 10）；学生数线性放大消除。
+    // 返回体字段名逐字不变（student/stats 及 9 个 stat 字段），前端消费端零改动。
+    const fetchDim = async (label, sql) => {
       try {
-        // 本周作业任务统计
-        const { rows: taskRows } = await query(
-          `SELECT
-            COUNT(*)::int AS total_tasks,
-            COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
-          FROM ${TABLES.TASKS}
-          WHERE student_id = $1
-            AND created_at >= $2
-            AND created_at < $3
-            AND deleted_at IS NULL`,
-          [student.id, periodStart, periodEnd]
-        )
+        const { rows } = await query(sql, [periodStart, periodEnd])
+        return { ok: true, label, rows }
+      } catch (e) {
+        return { ok: false, label, error: e.message }
+      }
+    }
 
-        // 本周批改题量 & 正确率
-        const { rows: questionRows } = await query(
-          `SELECT
-            COUNT(*)::int AS total,
-            COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
-            COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
-          FROM ${TABLES.QUESTIONS}
-          WHERE student_id = $1
-            AND created_at >= $2
-            AND created_at < $3
-            AND is_complete = TRUE`,
-          [student.id, periodStart, periodEnd]
-        )
+    const taskDim = await fetchDim('tasks',
+      `SELECT student_id,
+              COUNT(*)::int AS total_tasks,
+              COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
+       FROM ${TABLES.TASKS}
+       WHERE created_at >= $1 AND created_at < $2 AND deleted_at IS NULL
+       GROUP BY student_id`)
+    const qDim = await fetchDim('questions',
+      `SELECT student_id,
+              COUNT(*)::int AS total,
+              COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
+              COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
+       FROM ${TABLES.QUESTIONS}
+       WHERE created_at >= $1 AND created_at < $2 AND is_complete = TRUE
+       GROUP BY student_id`)
+    const wrongDim = await fetchDim('wrong',
+      `SELECT student_id, COUNT(*)::int AS count
+       FROM ${TABLES.WRONG_QUESTIONS}
+       WHERE added_at >= $1 AND added_at < $2
+       GROUP BY student_id`)
+    const statusDim = await fetchDim('status',
+      `SELECT student_id, lifecycle_status, COUNT(*)::int AS count
+       FROM ${TABLES.WRONG_QUESTIONS}
+       WHERE added_at >= $1 AND added_at < $2
+       GROUP BY student_id, lifecycle_status`)
 
-        // 本周新增错题
-        const { rows: wrongRows } = await query(
-          `SELECT COUNT(*)::int AS count
-          FROM ${TABLES.WRONG_QUESTIONS}
-          WHERE student_id = $1
-            AND added_at >= $2
-            AND added_at < $3`,
-          [student.id, periodStart, periodEnd]
-        )
+    const period = {
+      start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
+      end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : exclusiveEndYmd(periodEnd),
+      mode,
+      weekNum: isWeekMode ? getIsoWeek(periodStart) : null
+    }
+    const failedDims = [taskDim, qDim, wrongDim, statusDim].filter(d => !d.ok)
+    if (failedDims.length > 0) {
+      // 整维度查询失败 ⇒ 视为全班该维度取数失败，显式上报（不静默成无数据）。
+      // 原 N×4 版是 per-student try/catch（单生失败→stats:null）；批量版下「单生失败」不存在，
+      // 故障表现为整维度失败，粒度从「某生」升级为「全班该维度」，消费方 stats===null+error
+      // 与 partialFailure 告警路径仍等价生效。
+      const errMsg = failedDims.map(d => `${d.label}查询失败:${d.error}`).join('；')
+      console.error(`全班周报：${failedDims.length}/4 维度批量查询失败：`, errMsg)
+      const failedStudents = studentRows.map(s => ({ id: s.id, name: s.name, error: errMsg }))
+      return res.json({
+        success: true,
+        partialFailure: { count: failedStudents.length, total: studentRows.length, students: failedStudents },
+        period,
+        reports: studentRows.map(s => ({
+          student: { id: s.id, name: s.name, grade: s.grade },
+          stats: null,
+          error: errMsg
+        }))
+      })
+    }
 
-        // 本周掌握状态
-        const { rows: statusRows } = await query(
-          `SELECT lifecycle_status, COUNT(*)::int AS count
-          FROM ${TABLES.WRONG_QUESTIONS}
-          WHERE student_id = $1
-            AND added_at >= $2
-            AND added_at < $3
-          GROUP BY lifecycle_status`,
-          [student.id, periodStart, periodEnd]
-        )
+    const taskByStudent = new Map(taskDim.rows.map(r => [r.student_id, r]))
+    const qByStudent = new Map(qDim.rows.map(r => [r.student_id, r]))
+    const wrongByStudent = new Map(wrongDim.rows.map(r => [r.student_id, r]))
+    const statusByStudent = new Map()
+    for (const r of statusDim.rows) {
+      if (!statusByStudent.has(r.student_id)) statusByStudent.set(r.student_id, [])
+      statusByStudent.get(r.student_id).push({ lifecycle_status: r.lifecycle_status, count: r.count })
+    }
 
+    const reports = studentRows.map(student => {
+      try {
+        const t = taskByStudent.get(student.id)
+        const q = qByStudent.get(student.id)
+        const w = wrongByStudent.get(student.id)
+        const sRows = statusByStudent.get(student.id) || []
         const { masteredCount, basicMasteredCount, notStartedCount, pendingCount } =
-          splitMasteryStates(statusRows)
-
+          splitMasteryStates(sRows)
+        const total = q?.total || 0
         return {
           student: { id: student.id, name: student.name, grade: student.grade },
           stats: {
-            totalTasks: taskRows[0]?.total_tasks || 0,
-            completedTasks: taskRows[0]?.completed_tasks || 0,
-            totalQuestions: questionRows[0]?.total || 0,
-            correctCount: questionRows[0]?.correct || 0,
-            accuracy: questionRows[0]?.total > 0
-              ? Math.round((questionRows[0].correct / questionRows[0].total) * 1000) / 10
-              : 0,
-            newWrongCount: wrongRows[0]?.count || 0,
+            totalTasks: t?.total_tasks || 0,
+            completedTasks: t?.completed_tasks || 0,
+            totalQuestions: total,
+            correctCount: q?.correct || 0,
+            accuracy: total > 0 ? Math.round((q.correct / total) * 1000) / 10 : 0,
+            newWrongCount: w?.count || 0,
             masteredCount,
             basicMasteredCount,
             notStartedCount,
@@ -618,7 +646,7 @@ router.get('/', async (req, res) => {
           error: e.message
         }
       }
-    }))
+    })
 
     // 单学生取数失败不能静默成「本周无数据」——必须显式上报，否则消费方
     // （批量 PDF 生成器 weeklyReportGenerator.js、工作台班级视图）会把失败
@@ -637,14 +665,7 @@ router.get('/', async (req, res) => {
       partialFailure: failed.length > 0
         ? { count: failed.length, total: reports.length, students: failed }
         : null,
-      period: {
-        // 同上（全班版）：必须按本地日历日印，别用 toISOString 的 UTC 日 —— 见本文件上方单学生版的注释
-        start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
-        // 排他边界 → 最后一天必须走 exclusiveEndYmd（旧「减 1ms」写法在 UTC 服务器上失效，见上方注释）
-        end: mode === 'all' ? periodEnd.toISOString().split('T')[0] : exclusiveEndYmd(periodEnd),
-        mode,
-        weekNum: isWeekMode ? getIsoWeek(periodStart) : null
-      },
+      period,
       reports
     })
   } catch (error) {
