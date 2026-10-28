@@ -1191,9 +1191,10 @@ export const invalidateCache = (type, studentId) => {
   const keyMap = {
     students: 'students_cache',
     tasks: `tasks_cache_${studentId}`,
-    exams: `exams_cache_${studentId}`,
     wrong: `wrong_questions_cache_${studentId}`,
     questions: null,
+    // 试卷列表缓存键是 generated_exams_cache_v2_（见 generatedExamsCacheKey），
+    // 失效试卷缓存务必走 'generated'，不要新增 'exams' 旧键分支（exams_cache_ 是 v2 迁移前的 orphan 键，调用方从未使用）。
     generated: generatedExamsCacheKey(studentId),
     summary: 'tasks_summary_cache'
   }
