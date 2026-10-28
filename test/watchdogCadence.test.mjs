@@ -93,6 +93,34 @@ test('pickIntervalMs：高峰 15s / 低峰 600s / 拉起加速期覆盖低峰', 
   )
 })
 
+test('pickIntervalMs：服务未全健康（pendingRecovery）时低峰也快探 —— 2026-10-28 冷启动白等 10 分钟修复', () => {
+  const w = parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
+  const offPeakNow = new Date(2026, 9, 19, 3, 0)
+  assert.equal(
+    pickIntervalMs({ now: offPeakNow, windows: w, peakMs: 15_000, offPeakMs: 600_000, pendingRecovery: true }),
+    15_000,
+    '低峰但服务未全健康 → 15s 快探（600s 稀疏只适用于「两端都在跑」的稳态）'
+  )
+  assert.equal(
+    pickIntervalMs({ now: offPeakNow, windows: w, peakMs: 15_000, offPeakMs: 600_000, pendingRecovery: false }),
+    600_000,
+    '低峰且全健康 → 保持 600s（不得回退成常数 15s）'
+  )
+  // 加速期优先级高于 pendingRecovery（二者都给 15s，只验证不互相踩）
+  assert.equal(
+    pickIntervalMs({
+      now: offPeakNow,
+      windows: w,
+      peakMs: 15_000,
+      offPeakMs: 600_000,
+      accelerateUntil: offPeakNow.getTime() + 60_000,
+      pendingRecovery: false,
+    }),
+    15_000,
+    '加速期内仍 → 15s（原有行为不回归）'
+  )
+})
+
 test('反向自检：旧固定节奏（合成样本）在低峰与新策略结果可区分 ⇒ 回退常数 15s 必判红', () => {
   const oldPolicyFixed15s = () => 15_000 // 旧版：固定 15s，不看时间
   const w = parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)
@@ -123,4 +151,14 @@ test('结构锁：keep_local_services.mjs 已接入动态节奏并拆除固定 s
   assert.ok(WD_SRC.includes('WATCHDOG_PEAK_WINDOWS'), '必须支持窗口 env 覆盖')
   assert.ok(WD_SRC.includes('parseWindows(process.env.WATCHDOG_PEAK_WINDOWS) ?? parseWindows(DEFAULT_PEAK_WINDOWS_SPEC)'), 'env 非法时必须回退默认窗口')
   assert.ok(!/setInterval\(tick,\s*INTERVAL_MS\)/.test(WD_SRC), '旧版固定 setInterval(tick, INTERVAL_MS) 必须已拆除')
+})
+
+test('结构锁（2026-10-28 冷启动体验修复）：直开工作台 + 未全健康快探 + 自启跳首跳冷却', () => {
+  assert.ok(
+    WD_SRC.includes("const OPEN_URL = 'http://127.0.0.1:3000/workbench'"),
+    '浏览器必须直开 PC 工作台 /workbench（dev 中间件 serve workbench.html），不得落移动端首页'
+  )
+  assert.ok(WD_SRC.includes('pendingRecovery: !allHealthy'), 'tick 必须把「未全健康」传给 pickIntervalMs（低峰冷启动不得睡 600s）')
+  assert.ok(WD_SRC.includes('MINXUE_AUTOSTART'), '必须识别自启链 env（首跳端口空闲立即拉起，不等 90s 冷却）')
+  assert.ok(WD_SRC.includes('initialSpawnedAt()'), '自启链的初始 spawnedAt 必须前移一个冷却期')
 })

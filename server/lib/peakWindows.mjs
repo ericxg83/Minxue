@@ -89,9 +89,13 @@ export function isPeak(date, windows, tzOffsetMin = DEFAULT_TZ_OFFSET_MIN) {
  * - 高峰窗口内 → peakMs（保证随时拉起）
  * - 低峰 → offPeakMs
  * - 刚发生过拉起（accelerateUntil 在未来）→ 即使在低峰也先用 peakMs 快速确认恢复
+ * - 服务未全健康（pendingRecovery，含冷启动/冷却等待/故障）→ 即使在低峰也用 peakMs：
+ *   低峰 600s 稀疏的设计前提是「两端都在跑」的稳态；服务还没起来时睡 600s 会让
+ *   冷启动白等 10 分钟（2026-10-28 实测：08:29 登录 → 08:42 才弹浏览器）。
  */
-export function pickIntervalMs({ now, windows, peakMs, offPeakMs, accelerateUntil, tzOffsetMin }) {
+export function pickIntervalMs({ now, windows, peakMs, offPeakMs, accelerateUntil, pendingRecovery, tzOffsetMin }) {
   if (Number.isFinite(accelerateUntil) && accelerateUntil > now.getTime()) return peakMs
+  if (pendingRecovery) return peakMs
   return isPeak(now, windows, tzOffsetMin) ? peakMs : offPeakMs
 }
 

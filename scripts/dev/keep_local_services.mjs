@@ -23,8 +23,11 @@
  *
  * 开机自启链：计划任务 MinxueLocalServices(AtLogOn) → scripts/start-local-hidden.vbs
  *            → 本脚本（隐藏窗口）。Startup 文件夹另放一份同款 vbs 做兜底。
+ *            两份 vbs 均 set MINXUE_AUTOSTART=1 ⇒ 首跳端口空闲立即拉起（跳过 90s 防双拉冷却，
+ *            该冷却只对「外部先拉起」场景有意义，自启链里守护自己是唯一拉起者）。
  * 单实例：logs/keep_local_services.pid 互斥，重复启动直接退出。
- * 浏览器：带 --open 时，首次探到两端都健康后打开一次 http://127.0.0.1:3000/（每次守护生命周期仅一次）。
+ * 浏览器：带 --open 时，首次探到两端都健康后打开一次 PC 工作台
+ *        http://127.0.0.1:3000/workbench（每次守护生命周期仅一次；2026-10-28 起直开工作台）。
  * 日志：logs/keep_local_services.log（追加，带时间戳）
  * 停止：任务管理器结束 node（keep_local_services）即可（不会连带杀服务）。
  */
@@ -61,6 +64,16 @@ const PEAK_WINDOWS = parseWindows(process.env.WATCHDOG_PEAK_WINDOWS) ?? parseWin
 const ACCELERATE_MS = 2 * 60_000 // 拉起后用高峰节奏确认恢复的时长
 const COOLDOWN_MS = 90_000 // 拉起后给足冷启动时间，期间探活失败也不 taskkill
 
+// ⭐ 开机自启链跳过首跳冷却（2026-10-28）：
+//    自启 vbs（计划任务 + Startup 兜底）会 set MINXUE_AUTOSTART=1。该链路里守护自己就是
+//    唯一拉起者（start-local.cmd 只是手动工具），「防开机双拉」的 90s 首跳冷却纯属白等——
+//    2026-10-28 实测：08:29:42 首跳冷却等待 → 下一跳按低峰睡了 600s → 08:39:42 才拉起。
+//    自启时把初始 spawnedAt 前移一个冷却期 ⇒ 首跳端口空闲立即拉起。
+//    被占端口不受影响：spawnedByUs=false → decideOccupiedPort 返回 external → 只观察不杀，
+//    绝无误杀外部健康服务的风险（r309 教训保持有效）。
+const AUTOSTART = process.env.MINXUE_AUTOSTART === '1'
+const initialSpawnedAt = () => Date.now() - (AUTOSTART ? COOLDOWN_MS : 0)
+
 // ⭐ Render 保活（2026-10-20 r319，负责人「高峰期间不要断」）：
 //   每个 tick 顺手看一眼，只在高峰窗口内每 5 分钟打一次 /api/health（不阻塞主循环）。
 //   窗口判据与 Redis 心跳 / Cloudflare Worker 同一份（server/lib/peakWindows.mjs）。
@@ -73,7 +86,10 @@ const renderKeepalive = createRenderKeepalive({ windows: PEAK_WINDOWS, log })
 //    8s 远小于最短探活间隔（低峰 600s / 高峰 15s），不会拖慢故障发现。
 const HEALTH_TIMEOUT_MS = 8000
 const OPEN_BROWSER = process.argv.includes('--open')
-const OPEN_URL = 'http://127.0.0.1:3000/'
+// ⭐ 直开 PC 工作台（2026-10-28 负责人反馈：弹出来的是移动端首页，还得手动切工作台）。
+//    dev server 的 configureServer 中间件（vite.config.js）会把 /workbench 直接 serve 成
+//    workbench.html，落点即 PC 工作台，无需经过移动端首页。
+const OPEN_URL = 'http://127.0.0.1:3000/workbench'
 
 // 仓库外的 esbuild 二进制（见 .workbuddy-ai/memory/topics/build-and-dev.md §4）
 const ESBUILD_PATH = 'C:/Users/Administrator/.workbuddy-ai/binaries/esbuild/esbuild.exe'
@@ -92,7 +108,7 @@ const SERVICES = [
     //    （开机任务进程刚起、尚未 listen），旧版无条件再拉 ⇒ 双份抢端口（r292/r309 实测）。
     //    该标记区分「本守护拉起的」与「外部拉起的」：只有本守护拉起过的，端口空闲才负责拉起；
     //    外部的端口空闲仅观察等待，给它启动时间，不抢拉。
-    spawnedAt: Date.now(),
+    spawnedAt: initialSpawnedAt(),
     spawnedByUs: false,
   },
   {
@@ -104,7 +120,7 @@ const SERVICES = [
     //    （r292 实测 3 实例 :3000/:3001/:3002、633MB，两孤儿零连接）。参数由纯函数
     //    frontendDevArgs() 统一提供（唯一实现，test/watchdogOwnership.test.mjs 锁定）。
     args: frontendDevArgs(3000),
-    spawnedAt: Date.now(), // 同上：启动宽限
+    spawnedAt: initialSpawnedAt(), // 同上：启动宽限（自启链前移一个冷却期，首跳即可拉起）
     spawnedByUs: false, // 同上：开机任务先拉起时不抢拉
   },
 ]
@@ -216,10 +232,10 @@ let accelerateUntil = 0 // 拉起后的加速确认期截止时刻（期间用�
 let lastMode = null // 'peak' | 'offpeak'，仅用于节奏切换时记一行日志
 
 async function tick() {
-  if (ticking) return
+  if (ticking) return false // 并发保护触发 → 视为「未确认健康」，下一跳快探（保守方向）
   ticking = true
+  let allHealthy = true
   try {
-    let allHealthy = true
     for (const svc of SERVICES) {
       const ok = await healthy(svc)
       if (!ok) allHealthy = false
@@ -277,9 +293,11 @@ async function tick() {
     }
   } catch (e) {
     await log(`tick 异常: ${e.message}`)
+    return false // 异常轮按「未恢复」处理
   } finally {
     ticking = false
   }
+  return allHealthy
 }
 
 await log(
@@ -295,13 +313,17 @@ async function loop() {
     await log(`节奏切换 → ${mode === 'peak' ? `高峰（每 ${PEAK_INTERVAL_MS / 1000}s 探活）` : `低峰（每 ${OFFPEAK_INTERVAL_MS / 1000}s 探活）`}`)
     lastMode = mode
   }
-  await tick()
+  const allHealthy = await tick()
   const nextMs = pickIntervalMs({
     now,
     windows: PEAK_WINDOWS,
     peakMs: PEAK_INTERVAL_MS,
     offPeakMs: OFFPEAK_INTERVAL_MS,
     accelerateUntil,
+    // ⭐ 服务未全健康（冷启动/冷却等待/故障）→ 低峰也用快探节奏：
+    //    600s 稀疏的设计前提是「两端都在跑」的稳态；2026-10-28 实测冷启动
+    //    在冷却等待轮后睡满 600s、登录到弹浏览器 12 分钟，即此因。
+    pendingRecovery: !allHealthy,
   })
   setTimeout(() => { loop().catch(() => {}) }, nextMs)
 }

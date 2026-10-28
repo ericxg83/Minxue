@@ -5,4 +5,7 @@
 ' 08:25 neither :3000 nor :4000 was listening. keep_local_services.mjs probes every 15s
 ' and relaunches on failure, so the services actually survive.
 ' NOTE: keep this file pure ASCII (wscript reads .vbs as ANSI, not UTF-8).
-CreateObject("Wscript.Shell").Run "cmd /c cd /d D:\Minxue_App_V3 && node scripts\dev\keep_local_services.mjs --open", 0, False
+' 2026-10-28: MINXUE_AUTOSTART=1 tells the daemon this is the autostart chain
+' (no external launcher), so it may spawn immediately on first tick instead of
+' waiting out the 90s anti-double-spawn cooldown (logon-to-browser was ~12min).
+CreateObject("Wscript.Shell").Run "cmd /c set MINXUE_AUTOSTART=1&& cd /d D:\Minxue_App_V3 && node scripts\dev\keep_local_services.mjs --open", 0, False
