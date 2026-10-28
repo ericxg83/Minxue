@@ -37,7 +37,7 @@ export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPag
     try {
       const [sum, prog] = await Promise.all([
         getTasksSummary(false),
-        getInProgressTasks(10).catch(() => ({ success: false, tasks: [] }))
+        getInProgressTasks(50).catch(() => ({ success: false, tasks: [] }))
       ])
       if (activeRef.current && sum?.success) { setSummary(sum.summary); setLoadError(null) }
       if (activeRef.current && prog?.success) setInProgress(prog.tasks || [])
@@ -170,7 +170,7 @@ export default function NotificationsPanel({ onClose, onOpenTask, onOpenTasksPag
               {inProgress.length > 0 && (
                 <div className="space-y-2 mb-4">
                   <span style={{ fontSize: 'var(--fs-12)', fontWeight: 500, color: 'var(--text-secondary)' }}>
-                    批改中（{inProgress.length}）
+                    批改中（{summary?.inProgressCount ?? inProgress.length}）
                   </span>
                   {inProgress.map((t) => (
                     <button
