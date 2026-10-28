@@ -553,31 +553,36 @@ router.get('/', async (req, res) => {
       }
     }
 
-    const taskDim = await fetchDim('tasks',
-      `SELECT student_id,
-              COUNT(*)::int AS total_tasks,
-              COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
-       FROM ${TABLES.TASKS}
-       WHERE created_at >= $1 AND created_at < $2 AND deleted_at IS NULL
-       GROUP BY student_id`)
-    const qDim = await fetchDim('questions',
-      `SELECT student_id,
-              COUNT(*)::int AS total,
-              COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
-              COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
-       FROM ${TABLES.QUESTIONS}
-       WHERE created_at >= $1 AND created_at < $2 AND is_complete = TRUE
-       GROUP BY student_id`)
-    const wrongDim = await fetchDim('wrong',
-      `SELECT student_id, COUNT(*)::int AS count
-       FROM ${TABLES.WRONG_QUESTIONS}
-       WHERE added_at >= $1 AND added_at < $2
-       GROUP BY student_id`)
-    const statusDim = await fetchDim('status',
-      `SELECT student_id, lifecycle_status, COUNT(*)::int AS count
-       FROM ${TABLES.WRONG_QUESTIONS}
-       WHERE added_at >= $1 AND added_at < $2
-       GROUP BY student_id, lifecycle_status`)
+    // r351：4 条维度查询彼此独立（不同表、同周期参数），且 fetchDim 各自 try/catch
+    // 返回 {ok:false}，串行/并发下「哪些维度成功」结果完全一致 ⇒ 并发零行为变化，
+    // 仅把 4 次串行 DB 往返压成 1 次并发，热路径（工作台全班视图 + 批量 PDF）延迟下降。
+    const [taskDim, qDim, wrongDim, statusDim] = await Promise.all([
+      fetchDim('tasks',
+        `SELECT student_id,
+                COUNT(*)::int AS total_tasks,
+                COUNT(*) FILTER (WHERE status IN ('done', 'reviewed'))::int AS completed_tasks
+         FROM ${TABLES.TASKS}
+         WHERE created_at >= $1 AND created_at < $2 AND deleted_at IS NULL
+         GROUP BY student_id`),
+      fetchDim('questions',
+        `SELECT student_id,
+                COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE ${sqlCorrectExpr()})::int AS correct,
+                COUNT(*) FILTER (WHERE ${sqlWrongExpr()})::int AS wrong
+         FROM ${TABLES.QUESTIONS}
+         WHERE created_at >= $1 AND created_at < $2 AND is_complete = TRUE
+         GROUP BY student_id`),
+      fetchDim('wrong',
+        `SELECT student_id, COUNT(*)::int AS count
+         FROM ${TABLES.WRONG_QUESTIONS}
+         WHERE added_at >= $1 AND added_at < $2
+         GROUP BY student_id`),
+      fetchDim('status',
+        `SELECT student_id, lifecycle_status, COUNT(*)::int AS count
+         FROM ${TABLES.WRONG_QUESTIONS}
+         WHERE added_at >= $1 AND created_at < $2
+         GROUP BY student_id, lifecycle_status`)
+    ])
 
     const period = {
       start: mode === 'all' ? periodStart.toISOString().split('T')[0] : toLocalYmd(periodStart),
