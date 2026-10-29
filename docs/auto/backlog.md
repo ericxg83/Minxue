@@ -5170,3 +5170,13 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
     3. 返回体字段名逐字不变（`student/stats` 及 9 个 stat 字段），前端 `WeeklyReportWorkbench.vue` 与 `weeklyReportGenerator.js` 消费端零改动（铁律1）。
   - **验证计划**：新增 `test/weeklyReportClassBulk.test.mjs` —— 用内联合成旧版（4×N 循环）/ 新版（4 批量）行为对照：① 同输入两组输出 `reports` 逐生 `stats` 深相等；② 反向自检：注入「漏某生组装」→ 旧/新判红点名；③ 单测套件全绿（含既有 `dashboardCaliber` 等）。四道闸：npm test 全绿 + lint 0 新增 error + 隔离构建 + 冒烟读 DOM（全班概览页渲染不变）。
   - **级别判定**：归 A（行为不变性能优化），但 **r341 指定本子面「先提案不擅改」** ⇒ 本轮只落提案，待负责人拍板后落地；属本 automation 认领赛道（服务端基础设施·非批改 `weeklyReport.js`），无需跨赛道。
+
+## 2026-10-29 关闭确认（r352 后复核 · 用户指令「1 修 2 删 3 接」）
+
+用户 2026-10-29 依据 r352 报告对三项历史待拍板下达「修/删/接」指令；复核发现三项**均已于 2026-10-20 由其他会话落地**，本会话无需改动，仅核实 + 关闭：
+
+- [x] **r292-P-A（看门狗三缺陷）**：已由 commit `c374702`（2026-10-20 12:22）修复并关闭——① `--strictPort`（防 :3000 占满顺延孤儿）/ ② 只杀本守护拉起的进程（`spawnedByUs` + `decideOccupiedPort`/`decideIdlePort`，防开机双拉与误杀外部进程）/ ③ 探活超时 3s→8s（详见 `scripts/dev/keep_local_services.mjs:83-87`）。回归锁 `test/watchdogOwnership.test.mjs` **15/15 通过**（2026-10-29 复跑）。
+- [x] **r299-P-A（`server/simple-server.js` 去留）**：已由 commit `999ee42`（2026-10-20 12:14）删除；磁盘上已不存在、未被 git 跟踪。
+- [x] **r303-P-A（`MAX_GROUP_SIZE` 截断接线）**：`server/services/similarGroupClustering.js:113`（`clusterContentGroups`）与 `:160`（`clusterKpGroups`）均已 `slice(0, MAX_GROUP_SIZE)` 截断；回归锁 `test/similarGroupClustering.test.mjs` **12/12 通过**（2026-10-29 复跑）。
+
+⚠️ **复盘**：r333–r352 多轮日报/backlog 的陈旧「待拍板」残留行未清，导致 r352 报告误将三项列为待拍板、误导用户下达重复指令。后续轮次「待拍板清单」须以本关闭确认为准，不得再原样带出上述三项；同时下轮起「待拍板清单」生成前应 grep 当前代码/提交，避免再次带出已落地项。
