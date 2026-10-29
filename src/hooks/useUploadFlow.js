@@ -30,7 +30,6 @@ export function useUploadFlow({ loadTasks, isInitializing }) {
   const [pendingFlow, setPendingFlow] = useState(null) // 'workbook' | null
   const [selectedWorksheetId, setSelectedWorksheetId] = useState(null)
   const [flowSubject, setFlowSubject] = useState('数学')
-  const [showUploadOptions, setShowUploadOptions] = useState(false)
   const [showWorksheetPicker, setShowWorksheetPicker] = useState(false)
   const [homeworkChoiceFiles, setHomeworkChoiceFiles] = useState([])
 
@@ -309,7 +308,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     }
     input.setAttribute('multiple', 'multiple')
     input.click()
-    setShowUploadOptions(false)
   }
 
   // Upload file handler with QR detection
@@ -329,8 +327,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
         return
       }
       if (e.target && 'value' in e.target) e.target.value = ''
-
-      setShowUploadOptions(false)
 
       const duplicateFiles = []
       const newFiles = []
@@ -721,7 +717,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     clearPendingUploadFlow,
 
     // 上传入口
-    showUploadOptions, setShowUploadOptions,
     showWorksheetPicker, setShowWorksheetPicker,
     triggerUpload,
     handleFileSelect,

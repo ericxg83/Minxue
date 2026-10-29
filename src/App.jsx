@@ -20,7 +20,6 @@ import { __pendingUploadStore } from './features/upload/pendingUploadStore'
 import { mockTasks, mockWrongQuestions, mockGeneratedExams } from './data/mockData'
 import StudentSwitcher from './components/StudentSwitcher'
 import AppHeader from './components/AppHeader'
-import UploadOptionsModal from './components/UploadOptionsModal'
 import DeleteConfirmModal from './components/DeleteConfirmModal'
 import StagingModal from './components/StagingModal'
 import NotificationsPanel from './components/NotificationsPanel'
@@ -477,7 +476,6 @@ export default function App() {
     setPendingFlow,
     setSelectedWorksheetId,
     flowSubject, setFlowSubject,
-    showUploadOptions, setShowUploadOptions,
     showWorksheetPicker, setShowWorksheetPicker,
     handleFileSelect,
     retryTempUpload,
@@ -912,7 +910,7 @@ export default function App() {
             任意全屏弹层开启时禁用下拉，避免与弹层内手势抢事件。 */}
         <PullToRefresh
           onRefresh={handlePullRefresh}
-          disabled={showStaging || showUploadOptions || showWorksheetPicker || showScanQR || showGrading || showExamReview || showPrintPreview || showReprint || showStudentSwitcher || showDeleteConfirm || showNotifications || showLearningReport || showImageViewer || !!wrongBookDetail}
+          disabled={showStaging || showWorksheetPicker || showScanQR || showGrading || showExamReview || showPrintPreview || showReprint || showStudentSwitcher || showDeleteConfirm || showNotifications || showLearningReport || showImageViewer || !!wrongBookDetail}
           style={{ paddingBottom: '12px' }}
         >
           {/* 上传队列提示 — Claude style */}
@@ -947,7 +945,7 @@ export default function App() {
                 isLoadingTasks={isLoadingTasks}
                 isInitializing={isInitializing}
                 pendingWrongCount={dailyRetryQuestions.length}
-                onStartUpload={() => setShowUploadOptions(true)}
+                onStartUpload={() => openStaging('homework')}
                 onOpenTasks={() => { setCurrentPage('tasks'); clearSelection() }}
                 onStartPriorityRetry={handleStartPriorityRetry}
                 onRetryTask={handleRetryTask}
@@ -1105,14 +1103,6 @@ export default function App() {
           }}
           subject={flowSubject}
         />
-
-        {/* Upload Options Menu */}
-        {showUploadOptions && (
-          <UploadOptionsModal
-            onClose={() => setShowUploadOptions(false)}
-            onStartHomework={() => { setShowUploadOptions(false); openStaging('homework') }}
-          />
-        )}
 
         {/* 拍照+相册暂存区 */}
         {showStaging && (
