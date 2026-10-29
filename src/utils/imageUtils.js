@@ -7,16 +7,6 @@ const getSharedCanvas = () => {
   return sharedCanvas
 }
 
-// 将图片转换为 base64
-export const fileToBase64 = (file) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = () => resolve(reader.result)
-    reader.onerror = (error) => reject(error)
-  })
-}
-
 // 上传前置压缩：手机原图常见 8–12MB，跨境链路（前端 → Render → OSS）
 // 越大的 body 越容易撞上 OSS 的响应超时，且整单失败会连带同批其它页。
 // 下限守 1200px/100KB——低于 worker 的分辨率闸门，压过头会被判"图片太模糊"。
@@ -107,37 +97,3 @@ export const describeUploadFailure = (error) => {
   return e ? `上传失败：${e}` : '上传失败'
 }
 
-// 压缩图片（Phase 2优化：复用 canvas）
-export const compressImage = (file, maxWidth = 1920, maxHeight = 1920, quality = 0.8) => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.readAsDataURL(file)
-    reader.onload = (e) => {
-      const img = new Image()
-      img.src = e.target.result
-      img.onload = () => {
-        const canvas = getSharedCanvas()
-        let width = img.width
-        let height = img.height
-
-        // 计算缩放比例
-        if (width > maxWidth || height > maxHeight) {
-          const ratio = Math.min(maxWidth / width, maxHeight / height)
-          width *= ratio
-          height *= ratio
-        }
-
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d', { willReadFrequently: true })
-        ctx.drawImage(img, 0, 0, width, height)
-
-        // 转换为压缩后的 base64
-        const compressedBase64 = canvas.toDataURL('image/jpeg', quality)
-        resolve(compressedBase64)
-      }
-      img.onerror = reject
-    }
-    reader.onerror = reject
-  })
-}
