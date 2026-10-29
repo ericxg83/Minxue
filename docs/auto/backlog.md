@@ -5180,3 +5180,17 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - [x] **r303-P-A（`MAX_GROUP_SIZE` 截断接线）**：`server/services/similarGroupClustering.js:113`（`clusterContentGroups`）与 `:160`（`clusterKpGroups`）均已 `slice(0, MAX_GROUP_SIZE)` 截断；回归锁 `test/similarGroupClustering.test.mjs` **12/12 通过**（2026-10-29 复跑）。
 
 ⚠️ **复盘**：r333–r352 多轮日报/backlog 的陈旧「待拍板」残留行未清，导致 r352 报告误将三项列为待拍板、误导用户下达重复指令。后续轮次「待拍板清单」须以本关闭确认为准，不得再原样带出上述三项；同时下轮起「待拍板清单」生成前应 grep 当前代码/提交，避免再次带出已落地项。
+
+## 2026-10-29 新增提案 · r356-P-A（写路径 apiRequest 默认 retries=3 致非幂等写重放）
+
+- **级别**：B/C（改共享 `src/services/apiService.js` 默认重试语义 + 跨 PC 工作台 lane 调用方，行为变更，拿不准按 B/C）。
+- **现象**：`apiRequest(path, options, retries=3)`（apiService.js:111）默认 3 次尝试对**所有方法**生效，`requestJson` 对 500/502/503/504/408/429/网络错误/超时一律重试（与 method 无关）；仅 GET 做去重、写路径未降重试。
+- **证据（grep）**：未传 `retries=1` 的写调用——
+  - 移动端共享 apiService.js：`markNotificationsRead`(L262 POST)、`/tasks/:id/retry`(L329/L345 POST)、`deleteWrongQuestion`(L795 DELETE)、`deleteTask`(L799 DELETE)、`deleteGeneratedExam`(L803 DELETE)、`deleteWorksheet`(L957 DELETE)；
+  - PC 工作台 `QuestionBankWorkbench.vue`：`POST /teaching-question-types` create/PUT save(L316)、`/variants/:id/generate-all`(L317)、similar-groups 确认/忽略(L368/L387/L399)；
+  - 白板 `WeekendBoard.vue:683`/`WeekendHandout.vue:801` `POST /weekend-ppt/preview`（默认 3）。
+  - r105q 仅补 `createStudent/updateStudent/deleteStudent` 的 `retries=1`，系统性模式未收口。
+- **设计矛盾**：`httpCore.js:30-31` 注释明文「重复提交有副作用的请求不能被自动重放」，实现与之相反。
+- **风险**：Render 冷启动首请求 30~60s（httpCore 注释 L6-8），写操作命中超时且服务端已处理（丢响应）时重试重放；`DELETE`/mark-read 幂等安全，但 **CREATE 类（考法库保存、变式生成）产生重复资源**。
+- **建议落地（若授权）**：`apiRequest` 写路径默认 `retries=1`（或新增 `apiWrite()` 包装），非幂等 CREATE 显式 `retries=1`；回归锁「写路径不得自动重放非幂等请求」；四道闸全过后提交。
+- **处置**：本 automation 巡检发现，A 级自决权不覆盖（共享+跨 lane 行为变更）→ 只提案，等负责人拍板。
