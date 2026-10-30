@@ -2424,6 +2424,16 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
       const buf = await downloadImage(opts.imageUrl)
       imageDataURL = bufferToBase64(buf)
     } catch (e) {
+      // 题干明示引图的题（调用方传 figureRequired），图不可用 ⇒ 纯文字链路必然回
+      // 「待人工补充」。与缺配图预判闸同口径（2026-09-24 用户定调：缺图就别解析，
+      // 别浪费 token 和时间）——当场快速失败，不再烧 150s 文字链、不和后台视觉任务
+      // 抢配额。2026-10-30 实测：数轴配图 433×93 被下载闸拒收后回退文字，撞上补裁清扫
+      // 抢通道，老师对着「AI 计算中」白等 210s 被 503 强杀（q=32c286f1）。
+      if (opts.figureRequired) {
+        const err = new Error(`配图不可用：${e.message}`)
+        err.code = 'FIGURE_UNUSABLE'
+        throw err
+      }
       console.warn(`   [视觉求解] 配图下载失败，本题回退纯文字求解：${e.message}`)
       imageDataURL = null
     }
@@ -2612,6 +2622,11 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
       consensus
     }
   } catch (error) {
+    // 配图不可用（figureRequired 题的快速失败）：不是网络错，绝不重试，
+    // 带原因交回调用方给老师可行动的文案。
+    if (error && error.code === 'FIGURE_UNUSABLE') {
+      return { success: true, answer: '', analysis: '', source: 'figure-unusable', figureError: error.message }
+    }
     // 答案引擎内部已按「主模型 → FALLBACK_MODELS → 通用文本链路」逐层降级，
     // 到这里说明整条文本链路都不可用（限流/网络），按原逻辑重试或返回空。
     // 返回空时该题保留 OCR 阶段的答案（若有），没有则转人工复核 —— 不拿猜测值顶上。

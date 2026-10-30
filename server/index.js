@@ -2400,7 +2400,9 @@ app.put('/api/questions/:id', async (req, res) => {
 // 仅在 PC 批改工作台「编辑参考答案」时使用：老师截图/拍照后一键 OCR 填进 textarea，
 // 避免手敲 \frac、\sqrt 等 KaTeX 命令。识别后前端会弹窗预览让老师确认再覆盖。
 app.post('/api/questions/:id/recognize-answer', upload.single('image'), async (req, res) => {
+  const _t0 = Date.now()
   try {
+    console.log(`[recognize-answer] q=${req.params.id?.slice(0, 8)} 收到识别请求（${(req.file?.buffer?.length || 0)}B）`)
     const { id } = req.params
     if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
       return res.status(400).json({ ok: false, error: '未收到图片' })
@@ -2417,9 +2419,10 @@ app.post('/api/questions/:id/recognize-answer', upload.single('image'), async (r
       req.file.originalname || 'answer.jpg'
     )
     const result = await recognizeAnswerImage(fixedBuffer, 'image/jpeg')
+    console.log(`[recognize-answer] q=${req.params.id?.slice(0, 8)} 成功 ${Date.now() - _t0}ms`)
     res.json({ ok: true, answer: result.answer, analysis: result.analysis })
   } catch (error) {
-    console.error(`[recognize-answer] q=${req.params.id?.slice(0, 8)}:`, error.message)
+    console.error(`[recognize-answer] q=${req.params.id?.slice(0, 8)} 失败 ${Date.now() - _t0}ms:`, error.message)
     res.status(500).json({ ok: false, error: error.message || '识别失败' })
   }
 })
@@ -2429,7 +2432,9 @@ app.post('/api/questions/:id/recognize-answer', upload.single('image'), async (r
 // 老师按 block_coordinates 框选该题区域重新识别，补全后即可通过完整性门禁进入错题本。
 // 与 recognize-answer 一致：只返回结果，由前端预览确认后再走 PUT /api/questions/:id 落库。
 app.post('/api/questions/:id/recognize-question', upload.single('image'), async (req, res) => {
+  const _t0 = Date.now()
   try {
+    console.log(`[recognize-question] q=${req.params.id?.slice(0, 8)} 收到识别请求（${(req.file?.buffer?.length || 0)}B）`)
     const { id } = req.params
     if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
       return res.status(400).json({ ok: false, error: '未收到图片' })
@@ -2446,6 +2451,7 @@ app.post('/api/questions/:id/recognize-question', upload.single('image'), async 
       req.file.originalname || 'question.jpg'
     )
     const result = await recognizeQuestionImage(fixedBuffer, 'image/jpeg')
+    console.log(`[recognize-question] q=${req.params.id?.slice(0, 8)} 成功 ${Date.now() - _t0}ms`)
     res.json({
       ok: true,
       content: result.content,
@@ -2455,7 +2461,7 @@ app.post('/api/questions/:id/recognize-question', upload.single('image'), async 
       question_type: result.question_type
     })
   } catch (error) {
-    console.error(`[recognize-question] q=${req.params.id?.slice(0, 8)}:`, error.message)
+    console.error(`[recognize-question] q=${req.params.id?.slice(0, 8)} 失败 ${Date.now() - _t0}ms:`, error.message)
     res.status(500).json({ ok: false, error: error.message || '识别失败' })
   }
 })
@@ -2822,6 +2828,7 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     let finalAnswer = ''
     let usedChannel = null
     let rejectReason = null
+    let figureUnusableReason = null
 
     // ── 练习册答案库直查闸（2026-10-10）──────────────────────────────────
     // 为什么放在最前面（这是「AI 重解析点了 3 分钟还没完」的直接原因）：
@@ -2918,7 +2925,17 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
         imageUrl: q.geometry_image_url,
         visionVendorChain: [{ vendor: ch.vendor, model: ch.model }],
         timeoutMs: VISION_ENGINE_TIMEOUT_MS,
-        maxRetries: 0
+        maxRetries: 0,
+        // ⚠️ 引擎内部「配图下载失败 → 回退纯文字」时，文字分支读的就是下面三个字段。
+        //    不传 ⇒ 回退丢掉「严格单通道」纪律，改跑默认引擎全链（kimi-k3 → glm-5.2 →
+        //    Bailian → Huihuiyun，每级最长 150s），多级串行必然撞穿 210s 总兜底 ——
+        //    2026-10-30 实测 q=32c286f1（数轴配图 433×93 过小被下载闸拒收）老师白等 210s 后 503。
+        //    传上 ⇒ 回退后仍只打本通道一个模型，单级 ≤150s，不变量（单级/两级串行 < 总兜底）成立。
+        vendorOverride: ch.vendor,
+        modelOverride: ch.model,
+        strictPrimary: true,
+        // 题干明示引图的题，图不可用 ⇒ 引擎内快速失败、不再烧文字链（同缺配图预判闸口径）
+        figureRequired: isFigurePreflightSkipEnabled() && hasFigureReference(q)
       } : {
         vendorOverride: ch.vendor,
         modelOverride: ch.model,
@@ -2930,6 +2947,8 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
       result = r
       // 题干为空是终态：换哪个模型都一样没答案，别再往下试第二级。
       if (r.source === 'empty-input') break
+      // 题干明示引图但配图不可用（下载失败/分辨率过小）：换哪个模型都同样无图可读，终态。
+      if (r.source === 'figure-unusable') { figureUnusableReason = r.figureError; break }
       // 与 worker.js 同口径：先尝试从 analysis 抽出标准答案，再用归一化兜底。
       const rawAnswer = extractAnswerFromAnalysis(r.answer || '', r.analysis || '', options)
       const normalized = normalizeGeneratedAnswer({ question_type: q.question_type, options }, rawAnswer || '')
@@ -2954,6 +2973,16 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
         return done(() => res.status(400).json({
           error: 'empty-question-content',
           message: '这道题的题干内容为空，AI 无法计算答案，请先补齐题干或人工填写答案'
+        }))
+      }
+      // 题干明示引图但配图不可用（引擎内下载失败/分辨率过小的快速失败）：
+      // 与「缺配图预判闸」同口径 —— 无图可读的题重试多少次都一样，给可行动文案，别让老师白等。
+      if (figureUnusableReason) {
+        return done(() => res.status(400).json({
+          error: 'figure-unusable',
+          message: `这道题的题干要求看图作答，但配图不可用（${figureUnusableReason}）。请重新补一张清晰的配图（或人工填写答案），补图后可直接重算`,
+          reason: 'figure-unusable',
+          has_figure: hasFigure
         }))
       }
       // 「AI 自己说不会」（待人工补充 / 主观题无唯一答案 / '-'）——
