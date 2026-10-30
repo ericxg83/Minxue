@@ -14,7 +14,8 @@ import crypto from 'crypto'
 import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
-import { AI_CONFIG, buildOCRPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { AI_CONFIG, buildOCRPrompt, buildOptionsBackfillPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { collectMissingChoiceItems, buildBackfillGroups, parseBackfillJson, applyOptionsBackfill } from './utils/optionsBackfill.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
 import { enhanceAndUploadFigure } from './services/figureEnhanceService.js'
@@ -1511,6 +1512,68 @@ export async function stitchPageBuffers(buffers) {
   return sharp({
     create: { width, height: totalHeight, channels: 3, background: { r: 255, g: 255, b: 255 } }
   }).composite(composites).jpeg({ quality: 85 }).toBuffer()
+}
+
+/**
+ * 跨页补选项兜底（2026-10-30，任务 606935bf「题干在第 2 页、选项表在第 1 页」事故沉淀）。
+ *
+ * 背景：逐页独立 OCR 时，选项表页与题干页被拆开 → 切出的选择题 options=[]，
+ * 完整性闸拦住错题本、手动重裁是单页作用域裁不全。英语页组合并重识别
+ * （selectEnglishMergePages）覆盖部分场景，但合并弃用/失败回落时缺选项的题
+ * 没有任何补救（606935bf 实锤：21 题 is_suspicious、5 道语篇选择题 options=[]）。
+ *
+ * 本函数在英语页组块之后、落库 push 之前执行：
+ *   · 扫描最终题集里「choice 且 options=[]」的题（英语、数学跨页单选通吃；
+ *     正常任务 choice 都有选项 → 零触发零成本）；
+ *   · 题干页与相邻页竖拼（stitchPageBuffers），用 buildOptionsBackfillPrompt
+ *     定向提取选项，只回填 options，绝不动题干/答案/已有数据；
+ *   · 任何失败仅 warn，不影响主流程（题保持 is_suspicious 与原状）。
+ * 判定/分组/解析/校验全部收敛在 server/utils/optionsBackfill.js（有回归测试）。
+ */
+const backfillMissingChoiceOptions = async (pageResults, taskId) => {
+  try {
+    const items = collectMissingChoiceItems(pageResults)
+    if (items.length === 0) return
+    const pagesInvolved = [...new Set(items.map(i => i.pageNumber).filter(v => v != null))]
+    console.log(`   [跨页补选项] ${items.length} 道选择题缺选项（第 ${pagesInvolved.join(',')} 页），与相邻页拼图定向提取`)
+
+    const groups = buildBackfillGroups(pageResults, items)
+    let filledTotal = 0
+    for (const group of groups) {
+      const label = `第 ${group.pageNumbers.join('+')} 页`
+      try {
+        const stitched = group.pages.length > 1
+          ? await stitchPageBuffers(group.pages.map(p => p.compressedBuffer))
+          : group.pages[0].compressedBuffer
+        const prompt = buildOptionsBackfillPrompt(group.items.map(it => ({
+          questionNumber: it.questionNumber,
+          stem: it.stem,
+        })))
+        const res = await callVisionCompletion({
+          imageDataURL: `data:image/jpeg;base64,${bufferToBase64(stitched)}`,
+          systemPrompt: prompt,
+          userText: '请按规则提取每道题的选项并只返回 JSON。',
+          temperature: 0,
+          maxTokens: 2048,
+          vendorChain: GENERAL_OCR_VENDOR_CHAIN,
+        })
+        if (!res?.content) throw new Error('模型返回内容为空')
+        const parsed = parseBackfillJson(stripCodeFence(res.content))
+        const { filled, rejected } = applyOptionsBackfill(group.items, parsed)
+        filledTotal += filled
+        console.log(`   [跨页补选项] ${label}: 回填 ${filled} 题（拒绝 ${rejected} 条）`)
+      } catch (groupError) {
+        console.warn(`   [跨页补选项] ${label} 失败（不影响主流程，题保持原状）: ${groupError.message}`)
+      }
+    }
+    if (filledTotal > 0) {
+      console.log(`   [跨页补选项] 共回填 ${filledTotal}/${items.length} 题的选项 (taskId=${taskId})`)
+    } else {
+      console.warn(`   [跨页补选项] 未能回填任何选项 (${items.length} 题仍缺，taskId=${taskId})`)
+    }
+  } catch (e) {
+    console.warn(`   [跨页补选项] 整体异常（不影响主流程）: ${e.message}`)
+  }
 }
 
 // forceModel: 锁定到指定视觉模型。JSON 修复失败时由本函数自己传入下一个模型重试，
@@ -7470,6 +7533,11 @@ export const processTask = async (job) => {
         }
       }
     }
+
+    // ── 跨页补选项兜底（2026-10-30）：英语页组合并弃用/失败回落，或数学/英语
+    // 逐页 OCR 天然拆开「选项表页/题干页」时，choice 且 options=[] 的题在此定向找回选项。
+    // 只回填空 options，不动题干/答案；失败仅 warn。详见 backfillMissingChoiceOptions。──
+    await backfillMissingChoiceOptions(pageResults, taskId)
 
     let ocrPageTitle = null
     for (const r of pageResults) {
