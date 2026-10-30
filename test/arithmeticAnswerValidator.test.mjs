@@ -236,6 +236,52 @@ const cases = [
     valid: false,
     applicable: true,
   },
+
+  // ── 2026-10-30 第 6 次同族误清空：根号 √ 不在候选字符集，算式被切碎 ──────
+  // 批改页 #19（780d0a40 / e743085d 两学生卷，10-29）：题干 `3√18 × (1/6)√3 ÷ 2√6`
+  // 在 √ 处被切成碎片，`18 × (1/6)` 被当完整算式求值 3/1，与 AI 正解 3/4 比对"不符"
+  // → 清空答案转人工 → 页面误报「AI 没算出答案（题目可能缺配图或条件）」。
+  // 修法：根号进字符集 ⇒ 含根号题整体放弃校验（不支持根号的精确分数求值）。
+  {
+    question: '计算：3√18 × (1/6)√3 ÷ 2√6.',
+    answer: '3/4',
+    valid: true,
+    applicable: false,
+  },
+  {
+    // 事故同题干的另一 OCR 变体（1/6 无括号），修前同样被切碎成 18×1/6 = 3/1
+    question: '计算：3√18 × 1/6√3 ÷ 2√6.',
+    answer: '3/4',
+    valid: true,
+    applicable: false,
+  },
+  {
+    // 混合形态：修前 `√16 + 2×3` 会被切碎成 `16 + 2×3` = 22 拿去比对
+    question: '计算 √16 + 2×3 的值。',
+    answer: '10/1',
+    valid: true,
+    applicable: false,
+  },
+  {
+    // 答案本身带根号（化简题 2√2）：修前修后都跳过（答案侧不认根号）
+    question: '计算 √8 的值。',
+    answer: '2√2',
+    valid: true,
+    applicable: false,
+  },
+  {
+    // 反例：题干含根号但另有**真实算式**时，真算式仍必须校验（不得整体放水）
+    question: '先计算 2+3 的值，再化简 √8。',
+    answer: '7/1',
+    valid: false,
+    applicable: true,
+  },
+  {
+    question: '先计算 2+3 的值，再化简 √8。',
+    answer: '5/1',
+    valid: true,
+    applicable: true,
+  },
 ]
 
 for (const testCase of cases) {

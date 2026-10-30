@@ -126,8 +126,12 @@
                解析的查看入口仍统一在题干行「解析」按钮（AnalysisSource.vue），此处不重复。 -->
           <div v-else class="quick-answer-wrap">
             <div v-if="!quickAnswerEditing" class="ops-cmp-value missing-val" @click="startQuickAnswerEdit">
+              <!-- 2026-10-30：answer_exception_reason 是答案生成侧落库的精确原因
+                   （验算不符 / 缺配图预判 / 叙述残句…），随 SELECT q.* 已带出，有值就显示它，
+                   别再用写死的「缺配图或条件」误导 —— 实测 #19 是验算闸误清空（已修），
+                   老师看到「缺配图」只会白找配图。无值时才退回旧通用文案。 -->
               <template v-if="q.analysis">
-                ⚠ AI 没算出答案（题目可能缺配图或条件），<span class="quick-edit-hint">点击填写</span>
+                ⚠ {{ q.answer_exception_reason || 'AI 没算出答案（题目可能缺配图或条件）' }}，<span class="quick-edit-hint">点击填写</span>
               </template>
               <template v-else>— <span class="quick-edit-hint">点击填写</span></template>
             </div>
