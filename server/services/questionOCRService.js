@@ -168,6 +168,13 @@ export async function recognizeQuestionImage(imageBuffer, mimeType, opts = {}) {
       // 改显式链 WORKBOOK_OCR_VENDOR_CHAIN（deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜），
       // 链外弱模型依旧不会静默接管。vendorName 人工点名分支优先级不变。
       vendorChain: WORKBOOK_OCR_VENDOR_CHAIN,
+      // ⭐ 同步交互链路参数（2026-10-30「框选识别卡死」修复）：
+      //   老师点「开始识别」同步等结果，吃的是**单题裁剪小图**（几十 KB，正常 10~40s 识别完）。
+      //   旧实现不带 timeout → 每步 180s（整页 OCR 的大图口径），链首+链尾最坏 360s，
+      //   前端 180s 早已超时、老师对着转圈按钮以为死机。单题小图 75s 绰绰有余。
+      //   queueTimeoutMs：全局并发闸被 429 风暴压到 1 时排队有界，宁可快速失败让人重试。
+      timeout: 75_000,
+      queueTimeoutMs: 30_000,
     })
 
   return safeParseQuestion(content)

@@ -82,12 +82,42 @@ function notifyAiSuccess() {
   }
 }
 
-function _acquireAiSlot() {
+// ⭐ 排队等待可观测（2026-10-30「框选识别卡死」排障沉淀）：
+//   排队本身静默无日志，请求在闸外等几分钟，日志里完全看不出卡在哪。
+//   等待 >10s 时打一条（含当前排队人数），排障时能直接看到「有请求排了多久」。
+const QUEUE_WAIT_LOG_THRESHOLD_MS = 10_000
+
+function _acquireAiSlot(waitTimeoutMs = null) {
   if (_aiActive < _aiLimit) {
     _aiActive += 1
     return Promise.resolve()
   }
-  return new Promise(resolve => _aiWaiters.push(resolve))
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      resolve: () => {
+        if (waiter.timer) clearTimeout(waiter.timer)
+        waiter.enqueuedMs = Date.now() - waiter.enqueuedAt
+        if (waiter.enqueuedMs > QUEUE_WAIT_LOG_THRESHOLD_MS) {
+          console.warn(`[AI] 并发闸排队 ${Math.round(waiter.enqueuedMs / 1000)}s 后获得槽位（limit=${_aiLimit}，仍排队 ${_aiWaiters.length} 个）`)
+        }
+        resolve()
+      },
+      reject,
+      enqueuedAt: Date.now(),
+      timer: null,
+    }
+    _aiWaiters.push(waiter)
+    // waitTimeoutMs：只约束「排队等待」，不约束拿到槽位后的请求本身。
+    // 同步交互链路（教师点按钮等结果）传有限值：宁可快速失败让人重试，
+    // 也不能无限转圈 —— 旧行为（null=无限等）留给异步批改链路不变。
+    if (waitTimeoutMs != null) {
+      waiter.timer = setTimeout(() => {
+        const idx = _aiWaiters.indexOf(waiter)
+        if (idx >= 0) _aiWaiters.splice(idx, 1)
+        reject(new Error(`AI 通道繁忙：排队 ${(waitTimeoutMs / 1000) | 0}s 仍未获得执行槽位（当前并发 ${_aiActive}/${_aiLimit}，前方排队 ${_aiWaiters.length} 个），请稍后重试`))
+      }, waitTimeoutMs)
+    }
+  })
 }
 
 function _releaseAiSlot() {
@@ -105,8 +135,8 @@ function _releaseAiSlot() {
   _aiActive = Math.max(0, _aiActive - 1)
 }
 
-export async function withAiLimit(fn) {
-  await _acquireAiSlot()
+export async function withAiLimit(fn, { waitTimeoutMs = null } = {}) {
+  await _acquireAiSlot(waitTimeoutMs)
   try {
     return await fn()
   } finally {
@@ -262,10 +292,19 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
   // ⚠️ Google 免费档是**按分钟**的窗口限流（实测 flash 系列 5 RPM），8s 退避必然撞墙 ——
   //    必须跨过整个分钟窗才有意义，故 Gemini 直连通道显式传自己的时间表（见 GEMINI_DIRECT.RETRY_429_DELAYS）。
   retry429Delays = RETRY_DELAYS_429,
+  // ⭐ 429 是否惩罚全局并发闸（2026-10-30「框选识别卡死」根因修复）：
+  //   notifyAiRateLimited 会把全局并发 _aiLimit 永久 -1（最低 1），恢复条件苛刻
+  //   （连续 20 次成功 + 30s 静默）。vendorChain 步的 429 语义是「该通道限流 → 立即换链内下一步」，
+  //   不是「全站过载需要减速」——SenseNova 持续 429 时每个请求都打一下闸，把全系统 AI 并发
+  //   压到 1，所有请求在无界队列里排队数分钟（实测 curl 420s 无响应）。链内换通道场景必须豁免。
+  //   默认 true 保持旧行为（魔搭主链 retry429 重试场景仍降并发自保）。
+  rateLimitPenalty = true,
+  // 排队等待上限（毫秒）：null=无限等（旧行为）。同步交互链路传有限值。
+  queueTimeoutMs = null,
 } = {}) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const response = await withAiLimit(() => client.post(endpoint, body, axiosOptions))
+      const response = await withAiLimit(() => client.post(endpoint, body, axiosOptions), { waitTimeoutMs: queueTimeoutMs })
       notifyAiSuccess()
       // 配额哨兵：请求成功即视为该供应商已恢复，显式清除其降级事件 ——
       // 这是横幅「恢复后自动消失」的实际接线（此前全仓无 clearDegraded 调用点，
@@ -307,7 +346,7 @@ async function postWith429Retry(client, endpoint, body, axiosOptions, {
         })
         throw err
       }
-      if (status === 429) notifyAiRateLimited()
+      if (status === 429 && rateLimitPenalty) notifyAiRateLimited()
       if (retry429 && status === 429 && attempt < retry429Delays.length) {
         // Retry-After 优先：服务端说等几秒就等几秒。
         // 注意：只有当服务端给的等待 ≤ 当前时间表的最大档时才会被采用 —— 否则以本通道
@@ -685,7 +724,11 @@ export const CHART_OCR_VENDOR_CHAIN = [
 //   ❌ 有意排除：kimi-k3（批改场景返回空 questions 数组=整页丢失，不合格）、6.8-lite（丢选项 0/3、0/4）
 export const WORKBOOK_OCR_VENDOR_CHAIN = [
   { vendor: 'SenseNova', model: 'deepseek-flash' },
-  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+  // ⭐ extraBody.enable_thinking:false（2026-10-30「框选识别卡死」根因②）：
+  //   qwen3.8-flash 默认思考模式，对单题/整页转录的长指令生成超长 reasoning，
+  //   max_tokens 全烧在思考上不出 content → 每次跑满 180s 超时（日志全是 timeout of 180000ms exceeded）。
+  //   同图对照实测：默认 120s+ 跑不完；enable_thinking:false 3.2s 出正确 JSON。
+  { vendor: 'Bailian', model: 'qwen3.8-flash', extraBody: { enable_thinking: false } },
 ]
 
 // 通用学生作业拍照批改 OCR（worker.js recognizeQuestionsHybrid / recognizeQuestions，原 legacy 兜底，从未显式定序）：
@@ -696,7 +739,8 @@ export const WORKBOOK_OCR_VENDOR_CHAIN = [
 //      6.8-lite（丢选项 0/3、丢尾题 26/27）、ZenMux（GFW 墙，仅 Render 能出站）
 export const GENERAL_OCR_VENDOR_CHAIN = [
   { vendor: 'SenseNova', model: 'deepseek-flash' },
-  { vendor: 'Bailian', model: 'qwen3.8-flash' },
+  // ⭐ 同 WORKBOOK_OCR_VENDOR_CHAIN：qwen3.8-flash 必须关思考，否则每次跑满超时（2026-10-30 实测）
+  { vendor: 'Bailian', model: 'qwen3.8-flash', extraBody: { enable_thinking: false } },
   { vendor: 'HuihuiyunGemini', model: 'gemini-3.7-flash' },
 ]
 
@@ -931,6 +975,9 @@ async function requestOpenAIProvider({
   // 命中真·额度耗尽时，该 Key×模型冷却多久。默认由 postWith429Retry 用「自然日剩余」，
   // 匹配 ModelScope 的账号×模型×日 配额。SenseNova 5h 窗口 / 其它短周期请显式传。
   exhaustedTtlMs = null,
+  // 429 是否惩罚全局并发闸 / 排队等待上限。同步链路（教师点按钮）与 vendorChain 步传专用值。
+  rateLimitPenalty = true,
+  queueTimeoutMs = null,
 }) {
   const headers = vendor ? buildVendorHeaders(vendor, apiKey) : {
     'Content-Type': 'application/json',
@@ -961,7 +1008,7 @@ async function requestOpenAIProvider({
     endpoint,
     body,
     { headers, timeout, proxy: false },
-    { retry429, retry503, exhaustedTtlMs },
+    { retry429, retry503, exhaustedTtlMs, rateLimitPenalty, queueTimeoutMs },
   )
 
   return extractContent(response.data?.choices?.[0]?.message)
@@ -1764,6 +1811,12 @@ export async function callVendorTextCompletion({
   return { content, vendor: vendorName, model: useModel }
 }
 
+// ── vendorChain 步骤级瞬时限流冷却（2026-10-30「框选识别卡死」沉淀）──────────────
+//   某步 429 后 60s 内直接跳过该步，避免每个新请求都白挨一发限流（排队+日志噪音）。
+//   瞬时限流语义（区别于额度耗尽的 5h/自然日冷却）：到点自动放行，无需重启。
+const VENDOR_STEP_429_COOLDOWN_MS = 60_000
+const _vendorStep429Cooldown = new Map() // `${vendor}:${model}` -> 冷却到期 ms
+
 export async function callVisionCompletion(opts) {
   const {
     imageDataURL,
@@ -1813,6 +1866,10 @@ export async function callVisionCompletion(opts) {
     //   「同步等结果」的调用方（教师点按钮重算带图题答案）可下调，避免视觉慢通道把
     //   整条同步链路的墙钟时间耗光、撞穿上层 DEADLINE。
     timeout = null,
+    // 并发闸排队等待上限（2026-10-30「框选识别卡死」引入）：null=无限等（旧行为）。
+    //   同步交互链路必须传有限值 —— 闸被 429 风暴压到 1 时，无界排队让请求一卡几分钟，
+    //   前端 180s 早已超时、后端还在白跑。异步批改链路保持 null 不变。
+    queueTimeoutMs = null,
   } = opts
 
   // ModelScope Key 池：主 Key + 备用 Key，与 VL_MODELS 组成「Key×模型」矩阵。
@@ -1884,6 +1941,7 @@ export async function callVisionCompletion(opts) {
         timeout: parseInt(process.env.VISION_TIMEOUT_MS) || 180000,
         retry429: true,
         retry503: false,
+        queueTimeoutMs,
       })
       return { content, usedBackup: apiKey !== AI_CONFIG.API_KEY, vendorName: 'ModelScope' }
     } catch (err) {
@@ -1946,6 +2004,18 @@ export async function callVisionCompletion(opts) {
         return
       }
       providers.push(async () => {
+        // ⭐ 步骤级瞬时限流冷却（2026-10-30）：某步 429 后 60s 内后续请求直接跳过该步。
+        //   SenseNova 持续 429 时，每个新请求都白挨一发（虽快但每次都打日志+占闸排队），
+        //   冷却期内直达链尾，排队压力与日志噪音同减。成功即清除冷却。
+        const stepKey = `${vendorDef.name}:${step.model}`
+        const cooldownUntil = _vendorStep429Cooldown.get(stepKey) || 0
+        if (Date.now() < cooldownUntil) {
+          const left = Math.ceil((cooldownUntil - Date.now()) / 1000)
+          const skipErr = new Error(`通道 ${stepKey} 瞬时限流冷却中（剩 ${left}s），跳过`)
+          skipErr._provider = vendorDef.name.toLowerCase()
+          skipErr._stepCooldownSkipped = true
+          throw skipErr
+        }
         try {
           const content = await requestOpenAIProvider({
             endpoint: vendorDef.endpoint,
@@ -1961,17 +2031,39 @@ export async function callVisionCompletion(opts) {
             retry429: false,
             retry503: false,
             vendor: vendorDef,
-            extraBody: vendorDef.extraBody || null,
+            // extraBody 按「供应商级 + 链步级」合并：链步级优先。
+            // ⭐ 2026-10-30 实锤：qwen3.8-flash 默认思考模式，对单题转录的长指令会生成
+            //   超长 reasoning（max_tokens 2048 全烧在思考上），实测 120s+ 无 content → 每次超时；
+            //   带 enable_thinking:false 同图 3.2s 出正确结果。Bailian 供应商级 extraBody 为 null
+            //   （其 textModel=deepseek-v4-pro 不能盲目带 qwen 参数），故由链步级显式声明。
+            extraBody: (vendorDef.extraBody || step.extraBody)
+              ? { ...(vendorDef.extraBody || {}), ...(step.extraBody || {}) }
+              : null,
+            // 链内 429 = 「换通道」信号，不是「全站过载」——不打全局并发闸
+            //（否则 SenseNova 持续 429 会把闸压到 1，全系统 AI 排队雪崩）。
+            rateLimitPenalty: false,
+            queueTimeoutMs,
           })
+          _vendorStep429Cooldown.delete(stepKey)
           // 链首成功 = 走的是指定主力（不算降级）；链中成功 = 发生过降级（上层记 parse_warning）
           // model 一并带回（2026-09-24）：视觉求解答案的调用方需要 `vendor:model` 通道标识
           // 来判降级 / 留痕，仅靠 vendorName 无法区分同供应商下的不同模型。
           return { content, usedBackup: idx > 0, vendorName: vendorDef.name, model: step.model }
         } catch (err) {
           err._provider = vendorDef.name.toLowerCase()
+          // ⭐ 链步专属标记：主循环据此豁免「主站限流冷却」（链内 429 ≠ 魔搭主站限流）
+          //   与 else 推断分支（bailian 等链外供应商名会被误标成魔搭，归因错方向）。
+          err._fromVendorChain = true
+          err._providerLabel = vendorDef.name
+          if (err?.response?.status === 429) {
+            _vendorStep429Cooldown.set(stepKey, Date.now() + VENDOR_STEP_429_COOLDOWN_MS)
+          }
           // 单步失败必须可见：provider 主循环只汇总最后一个错误，链首失败会被链中成功掩盖，
           // 没有这行日志就分不清「主力真挂」还是「瞬时抖动降级」（2026-09-22 探针排障实需要）。
-          console.warn(`[AI] vendorChain 第 ${idx + 1} 步 ${vendorDef.name}:${step.model} 失败：${String(err?.message || err).slice(0, 200)}`)
+          // 冷却跳过属预期分流，降格为不打印（provider 主循环会记最后一个真实错误）。
+          if (!err?._stepCooldownSkipped) {
+            console.warn(`[AI] vendorChain 第 ${idx + 1} 步 ${vendorDef.name}:${step.model} 失败：${String(err?.message || err).slice(0, 200)}`)
+          }
           throw err
         }
       })
@@ -2005,6 +2097,7 @@ export async function callVisionCompletion(opts) {
               retry429: false,
               vendor,
               extraBody: vendor.extraBody || null,
+              queueTimeoutMs,
             })
             return { content, usedBackup: true, vendorName: vendor.name }
           } catch (err) {
@@ -2046,6 +2139,7 @@ export async function callVisionCompletion(opts) {
               retry429: false,
               vendor: gmiVendor,
               extraBody: gmiVendor.extraBody || null,
+              queueTimeoutMs,
             })
             return { content, usedBackup: true, vendorName: gmiVendor.name }
           } catch (err) {
@@ -2088,6 +2182,7 @@ export async function callVisionCompletion(opts) {
               retry429: false,
               vendor,
               extraBody: vendor.extraBody || null,
+              queueTimeoutMs,
             })
             return { content, usedBackup: true, vendorName: vendor.name }
           } catch (err) {
@@ -2173,6 +2268,9 @@ export async function callVisionCompletion(opts) {
   let agnesAttempted = false
   let fmAttempted = false
   let snAttempted = false
+  // vendorChain 步的精确归因（2026-10-30）：bailian 等链外供应商名不在下方四类里，
+  // 会被 else 推断分支误标成「魔搭」，错误文案变成「魔搭 + SenseNova 均不可用」——归因错方向。
+  const vendorChainTried = []
   for (const provider of providers) {
     try {
       const result = await provider()
@@ -2184,13 +2282,17 @@ export async function callVisionCompletion(opts) {
       //    它 429 跟魔搭没有任何关系。实测未排除时日志出现
       //    「[AI] 主模型限流，冷却 60s」+「魔搭所有 Key×模型组合今日配额均已耗尽」，
       //    归因完全错方向，还会平白把魔搭冷却掉。
+      // ⚠️ 2026-10-30：同样排除 vendorChain 链步 —— 链内 429（SenseNova 持续限流）是
+      //    「换通道」信号，跟魔搭主站配额无关，不该把魔搭兜底冷却 60s。
       const fromGeminiDirect = err._provider === 'googlegeminidirect'
-      if (!fromGeminiDirect && err.response?.status === 429 && !isQuotaExhaustedError(err) && !isMainRateLimitedToday()) {
+      if (!fromGeminiDirect && !err._fromVendorChain && err.response?.status === 429 && !isQuotaExhaustedError(err) && !isMainRateLimitedToday()) {
         markMainRateLimited()
       }
       lastError = err
       // 标记哪些 provider 真正被尝试过
-      if (err._provider === 'ms' || /魔搭|ModelScope|ms provider/i.test(err.message || '')) msAttempted = true
+      if (err._fromVendorChain) {
+        if (err._providerLabel && !vendorChainTried.includes(err._providerLabel)) vendorChainTried.push(err._providerLabel)
+      } else if (err._provider === 'ms' || /魔搭|ModelScope|ms provider/i.test(err.message || '')) msAttempted = true
       else if (err._provider === 'agnes' || /Agnes|agnes/i.test(err.message || '')) agnesAttempted = true
       else if (err._provider === 'freemodel' || /FreeModel|freemodel/i.test(err.message || '')) fmAttempted = true
       else if (err._provider === 'sensenova' || /SenseNova|sensenova/i.test(err.message || '')) snAttempted = true
@@ -2213,7 +2315,7 @@ export async function callVisionCompletion(opts) {
   // ── 统一错误信息：让用户/前端/黑名单都能精确知道是哪一类 provider 不可用 ──
   // 仅魔搭失败 → 提示"魔搭视觉模型当日配额耗尽或限流，请明日再试或配置其他模型"
   // 魔搭+Agnes 都失败 → 提示"所有视觉模型均不可用，请稍后重试"
-  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted, snAttempted, geminiAttempted })
+  throw wrapVisionError(lastError, { msAttempted, agnesAttempted, fmAttempted, snAttempted, geminiAttempted, extraTried: vendorChainTried })
 }
 
 /**
@@ -2227,7 +2329,7 @@ export async function callVisionCompletion(opts) {
  *   - 都没尝试（理论不可能）→ 抛原 error
  *   - 仅 Gemini 直连失败（onlyVendor 通道）→ 保留原 message，不改写成"魔搭耗尽"
  */
-export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false, snAttempted = false, geminiAttempted = false } = {}) {
+export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted = false, fmAttempted = false, snAttempted = false, geminiAttempted = false, extraTried = [] } = {}) {
   if (!lastError) return new Error('All vision AI providers failed')
   // 独占通道（onlyVendor=Gemini）下失败就是失败，不要把归因指向魔搭
   if (geminiAttempted && !msAttempted && !agnesAttempted && !fmAttempted && !snAttempted) return lastError
@@ -2237,6 +2339,10 @@ export function wrapVisionError(lastError, { msAttempted = false, agnesAttempted
   if (agnesAttempted) tried.push('Agnes')
   if (fmAttempted) tried.push('FreeModel')
   if (snAttempted) tried.push('SenseNova')
+  // vendorChain 链步的精确供应商名（2026-10-30）：如 Bailian，避免被 else 推断误标成魔搭
+  for (const label of (Array.isArray(extraTried) ? extraTried : [])) {
+    if (label && !tried.includes(label)) tried.push(label)
+  }
   if (tried.length >= 2) {
     const wrapped = new Error(`所有视觉模型（${tried.join(' + ')}）均不可用：${lastError.message || '未知错误'}`)
     wrapped.cause = lastError

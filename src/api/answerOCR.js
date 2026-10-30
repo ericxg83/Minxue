@@ -5,10 +5,12 @@ import { apiRequest } from '../services/apiService.js'
 export const recognizeAnswer = async (questionId, file) => {
   const fd = new FormData()
   fd.append('image', file)
+  // timeout 240s（2026-10-30）：后端同步识别链最坏 = 排队 30s + 每步 75s×2 ≈ 150s+开销，
+  // 前端必须比它长，否则后端还在跑、前端先报超时，老师重试反而加重排队。
   const data = await apiRequest(`/questions/${questionId}/recognize-answer`, {
     method: 'POST',
     body: fd,
-    timeout: 180 * 1000
+    timeout: 240 * 1000
   }, 1)
   if (!data || data.ok === false) {
     throw new Error(data?.error || '识别失败')
@@ -22,10 +24,12 @@ export const recognizeAnswer = async (questionId, file) => {
 export const recognizeQuestion = async (questionId, file) => {
   const fd = new FormData()
   fd.append('image', file)
+  // timeout 240s（2026-10-30）：后端同步识别链最坏 = 排队 30s + 每步 75s×2 ≈ 150s+开销，
+  // 前端必须比它长，否则后端还在跑、前端先报超时，老师重试反而加重排队。
   const data = await apiRequest(`/questions/${questionId}/recognize-question`, {
     method: 'POST',
     body: fd,
-    timeout: 180 * 1000
+    timeout: 240 * 1000
   }, 1)
   if (!data || data.ok === false) {
     throw new Error(data?.error || '识别失败')

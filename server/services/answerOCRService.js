@@ -60,6 +60,10 @@ export async function recognizeAnswerImage(imageBuffer, mimeType) {
     userText: '请识别这张图片里的题目与参考答案，按 JSON 格式返回。',
     temperature: 0.2,
     maxTokens: 2048,
+    // ⭐ 同步交互链路参数（2026-10-30「框选识别卡死」修复，同 questionOCRService）：
+    //   老师点按钮同步等结果，吃的是单题截图，75s 绰绰有余；排队有界防无界转圈。
+    timeout: 75_000,
+    queueTimeoutMs: 30_000,
   })
 
   return safeParseAnswer(content)
