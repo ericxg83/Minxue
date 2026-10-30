@@ -95,6 +95,11 @@ export const useReviewStore = defineStore('review', () => {
   const autoGateResolved = ref(null) // { count, at, issues }
   const clearAutoGateResolved = () => { autoGateResolved.value = null }
 
+  // [2026-10-30 默认全加] 完成复核时低置信等未入册错题被自动加入错题本的次数汇总，
+  // 供 UI 弹一条轻提示。弹窗（wrongGateVisible）从此只承载「自动加入失败」的异常题。
+  const autoGateAdded = ref(null) // { count, at }
+  const clearAutoGateAdded = () => { autoGateAdded.value = null }
+
   // ReviewTopBar 触发「去编辑」时记录的待编辑题目，QuestionDetailPanel 监听后打开编辑面板
   const pendingEditQuestionId = ref(null)
 
@@ -1940,8 +1945,12 @@ export const useReviewStore = defineStore('review', () => {
   //       理由：补题目元素不归老师做，拦下来老师也只能点"本次不加入"，
   //       等于用一次点击记录一次系统故障。
   //   · low_confidence / 未知 code
-  //     → **一律仍拦卷**。自动放行等于替老师下"算不算错"的结论，
-  //       判错则学生白练、错题本被污染。这是本分层不可越过的红线。
+  //     → 仍进 blocking（分类逻辑不变：autoResolvable=false 的语义是「不许按
+  //       不加入静默放行」）。但 blocking 的处置已变：
+  //       [2026-10-30 负责人裁决] 原来弹窗逐题问「加入/本次不加入」，实测老师的
+  //       答案恒为「加入」，弹窗退化为纯仪式 ⇒ 改为**默认自动加入错题本**
+  //       （复用既有 addQuestionToBook 链路，服务端校验完整性），只有加入失败/
+  //       被跳过的题才留在返回值里弹窗处理。加错可逆（错题本可移出、卷内可标对）。
   //
   // 写库失败必须上抛（铁律 #11）：绝不能让"自动放行"变成"静默丢弃"。
   const prepareWrongGate = async () => {
@@ -1981,6 +1990,36 @@ export const useReviewStore = defineStore('review', () => {
           issues: [...new Set(autoResolvable.flatMap(i => i.gateClass?.autoIssues || []))],
         }
       }
+    }
+
+    // ── [2026-10-30 默认全加] blocking 处置：自动加入，失败才弹窗 ──
+    // 老师对这类题的决策实测恒为「加入错题本」⇒ 逐题弹窗问已无意义。
+    // 复用弹窗按钮同一条入册链路 addQuestionToBook（同一件事只准一个实现），
+    // 服务端对不完整题会 skipped，不会把残题塞进错题本。
+    if (blocking.length > 0) {
+      let autoAddedCount = 0
+      for (const item of blocking) {
+        try {
+          const result = await addQuestionToBook(item.questionId)
+          const added = result?.added?.length || 0
+          const already = result?.alreadyExists?.length || 0
+          if (added > 0 || already > 0) {
+            autoAddedCount++
+          } else {
+            // skipped：题目元素不完整等，服务端拒收 → 留给老师（fail-closed）
+            console.warn(`[WrongGate] 自动加入被跳过，退回人工处理 qid=${item.questionId}:`, result)
+          }
+        } catch (e) {
+          // 单题失败不能吞：留在清单里让老师看到并处理（fail-closed）
+          console.error(`[WrongGate] 自动加入失败，退回人工处理 qid=${item.questionId}:`, e)
+        }
+      }
+      if (autoAddedCount > 0) {
+        autoGateAdded.value = { count: autoAddedCount, at: Date.now() }
+      }
+      // 以库为准重算：加入成功的题已进 wrongQuestions，会从未决清单自然消失；
+      // 剩下的才是真正需要老师处理的异常（缺元素 / 入册失败）。
+      return splitWrongGateList(rawUnresolvedWrongQuestions.value).blocking
     }
     return blocking
   }
@@ -2176,6 +2215,8 @@ export const useReviewStore = defineStore('review', () => {
     // [2026-09-23 P2] 门禁分层：系统侧缺项被自动记 wrong_no_book 的汇总（UI 层消费后弹轻提示）
     autoGateResolved,
     clearAutoGateResolved,
+    autoGateAdded,
+    clearAutoGateAdded,
     pendingEditQuestionId,
     // 闸1 欠账显性化（2026-09-27）：卷内常驻标识 + 全局待补清单 + 补入成功通知
     gateSkippedQuestions,

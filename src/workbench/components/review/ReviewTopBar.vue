@@ -172,10 +172,12 @@
 
   <!-- 错题处理决策门禁 -->
   <el-dialog v-model="store.wrongGateVisible" title="请确认错题处理方式" width="640px" :close-on-click-modal="false">
-    <div class="wrong-gate-tip">以下题目已判定为错误，但尚未进入错题本。</div>
+    <!-- [2026-10-30 默认全加] 低置信等未入册错题在完成复核时已自动加入（autoGateAdded），
+         这个弹窗现在只承载「自动加入失败」的异常题，不再逐题问「加入/本次不加入」。 -->
+    <div class="wrong-gate-tip">以下题目已判定为错误，但自动加入错题本失败。</div>
     <div class="wrong-gate-note">
-      你亲手标「错」的题系统会立即尝试入册，列在这里说明<strong>入册失败</strong>（多因题目元素不完整）；
-      AI 判错且你还没逐题确认的题，需要你选择是否加入。
+      未入册的错题在完成复核时会<strong>默认自动加入</strong>错题本；列在这里的是自动加入失败的题
+      （多因题目元素不完整）。补全元素保存后会自动入册，或选择「本次不加入」翻篇。
     </div>
     <ul class="wrong-gate-list">
       <li v-for="item in store.wrongGateList" :key="item.questionId" class="wrong-gate-item">
@@ -428,6 +430,15 @@ watch(() => store.autoGateResolved, (info) => {
     `${info.count} 道错题因题目元素缺失${detail}未加入错题本，已自动记录「本次不加入」；本题已标在页面上方「缺元素未入册」，补全后可用顶栏「待补入」清单找回`
   )
   store.clearAutoGateResolved()
+})
+
+// [2026-10-30 默认全加] 完成复核时低置信等未入册错题自动加入成功 → 轻提示
+// （store 只记录，这里弹）。全成功时老师只看到这条提示，不再被弹窗拦一次；
+// 弹窗从此只承载「自动加入失败」的异常题。
+watch(() => store.autoGateAdded, (info) => {
+  if (!info) return
+  ElMessage.success(`${info.count} 道低置信错题已自动加入错题本`)
+  store.clearAutoGateAdded()
 })
 
 // 当 store 中 currentTask 变化时同步下拉框
