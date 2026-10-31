@@ -24,7 +24,7 @@ import { useMemo } from 'react'
 import katex from 'katex'
 // 复用打印链路的纯函数与符号表，不再重复定义一份：本组件是 utils/mathText.js 的 fork，
 // 第 40 轮「裸源码上屏」缺陷就是两份实现漂移造成的——能共用的必须共用。
-import { convertSqrt, SUP_BASE, SUB_BASE } from '../../utils/mathText.js'
+import { convertSqrt, SUP_BASE, SUB_BASE, normalizeFractions } from '../../utils/mathText.js'
 
 // ── 智能 plain-text → LaTeX 转换器 ──
 
@@ -135,6 +135,13 @@ function preprocessMath(text) {
   // 而同一题的 PDF 走 utils/mathText.js 早已转成 \sqrt —— 屏幕与卷面不是同一份东西。
   result = convertSqrt(result)
 
+  // === 0.6 指数规范化 + 分数转换：与 utils/mathText.js 共享 normalizeFractions（单一实现）===
+  // 必须**先于**分数做指数规范化、且分数操作数认 ^{...}（详见该函数注释）。
+  // 2026-10-31 修复：此前本组件在分数之前未规范化指数、且分数正则不认 ^{...}，
+  // 导致 a^2/b^3 在手机端渲染成红色源码、a/b^2 被渲染成 (a/b)²，而 PDF 正确
+  // （铁律14：两份数学渲染实现必须同改）。
+  result = normalizeFractions(result)
+
   // === 0. 核心修复: 将不规范的 LaTeX 命令直接替换为 Unicode 符号 ===
   // 数据库中存储的题干包含 \leq 等命令但没有 $ 包裹，
   // KaTeX 无法正确解析 \leq2 这种连写形式。
@@ -148,12 +155,7 @@ function preprocessMath(text) {
   result = result.replace(/\\perp/g, '\u22A5')
   result = result.replace(/\\parallel/g, '\u2225')
 
-  // === 1. 除法表达式: a/b → \frac{a}{b} ===
-  result = result.replace(/(\([^)]+\))\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
-  result = result.replace(/(\([^)]+\))\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
-  result = result.replace(/([a-zA-Z0-9]+)\s*\/\s*(\([^)]+\))/g, '\\frac{$1}{$2}')
-  result = result.replace(/([a-zA-Z0-9°]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
-  result = result.replace(/(-[0-9]+)\s*\/\s*([a-zA-Z0-9]+)/g, '\\frac{$1}{$2}')
+  // === 1. 除法表达式 a/b → \frac{a}{b}：已由上面的 normalizeFractions 统一处理（共享 utils 实现）===
 
   // === 1.5 混合数: 数字 空格 分数 → 数字\frac{分子}{分母} (e.g., 1 1/6 → 1\frac{1}{6}) ===
   result = result.replace(/(\d+(?:\.\d+)?)\s+(\d+)\s*\/\s*(\d+)/g, (match, whole, num, den) => {
@@ -163,15 +165,7 @@ function preprocessMath(text) {
     return match
   })
 
-  // === 2. 指数: x^2 → x^{2} ===
-  //
-  // ⚠ 必须**非贪婪**（2026-10-10 乱码事故）：贪婪的 `+` 会把 `6a^2b^6` 吞成
-  // `6a^{2b}^6`，`b` 被误当上标内容 ⇒ 产物非法 ⇒ KaTeX 红色源码。
-  // 三条分工：纯数字整体(x^12)、单个字母(a^2b)、括号组((x+1)^2)。
-  result = result.replace(/([a-zA-Z0-9])\^([0-9]+)(?![0-9A-Za-z])/g, '$1^{$2}')
-  result = result.replace(/([a-zA-Z0-9])\^([a-zA-Z])(?![a-zA-Z0-9])/g, '$1^{$2}')
-  result = result.replace(/([a-zA-Z0-9])\^\(([^()]*)\)/g, '$1^{$2}')
-  result = result.replace(/([a-zA-Z0-9])\^([0-9])/g, '$1^{$2}')
+  // === 2. 指数: x^2 → x^{2}：已由上面的 normalizeFractions 统一处理（共享 utils 实现）===
 
   // === 3. 下标: x_1 → x_{1} ===
   //

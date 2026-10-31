@@ -70,6 +70,41 @@ const SUB_BASE = {
   'ₚ': 'p', 'ₛ': 's', 'ₜ': 't',
 }
 
+/**
+ * 指数规范化 + 分数转换（PDF 链路与移动端 MathText 组件共享的**单一实现**）。
+ *
+ * ⚠ 必须**先**做指数规范化、再转换分数：先把 `a^2` 收口成 `a^{2}`，
+ * 否则分数正则会把「属于指数的数字」误当分子/分母的边界 ——
+ * `a^2/b^3` 会被切成 `a^\frac{2}{b}^3`（双上标 ⇒ KaTeX 红色源码）。
+ * 分数操作数必须能吃下 `^{...}`（`a/b^2` → \frac{a}{b^{2}}，而非 \frac{a}{b}^{2}）。
+ *
+ * 2026-10-31 抽出共享：此前 PDF 链路（本文件）与移动端 MathText 组件各自维护一份、
+ * 顺序不一致，导致手机端对「带指数的分数」渲染出错而 PDF 正确（铁律14：两份实现必须同改）。
+ */
+export function normalizeFractions(s) {
+  s = s.replace(/([a-zA-Z0-9])\^([0-9]+)(?![0-9A-Za-z])/g, '$1^{$2}')
+  s = s.replace(/([a-zA-Z0-9])\^([a-zA-Z])(?![a-zA-Z0-9])/g, '$1^{$2}')
+  s = s.replace(/([a-zA-Z0-9])\^\(([^()]*)\)/g, '$1^{$2}')
+  const fractionOperand = String.raw`(?:\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?(?:\^\{[^{}]*\})?|\([^()]*\))`
+  const fractionPattern = new RegExp(
+    String.raw`(?<![\^{])(${fractionOperand})\s*\/\s*(${fractionOperand})(?!\^)`,
+    'g'
+  )
+  let prev
+  let guard = 0
+  do {
+    prev = s
+    s = s.replace(fractionPattern, '\\frac{$1}{$2}')
+    guard++
+    if (guard > 20) break
+  } while (s !== prev)
+
+  // 清理分数多余括号：\frac{(a)}{(b)} → \frac{a}{b}；(a/b) → a/b
+  s = s.replace(/\\frac\{\(([^{}]*)\)\}\{\(([^{}]*)\)\}/g, '\\frac{$1}{$2}')
+  s = s.replace(/\(\\frac\{([^{}]*)\}\{([^{}]*)\}\)/g, '\\frac{$1}{$2}')
+  return s
+}
+
 function preprocessMath(text) {
   let s = String(text || '')
 
@@ -126,40 +161,11 @@ function preprocessMath(text) {
     parseInt(num, 10) < parseInt(den, 10) ? `${whole}\\frac{${num}}{${den}}` : m
   )
 
-  // 3. 斜杠除法 a/b → \frac{a}{b}（多轮处理嵌套）
-  //
-  // 这里不能只用「括号 / 单个字母数字」作为分数两端：
-  // `c^(2n+2)/a^(2n+1)` 中的正则如果从指数里的 `(2n+2)` 开始匹配，
-  // 会误写成 `c^\frac{(2n+2)}{a}^(2n+1)`，白板上就会露出残缺的 LaTeX 源码。
-  // 先把括号指数规范成 LaTeX 大括号，再让分数操作数一次性吃掉「底数+指数」；
-  // 同时禁止从指数大括号内部起匹配，避免再次截断指数。
-  // 单字符/数字指数，保证 `a^2/b^3` 也按完整操作数参与分数转换。
-  //
-  // ⚠ 这里必须**非贪婪**（`+?`）：贪婪会把 `6a^2b^6` 吞成 `6a^{2b}^6` —— `b` 被误当
-  // 上标内容，产物非法 ⇒ KaTeX 红色源码（2026-10-10 几何/代数题乱码事故）。
-  // 只吃「紧跟 ^ 的一个字符或一个 (…) 括号组」，后面的字母仍属基底。
-  // 两条配合使用：`^数字+` 必须整段是数字（x^12 → x^{12}），
-  // `^字母` 只吃**一个**字母（a^2b → a^{2}b，非贪婪单条正则做不到，用两条分工）。
-  s = s.replace(/([a-zA-Z0-9])\^([0-9]+)(?![0-9A-Za-z])/g, '$1^{$2}')
-  s = s.replace(/([a-zA-Z0-9])\^([a-zA-Z])(?![a-zA-Z0-9])/g, '$1^{$2}')
-  s = s.replace(/([a-zA-Z0-9])\^\(([^()]*)\)/g, '$1^{$2}')
-  const fractionOperand = String.raw`(?:\\sqrt\{[^{}]*\}|[a-zA-Z0-9]+(?:\.[0-9]+)?(?:\^\{[^{}]*\})?|\([^()]*\))`
-  const fractionPattern = new RegExp(
-    String.raw`(?<![\^{])(${fractionOperand})\s*\/\s*(${fractionOperand})(?!\^)`,
-    'g'
-  )
-  let prev
-  let guard = 0
-  do {
-    prev = s
-    s = s.replace(fractionPattern, '\\frac{$1}{$2}')
-    guard++
-    if (guard > 20) break
-  } while (s !== prev)
-
-  // 4. 清理分数多余括号：\frac{(a)}{(b)} → \frac{a}{b}；(a/b) → a/b
-  s = s.replace(/\\frac\{\(([^{}]*)\)\}\{\(([^{}]*)\)\}/g, '\\frac{$1}{$2}')
-  s = s.replace(/\(\\frac\{([^{}]*)\}\{([^{}]*)\}\)/g, '\\frac{$1}{$2}')
+  // 3. 斜杠除法 a/b → \frac{a}{b}（指数规范化 + 分数转换，单一实现见 normalizeFractions）
+  //    2026-10-31 统一：移动端 MathText 组件此前在「分数之前」未做指数规范化、
+  //    且分数操作数不认 ^{...}，导致 a^2/b^3 在手机端渲染成红色源码、而 PDF 正确
+  //    （铁律14：两份数学渲染实现必须同改）。现抽出共享函数，两条链路同一份逻辑。
+  s = normalizeFractions(s)
 
   // 5. 指数/下标补花括号：x^2 → x^{2}、x_1 → x_{1}
   //    走确定性扫描（贪婪正则会把 `6a^2b^6` 吞成 `6a^{2b}^6`、`A_1B_1C_1` 吞成
