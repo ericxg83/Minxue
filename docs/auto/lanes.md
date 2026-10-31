@@ -128,7 +128,7 @@
 **接手提示**：本轮次已知的移动端线索（尚未核实，先核实再动手）：
 1. 移动端首屏偶发一次 `400 Bad Request`（疑似首次 `/api/tasks` 在学生 id 就绪前抢跑）——第 79 轮抓到、第 80/83 轮未复现，属本赛道，值得定位。
 2. PullToRefresh 回归（antd-mobile 曾致 vendor 分包断裂白屏，已回滚）——回归前必须先查 `vite.config.js` 的 `manualChunks`，也属本赛道。
-3. 首页上传「直达按钮」已被负责人**否决**，保持首页→上传→选类型→相机，`UploadOptionsModal` 维持两卡布局——不要重提。
+3. 首页上传「直达按钮」已由负责人**批准落地**（`4cc3ac2`，2026-10-29）：主按钮直连 `openStaging('homework')`、`UploadOptionsModal.jsx` 已删除，行为与原弹层内选「日常作业」完全等价（r361 核实全仓 0 悬空引用）——不要再提案恢复弹层。
 
 **第 105q 轮（2026-10-04，本赛道）已交付：移动端错误可见化 + 学生写操作禁重试**
 - StudentSwitcher 增/删/改失败只进 console（表单静默关闭、删除失败确认框卡死且本地与库分叉）→ 全部补 antd-mobile Toast，删除改「先服务端成功后动本地」；ImageCropper 原生 alert → Toast；WorksheetPicker 加载/设默认失败被吞 → Toast。
@@ -250,7 +250,7 @@
   会覆盖新学生数据，错题本卡空态且不自愈。**它与 r108q/r109q 的「失败 Toast」是两回事**
   （成功响应串学生 vs 失败反馈），尚未被覆盖，建议下轮核实修复（落地前校验 currentStudent.id）。
 - 移动端其他接手提示（历史）：首屏 400 已由 r109q 取证不复现 → 降为「待观察」；
-  PullToRefresh 回归前查 `vite.config.js online manualChunks`；首页直达上传按钮被负责人否决，勿重提。
+  PullToRefresh 回归前查 `vite.config.js online manualChunks`；首页上传直达按钮已由 `4cc3ac2` 批准落地（`UploadOptionsModal` 已删除），勿再提案恢复弹层。
 
 **第 129 轮（2026-10-04，PC 工作台赛道）已交付：静默失败 / 失败伪装成空态 整类修复**
 - 为什么落在 PC 工作台赛道：r120–r128 连续 9 轮按文件巡检 0 发现；改按**缺陷类**扫后，
