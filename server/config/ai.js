@@ -1948,6 +1948,17 @@ export async function callVisionCompletion(opts) {
       // ⚠️ 必须打标：否则 wrapVisionError 的按顺序推断会把连续多个魔搭组合的失败
       // 误标成 Agnes/FreeModel/SenseNova，前端出现「四家全灭」的假象（2026-09-15 实锤）。
       err._provider = 'ms'
+      // 魔搭账号级拦截（2026-11-01 杨浦/徐汇一模解析卡死）：403 "For account security,
+      // please complete your profile via email verification" —— 账号被要求邮箱验证后
+      // 该 Key 当日**所有**推理请求都被拒（实测主/备两把 Key 同时 403，秒回）。
+      // 不标记的话：每个页面的视觉请求都要白挨 Key×模型 全组合秒拒，然后才落到
+      // 慢速备份层（每页 40-300s），整份卷子表现为「解析中」挂十几分钟。
+      // 标记当日耗尽 → 直接跳过魔搭走备份层；完成验证后次日（或重启进程）自动恢复。
+      if (err?.response?.status === 403
+        && /email\s+verification|account\s+security/i.test(String(err?.response?.data?.error?.message || ''))) {
+        markModelExhausted(apiKey, vlModel, msUntilEndOfDayUtc())
+        console.warn(`[AI] 魔搭 Key…${keyTail(apiKey)} 要求邮箱验证（403），${vlModel} 当日跳过 —— 请到 modelscope.cn/my/settings/account 完成验证后重新解析，或等待备份通道完成`)
+      }
       throw err
     }
   }
