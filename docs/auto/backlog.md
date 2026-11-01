@@ -5194,3 +5194,24 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
 - **风险**：Render 冷启动首请求 30~60s（httpCore 注释 L6-8），写操作命中超时且服务端已处理（丢响应）时重试重放；`DELETE`/mark-read 幂等安全，但 **CREATE 类（考法库保存、变式生成）产生重复资源**。
 - **建议落地（若授权）**：`apiRequest` 写路径默认 `retries=1`（或新增 `apiWrite()` 包装），非幂等 CREATE 显式 `retries=1`；回归锁「写路径不得自动重放非幂等请求」；四道闸全过后提交。
 - **处置**：本 automation 巡检发现，A 级自决权不覆盖（共享+跨 lane 行为变更）→ 只提案，等负责人拍板。
+
+
+## 2026-11-01 新增提案 · r372-P-A（学生「班级 class」字段全链路静默丢失）
+
+- **级别**：C（公共 API 响应体新增字段 + 写生产库路径 + 改动跨移动端/PC 共享 `src/services/apiService.js` 与 `server/index.js` 学生端点；按「拿不准一律按 B/C」归 C；只提案不擅改）。
+- **现象**：老师在「切换学生」里录入的「班级」（选填）从未被持久化，全系统 `student.class` 永远为 `undefined`/空；UI 多处已用 `student.grade || student.class` 兜底显示班级（WeeklyReport:247、StudentDetailWorkbench.vue:38/542、StudentsWorkbench.vue:95、WrongBookCenterRedesign.vue:24/57/92），但真实班级数据永远取不到。本质是「功能从未接通」，不是已有数据损坏（该列历史全 NULL）。
+- **证据（file:line，先证列真实存在）**：
+  - 表列真实存在（不是「无此列」）：`database/schema.sql:7 class VARCHAR(100)`、`database/neon_schema.sql:11 class TEXT`。
+  - 前端**采集**：`src/components/StudentSwitcher/index.jsx:80-84` 构建 `studentData.class = classInfo`（年级·班级）、`:295-300` 班级输入框、`:223-225` 展示 `student.class`。
+  - 前端**未送出**：`src/services/apiService.js:192-196` `createStudent` 只发 `name/grade/avatar`；`:207-212` `updateStudent` 只发 `name/grade/avatar/enrollmentStatus` —— **class 被丢**。
+  - 后端**未读未写**：`server/index.js:1788` POST 解构 `name,grade,avatar`；`:1792` INSERT 仅 `(name,grade,avatar)`；`:1898` PUT 解构 `name,grade,avatar,enrollmentStatus` 且 UPDATE（:1906-1919）无 class；`:1829 / :1862` GET 列表/详情 SELECT 均无 class 列。
+  - PC 调用方也从不发 class：`StudentsWorkbench.vue:339` 暂停只发 `{enrollment_status}`、`:353` create、`StudentDetailWorkbench.vue:552` edit —— 均无 class。
+- **影响**：新/改学生的班级永远落库为 NULL；移动端与 PC 的班级展示位恒空（只显示年级）。优先级中（无历史数据损坏，仅「从未工作」的功能）。
+- **推荐最小修复（若授权，全向后兼容、纯增量，无回归）**：
+  1. 后端 POST `server/index.js:1788,1792`：解构加 `class`，INSERT 加 `class` 列、`[name, grade||'', avatar||'', class||'']`，RETURNING * 已含 class。
+  2. 后端 PUT `server/index.js:1898,1906-1919`：解构加 `class`；SET 加 `class = COALESCE($6, class)`、参数数组加 `class??null`（保持既有「不传原样保留」语义）。
+  3. 后端 GET 列表 `:1829` 与详情 `:1862` SELECT 加 `s.class`。
+  4. 前端 `apiService.js:192-196` `createStudent` body 加 `class: studentData.class||null`；`:207-212` `updateStudent` body 加 `class: updates.class||null`。
+  - 调用方零改：PC 现有调用不传 class ⇒ `undefined` ⇒ `JSON.stringify` 自动省略 ⇒ 服务端 `COALESCE` 保留原值，无回归；`StudentSwitcher` 已正确采集，改后自然落库与回显。
+- **验证计划（若落地）**：① 真机 `POST /api/students` 带 class → 落库非空、`GET /api/students` 回显 class；② 回归锁 `test/studentClassPersist.test.mjs`：内联合成旧版（create/update 不传 class、GET 不返 class）判红 + 新树判绿 + 反向自检；③ 四道闸全过（npm test 全绿 / lint 0 新增 error / 隔离构建 / 冒烟读 DOM：切换学生页班级可录入可回显）。
+- **处置**：本 automation 巡检发现，C 级自决权不覆盖（公共 API 响应体新增字段 + 写库路径 + 共享 apiService 跨 lane）→ 只提案，等负责人拍板。
