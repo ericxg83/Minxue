@@ -160,3 +160,15 @@ test('E1: 前端识别请求超时必须大于后端最坏总时长（240s > 30+
     '前端更短会在后端还在跑时先断，老师重试反而加重排队（雪崩放大器）'
   )
 })
+
+test('E2: _releaseAiSlot 唤醒等待者必须调 waiter.resolve()——直接调对象会 TypeError 死锁整个 AI 通道', () => {
+  // 2026-11-01 一模解析三连卡死根因：_aiWaiters 存的是 {resolve, reject, ...} 对象，
+  // 旧代码 next() 直接调用对象 → 每次「有排队时释放槽位」都抛 next is not a function
+  // → 等待者永不被唤醒、_aiActive 永不递减 → 所有后续 AI 请求静默排队（无日志），
+  // 解析卡 0/N 十几分钟。并发闸被压到 1（429 降并发）+ 队列形成后必现。
+  const src = read('server/config/ai.js')
+  assert.ok(/const next = _aiWaiters\.shift\(\)[\s\S]{0,600}next\.resolve\(\)/.test(src),
+    '_releaseAiSlot 必须调 next.resolve()（waiter 是对象不是函数）')
+  const releaseSeg = src.slice(src.indexOf('function _releaseAiSlot'), src.indexOf('export async function withAiLimit'))
+  assert.ok(!/next\(\)/.test(releaseSeg), '不得直接调用 waiter 对象（TypeError 死锁）')
+})

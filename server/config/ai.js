@@ -129,7 +129,12 @@ function _releaseAiSlot() {
   }
   const next = _aiWaiters.shift()
   if (next) {
-    next()
+    // ⚠️ 2026-11-01 死锁修复：waiter 是对象 {resolve, reject, ...}，此前把对象当函数直接调用
+    // → 每次「有排队时释放槽位」都抛 TypeError next is not a function
+    // → 等待者永远不被唤醒、_aiActive 永不递减 → **整个 AI 通道死锁**（所有后续请求
+    // 静默排队、无日志、解析卡 0/N 十几分钟；2026-11-01 一模解析三连卡根因）。
+    // 之前没暴露是因为并发闸很少满；魔搭 403 风暴把并发压到 1 后队列形成即必现。
+    next.resolve()
     return
   }
   _aiActive = Math.max(0, _aiActive - 1)
