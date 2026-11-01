@@ -730,7 +730,16 @@ const startPolling = () => {
       if (!anyParsing()) {
         stopPolling()
         await loadQuestions()
-        ElMessage.success('解析完成')
+        // ⚠️ 解析失败的卷也会让 anyParsing 变 false —— 不能无脑弹「解析完成」
+        //（2026-11-01 老师困惑「说成功却一道题都没有」的直接来源：failed 被报成成功）。
+        const failedNames = papers.value
+          .filter(p => p.question_parse_status === 'failed')
+          .map(p => p.name)
+        if (failedNames.length) {
+          ElMessage.warning(`解析失败：${failedNames.join('、')} —— 点该卷下的「题目」按钮重新上传解析`)
+        } else {
+          ElMessage.success('解析完成')
+        }
       }
     } catch { /* 轮询失败不打扰老师，下个 tick 再试 */ }
   }, 4000)
