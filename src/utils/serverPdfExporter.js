@@ -212,9 +212,11 @@ export async function renderCustomBodyToHTML({ bodyHtml, extraCss = '' }) {
  * @param {string} [opt.filename]        - 下载文件名（不含 .pdf）
  * @param {boolean} [opt.returnPdfBlob=false] - true 时返回 {pdfBlob}，不触发下载
  * @param {boolean} [opt.pageNumbers=false] - 每页页脚印「第 X 页 / 共 Y 页」（错题重练卷用）
+ * @param {Object|null} [opt.pdfOptions=null] - 覆盖默认 A4 的页面设置（讲解版横版 4:3 用），
+ *   透传给后端 Playwright page.pdf()；null 时保持历史 A4 行为，老调用方不受影响
  * @returns {Promise<{downloaded: true, pdfBytes: number, filename: string, pdfBlob?: Blob}>}
  */
-export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, showAnalysis = false, qrContent, filename, returnPdfBlob = false, pageNumbers = false }) {
+export async function exportServerPDF({ studentId, studentName, questions, html, showAnswers = false, showAnalysis = false, qrContent, filename, returnPdfBlob = false, pageNumbers = false, pdfOptions = null }) {
   let finalHtml = html
 
   // 模式 A：用 questions 构造 HTML（兼容老的错题卷主路径）
@@ -278,7 +280,8 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
         filename: `${filename || '错题重练'}.pdf`,
         // 页码交给后端 Chromium 的 displayHeaderFooter 生成（前端估不准真实页数）
         pageNumbers: pageNumbers === true,
-        pdfOptions: {
+        // 页面尺寸随版式走：默认 A4 竖版；讲解版传横版 4:3（280×210mm）+ 零页边距
+        pdfOptions: pdfOptions || {
           format: 'A4',
           printBackground: true,
           margin: { top: '12mm', bottom: '12mm', left: '12mm', right: '12mm' },

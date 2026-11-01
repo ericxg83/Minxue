@@ -320,6 +320,7 @@ import {
 } from '../../services/apiService.js'
 import { buildHandoutBody, buildHandoutCSS, groupHandoutQuestions } from '../../utils/handoutPdf'
 import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/composePaperPdf'
+import { buildLectureBody, buildLectureCSS, LECTURE_PAGE_MM, LECTURE_PAGE_PX } from '../../utils/lecturePdf'
 import {
   addBasketItem,
   removeBasketItem,
@@ -376,6 +377,8 @@ const PREVIEW_TABS = [
   { key: 'student', label: '练习卷' },
   { key: 'teacher', label: '教师卷' },
   { key: 'handout', label: '讲义' },
+  // 讲解版（2026-11-01 负责人拍板）：一小问一页、横版 4:3，给 iPad 笔记软件手写板书用
+  { key: 'lecture', label: '讲解版' },
 ]
 
 // 预览舞台样式（注入 iframe 文档）：灰底 + 居中白纸 + 每题悬停出现「×」、分值可点改。
@@ -384,6 +387,13 @@ const PREVIEW_STAGE_CSS = `
 html,body{background:#e6e4de}
 body{padding:14px 0 28px}
 .page{background:#fff;margin:0 auto;box-shadow:0 1px 10px rgba(0,0,0,.14)}
+/* 讲解版页面（横版 4:3）：白纸观感与删除按钮，只在预览舞台生效，不进打印版式 */
+.lec-page{margin:0 auto 14px;box-shadow:0 1px 10px rgba(0,0,0,.14)}
+.lec-page > .pb-del{position:absolute;right:8px;top:8px;width:22px;height:22px;line-height:20px;
+  padding:0;border:1px solid #E6C9C9;background:#fff;color:#B4436C;border-radius:50%;font-size:13px;
+  cursor:pointer;opacity:0;transition:opacity .12s}
+.lec-page:hover > .pb-del{opacity:1}
+.lec-page > .pb-del:hover{background:#FDECEF;border-color:#D4537E}
 .question{position:relative}
 .question > .pb-del{
   position:absolute;right:0;top:0;width:18px;height:18px;line-height:16px;padding:0;
@@ -693,6 +703,17 @@ const stopPolling = () => { if (pollTimer) { clearInterval(pollTimer); pollTimer
 
 /** 按版本产出 bodyHtml + 专属样式 + 文件名（预览与下载共用）。 */
 const buildPaperHtml = (kind) => {
+  if (kind === 'lecture') {
+    // 讲解版：一小问一页、横版 4:3（280×210mm），iPad 笔记软件手写板书用。
+    // ⛔ 不复用组卷/讲义版式 —— 页面骨架（横版、书写留白、页脚答案）完全不同。
+    // 篮子一项（小问行）= 一页，页数精确等于篮子长度。
+    const title = composeTitle.value || '讲解'
+    return {
+      bodyHtml: buildLectureBody({ items: basket.value, showImage: composeWithImage.value }),
+      extraCss: buildLectureCSS(),
+      filename: `${composePaperFilename(title, basket.value.length, todayStr())}_讲解版`,
+    }
+  }
   if (kind === 'handout') {
     const groups = groupHandoutQuestions(basket.value.slice())
     // 讲义版式：保留原卷题号、按卷分组（⛔ 不复用组卷版式，那套会重排重编号）
@@ -733,7 +754,9 @@ const fitZoom = (force = false) => {
   if (force) userZoomed.value = false
   const box = stageRef.value?.clientWidth || 0
   if (!box) return
-  const z = Math.min(1, Math.max(0.35, Math.round(((box - 22) / 794) * 100) / 100))
+  // 页宽随版式：A4 竖版 = 794px；讲解版是横版 4:3（≈1058px），按各自页宽算适应比例
+  const pageW = previewKind.value === 'lecture' ? LECTURE_PAGE_PX.w : 794
+  const z = Math.min(1, Math.max(0.35, Math.round(((box - 22) / pageW) * 100) / 100))
   zoom.value = z
   applyZoom()
 }
@@ -753,7 +776,9 @@ const setZoom = (delta) => {
  */
 const decoratePaper = (doc) => {
   if (!doc) return
-  doc.querySelectorAll('.question[data-qid]').forEach((el) => {
+  // 组卷/练习卷的题是 .question[data-qid]；讲解版每页是 .lec-page[data-qid]（也带删除按钮，
+  // 讲解版没有 .q-score，改分逻辑自然跳过）
+  doc.querySelectorAll('.question[data-qid], .lec-page[data-qid]').forEach((el) => {
     const id = el.getAttribute('data-qid')
     if (!id) return
 
@@ -834,9 +859,12 @@ const repaintPreview = async () => {
     fitZoom() // 先按容器算比例（用户手动缩放过则跳过）
     // 改一题就把卷面滚回顶部很难用：保持原来的阅读位置
     if (keepScroll) doc.documentElement.scrollTop = keepScroll
-    // scrollHeight 是**布局像素**，不受 zoom 影响，所以页数始终按 A4=1123px 算
+    // scrollHeight 是**布局像素**，不受 zoom 影响。页数算法随版式：
+    // A4 竖版按页高 1123px 估；讲解版每个小问固定一页，页数精确等于篮子长度。
     const h = doc?.body?.scrollHeight || 0
-    previewPages.value = h ? Math.max(1, Math.ceil(h / 1123)) : 0
+    previewPages.value = previewKind.value === 'lecture'
+      ? basket.value.length
+      : (h ? Math.max(1, Math.ceil(h / 1123)) : 0)
   } catch (e) {
     if (token === repaintToken) ElMessage.error(e?.payload?.message || e.message || '卷面渲染失败')
   } finally {
@@ -896,11 +924,21 @@ const downloadPdf = async () => {
   try {
     const { bodyHtml, extraCss, filename } = buildPaperHtml(previewKind.value)
     const html = await renderCustomBodyToHTML({ bodyHtml, extraCss })
+    const isLecture = previewKind.value === 'lecture'
     await exportServerPDF({
       html,
       filename,
-      // 讲义不印页码（按卷分组的讲题稿，页码没意义）
-      pageNumbers: previewKind.value !== 'handout',
+      // 讲义/讲解版不印页码：讲义按卷分组页码没意义；讲解版页脚已印答案、零页边距也没页码位置
+      pageNumbers: !isLecture && previewKind.value !== 'handout',
+      // 页面尺寸随版式：讲解版是横版 4:3（280×210mm），不再是 A4 —— 必须显式传给后端
+      pdfOptions: isLecture
+        ? {
+            width: LECTURE_PAGE_MM.width,
+            height: LECTURE_PAGE_MM.height,
+            printBackground: true,
+            margin: { top: '0', bottom: '0', left: '0', right: '0' },
+          }
+        : null,
     })
     ElMessage.success(`已生成：${filename}.pdf`)
   } catch (e) {
@@ -913,7 +951,13 @@ const downloadPdf = async () => {
 const paperMeta = computed(() => {
   if (repainting.value) return '重排中…'
   if (!summary.value.count) return '还没有题'
-  const pages = previewPages.value ? `约 ${previewPages.value} 页` : ''
+  // 讲解版页数精确（每小问一页），其余版式按页高估算只给「约 N 页」
+  const pages = previewPages.value
+    ? (previewKind.value === 'lecture' ? `共 ${previewPages.value} 页` : `约 ${previewPages.value} 页`)
+    : ''
+  if (previewKind.value === 'lecture') {
+    return [`${summary.value.count} 页`, '每小问一页', pages].filter(Boolean).join(' · ')
+  }
   if (previewKind.value === 'handout') {
     return [`${summary.value.count} 题`, '原卷题号', pages].filter(Boolean).join(' · ')
   }
