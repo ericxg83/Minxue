@@ -137,6 +137,10 @@
                 </div>
                 <div class="pb-row__text"><MathRender :content="q.content" auto-detect /></div>
 
+                <!-- 原题裁片图行内展示（2026-11-01 负责人反馈：小拇指缩略图看不清几何图形，等于没图）。
+                     数据里 64/64 题都有裁片图，此前只是展示位置太隐蔽。 -->
+                <img v-if="q.image_url" class="pb-row__figure" :src="thumbUrl(q.image_url)" alt="原题图" loading="lazy" />
+
                 <div v-if="(q.options || []).length" class="pb-row__opts">
                   <span v-for="(o, i) in q.options" :key="i" class="pb-opt">
                     {{ String.fromCharCode(65 + i) }}.<MathRender :content="String(o)" auto-detect tag="span" force-inline />
@@ -175,8 +179,6 @@
                   <span class="pb-editor__hint">改完立刻保存，全库筛选项跟着变</span>
                 </div>
               </div>
-
-              <img v-if="q.image_url" class="pb-row__thumb" :src="thumbUrl(q.image_url)" alt="原题" loading="lazy" />
             </article>
 
             <button v-if="truncated" type="button" class="pb-more" @click="loadMore">
@@ -476,7 +478,7 @@ const questionLabel = (q) => (q.question_no == null ? '?' : `${q.question_no}${q
 const typeLabel = (t) => ({ choice: '选择题', fill: '填空题', judge: '判断题', answer: '解答题' }[t] || '解答题')
 const stars = (d) => '★'.repeat(Math.max(1, Math.min(3, d <= 2 ? 1 : d === 3 ? 2 : 3)))
 // 列表缩略图走统一入口（OSS 追加 resize 参数），⛔ 不直接引原图
-const thumbUrl = (url) => ossThumbUrl(url, 240) || url
+const thumbUrl = (url) => ossThumbUrl(url, 480) || url
 
 // 答案来源四态：官方答案库 / 卷面印刷 / 老师手填 / AI 解出。
 // ⛔ 必须在界面上区分 —— 「答案一定要对，不要去猜」，老师要能一眼看出这条答案是谁给的。
@@ -1181,7 +1183,7 @@ onUnmounted(() => {
 }
 .pb-editor__tags input { width: 190px; }
 .pb-editor__hint { font-size: 10px; color: #aaa; }
-.pb-row__thumb { width: 116px; max-height: 116px; object-fit: contain; border: 1px solid #eee; border-radius: 6px; flex-shrink: 0; }
+.pb-row__figure { display: block; max-width: 340px; max-height: 240px; object-fit: contain; border: 1px solid #e5e3dc; border-radius: 6px; margin: 8px 0 2px; background: #fff; }
 .pb-more {
   width: 100%; padding: 10px; border: 1px dashed #ddd; border-radius: 8px;
   background: #fff; color: #666; font-size: 12px; cursor: pointer;
