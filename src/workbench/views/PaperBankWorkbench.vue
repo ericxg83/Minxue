@@ -28,7 +28,18 @@
           <div class="pb-panel">
             <div class="pb-panel__head">
               <strong>卷子</strong>
-              <span>{{ papers.length }} 套 · {{ totalQuestionCount }} 题</span>
+              <span class="pb-panel__head-right">
+                <span>{{ papers.length }} 套 · {{ totalQuestionCount }} 题</span>
+                <!-- 清空全部（2026-11-01 负责人需求：重新上传解析前一键清空，一套套删太费劲） -->
+                <button
+                  v-if="papers.length"
+                  type="button"
+                  class="pb-clear"
+                  :disabled="clearing"
+                  title="删除题库里全部试卷及其题目（不碰练习册）"
+                  @click="askClearPapers"
+                >{{ clearing ? '清空中…' : '清空全部' }}</button>
+              </span>
             </div>
 
             <button
@@ -313,6 +324,7 @@ import {
   getPaperBankPapers,
   createPaperBankPaper,
   deletePaperBankPaper,
+  deletePaperBankPapers,
   parsePaperBankPaper,
   parsePaperBankAnswers,
   searchPaperBankQuestions,
@@ -673,6 +685,36 @@ const askDeletePaper = async (p) => {
     await loadQuestions()
   } catch (e) {
     ElMessage.error(e?.payload?.message || e.message || '删除失败')
+  }
+}
+
+// 清空全部（2026-11-01 负责人需求）：重新上传解析前一键清空题库，不用一套套删。
+// 级联范围与单卷删除相同（questions/answers/units 全 CASCADE），后端只删 exam、不碰练习册。
+const clearing = ref(false)
+const askClearPapers = async () => {
+  if (!papers.value.length || clearing.value) return
+  try {
+    await ElMessageBox.confirm(
+      `将删除题库里全部 ${papers.value.length} 套卷和 ${totalQuestionCount.value} 道题（含答案），不可恢复。清空后重新上传试卷即可开始解析。`,
+      '清空题库',
+      { confirmButtonText: '全部删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 取消
+  }
+  clearing.value = true
+  try {
+    const r = await deletePaperBankPapers()
+    ElMessage.success(`已清空 ${r?.deleted ?? papers.value.length} 套卷`)
+    filterPaper.value = 'all'
+    basket.value = [] // 卷没了，篮子里的题全部失效，直接清空
+    await loadPapers()
+    await loadQuestions()
+  } catch (e) {
+    // 后端 409：有卷子还在解析中（解析任务还在写库，此时清空会出现写一半的数据）
+    ElMessage.error(e?.payload?.message || e.message || '清空失败')
+  } finally {
+    clearing.value = false
   }
 }
 
@@ -1054,6 +1096,10 @@ onUnmounted(() => {
 .pb-panel__head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
 .pb-panel__head strong { font-size: 13px; }
 .pb-panel__head span { font-size: 11px; color: #999; }
+.pb-panel__head-right { display: flex; align-items: center; gap: 8px; }
+.pb-clear { border: none; background: none; padding: 0; font-size: 11px; color: #a32d2d; cursor: pointer; }
+.pb-clear:hover { text-decoration: underline; }
+.pb-clear:disabled { color: #bbb; cursor: default; text-decoration: none; }
 .pb-panel__empty { font-size: 12px; color: #999; line-height: 1.7; padding: 6px 2px; }
 .pb-panel--tip { background: #faf9f6; }
 .pb-panel--tip strong { font-size: 12px; }

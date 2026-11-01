@@ -113,6 +113,35 @@ router.delete('/papers/:id', async (req, res) => {
   }
 })
 
+/**
+ * 清空全部卷（负责人 2026-11-01：重新上传解析前要能一键清空题库，一套套删太费劲）。
+ * 级联范围与单卷删除相同：resource_questions / resource_answers / resource_units
+ * 全部 ON DELETE CASCADE（pg_constraint 实测），只删 exam 类型、不碰练习册。
+ * ⛔ 有卷子还在解析中必须 409 拒绝：后台解析任务还在往库里写，
+ *   这时删 resources 会出现「写一半」的孤儿数据/报错刷屏。
+ */
+router.delete('/papers', async (req, res) => {
+  try {
+    const parsing = await query(
+      `SELECT name FROM resources
+        WHERE resource_type = 'exam' AND question_parse_status = 'parsing'
+        LIMIT 5`
+    )
+    if (parsing.rows.length) {
+      return res.status(409).json({
+        error: '有试卷正在解析中',
+        message: `「${parsing.rows.map(r => r.name).join('、')}」还在解析，等解析完成（或失败）后再清空`,
+      })
+    }
+    const { rowCount } = await query(
+      `DELETE FROM resources WHERE resource_type = 'exam'`
+    )
+    res.json({ success: true, deleted: rowCount || 0 })
+  } catch (e) {
+    res.status(500).json({ error: '清空失败', message: e.message })
+  }
+})
+
 // ── 上传 + 解析（后台跑，接口立即返回）──
 
 /**

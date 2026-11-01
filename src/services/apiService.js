@@ -1085,6 +1085,9 @@ export const updatePaperBankPaper = async (id, patch) => {
 
 export const deletePaperBankPaper = (id) => apiRequest(`/paper-bank/papers/${id}`, { method: 'DELETE' })
 
+// 清空全部试卷（级联删题目/答案/章节，只动 exam 类型）。重新上传解析前用。
+export const deletePaperBankPapers = () => apiRequest('/paper-bank/papers', { method: 'DELETE' })
+
 // 上传 PDF 或试卷照片触发解析。解析在服务端后台跑，本请求立即返回 ⇒ 不需要长超时。
 export const parsePaperBankPaper = async (id, files) => {
   const fd = new FormData()

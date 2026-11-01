@@ -387,3 +387,39 @@ test('反向自检：自带一套答案 OCR / 漏 export 都必须判红', () =>
   assert.ok(/ANSWER_OCR_SYSTEM_PROMPT/.test(selfMadeOcr))
   assert.ok(!/export\s+async\s+function\s+parsePdfInBackground\s*\(/.test('async function parsePdfInBackground(a,b) {}'))
 })
+
+// ─────────────────────────────────────────────────────────────
+// 清空全部（2026-11-01 负责人需求：重新上传解析前一键清空题库）
+// ─────────────────────────────────────────────────────────────
+
+test('★ 清空全部路由：只删 exam 类型，解析中必须 409 拒绝（后台解析还在写库）', () => {
+  const s = stripComments(read(ROUTES))
+  assert.match(s, /router\.delete\('\/papers',/, '必须有 DELETE /papers 清空全部路由')
+  assert.match(s, /question_parse_status = 'parsing'/, '解析中的卷必须先拦下')
+  assert.match(s, /DELETE FROM resources WHERE resource_type = 'exam'/, '只允许删 exam 类型，不碰练习册')
+  // 清空不得绕过 questions 红线（级联删的是 resource_questions，不是 questions 表）
+  assert.deepEqual(checkNoWriteToQuestions(s), [])
+})
+
+test('★ 前端清空入口：必须带确认框、清试题篮、成功后重载卷子与题目', () => {
+  const s = stripComments(read('src/workbench/views/PaperBankWorkbench.vue'))
+  assert.match(s, /askClearPapers/, '必须有清空入口函数')
+  assert.match(s, /deletePaperBankPapers\(\)/, '必须走 API 层的清空接口')
+  assert.match(s, /ElMessageBox\.confirm/, '危险操作必须有确认框')
+  assert.match(s, /basket\.value = \[\]/, '清空后试题篮必须清空（里面全是被删卷子的题）')
+  assert.match(s, /await loadPapers\(\)[\s\S]{0,80}await loadQuestions\(\)/, '清空后必须重载卷子和题目')
+})
+
+test('★ API 层：清空接口与单卷删除接口并存，路径不得混淆', () => {
+  const s = stripComments(read('src/services/apiService.js'))
+  assert.match(s, /deletePaperBankPapers = \(\) => apiRequest\('\/paper-bank\/papers', \{ method: 'DELETE' \}\)/,
+    '清空全部 = DELETE /paper-bank/papers（无 id）')
+  assert.match(s, /deletePaperBankPaper = \(id\) => apiRequest\(`\/paper-bank\/papers\/\$\{id\}`/,
+    '单卷删除保持原样')
+})
+
+test('反向自检：清空路由漏掉解析中拦截必须判红', () => {
+  const broken = "router.delete('/papers', async (req, res) => { await query(`DELETE FROM resources WHERE resource_type = 'exam'`) })"
+  assert.ok(!/question_parse_status = 'parsing'/.test(broken),
+    '这个写坏版本缺 parsing 拦截——上面的正则必须能把它揪出来')
+})
