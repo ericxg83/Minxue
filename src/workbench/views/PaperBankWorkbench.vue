@@ -369,7 +369,9 @@ const tagOptions = ref([])
 // 试题篮（前端状态，不落库）。卷面就是篮子 —— 不再有单独的篮子面板。
 const basket = ref([])
 const composeTitle = ref('')
-const composeWithImage = ref(false)
+// 印原题图默认开启（2026-11-01 负责人反馈：四个版式预览/下载都没配图）。
+// 几何/图表题没有图根本没法讲；文字已完整的题多印一张小裁片也无碍。想不印手动取消勾选。
+const composeWithImage = ref(true)
 const editingId = ref('')
 
 // 右侧卷面（常驻，和题目列表同一页）
