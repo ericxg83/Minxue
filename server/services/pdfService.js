@@ -1,23 +1,35 @@
-import { createCanvas, Path2D, DOMMatrix, ImageData } from '@napi-rs/canvas'
 import { createRequire } from 'module'
 import path from 'path'
+
+const require = createRequire(import.meta.url)
+// 渲染含标准 14 字体（Helvetica 等）的 PDF 时需要字体数据目录
+// 注意：Node 环境下 pdfjs 用 fs 读取，需传文件系统路径而非 file:// URL
+const PDFJS_PKG_DIR = path.dirname(require.resolve('pdfjs-dist/package.json'))
+const STANDARD_FONT_DATA_URL = path.join(PDFJS_PKG_DIR, 'standard_fonts') + path.sep
+// 中文等 CID 字体需要 CMap 才能正确抽取/渲染字形，否则 Node 端刷一堆
+// "Ensure that the cMapUrl and cMapPacked API parameters are provided" 告警，
+// 且文字版 PDF 的中文会被抽成乱码。cMaps 随 pdfjs-dist 一并发布，直接指本地路径。
+const CMAP_URL = path.join(PDFJS_PKG_DIR, 'cmaps') + path.sep
+const CMAP_OPTS = { cMapUrl: CMAP_URL, cMapPacked: true }
+
+// ⚠️ 2026-11-01 杨浦一模「解析成功但 0 题入册」事故修复：
+// @napi-rs/canvas 在 node_modules 里有**两份**（顶层 1.0.2 = server/package.json 的 ^1.0.2；
+// pdfjs-dist/node_modules/@napi-rs/canvas 0.1.100 = pdfjs-dist 声明 ^0.1.65，区间不重叠，
+// npm 为它单独嵌套安装）。pdf.js 内部 require('@napi-rs/canvas')（按 pdf.mjs 的位置解析）
+// 命中 **0.1.100 嵌套份**，其 pattern 渲染的 tmpCanvas/tmpCtx 也是它创建的；而本模块原来
+// ESM import 命中顶层 1.0.2 —— globalThis.Path2D 是 1.0.2 的类，文字层 glyph path 用它构造，
+// 传进 0.1.100 的 ctx.fill() 时 native 层 instanceof 校验失败，抛
+// "Value is none of these types `String`, `Path`, " —— **一个隐形字形炸掉整页渲染 → 0 题入册**
+//（黄浦一模没踩坑是因为它的文字层没走 pattern 渲染分支）。
+// ⇒ 本模块必须与 pdf.js 用**同一份** napi：按 pdf.mjs 的解析基址 createRequire，
+//    无论 npm 树怎么嵌套，两边永远解析到同一实例。
+const pdfjsRequire = createRequire(path.join(PDFJS_PKG_DIR, 'legacy', 'build', 'pdf.mjs'))
+const { createCanvas, Path2D, DOMMatrix, ImageData } = pdfjsRequire('@napi-rs/canvas')
 
 // pdfjs 在 Node 端渲染时依赖这些全局对象（字形路径缓存、变换矩阵等）
 if (!globalThis.Path2D) globalThis.Path2D = Path2D
 if (!globalThis.DOMMatrix) globalThis.DOMMatrix = DOMMatrix
 if (!globalThis.ImageData) globalThis.ImageData = ImageData
-
-const require = createRequire(import.meta.url)
-// 渲染含标准 14 字体（Helvetica 等）的 PDF 时需要字体数据目录
-// 注意：Node 环境下 pdfjs 用 fs 读取，需传文件系统路径而非 file:// URL
-const STANDARD_FONT_DATA_URL =
-  path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'standard_fonts') + path.sep
-// 中文等 CID 字体需要 CMap 才能正确抽取/渲染字形，否则 Node 端刷一堆
-// "Ensure that the cMapUrl and cMapPacked API parameters are provided" 告警，
-// 且文字版 PDF 的中文会被抽成乱码。cMaps 随 pdfjs-dist 一并发布，直接指本地路径。
-const CMAP_URL =
-  path.join(path.dirname(require.resolve('pdfjs-dist/package.json')), 'cmaps') + path.sep
-const CMAP_OPTS = { cMapUrl: CMAP_URL, cMapPacked: true }
 
 let pdfjsPromise = null
 const loadPdfjs = () => {
@@ -112,6 +124,16 @@ const sanitizeRenderText = (s) => {
 }
 // pdf.js 渲染文字时只走这几个入口；用 String 检测做零开销快路径
 const TEXT_CTX_METHODS = ['measureText', 'fillText', 'strokeText', 'fillStrokeText', 'outlineText']
+
+// ⚠️ fill/stroke 加固（2026-11-01 杨浦一模解析失败修复）：
+// pdf.js paintChar 在「隐藏 OCR 文字层 + 特殊渲染模式（patternFill/ADD_TO_PATH）」下会走
+// ctx.fill(glyphPath) / ctx.stroke(glyphPath) 分支。这份 PDF 的坏字形让该调用抛
+// napi "Value is none of these types `String`, `Path`, " —— **一个隐形字形炸掉整页渲染**，
+// 整份卷子 0 题入册（黄浦一模成功是因为它的文字层没踩这个分支）。
+// 文字层的字形本来就不出现在扫描图像上，跳过这一次绘制对 OCR 毫无影响；
+// 真正的扫描图像内容照常渲染。只吞这一类类型校验错误，其他错误照抛。
+const PATH_CTX_METHODS = ['fill', 'stroke']
+
 const hardenTextContext = (ctx) => {
   for (const name of TEXT_CTX_METHODS) {
     const orig = ctx[name]
@@ -119,6 +141,24 @@ const hardenTextContext = (ctx) => {
     ctx[name] = function (...args) {
       if (typeof args[0] === 'string') args[0] = sanitizeRenderText(args[0])
       return orig.apply(this, args)
+    }
+  }
+  for (const name of PATH_CTX_METHODS) {
+    const orig = ctx[name]
+    if (typeof orig !== 'function') continue
+    ctx[name] = function (...args) {
+      try {
+        return orig.apply(this, args)
+      } catch (e) {
+        if (/Value is none of these types/.test(String(e?.message || ''))) {
+          if (!ctx.__skippedBadGlyphPath) {
+            ctx.__skippedBadGlyphPath = true
+            console.warn('[pdfService] 跳过坏字形路径绘制（隐藏文字层的坏字形，不影响扫描图像渲染与 OCR）:', String(e?.message || '').slice(0, 120))
+          }
+          return undefined
+        }
+        throw e
+      }
     }
   }
   return ctx

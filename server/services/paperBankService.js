@@ -139,9 +139,27 @@ async function appendParseWarning(resourceId, message) {
  * ⛔ 全程在事务里，失败不留半份数据。
  */
 export async function replacePaperQuestions(resourceId, rows) {
+  // ⚠️ 唯一约束 resource_questions_resource_id_unit_id_question_no_sub_no_key：
+  // AI 对扫描卷（尤其末尾带答题卡的）可能在两页认出同一 (question_no, sub_no)，
+  // 直接逐行 INSERT 会撞唯一约束把整份卷子炸成 0 题（2026-11-01 杨浦一模实测）。
+  // 落库前按题号+小问去重保序：保留**首次**识别的那行（正文在前、答题卡在后，
+  // 首次通常是更好的识别结果），重复行计数返回、由调用方写 parseWarning 留痕，不静默吞。
+  const seen = new Set()
+  const deduped = []
+  let duplicated = 0
+  for (const r of rows) {
+    const key = `${String(r.question_no ?? '')}|${String(r.sub_no || '')}`
+    if (seen.has(key)) { duplicated += 1; continue }
+    seen.add(key)
+    deduped.push(r)
+  }
+  if (duplicated > 0) {
+    console.warn(`[paperBank] 卷 ${resourceId} 识别出 ${duplicated} 行重复题号，已保留首次识别`)
+  }
+
   await transaction(async (client) => {
     await client.query('DELETE FROM resource_questions WHERE resource_id = $1', [resourceId])
-    for (const r of rows) {
+    for (const r of deduped) {
       await client.query(
         `INSERT INTO resource_questions
            (resource_id, unit_id, question_no, sub_no, parent_stem, content, options,
@@ -169,6 +187,7 @@ export async function replacePaperQuestions(resourceId, rows) {
       )
     }
   })
+  return { duplicated }
 }
 
 // ── 单页 → 题目行 ──
@@ -369,7 +388,10 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     throw new Error('整份卷子没有识别出任何题目（可能是扫描质量过低，或页面不是题目页）')
   }
 
-  await replacePaperQuestions(resourceId, rows)
+  const { duplicated } = await replacePaperQuestions(resourceId, rows)
+  if (duplicated > 0) {
+    await appendParseWarning(resourceId, `识别出 ${duplicated} 行重复题号（多为答题卡页重复识别），已保留首次识别`)
+  }
   await setPaperParseStatus(resourceId, { status: 'done', donePages: pages.length })
 
   // 卷面标题回填到 metadata，方便列表识别是哪一套卷

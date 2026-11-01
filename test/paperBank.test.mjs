@@ -423,3 +423,25 @@ test('反向自检：清空路由漏掉解析中拦截必须判红', () => {
   assert.ok(!/question_parse_status = 'parsing'/.test(broken),
     '这个写坏版本缺 parsing 拦截——上面的正则必须能把它揪出来')
 })
+
+// ─────────────────────────────────────────────────────────────
+// PDF 渲染与落库健壮性（2026-11-01 杨浦一模「解析失败 / 0 题入册」双根因）
+// ─────────────────────────────────────────────────────────────
+
+test('★ pdfService 必须与 pdf.js 用同一份 @napi-rs/canvas（按 pdf.mjs 解析基址取），不得 ESM 直连', () => {
+  const s = stripComments(read('server/services/pdfService.js'))
+  // 双实例事故：顶层 1.0.2 vs pdfjs-dist 嵌套 0.1.100，globalThis.Path2D 是顶层类，
+  // pdf.js pattern 渲染的 tmpCtx 是嵌套份创建 → ctx.fill(path) native instanceof 校验失败，
+  // 一个隐形字形炸掉整页渲染 → 0 题入册。
+  assert.ok(!/import\s*\{[^}]*\}\s*from\s*'@napi-rs\/canvas'/.test(s),
+    '不得 ESM import @napi-rs/canvas（会命中顶层份，与 pdf.js require 的嵌套份分裂）')
+  assert.ok(/createRequire\(path\.join\(PDFJS_PKG_DIR,\s*'legacy',\s*'build',\s*'pdf\.mjs'\)\)/.test(s),
+    '必须按 pdf.mjs 的解析基址 createRequire 取 @napi-rs/canvas')
+})
+
+test('★ 落库必须先按题号+小问去重（答题卡页重复识别会撞唯一约束炸成 0 题）', () => {
+  const s = stripComments(read('server/services/paperBankService.js'))
+  assert.match(s, /replacePaperQuestions[\s\S]{0,600}seen\.has\(key\)/, '去重判据必须在 replacePaperQuestions 内')
+  assert.ok(/String\(r\.question_no \?\? ''\)/.test(s), '去重 key 必须字符串归一（question_no 可能 number 也可能 string）')
+  assert.match(s, /return \{ duplicated \}/, '重复行数必须返回给调用方（写 parseWarning 留痕，不静默吞）')
+})
