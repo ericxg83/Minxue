@@ -36,7 +36,7 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 import { buildTaggingInput } from './services/knowledgeService.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
-import { isValidImageBuffer, checkImageResolution } from './utils/imageValidator.js'
+import { isValidImageBuffer, checkImageResolution, checkFigureCropResolution } from './utils/imageValidator.js'
 import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
 import { formatOptionsForPrompt } from './utils/optionText.js'
 import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
@@ -946,7 +946,12 @@ const bufferToBase64 = (buffer) => {
   return `data:image/jpeg;base64,${buffer.toString('base64')}`
 }
 
-const downloadImage = async (imageUrl) => {
+const downloadImage = async (imageUrl, opts = {}) => {
+  // opts.figureCrop=true：下载的是【题目配图】（几何裁片）而非整页照片。
+  //   配图用专用判据（宽≥300 且 高≥40，见 imageValidator.checkFigureCropResolution），
+  //   不吃整页图的「最短边≥600」阈值 —— 数轴等扁条配图高度 100~200px 是正常形态，
+  //   2026-11-01 实测 1014×102 的数轴配图被 600 阈值拒收，老师重解析永远收到
+  //   「配图不可用」，而配图根本没法「重新上传」，提示也不可执行。
   try {
     console.log(`   正在下载图片: ${imageUrl.substring(0, 80)}...`)
     // ── 必须走禁代理选项（2026-09-22 事故）──
@@ -976,9 +981,16 @@ const downloadImage = async (imageUrl) => {
     //   后一律说"图片是空白 / Unable to identify"，反复重试只浪费配额 + 刷 429。
     //   在下载层就拦下，给出"请重新上传更清晰的图片"友好提示，
     //   让 NON_RETRYABLE 黑名单把它永久标记为不可重试。
-    const resCheck = await checkImageResolution(buf)
+    //   配图（figureCrop）用专用判据：宽≥300 且 高≥40（扁条数轴是合法形态）。
+    const resCheck = opts.figureCrop
+      ? await checkFigureCropResolution(buf)
+      : await checkImageResolution(buf)
     if (!resCheck.ok) {
       const { width, height } = resCheck.resolution || {}
+      if (opts.figureCrop) {
+        console.error(`   ❌ 配图分辨率过低: ${width}×${height}（需宽≥300且高≥40）, 文件大小 ${buf.length} bytes`)
+        throw new Error(`配图分辨率过低（${width}×${height}），AI 无法读图。请在批改页用「手工绘制几何图」补一张可用的配图（或人工填写答案）`)
+      }
       console.error(`   ❌ 图片分辨率过低: ${width}×${height} < ${resCheck.min}, 文件大小 ${buf.length} bytes`)
       throw new Error(`图片分辨率过低（${width}×${height}），请重新上传更清晰的图片（建议宽度≥1200像素，文件≥100KB）`)
     }
@@ -2484,7 +2496,9 @@ export const generateAnswerForQuestion = async (questionContent, retryCount = 0,
   let imageDataURL = opts.imageDataURL || null
   if (!imageDataURL && opts.imageUrl) {
     try {
-      const buf = await downloadImage(opts.imageUrl)
+      // 题目配图下载：用配图专用分辨率判据（figureCrop），不吃整页 600 阈值
+      //（2026-11-01：1014×102 数轴配图被 600 阈值误杀 → 重解析永远「配图不可用」）
+      const buf = await downloadImage(opts.imageUrl, { figureCrop: true })
       imageDataURL = bufferToBase64(buf)
     } catch (e) {
       // 题干明示引图的题（调用方传 figureRequired），图不可用 ⇒ 纯文字链路必然回
@@ -3113,7 +3127,8 @@ const generateMissingAnswers = async (questions, imageBuffer = null, taskId = nu
     if (figureDataURLCache.has(url)) return figureDataURLCache.get(url)
     const p = (async () => {
       try {
-        const buf = await downloadImage(url)
+        // 题目配图下载：配图专用分辨率判据（figureCrop），不吃整页 600 阈值（同上）
+        const buf = await downloadImage(url, { figureCrop: true })
         return bufferToBase64(buf)
       } catch (e) {
         console.warn(`     配图下载失败（本题回退纯文字求解）：${e.message}`)

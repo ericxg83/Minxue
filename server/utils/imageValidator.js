@@ -98,3 +98,30 @@ export async function checkImageResolution(buf, minResolution = MIN_OCR_RESOLUTI
   }
   return { ok: true, resolution, min: minResolution }
 }
+
+// ── 题目配图（几何裁片）专用分辨率判据（2026-11-01）────────────────────────────
+//
+// 为什么不能复用上面的 minSide≥600：那是为【整页作业照片】设计的阈值——页图短边 <600
+// 的确「AI 必空白」。但【题目配图】是裁剪出来的印刷图形，数轴/长条示意图的正常形态
+// 就是扁条（实测库内合法数轴配图 433×93、1014×102，高 100~200px 很常见），
+// 用最短边 ≥600 判它 100% 误杀 —— 老师点「AI 重解析」只会收到「配图不可用：分辨率过低」，
+// 而配图没法「重新上传」（提示文案对配图场景也不可执行）。
+//
+// 配图真正「不可识别」的形态是：宽度小到看不清数字/字母标注，或矮到只是一条线。
+// 判据按宽、高分别卡下限（不是最短边）：
+//   · 宽 < 300 —— 数字/字母标注不可辨（视觉模型实测下限附近），拒；
+//   · 高 < 40  —— 基本只是一条线/横杠，无图形信息，拒。
+// 文件字节数底线仍由 isValidImageBuffer（≥1024 bytes）兜底，这里不再重复卡大小。
+export const MIN_FIGURE_WIDTH = 300
+export const MIN_FIGURE_HEIGHT = 40
+
+export async function checkFigureCropResolution(buf) {
+  const resolution = await getImageResolution(buf)
+  if (resolution.width === 0 || resolution.height === 0) {
+    return { ok: false, reason: 'unreadable_resolution', resolution }
+  }
+  if (resolution.width < MIN_FIGURE_WIDTH || resolution.height < MIN_FIGURE_HEIGHT) {
+    return { ok: false, reason: 'too_low_resolution', resolution }
+  }
+  return { ok: true, resolution }
+}
