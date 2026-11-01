@@ -4,6 +4,8 @@ import dayjs from 'dayjs'
 import MathText from './MathText'
 import BottomSheet from './BottomSheet'
 import { normalizeOptions } from '../utils/optionText'
+// 错题详情字段规整：移动端原始响应缺 full_image_url / tags_source 的兜底（r376 修复）
+import { resolveWrongQuestionDetailFields } from '../utils/wrongQuestionDetailFields'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、重练卷长按共用同一套实现
 import { resolveQuestionDisplayStem } from '../utils/questionStem'
 // 题干配图：与 PC 端 / 复核页共用同一套优先级（干净 SVG → 描摹/裁片 URL → 闸门拦截）
@@ -41,7 +43,7 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
   // 判据用 subject 而非长度——长度会把数学长题干也折叠，破坏「数学展示原样」约束。
   const isEnglishPassage = q.subject === '英语'
   const [passageOpen, setPassageOpen] = useState(false)
-  const tags = q.tags_source === 'manual' ? (q.manual_tags || []) : (q.ai_tags || [])
+  const { tags, fullImageUrl } = resolveWrongQuestionDetailFields(q)
   const status = statusMap[wq.lifecycle_status || 'new'] || statusMap.new
   const StatusIcon = status.icon
   const date = dayjs(wq.added_at || wq.created_at)
@@ -146,7 +148,7 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
                 style={{ maxHeight: '260px' }}
                 onError={(e) => {
                   // 图片加载失败（如历史错误截图）→ 自动回退到整页原图，保证能看到本题
-                  const full = q.full_image_url
+                  const full = fullImageUrl
                   if (full && e.currentTarget.src !== full) {
                     e.currentTarget.src = full
                   } else {
@@ -157,9 +159,9 @@ export default function WrongQuestionDetailModal({ wrongQuestion, onClose, onRet
             </button>
           </div>
         )}
-        {q.full_image_url && (
+        {fullImageUrl && (
           <button
-            onClick={() => onViewImage(q.full_image_url)}
+            onClick={() => onViewImage(fullImageUrl)}
             className='mt-2 w-full py-2 rounded-lg text-[12px] font-medium'
             style={{ background: 'var(--primary-soft)', color: 'var(--primary-hover)' }}
           >
