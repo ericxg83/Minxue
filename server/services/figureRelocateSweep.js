@@ -21,6 +21,7 @@ import { cropAndUploadGeometryImage, isDegenerateFigureBox, clampImageBboxToBloc
 import { denormalizeBbox } from '../utils/geometryCrop.js'
 import { hasFigureReference } from '../utils/questionCompleteness.js'
 import { normalizeStem } from '../utils/stemNormalize.js'
+import { MISSING_FIGURE_SKIP_REASON } from '../utils/figureRequirementGuard.js'
 import { syncQuestionCompleteness } from './questionCompletenessSync.js'
 import { compensateWrongBook } from './wrongBookCompensation.js'
 
@@ -120,7 +121,7 @@ export const relocateOneFigure = async (q, pages, { dryRun = false } = {}) => {
   return { status: 'no_figure' }
 }
 
-const CANDIDATE_SQL = `
+export const CANDIDATE_SQL = `
   SELECT q.id, q.student_id, q.task_id, q.page_number, q.question_number, q.sub_no,
          q.content, q.parent_stem, q.block_coordinates, q.image_bbox, q.image_type, q.geometry_image_url
     FROM ${TABLES.QUESTIONS} q
@@ -130,7 +131,18 @@ const CANDIDATE_SQL = `
      AND t.deleted_at IS NULL
      AND t.images IS NOT NULL
      AND (COALESCE(q.parent_stem,'') || COALESCE(q.content,'')) ~ '如图|图[0-9]+|图示|附图|见图'
-     AND (q.is_correct = FALSE OR q.answer_source = 'blank')
+     AND (
+       q.is_correct = FALSE
+       OR q.answer_source = 'blank'
+       -- 2026-11-01 修闭环缺口：被「缺配图预判闸」跳过解析的题（answer_exception=true 且
+       -- reason 逐字等于闸文案）是系统明确知道「该有图而没图」的最高优先级补图对象。
+       -- 它们 is_correct=NULL（未判定）、answer_source='recognized'，原条件永远不含它们
+       -- ⇒ 本清扫自 2026-09-27 部署以来对这类题从未生效（实测重定位池=0），
+       --    而这类题正是 OCR 模型确认有图（image_type=geometry+bbox）却被 refine 误杀后
+       --    唯一出路——补裁清扫会永远循环同一拒绝（refine 宁缺毋滥，判据不可放宽）。
+       -- 本通道 skipRefine 裁图 + 两道 JS 闸，正是为「refine 误杀稀疏图形」设计的通道。
+       OR (q.answer_exception = TRUE AND q.answer_exception_reason = $2::text)
+     )
    ORDER BY q.updated_at DESC
    LIMIT $1`
 
@@ -143,7 +155,7 @@ export const sweepFigureRelocate = async ({ limit = 30, dryRun = false, logTag =
   if (_running) return { scanned: 0, cropped: 0, noFigure: 0, ids: [], skippedRun: true }
   _running = true
   try {
-    const { rows } = await query(CANDIDATE_SQL, [Math.max(1, Math.min(200, Number(limit) || 30))])
+    const { rows } = await query(CANDIDATE_SQL, [Math.max(1, Math.min(200, Number(limit) || 30)), MISSING_FIGURE_SKIP_REASON])
     // 按 task 缓存页 buffer（含 ±1 页）
     const pageCache = new Map() // taskId -> [{page, buffer}]
     const getPages = async (taskId, images) => {
@@ -203,14 +215,16 @@ export const sweepFigureCrossStudentShare = async ({ dryRun = false, logTag = 'f
     const key = normalizeStem(`${d.parent_stem} ${d.content || ''}`)
     if (key && !donorByUrl.has(key)) donorByUrl.set(key, d.geometry_image_url)
   }
-  // 2) 缺图引图错题（目标）
+  // 2) 缺图引图错题（目标）——含被缺图闸跳过解析的题（2026-11-01 同 CANDIDATE_SQL 的闭环缺口修复）
   const { rows: targets } = await query(
     `SELECT q.id, q.student_id, COALESCE(q.parent_stem,'') AS parent_stem, q.content, q.geometry_image_url
        FROM ${TABLES.QUESTIONS} q LEFT JOIN ${TABLES.TASKS} t ON t.id = q.task_id
       WHERE q.geometry_image_url IS NULL AND q.deleted_at IS NULL
         AND (t.id IS NULL OR t.deleted_at IS NULL)
-        AND (q.is_correct = FALSE OR q.answer_source = 'blank')
-        AND (COALESCE(q.parent_stem,'') || COALESCE(q.content,'')) ~ '如图|图[0-9]+|图示|附图|见图'`
+        AND (q.is_correct = FALSE OR q.answer_source = 'blank'
+             OR (q.answer_exception = TRUE AND q.answer_exception_reason = $1::text))
+        AND (COALESCE(q.parent_stem,'') || COALESCE(q.content,'')) ~ '如图|图[0-9]+|图示|附图|见图'`,
+    [MISSING_FIGURE_SKIP_REASON]
   )
   let shared = 0
   const ids = []
