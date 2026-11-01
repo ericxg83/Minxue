@@ -147,7 +147,12 @@ export async function renderExamPDF({ html, filename = 'exam.pdf', pdfOptions = 
     }
     // 页码（错题重练卷）：走 Chromium 原生页脚，只占用底部 margin 的空白，
     // 不改变内容区高度 ⇒ 卷子的分页位置与加页码前逐字相同。
-    const mergedPdfOptions = withPageNumberOptions({ ...defaultPdfOptions, ...pdfOptions }, pageNumbers)
+    // ⛔ puppeteer parsePDFOptions 里 format 优先级高于 width/height（有 format 时
+    //   width/height 被完全忽略）——调用方显式传了自定义页面尺寸（如讲解版 280×210mm
+    //   横版 4:3）就必须去掉 format，否则尺寸不生效、纸型回落 A4。
+    const merged = { ...defaultPdfOptions, ...pdfOptions }
+    if (pdfOptions?.width || pdfOptions?.height) delete merged.format
+    const mergedPdfOptions = withPageNumberOptions(merged, pageNumbers)
     const pdfBuffer = await page.pdf(mergedPdfOptions)
     return pdfBuffer
   } finally {
