@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { CheckCircle2, XCircle, ChevronLeft, ChevronRight, Loader2, QrCode, Eye, EyeOff, CircleCheckBig } from 'lucide-react'
-import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus, markGeneratedExamGraded } from '../../services/apiService'
+import { getQuestionsByIds, gradeGeneratedExam, batchUpsertWrongQuestionStatus } from '../../services/apiService'
 import { useStudentStore } from '../../store'
 import { normalizeOptions } from '../../utils/optionText'
 import { getReferenceAnswerOrigin, hasUsableAnalysis } from '../../utils/reviewDecision'
@@ -165,19 +165,16 @@ export default function Grading({ studentId, questionIds, onClose, onComplete, g
       }
 
       if (generatedExamId) {
-        // 新流程：使用 gradeGeneratedExam API（服务端处理掌握度进阶）
+        // 新流程：使用 gradeGeneratedExam API（服务端处理掌握度进阶 + 落 exam.graded 状态）
         await gradeGeneratedExam(generatedExamId, studentId, resultsArray)
       } else {
-        // 旧流程：兼容无 generatedExamId 的二维码
+        // 旧流程：兼容无 generatedExamId 的二维码（无 exam 可标记，仅更新错题状态）
         const legacyResults = resultsArray.map(r => ({
           questionId: r.questionId,
           status: r.isCorrect ? 'mastered' : 'pending',
           isCorrect: r.isCorrect
         }))
         await batchUpsertWrongQuestionStatus(studentId, legacyResults)
-        if (generatedExamId) {
-          await markGeneratedExamGraded(generatedExamId)
-        }
       }
 
       const stats = calcStats()
