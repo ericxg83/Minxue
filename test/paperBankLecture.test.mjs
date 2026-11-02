@@ -178,7 +178,7 @@ test('★ 页面无任何底纹：角标素字、题干素排，不得出现背�
   assert.ok(!body.includes('lec-stem-label'), '「公共题干」标签不得再渲染（参照版式是素排）')
 })
 
-test('★ 配图位置：有公共题干时图紧跟题干下方、在小问文字之前', () => {
+test('★ 配图位置：图在题目内容之下（题干→小问→图），不得插在题干和小问之间', () => {
   const body = buildLectureBody({
     items: [createBasketItem(q({
       id: 'a', question_no: 25, sub_no: '1', parent_stem: '如图，在三角形ABC中',
@@ -187,23 +187,25 @@ test('★ 配图位置：有公共题干时图紧跟题干下方、在小问文�
     showImage: true,
   })
   const iStem = body.indexOf('lec-stem-text')
+  const iQ = body.indexOf('lec-q-text')
   const iImg = body.indexOf('lec-img')
-  const iQ = body.indexOf('lec-q')
   assert.ok(iStem !== -1 && iImg !== -1 && iQ !== -1, '三要素都要在')
-  assert.ok(iStem < iImg && iImg < iQ, '顺序必须是 题干 → 图 → 小问')
+  assert.ok(iStem < iQ && iQ < iImg, '顺序必须是 题干 → 小问 → 图')
 })
 
-test('★ 配图位置：无公共题干时图退到题面文字之后', () => {
-  const body = buildLectureBody({
-    items: [createBasketItem(q({
-      id: 'a', question_no: 18, image_url: 'https://oss.example.com/q18.jpg',
-      content: '求证',
-    }))],
+test('★ 配图矢量优先：有 vec_url（几何重绘 SVG）用之，否则回退原题裁片', () => {
+  const item = q({
+    id: 'a', image_url: 'https://oss.example.com/q25.jpg',
+    vec_url: '/api/paper-bank/fig/abc.svg',
+  })
+  const withVec = buildLectureBody({ items: [createBasketItem(item)], showImage: true })
+  assert.ok(withVec.includes('src="/api/paper-bank/fig/abc.svg"'), '有矢量图必须优先用')
+  assert.ok(withVec.includes('data-fig-fallback="https://oss.example.com/q25.jpg"'), '必须带裁片回退地址')
+  const noVec = buildLectureBody({
+    items: [createBasketItem(q({ id: 'b', image_url: 'https://oss.example.com/q25.jpg' }))],
     showImage: true,
   })
-  const iImg = body.indexOf('lec-img')
-  const iQ = body.indexOf('lec-q-text')
-  assert.ok(iQ !== -1 && iImg !== -1 && iQ < iImg, '无题干时顺序必须是 题面 → 图')
+  assert.ok(noVec.includes('src="https://oss.example.com/q25.jpg"'), '无矢量图回退裁片')
 })
 
 // ─────────────────────────────────────────────────────────────

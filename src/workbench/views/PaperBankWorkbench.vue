@@ -139,7 +139,7 @@
 
                 <!-- 原题裁片图行内展示（2026-11-01 负责人反馈：小拇指缩略图看不清几何图形，等于没图）。
                      数据里 64/64 题都有裁片图，此前只是展示位置太隐蔽。 -->
-                <img v-if="q.image_url" class="pb-row__figure" :src="thumbUrl(q.image_url)" alt="原题图" loading="lazy" />
+                <img v-if="q.image_url" class="pb-row__figure" :src="q.vec_url || thumbUrl(q.image_url)" alt="原题图" loading="lazy" />
 
                 <div v-if="(q.options || []).length" class="pb-row__opts">
                   <span v-for="(o, i) in q.options" :key="i" class="pb-opt">

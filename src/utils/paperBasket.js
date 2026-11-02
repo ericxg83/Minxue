@@ -82,6 +82,7 @@ export function createBasketItem(q, score) {
     answer_source: src.answer_source || null,
     analysis: src.analysis || null,
     image_url: src.image_url || null,
+    vec_url: src.vec_url || null,
     resource_id: src.resource_id || null,
     resource_name: src.resource_name || '',
     difficulty: src.difficulty == null ? null : Number(src.difficulty),

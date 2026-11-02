@@ -238,7 +238,12 @@ async function verifyPointsInFigure({ dataURL, points, shortId }) {
   }
 }
 
-async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '', skipTextGate = false) {
+/**
+ * 几何重绘核心（2026-11-02 开放给试卷题库矢量图复用，paper-bank 批量脚本调用）：
+ * 裁片 buffer + 题面文本 → { ok, svg }；五道闸门里的文本闸/视觉复核全在此内。
+ * ⛔ 调用方不得绕过闸门直取 svg（「误放一张凭空多点比拒稿一百张更糟」）。
+ */
+export async function reconstructGeometrySvg(imageBuffer, questionId, content, options, parentStem = '', skipTextGate = false) {
   const shortId = (questionId || '').substring(0, 8)
   const base64 = imageBuffer.toString('base64')
   const dataURL = `data:image/png;base64,${base64}`

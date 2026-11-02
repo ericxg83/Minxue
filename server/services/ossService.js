@@ -45,6 +45,30 @@ export const uploadImage = async (fileBuffer, originalName, studentId) => {
   return uploadFile(fileBuffer, ext, 'images', studentId)
 }
 
+/**
+ * 上传到【确定性 key】（2026-11-02 试卷题库几何矢量图用）。
+ * uploadImage 的 key 是随机 UUID，无法「按题目 id 探测存在性」；
+ * 矢量图走约定 key（paper-bank/vec/{resourceId}/{questionNo}.svg），
+ * 列表接口才能 HEAD 探测后附 vec_url。同 key 重复上传 = 覆盖（幂等）。
+ */
+export const uploadBufferToKey = async (fileBuffer, key, mime) => {
+  const options = mime ? { mime } : undefined
+  const result = await ossClient.put(key, fileBuffer, options)
+  return getCDNUrl(key)
+}
+
+/** 探测确定性 key 是否存在（不存在/出错都返回 false，不抛——探测失败按缺图处理）。 */
+export const headObjectExists = async (key) => {
+  try {
+    await ossClient.head(key)
+    return true
+  } catch (e) {
+    if (e?.code === 'NoSuchKey' || e?.status === 404) return false
+    console.warn(`[OSS] head ${key} 失败(${e?.code || e?.status || e.message})，按缺图处理`)
+    return false
+  }
+}
+
 export const uploadPDF = async (fileBuffer, originalName, studentId) => {
   // Filename is already UTF-8 decoded at the upload endpoint.
   const ext = originalName.split('.').pop().toLowerCase()

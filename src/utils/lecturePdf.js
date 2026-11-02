@@ -118,18 +118,9 @@ function renderLecturePage(it, idx, total, { showImage = false } = {}) {
     html += `<div class="lec-stem"><div class="lec-stem-text">${renderContent(it.parent_stem)}</div></div>`
   }
 
-  // 配图紧跟题干下方、靠左（参照版式；「如图」的图就该在题干脚下）。
-  // 无公共题干时退到题面文字之后，保证任何行都有图位。
-  const imgHtml = (showImage && it.image_url)
-    ? `<div class="lec-img"><img src="${escapeHtml(it.image_url)}" alt="原题图" /></div>`
-    : ''
-  if (imgHtml && it.parent_stem) html += imgHtml
-
   html += `<div class="lec-q">`
   html += dotLabel ? `<span class="lec-q-no">${escapeHtml(dotLabel)}</span>` : ''
   html += `<span class="lec-q-text">${renderContent(it.content || '')}</span></div>`
-
-  if (imgHtml && !it.parent_stem) html += imgHtml
 
   const opts = normalizeOptions(it.options)
   if (opts.length) {
@@ -141,6 +132,13 @@ function renderLecturePage(it, idx, total, { showImage = false } = {}) {
       html += `<span class="lec-opt">${String.fromCharCode(65 + i)}. ${renderContentInline(opt)}</span>`
     })
     html += '</div>'
+  }
+
+  // 配图放【题目内容之下】靠左（2026-11-02 负责人定稿：图在题目下）。
+  // 矢量优先：vec_url 是几何重绘 SVG（paperFigureVector 产物），缺了回退原题裁片。
+  if (showImage && (it.vec_url || it.image_url)) {
+    const figSrc = escapeHtml(it.vec_url || it.image_url)
+    html += `<div class="lec-img"><img src="${figSrc}" alt="原题图" data-fig-fallback="${escapeHtml(it.image_url || '')}" /></div>`
   }
 
   // 书写区：撑满剩余页高（约 2/3 页），纯白无任何线条 —— 笔迹交给 iPad 笔记软件。
