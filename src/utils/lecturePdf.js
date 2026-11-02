@@ -9,6 +9,9 @@
  *   ③ 答案 + 解析要点印**页脚小字**——讲解时不用切出去查答案库；
  *   ④ 题面默认重排文字（大字号 KaTeX），「印原题图」开关切原题扫描图（几何含图题用）。
  *
+ * 版式参照（2026-11-02 负责人给的中西书局讲解稿样张）：无任何底纹底色（角标素字、
+ * 题干素排无灰盒）、配图放题干下方靠左、一小题一页照旧。
+ *
  * ── 与另外三套版式的关系（四套方向各不相同，⛔ 不要互相套用）──
  *   ① 讲义 handoutPdf.js：A4 竖版密排版、按卷分组 —— 打印出来看的；
  *   ② 组卷 composePaperPdf.js：重新编号、按题型分大题 —— 那是一份新卷子；
@@ -46,7 +49,9 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
-/** 讲解版专属样式（叠在 buildPaperCSS 之上，由 renderCustomBodyToHTML 拼接）。 */
+/** 讲解版专属样式（叠在 buildPaperCSS 之上，由 renderCustomBodyToHTML 拼接）。
+ *  版式参照（2026-11-02 负责人给的中西书局讲解稿样张）：无任何底纹底色、
+ *  角标素字、题干素排、配图在题干下方靠左、其余留白。 */
 export function buildLectureCSS() {
   return `
 body{margin:0;padding:0;background:#fff}
@@ -55,19 +60,18 @@ body{margin:0;padding:0;background:#fff}
   padding:9mm 12mm 6mm;display:flex;flex-direction:column;overflow:hidden;page-break-after:always}
 .lec-page:last-child{page-break-after:auto}
 .lec-head{display:flex;justify-content:space-between;align-items:center;gap:8mm;margin-bottom:4mm}
-.lec-badge{font-size:14px;color:#0C447C;background:#E6F1FB;border-radius:4px;padding:3px 10px;
+.lec-badge{font-size:15px;font-weight:bold;color:#1C1C1A;
   max-width:72%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .lec-pageno{font-size:12px;color:#999999;flex-shrink:0}
-.lec-stem{background:#F1EFE8;border:0.5px solid #D3D1C7;border-radius:6px;padding:2.5mm 4mm;margin-bottom:3mm}
-.lec-stem-label{font-size:11px;color:#888780;margin-bottom:1mm}
-.lec-stem-text{font-size:14px;line-height:1.65;color:#444441}
-.lec-q{font-size:19px;line-height:1.8;color:#1C1C1A}
+.lec-stem{margin-bottom:2mm}
+.lec-stem-text{font-size:16px;line-height:1.85;color:#1C1C1A}
+.lec-q{font-size:19px;line-height:1.8;color:#1C1C1A;margin-bottom:1mm}
 .lec-q-no{font-weight:bold;margin-right:2mm}
 .lec-opts{display:grid;gap:1.5mm 6mm;margin-top:3mm;font-size:16px;color:#1C1C1A}
-.lec-img{margin-top:3mm}
-.lec-img img{max-width:55%;max-height:58mm;display:block}
+.lec-img{margin-top:2mm;margin-bottom:1mm}
+.lec-img img{max-width:55%;max-height:58mm;display:block;margin-right:auto}
 .lec-write{flex:1;min-height:20mm}
-.lec-foot{border-top:1px solid #DDDACD;margin-top:3mm;padding-top:2.5mm;font-size:13px;line-height:1.7;color:#55544E}
+.lec-foot{border-top:1px solid #E4E2DA;margin-top:3mm;padding-top:2.5mm;font-size:13px;line-height:1.7;color:#55544E}
 .lec-ans{color:#2C2C2A}
 .lec-ans-missing{color:#AAAAA5}
 .lec-ans-note{color:#993C1D;margin-left:4px}
@@ -110,17 +114,22 @@ function renderLecturePage(it, idx, total, { showImage = false } = {}) {
   html += `<span class="lec-pageno">${idx + 1} / ${total}</span></div>`
 
   if (it.parent_stem) {
-    html += `<div class="lec-stem"><div class="lec-stem-label">公共题干</div>`
-    html += `<div class="lec-stem-text">${renderContent(it.parent_stem)}</div></div>`
+    // 素排题干（2026-11-02 参照版式：去掉灰底盒与「公共题干」标签，题干就是正文）
+    html += `<div class="lec-stem"><div class="lec-stem-text">${renderContent(it.parent_stem)}</div></div>`
   }
+
+  // 配图紧跟题干下方、靠左（参照版式；「如图」的图就该在题干脚下）。
+  // 无公共题干时退到题面文字之后，保证任何行都有图位。
+  const imgHtml = (showImage && it.image_url)
+    ? `<div class="lec-img"><img src="${escapeHtml(it.image_url)}" alt="原题图" /></div>`
+    : ''
+  if (imgHtml && it.parent_stem) html += imgHtml
 
   html += `<div class="lec-q">`
   html += dotLabel ? `<span class="lec-q-no">${escapeHtml(dotLabel)}</span>` : ''
   html += `<span class="lec-q-text">${renderContent(it.content || '')}</span></div>`
 
-  if (showImage && it.image_url) {
-    html += `<div class="lec-img"><img src="${escapeHtml(it.image_url)}" alt="原题图" /></div>`
-  }
+  if (imgHtml && !it.parent_stem) html += imgHtml
 
   const opts = normalizeOptions(it.options)
   if (opts.length) {

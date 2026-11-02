@@ -164,6 +164,49 @@ test('★ 原题图开关：默认不印，showImage=true 且有 image_url 才�
 })
 
 // ─────────────────────────────────────────────────────────────
+// ⑤' 版式参照（2026-11-02 负责人样张：中西书局讲解稿）——无底纹 + 图在题干下
+// ─────────────────────────────────────────────────────────────
+
+test('★ 页面无任何底纹：角标素字、题干素排，不得出现背景色盒子', () => {
+  const css = buildLectureCSS()
+  assert.ok(!/\.lec-badge\{[^}]*background/.test(css), '角标不得带底色药丸')
+  assert.ok(!/\.lec-stem\{[^}]*background/.test(css), '题干不得带灰底盒子')
+  assert.ok(!/\.lec-stem\{[^}]*border/.test(css), '题干不得带边框')
+  const body = buildLectureBody({
+    items: [createBasketItem(q({ id: 'a', parent_stem: '公共题干' }))],
+  })
+  assert.ok(!body.includes('lec-stem-label'), '「公共题干」标签不得再渲染（参照版式是素排）')
+})
+
+test('★ 配图位置：有公共题干时图紧跟题干下方、在小问文字之前', () => {
+  const body = buildLectureBody({
+    items: [createBasketItem(q({
+      id: 'a', question_no: 25, sub_no: '1', parent_stem: '如图，在三角形ABC中',
+      image_url: 'https://oss.example.com/q25.jpg', content: '当EF平行BC时求面积',
+    }))],
+    showImage: true,
+  })
+  const iStem = body.indexOf('lec-stem-text')
+  const iImg = body.indexOf('lec-img')
+  const iQ = body.indexOf('lec-q')
+  assert.ok(iStem !== -1 && iImg !== -1 && iQ !== -1, '三要素都要在')
+  assert.ok(iStem < iImg && iImg < iQ, '顺序必须是 题干 → 图 → 小问')
+})
+
+test('★ 配图位置：无公共题干时图退到题面文字之后', () => {
+  const body = buildLectureBody({
+    items: [createBasketItem(q({
+      id: 'a', question_no: 18, image_url: 'https://oss.example.com/q18.jpg',
+      content: '求证',
+    }))],
+    showImage: true,
+  })
+  const iImg = body.indexOf('lec-img')
+  const iQ = body.indexOf('lec-q-text')
+  assert.ok(iQ !== -1 && iImg !== -1 && iQ < iImg, '无题干时顺序必须是 题面 → 图')
+})
+
+// ─────────────────────────────────────────────────────────────
 // ⑥ 横版 4:3 页面（负责人拍板 ①）
 // ─────────────────────────────────────────────────────────────
 
