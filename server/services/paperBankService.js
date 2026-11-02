@@ -28,6 +28,7 @@ import { uploadImage } from './ossService.js'
 import { renderPdfToJpegs } from './pdfService.js'
 import { buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN } from '../config/ai.js'
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
+import { planSubrowFigureAssignments, extractFigureBandFromCrop } from './paperFigureAssign.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
 // 瞬时并发打满会触发供应商限流（2026-09-09 全本错位事故的成因之一）。
@@ -316,6 +317,33 @@ export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = co
             logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题裁片上传失败: ${e.message}`)
           }
         }
+      }
+
+      // ── 小问组配图共享（2026-11-02，paperFigureAssign）──
+      // 切段以「题号行上沿」为界：「题干→小问→图块在最后」版式的图会整段落进
+      // 最后一个下问的切段，其余小问只切到自己的一行文字条（显示为细线 = 没图，
+      // 徐汇一模 25(1)(2) 实测）。组内把带图行（优先抠成图形带）补给文字条行；
+      // 任何失败只降级为「维持现状」，不影响落库。
+      try {
+        const figPlans = planSubrowFigureAssignments(rows)
+        for (const pl of figPlans) {
+          const src = rows[pl.sourceIdx]
+          const tgt = rows[pl.targetIdx]
+          const srcBuf = await cropQuestionImage(pageBuffer, src.bbox)
+          if (!srcBuf) continue
+          const figBuf = (await extractFigureBandFromCrop(srcBuf)) || srcBuf
+          try {
+            tgt.image_url = await uploadImage(
+              figBuf,
+              `paper-p${pageNumber}-q${tgt.question_no}-s${tgt.sub_no || 'x'}-fig.jpg`,
+              'paper-bank'
+            )
+          } catch (e) {
+            logger.warn?.(`[paperBank] 小问配图共享上传失败 q${tgt.question_no}(${tgt.sub_no}): ${e.message}`)
+          }
+        }
+      } catch (e) {
+        logger.warn?.(`[paperBank] 小问配图共享失败（不影响主流程）: ${e.message}`)
       }
     }
   } catch (e) {
