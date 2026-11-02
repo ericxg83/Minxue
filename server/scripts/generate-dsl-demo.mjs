@@ -26,18 +26,23 @@ const GEMINI = {
   endpoint: 'https://api.huihuiyun.top/v1/chat/completions',
   key: process.env.HUIHUIYUN_GEMINI_API_KEY,
   model: MODEL_NAME,
-  maxTokens: 8192,
+  // Claude 通道思考吃预算：max_tokens 必须 = 思考 + 正文，8192 会在长思考题上烧空
+  maxTokens: MODEL_NAME.startsWith('claude') ? 16384 : 8192,
 }
 async function callGemini({ systemPrompt, userText, imageDataURL }) {
+  // Claude 通道（该网关）拒绝非默认 temperature，其余通道保持 0.1
+  const temperature = MODEL_NAME.startsWith('claude') ? undefined : 0.1
   const res = await fetch(GEMINI.endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GEMINI.key}` },
-    body: JSON.stringify({ model: GEMINI.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: [{ type: 'image_url', image_url: { url: imageDataURL } }, { type: 'text', text: userText }] }], max_tokens: GEMINI.maxTokens, temperature: 0.1 }),
+    body: JSON.stringify({ model: GEMINI.model, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: [{ type: 'image_url', image_url: { url: imageDataURL } }, { type: 'text', text: userText }] }], max_tokens: GEMINI.maxTokens, temperature }),
   })
   const text = await res.text()
   if (res.status !== 200) throw new Error(`gemini HTTP ${res.status}: ${text.slice(0, 120)}`)
   const msg = JSON.parse(text).choices?.[0]?.message
-  const content = typeof msg?.content === 'string' ? msg.content : (Array.isArray(msg?.content) ? msg.content.map(x => x?.text || '').join('') : '')
+  let content = typeof msg?.content === 'string' ? msg.content : (Array.isArray(msg?.content) ? msg.content.map(x => x?.text || '').join('') : '')
+  // Claude 走网关时正文可能被思考吃掉（content 空、全在 reasoning_content）→ 兜底取思考
+  if (!content && msg?.reasoning_content) content = msg.reasoning_content
   if (!content) throw new Error('gemini 空 content')
   return content
 }
