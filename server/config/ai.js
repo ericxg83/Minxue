@@ -502,6 +502,9 @@ export const BACKUP_VENDOR_DEFS = [
     //    负责人拍板主模型随组切 3.8-flash：贵 13×（~$0.02/次）但绝对额小，且现有 DSL 闸门闭环
     //    （correctDslByVision ≤5 轮）可兜 09-19 时代的占位符脏标注；含 3.7 的分组若日后重现，
     //    改回本行 + grep gemini-3.7-flash 同步三条显式链即可。
+    // [2026-11-02 组⑥] 当日又经 5 次换组（纯文本/GPT/Claude 组均不合格），最终落全 gemini 池：
+    //    2.5-flash/pro、3-flash、3.1-flash、3.1-pro-preview(-low)、3.5-flash、3.8-flash（仍无 3.7）。
+    //    配置零改动即恢复（vlModels 本就指向 3.8）；3.5 收编见下方 vlModels 处 A/B 注记。
     //
     // 选型实测（同题 13 张 A/B，server/_diag_37_vs_38_ab.mjs，报告 _几何重绘-换组归因结论-20260919.md）：
     //   - 能力：3.7-flash 12/13（92.3%；唯一失败是 403 `All available accounts exhausted`
@@ -524,7 +527,12 @@ export const BACKUP_VENDOR_DEFS = [
     // ⛔ 2026-09-24：移除 gemini-3.1-pro（用户反馈又贵又不好用）。2026-11-02 主模型改 3.8-flash
     //   （3.7 所在分组已被服务商删除，见上）；若也想关停整个付费池，清空 .env 的
     //   HUIHUIYUN_GEMINI_API_KEY 即可（resolveBackupVendors 会跳过）。
-    vlModels: ['gemini-3.8-flash'],
+    // [2026-11-02 组⑥ A/B] 同 6 题实测：3.8 6/6（5严格+1弱OK、无幻影、有箭头）vs 3.5 首轮 6/6
+    //   重跑 5/6（数轴 dsl_unchanged 硬失败、Rt△ 幻影线段 B-D）——主力留 3.8。
+    //   3.5 唯一明确胜点：网格题把网格画出来了（3.8 漏画）；故收编为组内第二顺位：
+    //   仅通用兜底链（STRONG_VL_FALLBACK_VENDORS 按 vlModels 全量取）在 3.8 失败/额度打满时轮到，
+    //   四条显式 vendorChain 仍点名 3.8 不受影响。速度 3.5 略快（2m35 vs 3m10 / 6 题）。
+    vlModels: ['gemini-3.8-flash', 'gemini-3.5-flash'],
     maxTokens: 16384,
     referer: null,
     extraBody: null,
