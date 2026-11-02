@@ -325,8 +325,8 @@ test('几何链路的专用链**默认写死实测主力**（不靠 env 才有�
   const vendors = m[1].split(',').map((s) => s.trim()).filter(Boolean)
   assert.ok(vendors.length >= 2,
     `默认链至少要两家供应商兜底（单家全挂即整链失败），实际 ${vendors.length}`)
-  assert.match(vendors[0], /^HuihuiyunGemini:gemini-3\.7-flash$/,
-    '首位必须是实测几何 DSL 主力；若确要换主力，请同步本断言与几何Worker 头部实测记录')
+  assert.match(vendors[0], /^HuihuiyunGemini:gemini-3\.8-flash$/,
+    '首位必须是实测几何 DSL 主力；若确要换主力，请同步本断言与几何Worker 头部实测记录（2026-11-02 随组 3.7→3.8）')
   assert.doesNotMatch(m[1], /ModelScope|魔搭/,
     '链外一律不碰：几何专用链不得含魔搭（它会静默换弱模型，正是本契约要防的失败模式）')
 })
