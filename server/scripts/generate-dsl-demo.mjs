@@ -17,10 +17,15 @@ import { checkFigureReference } from '../utils/geometryFigureGate.js'
 const OUT = 'D:/Minxue_App_V3/server/scripts/logs/dsl-demo'
 fs.mkdirSync(OUT, { recursive: true })
 
+// --model=<name>：换通道实测用（如 gpt-6.1-terra）；--limit=<n>：控制题数（默认 6）
+const MODEL_ARG = process.argv.find(a => a.startsWith('--model='))?.split('=')[1]
+const LIMIT_ARG = Number(process.argv.find(a => a.startsWith('--limit='))?.split('=')[1]) || 6
+const MODEL_NAME = MODEL_ARG || 'gemini-3.8-flash'
+
 const GEMINI = {
   endpoint: 'https://api.huihuiyun.top/v1/chat/completions',
   key: process.env.HUIHUIYUN_GEMINI_API_KEY,
-  model: 'gemini-3.8-flash',
+  model: MODEL_NAME,
   maxTokens: 8192,
 }
 async function callGemini({ systemPrompt, userText, imageDataURL }) {
@@ -54,7 +59,7 @@ if (idsArg) {
 // --ids 模式：用户明确指定的题直接做（子题题干可能不带"如图"但确有配图），不过闸门过滤
 const items = idsArg
   ? sample.rows
-  : sample.rows.filter(r => checkFigureReference(r.content || '', '').ok).slice(0, 6)
+  : sample.rows.filter(r => checkFigureReference(r.content || '', '').ok).slice(0, LIMIT_ARG)
 console.log(`演示 ${items.length} 张`)
 
 const cards = []
@@ -98,7 +103,7 @@ const rows = cards.map((c, i) => {
     <div style="font-size:13px;color:#333;margin-bottom:10px">${c.head} ${badge}</div>
     <div style="display:flex;gap:14px;align-items:flex-start">
       <div><div style="font-size:11px;color:#999;margin-bottom:4px">原题裁片</div><img src="orig_${i + 1}.png" style="max-width:300px;border:1px solid #ddd;border-radius:6px"/></div>
-      <div><div style="font-size:11px;color:#999;margin-bottom:4px">DSL 重绘（gemini-3.8-flash）</div>${right}</div>
+      <div><div style="font-size:11px;color:#999;margin-bottom:4px">DSL 重绘（${MODEL_NAME}）</div>${right}</div>
     </div>
   </div>`
 }).join('\n')
@@ -106,7 +111,7 @@ const rows = cards.map((c, i) => {
 const html = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>DSL 重绘效果对比</title>
 <style>body{font-family:-apple-system,system-ui,sans-serif;background:#f5f5f5;margin:0;padding:24px}h1{font-size:20px}h2{font-size:14px;color:#666;font-weight:normal}</style></head>
 <body><h1>几何题配图 · DSL 重绘效果对比</h1>
-<h2>通道：gemini-3.8-flash（辉辉云）｜闭环：correctDslByVision ≤5 轮｜渲染：renderGeometrySvg（SVG→PNG）｜2026-09-19</h2>
+<h2>通道：${MODEL_NAME}（辉辉云）｜闭环：correctDslByVision ≤5 轮｜渲染：renderGeometrySvg（SVG→PNG）｜${new Date().toISOString().slice(0, 10)}</h2>
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px">${rows}</div></body></html>`
 fs.writeFileSync(path.join(OUT, 'index.html'), html)
 console.log(`\n对比页: ${OUT}/index.html`)
