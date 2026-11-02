@@ -496,6 +496,13 @@ export const BACKUP_VENDOR_DEFS = [
     //    **gemini-3.8-flash 返回 404 Resource not found**（分组不含该模型，不是限流）。
     //    探测：server/_diag_gemini_pool_probe.mjs（秒级只读）。
     //
+    // ⚠️ 2026-11-02 旧分组被服务商删除（所有模型 403 GROUP_DELETED），用户重选新分组后实测：
+    //    仅 gemini-3.8-flash / gemini-3.1-pro-preview 可用；3.7-flash / 3.6-flash / 3.1-pro 全部
+    //    404「not supported by any configured account in this group」。探测：server/_diag_gemini_pool_probe.mjs。
+    //    负责人拍板主模型随组切 3.8-flash：贵 13×（~$0.02/次）但绝对额小，且现有 DSL 闸门闭环
+    //    （correctDslByVision ≤5 轮）可兜 09-19 时代的占位符脏标注；含 3.7 的分组若日后重现，
+    //    改回本行 + grep gemini-3.7-flash 同步三条显式链即可。
+    //
     // 选型实测（同题 13 张 A/B，server/_diag_37_vs_38_ab.mjs，报告 _几何重绘-换组归因结论-20260919.md）：
     //   - 能力：3.7-flash 12/13（92.3%；唯一失败是 403 `All available accounts exhausted`
     //     账号池打满，非模型能力）、平均 2.08 轮、标注冒名 0 条（辅助点全带 `_` 前缀）；
@@ -514,9 +521,10 @@ export const BACKUP_VENDOR_DEFS = [
     name: 'HuihuiyunGemini',
     envKey: 'HUIHUIYUN_GEMINI_API_KEY',
     endpoint: 'https://api.huihuiyun.top/v1/chat/completions',
-    // ⛔ 2026-09-24：移除 gemini-3.1-pro（用户反馈又贵又不好用）。保留 3.7-flash 作为该付费池主模型；
-    //   若也想关停整个付费池，清空 .env 的 HUIHUIYUN_GEMINI_API_KEY 即可（resolveBackupVendors 会跳过）。
-    vlModels: ['gemini-3.7-flash'],
+    // ⛔ 2026-09-24：移除 gemini-3.1-pro（用户反馈又贵又不好用）。2026-11-02 主模型改 3.8-flash
+    //   （3.7 所在分组已被服务商删除，见上）；若也想关停整个付费池，清空 .env 的
+    //   HUIHUIYUN_GEMINI_API_KEY 即可（resolveBackupVendors 会跳过）。
+    vlModels: ['gemini-3.8-flash'],
     maxTokens: 16384,
     referer: null,
     extraBody: null,
@@ -739,14 +747,14 @@ export const WORKBOOK_OCR_VENDOR_CHAIN = [
 // 通用学生作业拍照批改 OCR（worker.js recognizeQuestionsHybrid / recognizeQuestions，原 legacy 兜底，从未显式定序）：
 //   ① SenseNova deepseek-flash —— 主：免费、18.5s、JSON 3/3、唯一选项填满（链③同款，通用批改=同族任务）
 //   ② Bailian qwen3.8-flash —— 兜：批改场景 JSON 稳、无灾难缺陷（链③兜；Bailian vlModels 空，靠 vendorChain 显式点名绕过）
-//   ③ HuihuiyunGemini gemini-3.7-flash —— 最后兜：付费、强视觉白名单，按 token 计费
+//   ③ HuihuiyunGemini gemini-3.8-flash —— 最后兜：付费、强视觉白名单，按 token 计费（2026-11-02 随分组从 3.7 切 3.8）
 //   ❌ 有意排除：kimi-k3（批改/通用场景返回空 questions=整页丢失，链③据此排除；用户 2026-09-24 拍定剔除）、
 //      6.8-lite（丢选项 0/3、丢尾题 26/27）、ZenMux（GFW 墙，仅 Render 能出站）
 export const GENERAL_OCR_VENDOR_CHAIN = [
   { vendor: 'SenseNova', model: 'deepseek-flash' },
   // ⭐ 同 WORKBOOK_OCR_VENDOR_CHAIN：qwen3.8-flash 必须关思考，否则每次跑满超时（2026-10-30 实测）
   { vendor: 'Bailian', model: 'qwen3.8-flash', extraBody: { enable_thinking: false } },
-  { vendor: 'HuihuiyunGemini', model: 'gemini-3.7-flash' },
+  { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },
 ]
 
 let _resolvedVendorsCache = null

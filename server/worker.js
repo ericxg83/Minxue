@@ -1625,7 +1625,7 @@ const recognizeQuestions = async (imageBase64, taskId, retryCount = 0, forceMode
         temperature: 0.3,
         maxTokens: 8192,
         // 通用批改显式链（2026-09-24）：deepseek-flash@SenseNova 主 + qwen3.8-flash@Bailian 兜 +
-        // gemini-3.7-flash@HuihuiyunGemini 最后兜。kimi-k3 因批改场景返回空 questions 已剔除。
+        // gemini-3.8-flash@HuihuiyunGemini 最后兜（2026-11-02 旧分组被删，随组从 3.7 切 3.8）。kimi-k3 因批改场景返回空 questions 已剔除。
         // forceModel 显式点名时仍走原强制模型（保留 1291 行的 nextModel 重试语义），不破坏其它调用。
         ...(forceModel ? { model: forceModel } : { vendorChain: GENERAL_OCR_VENDOR_CHAIN })
       })

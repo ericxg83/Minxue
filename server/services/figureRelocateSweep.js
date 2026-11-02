@@ -31,9 +31,9 @@ const parseJson = (v) => {
   try { return JSON.parse(v) } catch { return null }
 }
 
-// 强视觉定位链：gemini-3.7-flash（强视觉白名单）主，qwen3.8-flash 兜。
+// 强视觉定位链：gemini-3.8-flash（强视觉白名单；2026-11-02 分组被删重选后新组无 3.7，随组切 3.8）主，qwen3.8-flash 兜。
 const STRONG_VL_CHAIN = [
-  { vendor: 'HuihuiyunGemini', model: 'gemini-3.7-flash' },
+  { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },
   { vendor: 'Bailian', model: 'qwen3.8-flash' },
 ]
 

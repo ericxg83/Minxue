@@ -74,7 +74,9 @@ const MAX_RETRIES = RETRY_DELAYS.length // 3
 // 几何重绘实际一直在走通用降级链（魔搭 → SenseNova → 辉辉云 → …）——而 2026-09-19
 // 同题 13 张 A/B（_diag_37_vs_38_ab.mjs）的结论是 gemini-3.7-flash 几何 DSL 92.3% 最强，
 // 却被排在 SenseNova 之后。改为显式 vendorChain，把实测强者置顶：
-//   ① HuihuiyunGemini gemini-3.7-flash —— 几何 DSL 主力（付费池，单次 ~$0.0015）
+//   ① HuihuiyunGemini gemini-3.8-flash —— 几何 DSL 主力（付费池；2026-11-02 旧分组被服务商删除、
+//      用户重选的新组已无 3.7-flash，随组切 3.8，单次 ~$0.02；09-19 A/B 的「3.7 最优」结论见上，
+//      含 3.7 的分组若日后重现可改回本行）
 //   ② Bailian qwen3.8-flash —— 兜底（2026-09-25 几何 DSL 基准 12 张难题裁片：
 //      与 gemini 同为 11/12 成功，平均 60s/次（gemini 10s）、一次 180s 超时，
 //      核心点标注两家一致 —— 慢但稳，适合兜底位。Token Plan 套餐内边际成本≈0；
@@ -83,7 +85,7 @@ const MAX_RETRIES = RETRY_DELAYS.length // 3
 // vendorChain 语义 = 链外一律不碰（含魔搭与末轮魔搭兜底），全链失败宁可失败不静默换弱模型。
 // 可用 env GEOMETRY_VISION_VENDOR_CHAIN 覆盖，格式 'Vendor:model,Vendor:model'。
 const GEOMETRY_VISION_VENDOR_CHAIN = (process.env.GEOMETRY_VISION_VENDOR_CHAIN ||
-  'HuihuiyunGemini:gemini-3.7-flash,Bailian:qwen3.8-flash,SenseNova:deepseek-flash')
+  'HuihuiyunGemini:gemini-3.8-flash,Bailian:qwen3.8-flash,SenseNova:deepseek-flash')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
