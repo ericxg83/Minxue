@@ -41,6 +41,15 @@ export const PAPER_MAX_PAGES = Number(process.env.PAPER_MAX_PAGES || 60)
 // 解析页图与裁片的缩放。scale 2 足够 OCR 与讲义缩略，且裁片体积可控。
 const RENDER_SCALE = 2
 
+// 裁片/整页图专用高清渲染（2026-11-03 负责人定调「要高清，不要矢量」）。
+// OCR 仍用 2x（视觉模型内部会缩放，拉大只烧 token）；裁片与 page_image_url 用 4x：
+// A4 基准 595×842pt ⇒ 4x = 2382×3368（≈288dpi），矢量线条/字母真实细节翻倍，
+// 讲解版 PDF（280×210mm）300dpi 打印/放大时不糊、无锯齿（2x 只有 ~144dpi，4x 下裁片区域
+// 1819px 打印像素有 2144px 源，够用）。maxEdge 必须同步抬高（默认 2048 会把 4x 压回 2.4x）。
+const CROP_RENDER_SCALE = 4
+const CROP_RENDER_MAX_EDGE = 4096
+const CROP_RENDER_QUALITY = 0.92 // canvas.toBuffer 的 jpeg 质量是 0~1（不是 sharp 的 0~100）
+
 /** 并发映射：保序返回，单点失败不拖垮整批。 */
 export async function mapWithConcurrency(items, limit, fn) {
   const out = new Array(items.length)
@@ -210,7 +219,8 @@ export async function cropQuestionImage(pageBuffer, box) {
   const height = Math.min(H - top, Math.round(clampN(box.height) / 1000 * H))
   if (width < 8 || height < 8) return null
   try {
-    return await sharp(page).extract({ left, top, width, height }).jpeg({ quality: 82 }).toBuffer()
+    // quality 92：82 在 4x 细节上会引入可见块状伪影（老师报障「锯齿」的一部分）
+    return await sharp(page).extract({ left, top, width, height }).jpeg({ quality: 92 }).toBuffer()
   } catch (e) {
     console.warn('[paperBank] 裁片失败:', e.message)
     return null
@@ -222,8 +232,10 @@ export async function cropQuestionImage(pageBuffer, box) {
  * 任一子步骤失败都**只降级、不中断**：OCR 失败 → 该页 0 题（记 warning）；
  * 切段失败 → 题目照存，只是没有裁片图（image_url 为空）。
  */
-export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = console }) {
+export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, pageNumber, logger = console }) {
   const imageDataURL = 'data:image/jpeg;base64,' + pageBuffer.toString('base64')
+  // 裁片/整页图一律走高清页（4x）；没给（拍照上传/高清渲染失败）就退回解析页。
+  const hiPage = cropPageBuffer || pageBuffer
 
   const { content } = await callVisionCompletion({
     imageDataURL,
@@ -248,7 +260,7 @@ export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = co
   // 传 null 会生成 `images/null/...` 这种脏路径。
   let pageImageUrl = null
   try {
-    pageImageUrl = await uploadImage(pageBuffer, `paper-p${pageNumber}.jpg`, 'paper-bank')
+    pageImageUrl = await uploadImage(hiPage, `paper-p${pageNumber}.jpg`, 'paper-bank')
   } catch (e) {
     logger.warn?.(`[paperBank] 第 ${pageNumber} 页整页图上传失败: ${e.message}`)
   }
@@ -312,7 +324,7 @@ export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = co
         const box = measured?.boxes?.[String(i)]
         if (!box) continue
         rows[i].bbox = box
-        const cropped = await cropQuestionImage(pageBuffer, box)
+        const cropped = await cropQuestionImage(hiPage, box)
         if (cropped) {
           try {
             rows[i].image_url = await uploadImage(cropped, `paper-p${pageNumber}-q${rows[i].question_no}.jpg`, 'paper-bank')
@@ -332,7 +344,7 @@ export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = co
         for (const pl of figPlans) {
           const src = rows[pl.sourceIdx]
           const tgt = rows[pl.targetIdx]
-          const srcBuf = await cropQuestionImage(pageBuffer, src.bbox)
+          const srcBuf = await cropQuestionImage(hiPage, src.bbox)
           if (!srcBuf) continue
           const figBuf = (await extractFigureBandFromCrop(srcBuf)) || srcBuf
           try {
@@ -372,6 +384,7 @@ export async function parsePageToQuestions({ pageBuffer, pageNumber, logger = co
  */
 export async function parsePaperResource({ resourceId, fileBuffer, mimeType, images, logger = console }) {
   let pages = []
+  let hiPages = null // 4x 高清页：只喂裁片/整页图，不喂 OCR（2026-11-03「要高清」）
   if (Array.isArray(images) && images.length) {
     pages = images.slice(0, PAPER_MAX_PAGES)
   } else if (fileBuffer) {
@@ -381,6 +394,18 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
       pages = (rendered?.images || []).slice(0, PAPER_MAX_PAGES)
       if (rendered?.totalPages > pages.length) {
         await appendParseWarning(resourceId, `PDF 共 ${rendered.totalPages} 页，仅解析前 ${pages.length} 页`)
+      }
+      // 高清页单独渲染一次。失败只降级（裁片退回 2x），绝不阻塞解析。
+      try {
+        const hi = await renderPdfToJpegs(fileBuffer, {
+          scale: CROP_RENDER_SCALE,
+          maxPages: pages.length,
+          maxEdge: CROP_RENDER_MAX_EDGE,
+          quality: CROP_RENDER_QUALITY,
+        })
+        if (hi?.images?.length) hiPages = hi.images
+      } catch (e) {
+        logger.warn?.(`[paperBank] 高清页渲染失败（裁片退回 ${RENDER_SCALE}x）: ${e.message}`)
       }
     } else {
       pages = [fileBuffer]
@@ -394,7 +419,12 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   const pageResults = await mapWithConcurrency(pages, PAPER_OCR_CONCURRENCY, async (buf, idx) => {
     const pageNumber = idx + 1
     try {
-      const r = await parsePageToQuestions({ pageBuffer: buf, pageNumber, logger })
+      const r = await parsePageToQuestions({
+        pageBuffer: buf,
+        cropPageBuffer: hiPages?.[idx] || null,
+        pageNumber,
+        logger,
+      })
       return r
     } catch (e) {
       await appendParseWarning(resourceId, `第 ${pageNumber} 页解析失败：${String(e?.message || e).slice(0, 200)}`)

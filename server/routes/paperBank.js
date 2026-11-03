@@ -16,8 +16,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { query } from '../config/neon.js'
-import { uploadPDF, headObjectExists } from '../services/ossService.js'
-import { getCDNUrl } from '../config/oss.js'
+import { uploadPDF } from '../services/ossService.js'
 import {
   parsePaperResource,
   parsePaperAnswers,
@@ -266,42 +265,16 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
 
 // ── 题目读取 ──
 
-// ── 几何矢量图 URL 附着（2026-11-02）──
-// 产物：server/scripts/vectorize-paper-bank-figures.mjs（几何重绘核心复用 geometryWorker，
-// 逐张人工验收后上传），key 按题共享：paper-bank/vec/{resourceId}/{questionNo}.svg。
-// 列表接口 HEAD 探测后逐行附 vec_url；探测失败/不存在 = 无该字段（前端回退裁片）。
-// ⚠️ 只附着、不生成：生成是显式批处理（烧视觉额度），接口保持只读廉价。
-const VEC_TTL_MS = 10 * 60 * 1000
-const vecCache = new Map()
-async function attachVecUrls(questions) {
-  if (!Array.isArray(questions) || !questions.length) return questions
-  const now = Date.now()
-  const uniq = new Map()
-  for (const q of questions) {
-    if (!q?.image_url || q.resource_id == null || q.question_no == null) continue
-    const key = `${q.resource_id}|${String(q.question_no)}`
-    if (!uniq.has(key)) uniq.set(key, key)
-  }
-  await Promise.all([...uniq.keys()].map(async (key) => {
-    const hit = vecCache.get(key)
-    if (hit && now - hit.at < (hit.url ? VEC_TTL_MS : 2 * 60 * 1000)) return
-    const [rid, qno] = key.split('|')
-    const ossKey = `paper-bank/vec/${rid}/${qno}.svg`
-    const exists = await headObjectExists(ossKey)
-    vecCache.set(key, { url: exists ? getCDNUrl(ossKey) : null, at: Date.now() })
-  }))
-  for (const q of questions) {
-    if (!q?.image_url || q.resource_id == null || q.question_no == null) continue
-    const hit = vecCache.get(`${q.resource_id}|${String(q.question_no)}`)
-    if (hit?.url) q.vec_url = hit.url
-  }
-  return questions
-}
+// ── 几何矢量图附着：已停用（2026-11-03 负责人定调）──
+// 负责人原话：「我不追求矢量，我要的是高清」。重绘两天内连续画错（嘉定 23 F→H、
+// 徐汇 25 面板错位），且扫描件小图标签保真是硬上限 ⇒ 停用 vec_url 附着，
+// 列表/讲解版/组篮全部回退高清裁片（裁片分辨率由 paperBankService 的 4x 渲染保证）。
+// 历史 SVG 仍留在 OSS（paper-bank/vec/...），仅作归档，不再消费；
+// 生成脚本 server/scripts/vectorize-paper-bank-figures.mjs 同步停用，不要在新卷流程里跑。
 
 router.get('/papers/:id/questions', async (req, res) => {
   try {
     const questions = await listPaperQuestions(req.params.id)
-    await attachVecUrls(questions)
     res.json({ success: true, questions })
   } catch (e) {
     res.status(500).json({ error: '题目加载失败', message: e.message })
@@ -328,7 +301,6 @@ router.get('/questions', async (req, res) => {
       keyword: req.query.keyword ? String(req.query.keyword) : undefined,
       limit: req.query.limit,
     })
-    await attachVecUrls(questions)
     res.json({ success: true, questions })
   } catch (e) {
     res.status(500).json({ error: '筛选失败', message: e.message })
