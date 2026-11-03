@@ -1,12 +1,17 @@
 /**
- * 质量纪律（2026-11-03 定）：负责人「能矢量就矢量，矢量做不到就高清」。
- * 允许重绘，但三道关缺一不可，否则宁可保 4x 高清裁片：
- *   ① 输入必须是 4x 高清裁片（paperBankService 已保证 ≈288dpi）。2x 下 23 题的
- *      D/E/F 三个字母位置全糊在一起，模型整体错位并凭空造出 H——不是读错一个字母；
- *   ② content gate 硬规则 3.5「字母误读判据」必须过；
- *   ③ 逐张人工目验（rasterize SVG 对照原裁片逐字母核）——自动指标全绿 ≠ 画得对。
- * 历史事故：嘉定 23 F→H + 比例失真（11-03 撤回）；徐汇 25 三面板捏单图（11-02 撤回）；
- *          嘉定 24 抛物线被画成 V 形折线（11-03 目验撤回）。
+ * ⛔ 已停止（2026-11-03 10:26 负责人定调）：试卷题库这个场景**不需要矢量**。
+ * 原话：「这个场景下没必要矢量了。如果已经矢量的了，钱都花了，你就别删除掉已做了的，
+ * 以后按新标准就好了。」⇒ 新标准 = 全部 4x 高清裁片（≈288dpi、q92），无模糊无锯齿。
+ *
+ * 存量 3 张已验证矢量（徐汇24 / 杨浦23 / 嘉定23）继续生效、**不删**：
+ * paperBank 路由的 vec_url 附着保留，列表/讲解版仍是「有 vec 用 vec、没有回落高清裁片」。
+ * 只是**不再生产新的**：本脚本默认直接退出，仅 `--legacy` 可进入归档/应急模式。
+ *
+ * 若将来 --legacy 真要跑，三道关缺一不可：
+ *   ① 输入必须 4x 高清裁片；② content gate 硬规则 3.5 字母误读判据必须过；
+ *   ③ 逐张人工目验（自动指标全绿 ≠ 画得对）。
+ * 历史事故：嘉定 23 字母错位+D/E/F 错配（11-03）；徐汇 25 三面板捏单图（11-02）；
+ *          嘉定 24 抛物线画成 V 形折线（11-03）；嘉定 23 首绘 F→H（11-03）。
  */
 import { fileURLToPath } from 'url'
 import path from 'path'
@@ -28,6 +33,13 @@ const argOf = (name, def = '') => {
 const DRY = args.includes('--dry')
 const FORCE = args.includes('--force')
 const QLIST = argOf('q', '23,24,25').split(',').map(s => s.trim()).filter(Boolean)
+
+// 停用闸：默认拒跑，防止新卷流程/顺手一跑白烧视觉额度（2026-11-03 10:26）。
+if (!args.includes('--legacy')) {
+  console.log('⛔ 矢量重绘已停止（2026-11-03 负责人定：此场景不需要矢量，全部走高清明细裁片）。')
+  console.log('   存量 3 张已验证 SVG 继续生效；本脚本仅留档，确需应急请显式传 --legacy。')
+  process.exit(0)
+}
 
 const PROGRESS_PATH = new URL('./logs/paper-vec/progress.json', import.meta.url)
 const progress = existsSync(PROGRESS_PATH)

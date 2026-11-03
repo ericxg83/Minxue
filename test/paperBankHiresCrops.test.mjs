@@ -38,13 +38,20 @@ test('裁片 JPEG 质量必须是 92（82 在 4x 细节上有块状伪影）', (
   assert.equal(m[1], '92')
 })
 
-test('矢量优先 + 高清裁片兜底：vec_url 附着在位，前端逐处回落裁片', () => {
-  // 2026-11-03 09:50 负责人二次定调：「能矢量就矢量，矢量做不到就高清」。
-  const src = read('server/routes/paperBank.js')
-  assert.ok(/attachVecUrls/.test(src), 'paperBank 路由必须附着 vec_url（矢量优先）')
-  assert.ok(/headObjectExists/.test(src), 'vec 产物靠 OSS HEAD 探测，缺了矢量永远不生效')
+test('存量矢量继续生效，但不再生产新矢量（2026-11-03 终局口径）', () => {
+  // 负责人 10:26 定：此场景不需要矢量；已做的不删（钱已花），以后按高清标准。
+  const route = read('server/routes/paperBank.js')
+  assert.ok(/attachVecUrls/.test(route), '存量 vec_url 附着必须保留，否则已验证的 3 张白花')
+  assert.ok(/headObjectExists/.test(route), 'vec 产物靠 OSS HEAD 探测')
   assert.ok(/vec_url \|\|/.test(read('src/utils/lecturePdf.js')), '讲解版必须保留裁片兜底')
   assert.ok(/vec_url \|\|/.test(read('src/workbench/views/PaperBankWorkbench.vue')), '列表行内图必须保留裁片兜底')
-  // 矢量画错的硬闸：content gate 的字母误读判据必须在位（嘉定 23 F→H 事故）
-  assert.ok(/硬规则 3\.5：字母误读判据/.test(read('server/utils/geometryContentGate.js')), '字母误读硬闸不得被删')
+
+  // 生产端默认拒跑（防新卷流程/顺手一跑白烧额度）
+  const script = read('server/scripts/vectorize-paper-bank-figures.mjs')
+  assert.ok(/if \(!args\.includes\('--legacy'\)\)/.test(script), '矢量脚本必须默认退出，仅 --legacy 可运行')
+  assert.ok(/已停止（2026-11-03 10:26/.test(script) || /已停止（2026-11-03/.test(script), '脚本头部必须写明停用决定')
+})
+
+test('矢量画错的硬闸不得被删（字母误读判据）', () => {
+  assert.ok(/硬规则 3\.5：字母误读判据/.test(read('server/utils/geometryContentGate.js')))
 })
