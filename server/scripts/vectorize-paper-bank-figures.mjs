@@ -40,9 +40,16 @@ const progress = existsSync(PROGRESS_PATH)
 
 const pool = getPool()
 
+// --resource=<id 或 id 前缀>：只处理指定卷。不加则扫全部 exam；
+// 进度文件里 ok:false 的历史拒绝/失败条目不会自动跳过（只有 ok:true 跳），
+// 新卷接入时用它避免重烧旧卷的额度（2026-11-03 嘉定接入实测）。
+const RES = argOf('resource', '')
+
 const papers = await pool.query(`
-  SELECT id, name FROM resources WHERE resource_type = 'exam' ORDER BY created_at
-`)
+  SELECT id, name FROM resources
+  WHERE resource_type = 'exam' ${RES ? 'AND id::text LIKE $1' : ''}
+  ORDER BY created_at
+`, RES ? [RES + '%'] : [])
 
 // 收集目标行：每套卷的指定题号
 const targets = []   // { resource, questionNo, rows, source }
