@@ -113,18 +113,21 @@ export async function extractFigureBandFromCrop(cropBuffer) {
       hiPerRow[y] = hi
     }
 
-    // 分段：墨迹簇（空白 >=8px 断开；真卷行距实测 10~32px，8px 足以逐行切开）
+    // 分段：墨迹簇（空白 >=8px 断开；真卷行距实测 10~32px，8px 足以逐行切开）。
+    // ⚠️「有墨」阈值取 >=3 而不是 >=1：JPEG 噪点会让空白行残留 1~2 个墨点，
+    //    以致文字行与图之间的空白被填住、切不开（徐汇 q5/q13 实测）。
+    //    真正的文字/图形行墨点数都在几百以上，3 点以下只可能是噪点。
     const bands = []
     {
       let y = 0
       while (y < height) {
-        while (y < height && inkPerRow[y] === 0) y++
+        while (y < height && inkPerRow[y] < 3) y++
         if (y >= height) break
         const top = y
         let bottom = y, gap = 0
         y++
         while (y < height) {
-          if (inkPerRow[y] >= 1) { bottom = y; gap = 0 }
+          if (inkPerRow[y] >= 3) { bottom = y; gap = 0 }
           else { gap++; if (gap >= 8) break }
           y++
         }
