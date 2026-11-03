@@ -16,7 +16,8 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { query } from '../config/neon.js'
-import { uploadPDF } from '../services/ossService.js'
+import { uploadPDF, headObjectExists } from '../services/ossService.js'
+import { getCDNUrl } from '../config/oss.js'
 import {
   parsePaperResource,
   parsePaperAnswers,
@@ -272,9 +273,43 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
 // 历史 SVG 仍留在 OSS（paper-bank/vec/...），仅作归档，不再消费；
 // 生成脚本 server/scripts/vectorize-paper-bank-figures.mjs 同步停用，不要在新卷流程里跑。
 
+// ── 几何矢量图附着（2026-11-02 上线，2026-11-03 恢复）──
+// 负责人定调：「能矢量就矢量，矢量做不到就高清」——矢量正确时观感最好，
+// 但必须有硬质量闸兜底：生成侧 4x 高清输入 + content gate（含硬规则 3.5 字母误读判据）
+// + 逐张人工目验（server/scripts/vectorize-paper-bank-figures.mjs），三关缺一不可。
+// 列表接口 HEAD 探测后逐行附 vec_url；无产物 = 前端自动回退高清裁片（4x ≈288dpi）。
+// ⚠️ 只附着、不生成：生成是显式批处理（烧视觉额度），接口保持只读廉价。
+const VEC_TTL_MS = 10 * 60 * 1000
+const vecCache = new Map()
+async function attachVecUrls(questions) {
+  if (!Array.isArray(questions) || !questions.length) return questions
+  const now = Date.now()
+  const uniq = new Map()
+  for (const q of questions) {
+    if (!q?.image_url || q.resource_id == null || q.question_no == null) continue
+    const key = `${q.resource_id}|${String(q.question_no)}`
+    if (!uniq.has(key)) uniq.set(key, key)
+  }
+  await Promise.all([...uniq.keys()].map(async (key) => {
+    const hit = vecCache.get(key)
+    if (hit && now - hit.at < (hit.url ? VEC_TTL_MS : 2 * 60 * 1000)) return
+    const [rid, qno] = key.split('|')
+    const ossKey = `paper-bank/vec/${rid}/${qno}.svg`
+    const exists = await headObjectExists(ossKey)
+    vecCache.set(key, { url: exists ? getCDNUrl(ossKey) : null, at: Date.now() })
+  }))
+  for (const q of questions) {
+    if (!q?.image_url || q.resource_id == null || q.question_no == null) continue
+    const hit = vecCache.get(`${q.resource_id}|${String(q.question_no)}`)
+    if (hit?.url) q.vec_url = hit.url
+  }
+  return questions
+}
+
 router.get('/papers/:id/questions', async (req, res) => {
   try {
     const questions = await listPaperQuestions(req.params.id)
+    await attachVecUrls(questions)
     res.json({ success: true, questions })
   } catch (e) {
     res.status(500).json({ error: '题目加载失败', message: e.message })
@@ -301,6 +336,7 @@ router.get('/questions', async (req, res) => {
       keyword: req.query.keyword ? String(req.query.keyword) : undefined,
       limit: req.query.limit,
     })
+    await attachVecUrls(questions)
     res.json({ success: true, questions })
   } catch (e) {
     res.status(500).json({ error: '筛选失败', message: e.message })

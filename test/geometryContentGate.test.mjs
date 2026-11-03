@@ -391,3 +391,65 @@ test('SVG标注：下标/带撇标注按去撇 bare 字母与题干比对', () =
 test('SVG标注：无文本标注的 SVG 放行', () => {
   assert.deepEqual(findSuspiciousSvgLabels('<svg><rect/></svg>', ''), [])
 })
+
+// ══ 硬规则 3.5：题干引用的点字母必须在重绘图上出现（2026-11-03 嘉定一模 23 题 F→H）══
+// 事故链：2x 裁片字母仅 ~10px 高 ⇒ 模型把 F 读成 H 画出 CH ⇒ 规则 2 拦下"CH 无引用"
+// ⇒ 视觉复核看同一张糊图也读成 H ⇒ 放行。本规则用确定性文本→结构比对补洞。
+
+test('题干引用 F（BC·CF）而重绘图画成 H → 拦截（嘉定 23 事故原样）', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 20, y: 90 }, { label: 'C', x: 20, y: 10 },
+      { label: 'B', x: 70, y: 10 }, { label: 'E', x: 90, y: 10 },
+      { label: 'D', x: 20, y: 50 }, { label: 'H', x: 60, y: 40 },
+    ],
+    segments: [
+      { from: 'A', to: 'C' }, { from: 'C', to: 'B' }, { from: 'B', to: 'E' },
+      { from: 'A', to: 'B' }, { from: 'C', to: 'D' }, { from: 'C', to: 'E' },
+      { from: 'B', to: 'H' }, { from: 'C', to: 'H' },
+    ],
+  }
+  const content = '(1) CD⊥AB;\n(2) BC · CF = AC² - DE²'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.equal(r.ok, false)
+  assert.ok(r.reasons.some(s => s.includes('F→H') && s.includes('字母误读')), '必须点出 F→H 误读')
+})
+
+test('同一结构把 H 改回 F → 字母缺失规则不再报（其余规则另判）', () => {
+  const structure = {
+    points: [
+      { label: 'A', x: 20, y: 90 }, { label: 'C', x: 20, y: 10 },
+      { label: 'B', x: 70, y: 10 }, { label: 'E', x: 90, y: 10 },
+      { label: 'D', x: 20, y: 50 }, { label: 'F', x: 60, y: 40 },
+    ],
+    segments: [
+      { from: 'A', to: 'C' }, { from: 'C', to: 'B' }, { from: 'B', to: 'E' },
+      { from: 'A', to: 'B' }, { from: 'C', to: 'D' }, { from: 'C', to: 'E' },
+      { from: 'B', to: 'F' }, { from: 'C', to: 'F' }, { from: 'D', to: 'E' },
+    ],
+  }
+  const content = '(1) CD⊥AB;\n(2) BC · CF = AC² - DE²'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.ok(!r.reasons.some(s => s.includes('字母误读')), 'F 已画出，本规则不得报错')
+})
+
+test('选项标号 A./B./C./D. 不作证据（单字母不进比对）→ 不误杀', () => {
+  const structure = {
+    points: [{ label: 'P' }, { label: 'Q' }],
+    segments: [{ from: 'P', to: 'Q' }],
+  }
+  const content = '如图，点 P、Q 在数轴上'
+  const opts = ['A. 3', 'B. 4', 'C. 5', 'D. 6']
+  const r = validateStructureAgainstContent(structure, content, opts)
+  assert.ok(!r.reasons.some(s => s.includes('字母误读')), '选项标号不得被当成配图点')
+})
+
+test('题干提到的另一个图形字母（整串都没画）→ 跳过不误杀', () => {
+  const structure = {
+    points: [{ label: 'A' }, { label: 'B' }, { label: 'C' }],
+    segments: [{ from: 'A', to: 'B' }, { from: 'B', to: 'C' }, { from: 'C', to: 'A' }],
+  }
+  const content = '如图，在△ABC中，把△XYZ沿DE翻折后再讨论△ABC的面积'
+  const r = validateStructureAgainstContent(structure, content)
+  assert.ok(!r.reasons.some(s => s.includes('字母误读')), '未画的整串（XYZ）应跳过')
+})

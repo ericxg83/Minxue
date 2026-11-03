@@ -517,6 +517,53 @@ export function validateStructureAgainstContent(structure, content, options) {
     }
   }
 
+  // ── 硬规则 3.5：字母误读判据——题干引用的点缺了，图上却多出一个题干从未出现的点 ──
+  //
+  // 漏洞：本闸门此前只查「画出来的东西题干有没有出处」（drawn→text）。嘉定 23 题干
+  // 「BC·CF = AC² - DE²」引用了 F，模型把 F 误读成 H 画出来——规则 3 已抓到「点 H 未在
+  // 题干出现」，但处置路径会调 verifyPointsInFigure/verifySegmentsInFigure 做「原图视觉复核」，
+  // 复核用的是**同一张糊图**（2x 渲染 ≈144dpi 下字母只有 ~10px，F/H 不可辨），复核模型也读成 H →
+  // 「确认 CE、CH 均在原图中」→ 放行。两次误读互相印证，错字母就这样上了讲解版。
+  //
+  // 本规则只在**误读画像**下硬拒（不吃视觉复核豁免：理由文案刻意不匹配 SEG/POINT_REASON_RE，
+  // classifyTextGateReasons 归入 other → reviewable=false）：
+  //   画像 = ① 题干某个字母（多字母 token 内，非单字母）没画出来
+  //          AND ② 图上有点字母题干**从未出现**（候选误读字母）
+  //          AND ③ 该候选点与 ① 的同伴字母之间有画出的线段（说明"位置画对了、字母读错了"）
+  // 为什么加 ③：单纯"欠画"（如题干提 连接AC′ 但整段没画）不算错字母，只是不完整；
+  // 只有"该有的点位置在、字母却是题干外的字母"才是误读（2026-11-03 折叠图正例反证）。
+  {
+    const runs = String(allText).match(/[A-Z][′'’]?(?:[₀-₉0-9]+)?(?:[A-Z][′'’]?(?:[₀-₉0-9]+)?)+/g) || []
+    const refAll = allReferencedLetters(allText)
+    const drawnUnref = [...drawnPts].filter(l => !refAll.has(l.replace(/′/g, '')) && !refAll.has(l))
+    if (drawnUnref.length) {
+      const missingWithPartners = new Map() // 缺的字母 -> 同 token 伙伴（已画出的）
+      for (const run of runs) {
+        const labels = [...run.matchAll(/[A-Z][′'’]?(?:[₀-₉0-9]+)?/g)]
+          .map(m => normalizeLabel(m[0]))
+          .filter(l => !isFurniture(l))
+        if (labels.length < 2) continue
+        const drawnInRun = labels.filter(l => drawnPts.has(l))
+        if (drawnInRun.length === 0 || drawnInRun.length * 2 < labels.length) continue
+        for (const l of labels) {
+          if (drawnPts.has(l)) continue
+          if (!missingWithPartners.has(l)) missingWithPartners.set(l, new Set())
+          for (const d of drawnInRun) missingWithPartners.get(l).add(d)
+        }
+      }
+      const hits = []
+      for (const [lost, partners] of missingWithPartners) {
+        const sub = drawnUnref.find(u =>
+          [...partners].some(partner => drawnSegs.has(segKey(partner, u)) || drawnSegs.has(segKey(u, partner)))
+        )
+        if (sub) hits.push(`${lost}→${sub}`)
+      }
+      if (hits.length) {
+        reasons.push(`题干引用点 ${hits.join('、')} 在重绘图上缺失、却被题干外的字母替代（字母误读）`)
+      }
+    }
+  }
+
   // ── 硬规则 4：题干给出的形状约束（正方形/菱形/等边）与坐标比例不符 ──
   // 形状约束只看 content（"题干说正方形..."），不混入选项。
   checkShapeConstraints(structure, content, reasons)

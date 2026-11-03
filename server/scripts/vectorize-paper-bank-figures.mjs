@@ -1,21 +1,12 @@
 /**
- * ⛔ 已停用（2026-11-03 负责人定调）：负责人原话「一模卷是讲课用的，我不追求矢量，我要的是高清」。
- * 两天内重绘连续画错（嘉定 23 F→H、徐汇 25 面板错位），且扫描件小图标签保真是硬上限。
- * 现行方案：paperBankService 解析时 4x 渲染高清裁片（≈288dpi）+ JPEG q92，vec_url 附着已拆。
- * 本脚本仅留档/应急，不要在新卷流程里跑；历史 SVG 留在 OSS paper-bank/vec/ 作归档。
- *
- * 试卷题库几何图矢量化批处理（2026-11-02，已停用）
- *
- * 负责人指令：为省 token，只重绘每套试卷的 23/24/25 题的几何图。
- * 产物：每题一张矢量 SVG → OSS 确定性 key `paper-bank/vec/{resourceId}/{questionNo}.svg`
- *       （同题小问共享一张；key 按题不按行，列表接口 HEAD 探测后附 vec_url）。
- * 核心：复用 geometryWorker#reconstructGeometrySvg（视觉→结构→题干交叉核对→SVG），
- *       ⛔ 不绕闸门；失败/拒绝的题保持裁片（宁缺毋滥）。
- *
- * 用法：
- *   node server/scripts/vectorize-paper-bank-figures.mjs --q=23,24,25 --dry
- *   node server/scripts/vectorize-paper-bank-figures.mjs --q=23,24,25
- *   node server/scripts/vectorize-paper-bank-figures.mjs --q=23,24,25 --force   (忽略进度重跑)
+ * 质量纪律（2026-11-03 定）：负责人「能矢量就矢量，矢量做不到就高清」。
+ * 允许重绘，但三道关缺一不可，否则宁可保 4x 高清裁片：
+ *   ① 输入必须是 4x 高清裁片（paperBankService 已保证 ≈288dpi）。2x 下 23 题的
+ *      D/E/F 三个字母位置全糊在一起，模型整体错位并凭空造出 H——不是读错一个字母；
+ *   ② content gate 硬规则 3.5「字母误读判据」必须过；
+ *   ③ 逐张人工目验（rasterize SVG 对照原裁片逐字母核）——自动指标全绿 ≠ 画得对。
+ * 历史事故：嘉定 23 F→H + 比例失真（11-03 撤回）；徐汇 25 三面板捏单图（11-02 撤回）；
+ *          嘉定 24 抛物线被画成 V 形折线（11-03 目验撤回）。
  */
 import { fileURLToPath } from 'url'
 import path from 'path'

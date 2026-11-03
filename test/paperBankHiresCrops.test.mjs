@@ -38,10 +38,13 @@ test('裁片 JPEG 质量必须是 92（82 在 4x 细节上有块状伪影）', (
   assert.equal(m[1], '92')
 })
 
-test('vec_url 附着必须保持停用（负责人：不追求矢量）', () => {
+test('矢量优先 + 高清裁片兜底：vec_url 附着在位，前端逐处回落裁片', () => {
+  // 2026-11-03 09:50 负责人二次定调：「能矢量就矢量，矢量做不到就高清」。
   const src = read('server/routes/paperBank.js')
-  assert.ok(!/attachVecUrls/.test(src), 'paperBank 路由不得再附着 vec_url')
-  assert.ok(!/headObjectExists/.test(src), 'vec 探测的 OSS HEAD 依赖必须一并移除')
-  // 前端三处消费点仍保留 `vec_url || image_url` 兜底写法（无 vec_url 即裁片），不需要改
+  assert.ok(/attachVecUrls/.test(src), 'paperBank 路由必须附着 vec_url（矢量优先）')
+  assert.ok(/headObjectExists/.test(src), 'vec 产物靠 OSS HEAD 探测，缺了矢量永远不生效')
   assert.ok(/vec_url \|\|/.test(read('src/utils/lecturePdf.js')), '讲解版必须保留裁片兜底')
+  assert.ok(/vec_url \|\|/.test(read('src/workbench/views/PaperBankWorkbench.vue')), '列表行内图必须保留裁片兜底')
+  // 矢量画错的硬闸：content gate 的字母误读判据必须在位（嘉定 23 F→H 事故）
+  assert.ok(/硬规则 3\.5：字母误读判据/.test(read('server/utils/geometryContentGate.js')), '字母误读硬闸不得被删')
 })
