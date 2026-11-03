@@ -243,6 +243,7 @@ export async function extractFigureBandFromCrop(cropBuffer) {
 
     return await sharp(cropBuffer)
       .extract({ left: cropLeft, top: figTop, width: cropWidth, height: figBottom - figTop })
+      .withMetadata({ icc: 'srgb' }) // 与裁片同源：输出不留无头 JPEG（下游 raw() 会报色彩空间未设）
       .jpeg({ quality: 92 }) // 与 cropQuestionImage 同口径；82 在 4x 细节上有可见块状伪影
       .toBuffer()
   } catch (e) {
