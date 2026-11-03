@@ -299,3 +299,31 @@ test('★ 预览缩放与页数要认讲解版的页宽/页数口径', () => {
   assert.ok(/previewKind\.value === 'lecture'\s*\?\s*basket\.value\.length/.test(s),
     '讲解版页数必须精确等于篮子长度（每小问一页），不得按 A4 页高估')
 })
+
+// ── 配图版式（2026-11-03 负责人报障：配图「居中且太小」）──
+// 真因不是 CSS 居中：裁片是整页宽横条、图形只占 12%~45%，缩到 55% 页宽后
+// 图形仅约 15mm，且被左侧空白推到中部（看起来像居中）。修法两层：
+//   ① 抠图横向裁紧（锁在 paperFigureAssign.test.mjs）；
+//   ② 讲解版配图容器强制靠左 + 尺寸上限放开到 50% 页宽 / 64mm 高。
+// 这里锁第 ② 层，避免有人「顺手」改回 auto 居中或把尺寸收小。
+
+test('★ 讲解版配图必须靠左：容器 flex-start，不许 auto 居中', () => {
+  const css = buildLectureCSS()
+  const box = (css.match(/\.lec-img\{[^}]*\}/) || [''])[0]
+  assert.ok(box, '必须有 .lec-img 规则')
+  assert.ok(/display:flex/.test(box), '.lec-img 必须是 flex 容器（靠左判据的唯一实现）')
+  assert.ok(/justify-content:flex-start/.test(box), '.lec-img 必须 justify-content:flex-start')
+  assert.ok(!/margin[^;}]*auto/.test(box), '.lec-img 不许用 auto 外边距（会被误读成居中）')
+
+  const img = (css.match(/\.lec-img img\{[^}]*\}/) || [''])[0]
+  assert.ok(img, '必须有 .lec-img img 规则')
+  assert.ok(/max-width:50%/.test(img), '配图最大宽必须 50% 页宽（2026-11-03 定稿）')
+  assert.ok(/max-height:64mm/.test(img), '配图最大高必须 64mm（2026-11-03 定稿）')
+  assert.ok(!/margin:0 auto/.test(img), '配图不得 margin:0 auto 居中')
+})
+
+test('★ 通用卷面配图 .q-image 也必须靠左（讲义/组卷/错题卷同口径）', () => {
+  const src = stripComments(read('src/utils/pdfGenerator.js'))
+  assert.ok(/\.q-image\{text-align:left/.test(src), '.q-image 必须 text-align:left')
+  assert.ok(!/\.q-image\{text-align:center/.test(src), '.q-image 不得回退 text-align:center')
+})
