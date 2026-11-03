@@ -169,40 +169,37 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     }
 
     const figRange = bandRange(fig)
+    // 「属于图」的横向判据：该带墨迹范围必须被图形范围包含（允许 1.5% 余量）。
+    // 顶点字母 / 坐标轴箭头 / 图注都落在图幅正上方或正下方、横向不越界；
+    // 而选项行（A. 甲和乙…）与章节标题（三、解答题）左缘起于页面文字栏，
+    // 远在图幅左侧 ⇒ 判 false（徐汇 q1/q6、嘉定 q18 实测）。
+    const padX = Math.max(8, Math.round(width * 0.015))
+    const withinFigure = (br) => !!br && !!figRange &&
+      br.lo >= figRange.lo - padX && br.hi <= figRange.hi + padX
 
     // 向下合并：被内部间隙切碎的图形子块 + 图形下方的顶点字母 / 图注。
-    // ⚠️ 不能「遇到文字带就 break」：顶点字母（C/B/F）与「图1」「图2」图注的横向跨度
-    //    常达到本裁片最宽带的 50%+，会被判成文字带 —— 一律 break 就会把底部标注整条切掉
-    //    （嘉定一模 23/25 实测：C/B/F、A/C、图1/图2 全部缺失）。
-    //    闸口改为「横向范围 ≥80% 落在图形范围内」：图注一定在图幅正下方，
-    //    而真·正文行会明显超出图幅（页面整宽），仍会被 break 挡住。
-    const insideFigRatio = (br) => {
-      if (!br || !figRange) return 0
-      const overlap = Math.min(br.hi, figRange.hi) - Math.max(br.lo, figRange.lo) + 1
-      if (overlap <= 0) return 0
-      return overlap / (br.hi - br.lo + 1)
-    }
+    // ⚠️ 不能「遇到文字带就 break」：顶点字母（C/B/F）与「图1」「图2」图注的横向
+    //    跨度常达到本裁片最宽带的 50%+，会被判成文字带 —— 一律 break 会把底部标注整条切掉。
+    //    改用「横向包含」闸：图注一定在图幅正下方，而选项/正文行会明显超出图幅。
     let figBottomInk = fig.bottom
     for (const b of bands) {
       if (b.top <= fig.bottom) continue
       if (b.top - figBottomInk - 1 > 40) break
-      if (isTextBand(b) && insideFigRatio(bandRange(b)) < 0.8) break
+      if ((b.bottom - b.top + 1) >= 120) break
+      if (!withinFigure(bandRange(b))) break
       figBottomInk = b.bottom
     }
 
-    // 向上合并图标注（顶点字母 / 坐标轴箭头常在图正上方、窄且紧贴图）。
-    // ⚠️ 必须用「与图横向范围重叠」作闸：页面左缘的短文字行（如「坐标；」「坐标.」）
-    // 同样是窄带，但它们在图幅左侧之外，并入就会把文字裹进配图（嘉定 24 实测）。
+    // 向上合并：图正上方的顶点字母 / 坐标轴箭头。
+    // 必须在图上「紧贴」（间隙 ≤12px）：真卷顶点字母离图 8px 左右，
+    // 而正文行离图 25px 以上（嘉定 24「坐标.」、q4「可能是（ ）.」实测）。
     let figTopInk = fig.top
     const above = bands.filter(b => b.bottom < fig.top).sort((a, b) => b.bottom - a.bottom)
     for (const b of above) {
-      if (figTopInk - b.bottom - 1 > 40) break
+      if (figTopInk - b.bottom - 1 > 12) break
+      if ((b.bottom - b.top + 1) >= 120) break
       if (isTextBand(b)) break
-      const br = bandRange(b)
-      if (!br || !figRange) break
-      const overlap = Math.min(br.hi, figRange.hi) - Math.max(br.lo, figRange.lo) + 1
-      const bw = br.hi - br.lo + 1
-      if (overlap <= 0 || overlap < bw * 0.5) break
+      if (!withinFigure(bandRange(b))) break
       figTopInk = b.top
     }
 
