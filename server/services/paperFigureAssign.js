@@ -85,7 +85,6 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     if (width < 40 || height < 60) return null
 
     const inkPerRow = new Array(height).fill(0)
-    const rowThresh = Math.max(2, Math.round(width * 0.008))
     for (let y = 0; y < height; y++) {
       const off = y * width
       let c = 0
@@ -93,42 +92,36 @@ export async function extractFigureBandFromCrop(cropBuffer) {
       inkPerRow[y] = c
     }
 
-    // 聚带
-    const bands = []
-    let y = 0
-    while (y < height) {
-      if (inkPerRow[y] >= rowThresh) {
-        const top = y
-        while (y < height && inkPerRow[y] >= rowThresh) y++
-        bands.push({ top, bottom: y })
-      } else {
-        y++
+    // ── 图形定位（2026-11-03 重写）──
+    // 真卷版式：文字在上、图形在下。用「最大的连续空白带」作文字/图形分界，
+    // 取其下方墨迹（>=1 像素，能兜住三角形顶点等细线）作为图形；图形内部允许
+    // <=40px 的小空隙（细线之间的空白）。图顶细线因此不会被切掉。
+    let maxGap = 0, gapEnd = height
+    {
+      let run = 0
+      for (let y = 0; y < height; y++) {
+        if (inkPerRow[y] >= 1) {
+          if (run > maxGap) { maxGap = run; gapEnd = y }
+          run = 0
+        } else {
+          run++
+        }
       }
+      if (run > maxGap) { maxGap = run; gapEnd = height }
     }
-    if (!bands.length) return null
+    // 分界不明显（<25px）视为无文字：整片作为图形（取底部墨簇）
+    const sep = maxGap >= 25 ? gapEnd : 0
 
-    const median = (arr) => {
-      if (!arr.length) return 0
-      const s = [...arr].sort((a, b) => a - b)
-      return s[Math.floor(s.length / 2)]
-    }
-
-    let figTop = -1
-    let figBottom = -1
-    const seen = []
-    for (let bi = 0; bi < bands.length; bi++) {
-      const b = bands[bi]
-      const bh = b.bottom - b.top
-      const priorMed = median(seen)
-      const minTall = Math.max(70, Math.round(priorMed * 2.2))
-      if (bh >= minTall) {
-        figTop = b.top
-        figBottom = b.bottom
-        break
-      }
-      seen.push(bh)
+    let figTop = -1, figBottom = -1, gap = 0
+    for (let y = sep; y < height; y++) {
+      if (inkPerRow[y] >= 1) { if (figTop === -1) figTop = y; figBottom = y; gap = 0 }
+      else { gap++; if (gap > 40) break }
     }
     if (figTop === -1) return null
+    // 越过分界再向上收几像素（分界线可能正压在某根细线上）
+    figTop = Math.max(0, figTop - 6)
+    if (figBottom < height) figBottom = Math.min(height, figBottom + 6)
+
     const figH = figBottom - figTop
     if (figH < 50 || figH < height * 0.25) return null
 
