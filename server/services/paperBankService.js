@@ -29,6 +29,7 @@ import { renderPdfToJpegs } from './pdfService.js'
 import { buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN } from '../config/ai.js'
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
 import { planSubrowFigureAssignments, extractFigureBandFromCrop } from './paperFigureAssign.js'
+import { stripPageRulingLines } from './pageRulingClean.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
 // 瞬时并发打满会触发供应商限流（2026-09-09 全本错位事故的成因之一）。
@@ -196,7 +197,9 @@ export async function replacePaperQuestions(resourceId, rows) {
 /** 按归一化区间（0-1000）从整页图裁出该题区域。裁不动就返回 null（不编造图）。 */
 export async function cropQuestionImage(pageBuffer, box) {
   if (!box) return null
-  const meta = await sharp(pageBuffer).metadata()
+  // 先剥掉页面印刷装订竖线（嘉定/徐汇一模实测每张裁片右缘带线，见 pageRulingClean.js）。
+  const page = await stripPageRulingLines(pageBuffer)
+  const meta = await sharp(page).metadata()
   const W = Number(meta.width) || 0
   const H = Number(meta.height) || 0
   if (!W || !H) return null
@@ -207,7 +210,7 @@ export async function cropQuestionImage(pageBuffer, box) {
   const height = Math.min(H - top, Math.round(clampN(box.height) / 1000 * H))
   if (width < 8 || height < 8) return null
   try {
-    return await sharp(pageBuffer).extract({ left, top, width, height }).jpeg({ quality: 82 }).toBuffer()
+    return await sharp(page).extract({ left, top, width, height }).jpeg({ quality: 82 }).toBuffer()
   } catch (e) {
     console.warn('[paperBank] 裁片失败:', e.message)
     return null
