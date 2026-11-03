@@ -68,8 +68,8 @@ body{margin:0;padding:0;background:#fff}
 .lec-q{font-size:19px;line-height:1.8;color:#1C1C1A;margin-bottom:1mm}
 .lec-q-no{font-weight:bold;margin-right:2mm}
 .lec-opts{display:grid;gap:1.5mm 6mm;margin-top:3mm;font-size:16px;color:#1C1C1A}
-.lec-img{margin-top:2mm;margin-bottom:1mm}
-.lec-img img{max-width:55%;max-height:58mm;display:block;margin-right:auto}
+.lec-img{margin-top:2mm;margin-bottom:1mm;display:flex;justify-content:flex-start}
+.lec-img img{display:block;max-width:50%;max-height:64mm;margin:0;align-self:flex-start}
 .lec-write{flex:1;min-height:20mm}
 .lec-foot{border-top:1px solid #E4E2DA;margin-top:3mm;padding-top:2.5mm;font-size:13px;line-height:1.7;color:#55544E}
 .lec-ans{color:#2C2C2A}

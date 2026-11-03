@@ -198,7 +198,7 @@ ${s}.q-diff{color:#F59E0B;font-size:12px;letter-spacing:1px;white-space:nowrap;f
 ${s}.q-text{flex:1;word-break:break-word}
 ${s}.q-stem{font-size:13px;line-height:1.7;margin:0 0 2px 32px;word-break:break-word}
 ${s}.q-prereq{font-size:12px;line-height:1.7;color:#0B7285;margin:0 0 2px 32px;word-break:break-word}
-${s}.q-image{text-align:center;margin:4px 0 4px 32px}
+${s}.q-image{text-align:left;margin:4px 0 4px 32px}
 ${s}.q-image img{max-width:100%;max-height:180px;object-fit:contain;border-radius:4px}
 ${s}.opts{display:grid;gap:4px 14px;padding-left:32px;margin-bottom:2px}
 ${s}.opts-1{grid-template-columns:1fr}

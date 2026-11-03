@@ -82,12 +82,16 @@ test('阈值常量语义：低于它算文字条、达到它才算带图行', ()
 // ── extractFigureBandFromCrop：合成图锁行为 ──
 
 const makeCrop = async (bands) => {
-  // bands: [{top, bottom}] 黑条（模拟文字行/图形），白底 400 宽
+  // bands: [{top, bottom, x?, w?}] 黑条（模拟文字行/图形），白底 400 宽
   const h = 300
   const svg = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="${h}">`,
     '<rect width="400" height="300" fill="white"/>',
-    ...bands.map(b => `<rect x="20" y="${b.top}" width="360" height="${b.bottom - b.top}" fill="black"/>`),
+    ...bands.map(b => {
+      const x = b.x ?? 20
+      const w = b.w ?? 360
+      return `<rect x="${x}" y="${b.top}" width="${w}" height="${b.bottom - b.top}" fill="black"/>`
+    }),
     '</svg>',
   ].join('')
   return sharp(Buffer.from(svg)).jpeg().toBuffer()
@@ -118,4 +122,34 @@ test('纯图形裁片（单一大带）→ 返回该带', async () => {
 test('过小裁片 → null', async () => {
   const tiny = await sharp({ create: { width: 100, height: 30, channels: 3, background: 'white' } }).jpeg().toBuffer()
   assert.equal(await extractFigureBandFromCrop(tiny), null)
+})
+
+// ── 真实卷面形态锁（2026-11-03 嘉定 24 实测校准）──
+// 真卷是整页宽裁片，页面左右有留白：文字行只占 38%~70% 宽，图形占 12%~45%。
+// 用「>=75% 整幅」当文字判据会把文字全判成图形，把两行小问文字裹进配图。
+
+test('真实页面留白：文字只占 66% 宽也判为文字，只留窄图', async () => {
+  const crop = await makeCrop([
+    { top: 20, bottom: 50, x: 68, w: 264 },   // 文字行 66% 宽
+    { top: 80, bottom: 110, x: 68, w: 264 },  // 文字行 66% 宽
+    { top: 140, bottom: 270, x: 156, w: 88 }, // 图形 22% 宽、130px 高
+  ])
+  const band = await extractFigureBandFromCrop(crop)
+  assert.ok(band, '应抠出图形带')
+  const meta = await sharp(band).metadata()
+  assert.ok(meta.height < 150, `两行文字应被切掉，带高 ${meta.height} 不应接近整张 300`)
+  assert.ok(meta.height >= 120, `图形带高 ${meta.height} 应约 130+`)
+})
+
+test('两行文字紧贴（<8px 行距）合并成高块，仍按文字切掉', async () => {
+  const crop = await makeCrop([
+    { top: 20, bottom: 50, x: 68, w: 264 },
+    { top: 54, bottom: 84, x: 68, w: 264 },   // 与上一行仅隔 4px，会合并成 66px 高块
+    { top: 120, bottom: 270, x: 156, w: 88 },
+  ])
+  const band = await extractFigureBandFromCrop(crop)
+  assert.ok(band, '应抠出图形带')
+  const meta = await sharp(band).metadata()
+  assert.ok(meta.height <= 165, `合并文字块应被切掉，带高 ${meta.height}`)
+  assert.ok(meta.height >= 125, `图形带高 ${meta.height}`)
 })

@@ -71,15 +71,18 @@ export function planSubrowFigureAssignments(rows) {
  * @param {Buffer} cropBuffer 源行裁片（页面坐标按行 bbox 裁出的 JPEG）
  * @returns {Promise<Buffer|null>} 图形带裁片；找不到干净的图形带返回 null（调用方用整张源裁片兜底）
  *
- * 判据（2026-11-03 重写，取代脆弱的「2.2× 大于兄弟带」规则）：
- * - 灰度 < 200 记为墨点；逐行统计墨点数与「墨迹是否横跨整幅（≥75% 宽）」。
- * - 按行 ink 剖面分段：空白 ≥ 12px 即断开（足以切开 15~20px 行距的小问文字行，
- *   但不会切碎几何图——图内即便有 >12px 的间隙，下面会按「图形带」整体合并）。
- * - 「文字带」= 横跨整幅 且 高度 < 50px（真卷小问文字行横跨整幅、约 20~40px；
- *   嘉定 24 图形仅占 21% 宽、25 占 40%，几何图绝不满足「整幅」）。
- * - 「图形带」= 非文字带（窄几何图 / 或满幅但高大的整图）。
- * - 取所有图形带的并集 [top..bottom]（几何图内部间隙被合并回来），
- *   并集高须 ≥ 50px 且 ≥ 裁片高 25%，否则视为纯文字 / 无图 → 返回 null。
+ * 判据（2026-11-03 按 13 张真实裁片重写，取代「整幅宽度」与「2.2× 兄弟带」两版）：
+ * - 灰度 < 200 记为墨点；逐行统计墨点数与横向跨度（像素）。
+ * - 按行 ink 剖面分段：空白 ≥ 8px 断开（真卷行距实测 10~32px，足以逐行切开文字）。
+ * - 「文字带」= 高度 < 120px 且 横向跨度 ≥ 本裁片最宽带的 50%。
+ *   ⚠️ 不能用「≥75% 整幅」作绝对阈值：真卷页面有留白，文字行只占 38%~70% 宽，
+ *   图形占 12%~45%，绝对阈值会把文字误判成图形（嘉定 24 实测裹进两行小问文字）。
+ * - 「图形带」= 最高的非文字带（整片图形远高于单行文字），再向下合并被内部间隙
+ *   切碎的图块（间隙 ≤ 40px 且非文字带）；向上合并「顶点字母 / 坐标轴箭头」等标注
+ *   （间隙 ≤ 40px、非文字带、且与图形横向范围重叠 ≥ 50%）。
+ *   ⚠️ 向上的横向重叠闸不可省：页面左缘的短文字行（「坐标；」「坐标.」）也是窄带，
+ *   但它们在图幅之外，并入就会把文字裹进配图（嘉定 24 实测）。
+ * - 带宽高须 ≥ 50px 且 ≥ 裁片高 25%，否则视为纯文字 / 无图 → 返回 null。
  * - 纯文字裁片：所有带都是文字带 ⇒ 无图形带 ⇒ null（调用方回退整张裁片，绝不裹文字进图）。
  */
 export async function extractFigureBandFromCrop(cropBuffer) {
@@ -89,9 +92,11 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     const height = Number(info.height) || 0
     if (width < 40 || height < 60) return null
 
-    // 逐行墨迹数 + 是否横跨整幅（>=75% 宽）
+    // 逐行墨迹数 + 横向跨度/左右边界（像素）
     const inkPerRow = new Array(height).fill(0)
-    const spanWide = new Array(height).fill(false)
+    const spanPerRow = new Array(height).fill(0)
+    const loPerRow = new Array(height).fill(-1)
+    const hiPerRow = new Array(height).fill(-1)
     for (let y = 0; y < height; y++) {
       const off = y * width
       let c = 0, lo = -1, hi = -1
@@ -103,10 +108,12 @@ export async function extractFigureBandFromCrop(cropBuffer) {
         }
       }
       inkPerRow[y] = c
-      if (c >= 3 && lo >= 0 && (hi - lo + 1) >= width * 0.75) spanWide[y] = true
+      spanPerRow[y] = lo < 0 ? 0 : (hi - lo + 1)
+      loPerRow[y] = lo
+      hiPerRow[y] = hi
     }
 
-    // 分段：墨迹簇（空白 >=12px 断开）
+    // 分段：墨迹簇（空白 >=8px 断开；真卷行距实测 10~32px，8px 足以逐行切开）
     const bands = []
     {
       let y = 0
@@ -118,7 +125,7 @@ export async function extractFigureBandFromCrop(cropBuffer) {
         y++
         while (y < height) {
           if (inkPerRow[y] >= 1) { bottom = y; gap = 0 }
-          else { gap++; if (gap >= 12) break }
+          else { gap++; if (gap >= 8) break }
           y++
         }
         bands.push({ top, bottom })
@@ -126,27 +133,86 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     }
     if (!bands.length) return null
 
-    // 文字带判据：横跨整幅（>=60% 行整幅）且高度 < 50px
+    const bandMaxSpan = (b) => {
+      let m = 0
+      for (let y = b.top; y <= b.bottom; y++) if (spanPerRow[y] > m) m = spanPerRow[y]
+      return m
+    }
+    const maxSpan = Math.max(1, ...bands.map(bandMaxSpan))
+
+    // 文字带判据（2026-11-03 按 13 张真实裁片校准）：**相对宽度**，不是绝对整幅比。
+    // 真卷整页宽 2144px 时文字行只占 38%~70% 宽（页面左右有留白），图形占 12%~45%；
+    // 旧判据「>=75% 整幅才算文字」会把文字全判成图形（嘉定 24 实测裹进两行小问文字）。
+    // 现判据：高度 < 120px（单行文字/两三行合并）且 横向跨度 >= 本裁片最宽带的 50%。
     const isTextBand = (b) => {
-      let wide = 0, total = 0
-      for (let y = b.top; y <= b.bottom; y++) {
-        if (inkPerRow[y] >= 1) { total++; if (spanWide[y]) wide++ }
-      }
-      if (total === 0) return false
-      return wide / total >= 0.6 && (b.bottom - b.top + 1) < 50
+      if ((b.bottom - b.top + 1) >= 120) return false
+      return bandMaxSpan(b) >= maxSpan * 0.5
     }
 
-    // 图形带 = 非文字带；取并集（几何图内部间隙合并回来）
-    const figBands = bands.filter(b => !isTextBand(b))
-    if (!figBands.length) return null
-    let figTop = figBands[0].top
-    let figBottom = figBands[0].bottom
-    for (const b of figBands) {
-      if (b.top < figTop) figTop = b.top
-      if (b.bottom > figBottom) figBottom = b.bottom
+    // 图形带 = 最高的「非文字带」（整片图形的高度远大于单行文字）
+    let fig = null
+    let figBandH = 0
+    for (const b of bands) {
+      if (isTextBand(b)) continue
+      const h = b.bottom - b.top + 1
+      if (h > figBandH) { fig = b; figBandH = h }
     }
-    figTop = Math.max(0, figTop - 4)
-    figBottom = Math.min(height, figBottom + 6)
+    if (!fig || figBandH < 50) return null
+
+    const bandRange = (b) => {
+      let lo = width, hi = -1
+      for (let y = b.top; y <= b.bottom; y++) {
+        if (loPerRow[y] >= 0 && loPerRow[y] < lo) lo = loPerRow[y]
+        if (hiPerRow[y] > hi) hi = hiPerRow[y]
+      }
+      return hi >= lo ? { lo, hi } : null
+    }
+
+    const figRange = bandRange(fig)
+
+    // 向下合并：被内部间隙切碎的图形子块 + 图形下方的顶点字母 / 图注。
+    // ⚠️ 不能「遇到文字带就 break」：顶点字母（C/B/F）与「图1」「图2」图注的横向跨度
+    //    常达到本裁片最宽带的 50%+，会被判成文字带 —— 一律 break 就会把底部标注整条切掉
+    //    （嘉定一模 23/25 实测：C/B/F、A/C、图1/图2 全部缺失）。
+    //    闸口改为「横向范围 ≥80% 落在图形范围内」：图注一定在图幅正下方，
+    //    而真·正文行会明显超出图幅（页面整宽），仍会被 break 挡住。
+    const insideFigRatio = (br) => {
+      if (!br || !figRange) return 0
+      const overlap = Math.min(br.hi, figRange.hi) - Math.max(br.lo, figRange.lo) + 1
+      if (overlap <= 0) return 0
+      return overlap / (br.hi - br.lo + 1)
+    }
+    let figBottomInk = fig.bottom
+    for (const b of bands) {
+      if (b.top <= fig.bottom) continue
+      if (b.top - figBottomInk - 1 > 40) break
+      if (isTextBand(b) && insideFigRatio(bandRange(b)) < 0.8) break
+      figBottomInk = b.bottom
+    }
+
+    // 向上合并图标注（顶点字母 / 坐标轴箭头常在图正上方、窄且紧贴图）。
+    // ⚠️ 必须用「与图横向范围重叠」作闸：页面左缘的短文字行（如「坐标；」「坐标.」）
+    // 同样是窄带，但它们在图幅左侧之外，并入就会把文字裹进配图（嘉定 24 实测）。
+    let figTopInk = fig.top
+    const above = bands.filter(b => b.bottom < fig.top).sort((a, b) => b.bottom - a.bottom)
+    for (const b of above) {
+      if (figTopInk - b.bottom - 1 > 40) break
+      if (isTextBand(b)) break
+      const br = bandRange(b)
+      if (!br || !figRange) break
+      const overlap = Math.min(br.hi, figRange.hi) - Math.max(br.lo, figRange.lo) + 1
+      const bw = br.hi - br.lo + 1
+      if (overlap <= 0 || overlap < bw * 0.5) break
+      figTopInk = b.top
+    }
+
+    // 顶部留白：不得与上一带（文字）重叠
+    let prevBottom = -1
+    for (const b of bands) if (b.bottom < figTopInk) prevBottom = Math.max(prevBottom, b.bottom)
+    const gapAbove = prevBottom >= 0 ? figTopInk - prevBottom - 1 : 8
+    const topMargin = Math.min(4, Math.max(0, Math.floor(gapAbove / 2)))
+    const figTop = Math.max(0, figTopInk - topMargin)
+    const figBottom = Math.min(height, figBottomInk + 6)
     const figH = figBottom - figTop
     if (figH < 50 || figH < height * 0.25) return null
 

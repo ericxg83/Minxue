@@ -136,7 +136,11 @@ export async function stripPageRulingLines(pageBuffer) {
           top,
         }
       })
-      out = await sharp(pageBuffer).composite(overlays).jpeg({ quality: 92 }).toBuffer()
+      // ⛔ 必须 withMetadata({icc:'srgb'})：sharp 默认丢弃元数据，输出的 JPEG 以
+      //    DQT 开头（ffd8ffdb）且色彩空间未知，下游 sharp(...).greyscale().raw() 会抛
+      //    「colourspace: parameter space not set」⇒ 抠图静默失败、回退整张裁片
+      //    （2026-11-03 嘉定一模 23/25 题「配图带文字 + 图很小」的真因）。
+      out = await sharp(pageBuffer).composite(overlays).withMetadata({ icc: 'srgb' }).jpeg({ quality: 92 }).toBuffer()
     }
   } catch {
     out = pageBuffer

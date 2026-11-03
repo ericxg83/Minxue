@@ -219,8 +219,14 @@ export async function cropQuestionImage(pageBuffer, box) {
   const height = Math.min(H - top, Math.round(clampN(box.height) / 1000 * H))
   if (width < 8 || height < 8) return null
   try {
-    // quality 92：82 在 4x 细节上会引入可见块状伪影（老师报障「锯齿」的一部分）
-    return await sharp(page).extract({ left, top, width, height }).jpeg({ quality: 92 }).toBuffer()
+    // quality 92：82 在 4x 细节上会引入可见块状伪影（老师报障「锯齿」的一部分）。
+    // ⛔ 必须 withMetadata({icc:'srgb'})：否则输出的裁片是无头 JPEG（ffd8ffdb）、
+    //    色彩空间未知，下游抠图 sharp(...).raw() 直接抛「colourspace: parameter
+    //    space not set」⇒ 图形带提取永远 null、静默回退整张裁片（配图带文字）。
+    return await sharp(page).extract({ left, top, width, height })
+      .withMetadata({ icc: 'srgb' })
+      .jpeg({ quality: 92 })
+      .toBuffer()
   } catch (e) {
     console.warn('[paperBank] 裁片失败:', e.message)
     return null
