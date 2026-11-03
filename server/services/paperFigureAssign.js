@@ -150,8 +150,36 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     const figH = figBottom - figTop
     if (figH < 50 || figH < height * 0.25) return null
 
+    // ── 横向裁紧（2026-11-03）──
+    // 源裁片是「整页宽」的横条（实测 2144px 宽），而图形常常只占其中一小块，
+    // 左右大片空白会同时造成两个观感问题（嘉定一模 23 题实测：图形仅占宽 12%）：
+    //   ① 配图缩到 55% 页宽后，图形本身只剩约 15mm —— 显得「尺寸太小」；
+    //   ② 图形被左侧空白推到横条中部 —— 看起来像「居中」，而不是靠左。
+    // 这里按图形墨迹的水平范围裁到图形本身（两侧各留 1% 余量），
+    // 使配图「图形占满图幅」：既靠左、又足够大。
+    let inkLeft = width
+    let inkRight = -1
+    for (let y = figTop; y < figBottom; y++) {
+      const off = y * width
+      for (let x = 0; x < width; x++) {
+        if (data[off + x] < 200) {
+          if (x < inkLeft) inkLeft = x
+          if (x > inkRight) inkRight = x
+        }
+      }
+    }
+    let cropLeft = 0
+    let cropWidth = width
+    if (inkRight >= inkLeft) {
+      const padX = Math.max(8, Math.round(width * 0.01))
+      cropLeft = Math.max(0, inkLeft - padX)
+      cropWidth = Math.min(width, inkRight + padX + 1) - cropLeft
+    }
+    // 极端情况（横向墨迹范围过小）退化为整幅宽，避免裁出细条
+    if (cropWidth < 40) { cropLeft = 0; cropWidth = width }
+
     return await sharp(cropBuffer)
-      .extract({ left: 0, top: figTop, width, height: figBottom - figTop })
+      .extract({ left: cropLeft, top: figTop, width: cropWidth, height: figBottom - figTop })
       .jpeg({ quality: 82 })
       .toBuffer()
   } catch (e) {
