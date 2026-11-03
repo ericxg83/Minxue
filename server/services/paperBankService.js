@@ -339,14 +339,31 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
       // 最后一个下问的切段，其余小问只切到自己的一行文字条（显示为细线 = 没图，
       // 徐汇一模 25(1)(2) 实测）。组内把带图行（优先抠成图形带）补给文字条行；
       // 任何失败只降级为「维持现状」，不影响落库。
+      // ⚠️ 2026-11-03 事故修复：此前只把图形带补给「文字条行」，**source（带图行）
+      // 自己保留整段原始裁片**（含小问文字 + 更高），讲解版/讲义里该页图就会带文字、
+      // 且高裁片顶爆版式。现改为 source 也换成同一张干净图形带，整组共享同一张图。
       try {
         const figPlans = planSubrowFigureAssignments(rows)
+        const sourceDone = new Set()
         for (const pl of figPlans) {
           const src = rows[pl.sourceIdx]
           const tgt = rows[pl.targetIdx]
           const srcBuf = await cropQuestionImage(hiPage, src.bbox)
           if (!srcBuf) continue
           const figBuf = (await extractFigureBandFromCrop(srcBuf)) || srcBuf
+          // source 行也换成干净图形带（同一份图，避免该页图带小问文字 + 高裁片）
+          if (!sourceDone.has(pl.sourceIdx)) {
+            sourceDone.add(pl.sourceIdx)
+            try {
+              src.image_url = await uploadImage(
+                figBuf,
+                `paper-p${pageNumber}-q${src.question_no}-s${src.sub_no || 'x'}-figsrc.jpg`,
+                'paper-bank'
+              )
+            } catch (e) {
+              logger.warn?.(`[paperBank] 小问配图共享(source)上传失败 q${src.question_no}(${src.sub_no}): ${e.message}`)
+            }
+          }
           try {
             tgt.image_url = await uploadImage(
               figBuf,

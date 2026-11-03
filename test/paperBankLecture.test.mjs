@@ -78,6 +78,35 @@ test('★ 无小问的题自然一题一页；空篮子给空态', () => {
 })
 
 // ─────────────────────────────────────────────────────────────
+// ①' 页面顺序必须 = 原卷题号自然序（2026-11-03 事故修复）
+//    讲解版「一小问一页」，顺序不能依赖篮子勾选顺序（嘉定一模 25 题曾导出成
+//    (2-2)→(2-1)→(1) 倒序）。必须按 (question_no, sub_no) 稳定排序。
+// ─────────────────────────────────────────────────────────────
+
+test('★ 讲解版页面顺序 = 原卷题号自然序，不依赖篮子勾选顺序', () => {
+  const items = [
+    createBasketItem(q({ id: 'c', question_no: 25, sub_no: '2-2', parent_stem: 'S' })),
+    createBasketItem(q({ id: 'a', question_no: 25, sub_no: '1', parent_stem: 'S' })),
+    createBasketItem(q({ id: 'b', question_no: 25, sub_no: '2-1', parent_stem: 'S' })),
+  ]
+  const body = buildLectureBody({ items, showImage: true })
+  const i1 = body.indexOf('第 25 题(1)')
+  const i21 = body.indexOf('第 25 题(2-1)')
+  const i22 = body.indexOf('第 25 题(2-2)')
+  assert.ok(i1 !== -1 && i21 !== -1 && i22 !== -1, '三页角标都要在')
+  assert.ok(i1 < i21 && i21 < i22, '顺序必须 (1) → (2-1) → (2-2)，不得倒序/乱序')
+})
+
+test('★ 题号按数值排，不得按字典序（10 必须排在 2 之后）', () => {
+  const items = [
+    createBasketItem(q({ id: 'x', question_no: 10, sub_no: '1' })),
+    createBasketItem(q({ id: 'y', question_no: 2, sub_no: '3' })),
+  ]
+  const body = buildLectureBody({ items })
+  assert.ok(body.indexOf('第 10 题(1)') > body.indexOf('第 2 题(3)'), '数值序：2 在 10 之前')
+})
+
+// ─────────────────────────────────────────────────────────────
 // ② 原卷题号（同讲义口径，绝不重编号）
 // ─────────────────────────────────────────────────────────────
 

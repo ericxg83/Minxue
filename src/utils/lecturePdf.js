@@ -153,12 +153,60 @@ function renderLecturePage(it, idx, total, { showImage = false } = {}) {
  * @param {object} o
  * @param {Array}  o.items      试题篮 items（createBasketItem 产物，一项 = 一页）
  * @param {boolean} [o.showImage] 是否印原题裁片图（几何含图题用）
+ *
+ * ⚠️ 讲解版是「一小问一页」，顺序必须 = 原卷题号自然序，不能依赖篮子勾选顺序
+ * （用户按任意顺序勾题、或搜索返回顺序变化，都会导致页面倒序/乱序，见 2026-11-03 事故：
+ * 嘉定一模 25 题导出成 (2-2)→(2-1)→(1)）。这里强制按 (question_no, sub_no) 稳定排序。
  */
 export function buildLectureBody({ items = [], showImage = false } = {}) {
   const list = Array.isArray(items) ? items : []
   if (!list.length) {
     return '<div class="lec-empty">试题篮是空的</div>'
   }
-  const total = list.length
-  return list.map((it, i) => renderLecturePage(it, i, total, { showImage })).join('')
+  const sorted = [...list].sort(compareLectureItem)
+  const total = sorted.length
+  return sorted.map((it, i) => renderLecturePage(it, i, total, { showImage })).join('')
+}
+
+/**
+ * 讲解版排序比较器：先按题号升序，再按小问自然序（'1' < '2-1' < '2-2' < '10'）。
+ * 空 sub_no（无小问的独立题）排在同题号小问之前。数值段按整数比，非数值段字典序，
+ * 避免字符串排序把 '10' 排到 '2' 前面。
+ */
+function compareLectureItem(a, b) {
+  const na = Number(a?.question_no ?? 0) || 0
+  const nb = Number(b?.question_no ?? 0) || 0
+  if (na !== nb) return na - nb
+  return naturalSubCompare(a?.sub_no || '', b?.sub_no || '')
+}
+
+function naturalSubCompare(x, y) {
+  if (x === y) return 0
+  if (!x) return -1 // 空 sub_no 在前
+  if (!y) return 1
+  const ax = splitNumeric(x)
+  const ay = splitNumeric(y)
+  const len = Math.min(ax.length, ay.length)
+  for (let i = 0; i < len; i++) {
+    const dx = ax[i]
+    const dy = ay[i]
+    const nx = Number.isFinite(dx)
+    const ny = Number.isFinite(dy)
+    if (nx && ny) {
+      if (dx !== dy) return dx - dy
+    } else if (nx !== ny) {
+      // 一段是数字、一段是文本：数字优先
+      return nx ? -1 : 1
+    } else {
+      if (dx < dy) return -1
+      if (dx > dy) return 1
+    }
+  }
+  return ax.length - ay.length
+}
+
+/** 把 '2-1' 拆成 [2, '-', 1]：数字段为 Number，连接符/文本段为原串。 */
+function splitNumeric(s) {
+  const parts = String(s).split(/(\d+)/)
+  return parts.filter(p => p !== '').map(p => (/^\d+$/.test(p) ? Number(p) : p))
 }
