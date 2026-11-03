@@ -67,15 +67,20 @@ export function planSubrowFigureAssignments(rows) {
 }
 
 /**
- * 从源行裁片里抠「图形带」：去掉顶部的小问文字行，只留下方的大块图形。
+ * 从源行裁片里抠「图形带」：去掉顶部/零散的小问文字行，只留下方的大块图形。
  * @param {Buffer} cropBuffer 源行裁片（页面坐标按行 bbox 裁出的 JPEG）
  * @returns {Promise<Buffer|null>} 图形带裁片；找不到干净的图形带返回 null（调用方用整张源裁片兜底）
  *
- * 算法（按行 ink 剖面分带）：
- * - 灰度 < 200 记为墨点，一行墨点数 ≥ max(2, 宽×0.8%) 视为「有墨行」；
- * - 连续有墨行聚成带，带间空白断开；
- * - 图形带 = 第一条高度 ≥ max(70px, 2.2×前方带高中位数) 的带（文字带实测 20-40px）；
- * - 输出 = 该带 [top..bottom] 全宽；整带高须 ≥ 裁片高 25% 且 ≥ 50px，否则放弃。
+ * 判据（2026-11-03 重写，取代脆弱的「2.2× 大于兄弟带」规则）：
+ * - 灰度 < 200 记为墨点；逐行统计墨点数与「墨迹是否横跨整幅（≥75% 宽）」。
+ * - 按行 ink 剖面分段：空白 ≥ 12px 即断开（足以切开 15~20px 行距的小问文字行，
+ *   但不会切碎几何图——图内即便有 >12px 的间隙，下面会按「图形带」整体合并）。
+ * - 「文字带」= 横跨整幅 且 高度 < 50px（真卷小问文字行横跨整幅、约 20~40px；
+ *   嘉定 24 图形仅占 21% 宽、25 占 40%，几何图绝不满足「整幅」）。
+ * - 「图形带」= 非文字带（窄几何图 / 或满幅但高大的整图）。
+ * - 取所有图形带的并集 [top..bottom]（几何图内部间隙被合并回来），
+ *   并集高须 ≥ 50px 且 ≥ 裁片高 25%，否则视为纯文字 / 无图 → 返回 null。
+ * - 纯文字裁片：所有带都是文字带 ⇒ 无图形带 ⇒ null（调用方回退整张裁片，绝不裹文字进图）。
  */
 export async function extractFigureBandFromCrop(cropBuffer) {
   try {
@@ -84,49 +89,69 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     const height = Number(info.height) || 0
     if (width < 40 || height < 60) return null
 
+    // 逐行墨迹数 + 是否横跨整幅（>=75% 宽）
     const inkPerRow = new Array(height).fill(0)
+    const spanWide = new Array(height).fill(false)
     for (let y = 0; y < height; y++) {
       const off = y * width
-      let c = 0
-      for (let x = 0; x < width; x++) if (data[off + x] < 200) c++
-      inkPerRow[y] = c
-    }
-
-    // ── 图形定位（2026-11-03 重写）──
-    // 真卷版式：文字在上、图形在下。用「最大的连续空白带」作文字/图形分界，
-    // 取其下方墨迹（>=1 像素，能兜住三角形顶点等细线）作为图形；图形内部允许
-    // <=40px 的小空隙（细线之间的空白）。图顶细线因此不会被切掉。
-    let maxGap = 0, gapEnd = height
-    {
-      let run = 0
-      for (let y = 0; y < height; y++) {
-        if (inkPerRow[y] >= 1) {
-          if (run > maxGap) { maxGap = run; gapEnd = y }
-          run = 0
-        } else {
-          run++
+      let c = 0, lo = -1, hi = -1
+      for (let x = 0; x < width; x++) {
+        if (data[off + x] < 200) {
+          c++
+          if (lo < 0) lo = x
+          hi = x
         }
       }
-      if (run > maxGap) { maxGap = run; gapEnd = height }
+      inkPerRow[y] = c
+      if (c >= 3 && lo >= 0 && (hi - lo + 1) >= width * 0.75) spanWide[y] = true
     }
-    // 分界不明显（<25px）视为无文字：整片作为图形（取底部墨簇）
-    const sep = maxGap >= 25 ? gapEnd : 0
 
-    let figTop = -1, figBottom = -1, gap = 0
-    for (let y = sep; y < height; y++) {
-      if (inkPerRow[y] >= 1) { if (figTop === -1) figTop = y; figBottom = y; gap = 0 }
-      else { gap++; if (gap > 40) break }
+    // 分段：墨迹簇（空白 >=12px 断开）
+    const bands = []
+    {
+      let y = 0
+      while (y < height) {
+        while (y < height && inkPerRow[y] === 0) y++
+        if (y >= height) break
+        const top = y
+        let bottom = y, gap = 0
+        y++
+        while (y < height) {
+          if (inkPerRow[y] >= 1) { bottom = y; gap = 0 }
+          else { gap++; if (gap >= 12) break }
+          y++
+        }
+        bands.push({ top, bottom })
+      }
     }
-    if (figTop === -1) return null
-    // 越过分界再向上收几像素（分界线可能正压在某根细线上）
-    figTop = Math.max(0, figTop - 6)
-    if (figBottom < height) figBottom = Math.min(height, figBottom + 6)
+    if (!bands.length) return null
 
+    // 文字带判据：横跨整幅（>=60% 行整幅）且高度 < 50px
+    const isTextBand = (b) => {
+      let wide = 0, total = 0
+      for (let y = b.top; y <= b.bottom; y++) {
+        if (inkPerRow[y] >= 1) { total++; if (spanWide[y]) wide++ }
+      }
+      if (total === 0) return false
+      return wide / total >= 0.6 && (b.bottom - b.top + 1) < 50
+    }
+
+    // 图形带 = 非文字带；取并集（几何图内部间隙合并回来）
+    const figBands = bands.filter(b => !isTextBand(b))
+    if (!figBands.length) return null
+    let figTop = figBands[0].top
+    let figBottom = figBands[0].bottom
+    for (const b of figBands) {
+      if (b.top < figTop) figTop = b.top
+      if (b.bottom > figBottom) figBottom = b.bottom
+    }
+    figTop = Math.max(0, figTop - 4)
+    figBottom = Math.min(height, figBottom + 6)
     const figH = figBottom - figTop
     if (figH < 50 || figH < height * 0.25) return null
 
     return await sharp(cropBuffer)
-      .extract({ left: 0, top: figTop, width, height: Math.min(figBottom, height) - figTop })
+      .extract({ left: 0, top: figTop, width, height: figBottom - figTop })
       .jpeg({ quality: 82 })
       .toBuffer()
   } catch (e) {
