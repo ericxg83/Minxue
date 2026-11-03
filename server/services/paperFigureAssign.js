@@ -246,7 +246,7 @@ export async function extractFigureBandFromCrop(cropBuffer) {
 
     return await sharp(cropBuffer)
       .extract({ left: cropLeft, top: figTop, width: cropWidth, height: figBottom - figTop })
-      .jpeg({ quality: 82 })
+      .jpeg({ quality: 92 }) // 与 cropQuestionImage 同口径；82 在 4x 细节上有可见块状伪影
       .toBuffer()
   } catch (e) {
     console.warn('[paperFigureAssign] 图形带提取失败:', e.message)
