@@ -280,6 +280,10 @@ export async function exportServerPDF({ studentId, studentName, questions, html,
         filename: `${filename || '错题重练'}.pdf`,
         // 页码交给后端 Chromium 的 displayHeaderFooter 生成（前端估不准真实页数）
         pageNumbers: pageNumbers === true,
+        // 页脚左侧「学生：张三」：重练卷只有第一页有姓名抬头，多页卷子拆开/多人卷子
+        // 一起打印时靠页脚认人。仅在出页脚（pageNumbers=true）时由后端印上去；
+        // 没有学生名就不传，页脚保持「只印页码」。
+        footerStudentName: studentName || '',
         // 页面尺寸随版式走：默认 A4 竖版；讲解版传横版 4:3（280×210mm）+ 零页边距
         pdfOptions: pdfOptions || {
           format: 'A4',

@@ -17,7 +17,7 @@ import qrcode from 'qrcode-generator'
 import { createRequire } from 'module'
 import { readFileSync } from 'fs'
 import { query, TABLES } from '../config/neon.js'
-import { renderExamPDF } from './examPdfRenderer.js'
+import { renderExamPDF, buildPaperFooterLabel } from './examPdfRenderer.js'
 import { toLocalYmd } from '../utils/period.js'
 // 多小问（题组）共享题干的展示口径：与 PC 端 / 移动端共用同一套实现，
 // 保证「重练卷上的题干」和「错题本卡片上的题干」逐字一致。
@@ -266,6 +266,10 @@ const buildExamHTML = ({ title, studentName, questions, qrSvg }) => {
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${buildPaperCSS()}</style></head><body>${buildPaperBody({ title, studentName, questions, qrSvg })}</body></html>`
 }
 
+// 导出仅为探针/测试复用（纯函数，无副作用）：用来渲染真实版式的样张验证页脚，
+// 不必连库、不必建 generated_exams 行。
+export { buildExamHTML }
+
 /**
  * 导出重练卷 PDF
  *
@@ -420,7 +424,10 @@ export async function exportWrongRetryPdf({ studentId, wrongQuestionIds, include
   // pageNumbers：每页页脚印「第 X 页 / 共 Y 页」。
   // PC 错题中心「一键导出重练卷」是**独立于前端导出引擎的后端路径**（不经 exportServerPDF），
   // 必须在这里单独开；页码画在底部 margin 空白区，不改内容区高度 ⇒ 分页与加页码前一致。
-  const pdfBuffer = await renderExamPDF({ html, filename, pageNumbers: true })
+  // footerLabel：页脚再印「学生：张三」——只有第一页有二维码和姓名抬头，
+  // 多页卷子拆开或多人卷子混印时靠页脚认人（2026-11-04 需求）。
+  const footerLabel = buildPaperFooterLabel({ studentName })
+  const pdfBuffer = await renderExamPDF({ html, filename, pageNumbers: true, footerLabel })
 
   return { pdfBuffer, examId, qrContent, studentName, count: active.length, filename }
 }

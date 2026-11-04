@@ -8,22 +8,24 @@
  * 避免后端重复实现模板。
  */
 import express from 'express'
-import { renderExamPDF, closeBrowser } from '../services/examPdfRenderer.js'
+import { renderExamPDF, closeBrowser, buildPaperFooterLabel } from '../services/examPdfRenderer.js'
 
 const router = express.Router()
 
 /**
  * POST /api/exam-pdf
- * Body: { html: string, filename?: string, pdfOptions?: Object, pageNumbers?: boolean }
+ * Body: { html: string, filename?: string, pdfOptions?: Object, pageNumbers?: boolean,
+ *         footerStudentName?: string }
  * Response: application/pdf (binary)
  *
  * pageNumbers=true → 每页页脚印「第 X 页 / 共 Y 页」（错题重练卷）。
+ * footerStudentName → 页脚左侧再印「学生：张三」，多页卷子拆开/多人卷子混印时能认人。
  * 不传/false 时行为与历史一致（周报、试卷库讲义等出口不受影响）。
  */
 router.post('/', async (req, res) => {
   const t0 = Date.now()
   try {
-    const { html, filename = 'exam.pdf', pdfOptions, pageNumbers = false } = req.body || {}
+    const { html, filename = 'exam.pdf', pdfOptions, pageNumbers = false, footerStudentName = '' } = req.body || {}
     if (!html || typeof html !== 'string') {
       return res.status(400).json({ error: 'html 不能为空（须为 buildExamHTML 生成的完整 HTML）' })
     }
@@ -37,10 +39,16 @@ router.post('/', async (req, res) => {
 
     console.log(`[examPdf] 收到渲染请求 html=${html.length} 字符`)
 
+    // 页脚标签只收「纯文本」，长度在 buildPaperFooterLabel 内截断；
+    // 拼进模板时还会转义（学生名可能含 & < > "），此处不信任调用方。
+    const footerLabel = buildPaperFooterLabel({
+      studentName: typeof footerStudentName === 'string' ? footerStudentName : '',
+    })
+
     // puppeteer-core 的 page.pdf() 在部分版本返回 Uint8Array；必须显式转成
     // Node Buffer，否则 Express 会把它按普通对象序列化成 {"0":...}，
     // 前端拿到的就不是合法 PDF，下载和打印都会停在"生成 PDF"阶段。
-    const pdfBuffer = Buffer.from(await renderExamPDF({ html, filename, pdfOptions, pageNumbers }))
+    const pdfBuffer = Buffer.from(await renderExamPDF({ html, filename, pdfOptions, pageNumbers, footerLabel }))
 
     const dt = Date.now() - t0
     console.log(`[examPdf] 渲染完成 ${dt}ms, PDF ${pdfBuffer.length} bytes`)

@@ -105,7 +105,10 @@ test('渲染器：pageNumbers 参数被真正消费（不是死参数）', () =>
     assert.match(fn, /footerTemplate:\s*pdfOptions\.footerTemplate\s*\|\|/, '必须提供页码页脚兜底')
   }
   const call = anchoredSlice(src, 'const mergedPdfOptions = withPageNumberOptions(', 120, RENDERER, fails)
-  if (call) assert.match(call, /pageNumbers\)/, 'renderExamPDF 必须把 pageNumbers 传进开关函数（否则参数是死的）')
+  if (call) {
+    assert.match(call, /pageNumbers\b/, 'renderExamPDF 必须把 pageNumbers 传进开关函数（否则参数是死的）')
+    assert.match(call, /footerLabel\)/, '页脚标签（学生名）也必须一起传进去')
+  }
   assert.deepEqual(fails, [], fails.join('\n'))
 })
 
