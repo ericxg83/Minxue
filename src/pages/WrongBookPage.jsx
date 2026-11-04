@@ -31,6 +31,21 @@ const subjectOf = i => {
 }
 const subjectLabel = s => SUBJECT_NAMES[s.toLowerCase()] || s
 
+// 难度筛选：questions.difficulty 为 1-5 整数（NULL=未判定），与周末讲义 / 排卷星级同口径
+// 收成三档 + 未判定。列表接口已在 question 子对象里下发 difficulty，纯客户端过滤即可。
+const diffOf = i => {
+  const d = qOf(i).difficulty
+  if (d == null || d === '') return null
+  const n = Number(d)
+  return Number.isFinite(n) ? n : null
+}
+const DIFFICULTY_TIERS = [
+  { id: 'basic', label: '基础', match: d => d !== null && d <= 2 },
+  { id: 'medium', label: '中等', match: d => d === 3 },
+  { id: 'hard', label: '较难', match: d => d !== null && d >= 4 },
+  { id: 'unknown', label: '未判定', match: d => d === null },
+]
+
 // 日期筛选基于 added_at/created_at（列表行已在显示同源日期），纯客户端过滤。
 const inDateRange = (item, range) => {
   if (range === 'all') return true
@@ -112,6 +127,7 @@ export default function WrongBookPage({
   const [filter, setFilter] = useState('new')
   const [dateRange, setDateRange] = useState('all')
   const [subject, setSubject] = useState('all')
+  const [difficulty, setDifficulty] = useState('all')
   const [selectMode, setSelectMode] = useState(false)
   const tabs = [
     { id: 'new', label: '待复习', count: counts.new || 0 },
@@ -128,10 +144,16 @@ export default function WrongBookPage({
     return seen
   }, [questions])
 
+  // 难度档位仅展示当前列表里实际存在的档（与学科 chip 同口径：无数据则该档不出现）。
+  const difficultyTiers = useMemo(() =>
+    DIFFICULTY_TIERS.filter(t => questions.some(q => t.match(diffOf(q))))
+  , [questions])
+
   const visible = questions.filter(i =>
     (filter === 'review' ? ['review_1', 'review_2'].includes(lifecycle(i)) : lifecycle(i) === filter)
     && inDateRange(i, dateRange)
     && (subject === 'all' || subjectOf(i) === subject)
+    && (difficulty === 'all' || DIFFICULTY_TIERS.find(t => t.id === difficulty)?.match(diffOf(i)))
   )
 
   // ── 搜索找题（2026-10-14 移动端自由组卷）──────────────────────────────
@@ -346,6 +368,14 @@ export default function WrongBookPage({
             ))}
           </>
         )}
+        {difficultyTiers.length > 0 && (
+          <>
+            <span className='mx-0.5 h-3.5 w-px flex-shrink-0' style={{ background: 'var(--border-light)' }} aria-hidden='true' />
+            {difficultyTiers.map(t => (
+              <FilterChip key={t.id} active={difficulty === t.id} onClick={() => setDifficulty(difficulty === t.id ? 'all' : t.id)}>{t.label}</FilterChip>
+            ))}
+          </>
+        )}
       </div>
     )}
       </>
@@ -368,7 +398,7 @@ export default function WrongBookPage({
       : !questions.length
       ? <EmptyState icon={Search} title='这里还没有错题' description='完成作业批改后，错题会自动进入这里' className='py-16' />
       : !visible.length
-        ? <EmptyState icon={Search} title='这个分类暂时没有错题' description='试试放宽时间或学科筛选，或切换其他状态' className='py-16' />
+        ? <EmptyState icon={Search} title='这个分类暂时没有错题' description='试试放宽时间、学科或难度筛选，或切换其他状态' className='py-16' />
         : <MobileList>
             {visible.map(renderRow)}
             {hasMore && (
