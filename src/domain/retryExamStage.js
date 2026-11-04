@@ -122,9 +122,17 @@ export const RETRY_EXAM_STAGE_TONE = {
 /** 是否已出结果（复核完成）—— Tab「已出结果」的判定 */
 export const isResultStage = stage => stage === RETRY_EXAM_STAGE.RESULT
 
-/** 是否还能在移动端提交答卷（只有没交过、或上次批改失败时才给这个入口） */
+/**
+ * 是否还能在移动端提交答卷。
+ * [2026-11-04 补交口径] 负责人拍板「支持补交 + 自动对账翻案」：已出结果（RESULT）
+ * 的卷如果还有页面没提交，也要能给「补交答卷」入口 —— worker 侧有补交守卫
+ * （未对位且有旧判定的题保留旧结果）+ 结算侧对账翻案（上次误判错、这次判对自动撤销），
+ * 补交不会再污染数据。等待作答 / 批改出错两档维持原语义。
+ */
 export const canSubmitAnswerSheet = stage =>
-  stage === RETRY_EXAM_STAGE.ISSUED || stage === RETRY_EXAM_STAGE.FAILED
+  stage === RETRY_EXAM_STAGE.ISSUED
+  || stage === RETRY_EXAM_STAGE.FAILED
+  || stage === RETRY_EXAM_STAGE.RESULT
 
 /** 是否正在处理中（转圈类动效只给这两档） */
 export const isBusyStage = stage =>

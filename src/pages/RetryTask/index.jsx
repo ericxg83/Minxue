@@ -118,6 +118,9 @@ export default function RetryTask({ taskId, onBack }) {
   const StatusIcon = meta.icon
   const questionCount = Array.isArray(task?.question_ids) ? task.question_ids.length : 0
   const isDone = status === 'graded'
+  // [2026-11-04 补交口径] 只有 AI 批改中不让重复交卷；已出结果（graded）的卷
+  // 仍允许补交剩余页面（worker 补交守卫 + 结算对账翻案保证不污染数据）。
+  const canUpload = status !== 'grading'
 
   // HEIC 预览：Android WebView file.type 经常是空 → 退化靠扩展名判断。
   // 浏览器原 <img> 解不开 HEIC 会显示 broken image（onError 兜底），但不至于白屏。
@@ -297,10 +300,12 @@ export default function RetryTask({ taskId, onBack }) {
             </div>
           </motion.div>
 
-          {/* 上传区（仅待批改态可上传） */}
-          {!isDone && (
+          {/* 上传区（批改中除外；已出结果的卷给补交） */}
+          {canUpload && (
             <div className="mt-4 bg-white rounded-2xl p-5 shadow-sm">
-              <div className="text-[14px] font-medium mb-3" style={{ color: 'var(--text)' }}>上传答案照片</div>
+              <div className="text-[14px] font-medium mb-3" style={{ color: 'var(--text)' }}>
+                {isDone ? '补交答案照片（拍还没批过的页）' : '上传答案照片'}
+              </div>
 
               {/* 已选预览 */}
               {pendingFiles.length > 0 && (
@@ -343,7 +348,7 @@ export default function RetryTask({ taskId, onBack }) {
                 }}
               >
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                {uploading ? '上传并批改中...' : '上传并批改'}
+                {uploading ? '上传并批改中...' : isDone ? '补交并批改' : '上传并批改'}
               </button>
             </div>
           )}

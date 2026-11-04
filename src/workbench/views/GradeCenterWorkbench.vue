@@ -249,7 +249,7 @@
                   :loading="retryAnswerUploading"
                   @click="pickRetryAnswer(selectedTask)"
                 >
-                  上传答卷<el-icon><Upload /></el-icon>
+                  {{ selectedTask.retryState === RETRY_PAPER_STATE.ISSUED ? '上传答卷' : '补交答卷' }}<el-icon><Upload /></el-icon>
                 </ActionButton>
                 <ActionButton variant="primary" @click="openTask(selectedTask)">
                   {{ selectedTask.actionLabel }}<el-icon><ArrowRight /></el-icon>
@@ -853,12 +853,18 @@ function closePaperPreview() {
 // 这条通道打的是本机后端（工作台 dev/preview 的 /api 同源），不依赖上面任何一跳。
 // ⛔ 上传/关联都走移动端同一套实现（taskService.uploadRetryAnswer + linkRetryTask），
 //    卷「有没有交卷」的判据仍是 tasks.generated_exam_id，这里不新增第二套状态。
+// [2026-11-04 补交口径] 负责人拍板「支持补交 + 自动对账翻案」：已出结果（reviewed /
+// pending_confirm / pending_review）的卷同样给「补交答卷」入口，只剩 AI 批改中不让
+// 重复交卷。worker 补交守卫（未对位且有旧判定的题保留旧结果）+ 结算对账翻案保证
+// 只判新页面、自动更正上次误判，不会污染数据。孤儿答卷卡（retryState=null，卷已删）
+// 不给入口 —— 没有卷可挂。
 const retryAnswerInput = ref(null)
 const retryAnswerTarget = ref(null)
 const retryAnswerUploading = ref(false)
 
 function canUploadRetryAnswer(task) {
-  return !!task?.id && task.source === 'retry' && task.retryState === RETRY_PAPER_STATE.ISSUED
+  return !!task?.id && task.source === 'retry'
+    && task.retryState != null && task.retryState !== RETRY_PAPER_STATE.GRADING
 }
 
 function pickRetryAnswer(task) {

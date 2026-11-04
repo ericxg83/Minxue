@@ -29,8 +29,10 @@ const time = v => dayjs(v).isValid() ? dayjs(v).format('YYYY/MM/DD HH:mm') : '�
 // 主入口=本页"上传答卷"（选中这份卷即定位 examId，多页天然归一）；首页扫码上传为辅助路径。
 //
 // 状态口径与列表页同源（src/domain/retryExamStage.js）：等待作答 / 已提交答卷 /
-// 正在批改 / 等待复核，已出结果时直接给结果数字。上传答卷入口只在「等待作答」和
-// 「批改出错」两档出现，避免重复交卷。
+// 正在批改 / 等待复核，已出结果时直接给结果数字。上传答卷入口在「等待作答」、
+// 「批改出错」和「已出结果」三档出现 —— 2026-11-04 补交口径（负责人拍板）：
+// 分次做的卷子出结果后仍要能补交剩余页面，worker 补交守卫 + 结算对账翻案保证
+// 补交只判新页面、并自动更正上次把没拍到的题记成的错误，不会重复交卷污染数据。
 //
 // 2026-09-14：删掉「查看批改结果」二级入口 —— 移动端只需要知道结果数字（本页已有），
 // 逐题明细归错题本、改判归 PC 复核台；且重练答卷不建 questions 行，按 task_id 必然取空。
@@ -73,10 +75,14 @@ export default function ExamDetailModal({ exam, onClose, onReprint, onDelete, on
               className='flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-semibold text-white transition-transform active:scale-[0.98]'
               style={{ background: 'var(--primary)' }}
             >
-              <Camera size={16} />{stage === RETRY_EXAM_STAGE.FAILED ? '重新上传答卷' : '上传答卷'}
+              <Camera size={16} />{stage === RETRY_EXAM_STAGE.FAILED
+                ? '重新上传答卷'
+                : stage === RETRY_EXAM_STAGE.RESULT ? '补交答卷' : '上传答卷'}
             </button>
             <p className='text-center text-[11px] leading-4' style={{ color: 'var(--text-tertiary)' }}>
-              拍整份做完的卷子，多页一起传，系统按这份卷批改并更新掌握度
+              {stage === RETRY_EXAM_STAGE.RESULT
+                ? '还有页面没批？拍新做完的页面补交即可，已批过的页不用重拍'
+                : '拍整份做完的卷子，多页一起传，系统按这份卷批改并更新掌握度'}
             </p>
           </div>
         )}
