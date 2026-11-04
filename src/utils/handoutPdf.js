@@ -48,18 +48,29 @@ export function buildHandoutCSS() {
 .q-src{font-size:11px;color:#888;white-space:nowrap;flex-shrink:0}
 .handout-empty{font-size:13px;color:#888;padding:20px 0;text-align:center}
 .answer-note{font-size:11px;color:#993C1D;margin-top:2px;padding-left:32px}
+.question-group{margin-bottom:6px;page-break-inside:avoid}
+.question-group .q-head-stem{font-weight:bold}
+.question-group .question{margin-left:18px;margin-bottom:4px}
 `
 }
 
 /** 把扁平的题目行按卷分组（保持传入顺序；同卷的行会聚在一起）。 */
 
-/** 单题 HTML。题号一律用**原卷题号**（question_no），绝不重编号。 */
-function renderHandoutQuestion(q, showAnswers) {
+/**
+ * 单题 HTML。题号一律用**原卷题号**（question_no），绝不重编号。
+ * @param {object} q
+ * @param {boolean} showAnswers
+ * @param {object} [opts]
+ *   - suppressStem {boolean} 题组已把公共题干提到组头，子题不再重复印 parent_stem（否则「规定」会刷几遍）
+ *   - numLabel     {string}  自定义题号（题组子题写「（1）」这类，不重复带大题号）
+ */
+function renderHandoutQuestion(q, showAnswers, opts = {}) {
   const typeClass = q.question_type === 'choice' ? 'q-choice'
     : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
-  // 原卷题号：question_no 是卷面印刷题号；有 sub_no 时写成「19(1)」
-  const numLabel = q.question_no == null ? '?' : String(q.question_no)
-  const dotLabel = q.sub_no ? `${numLabel}(${q.sub_no})` : `${numLabel}.`
+  // 原卷题号：question_no 是卷面印刷题号；有 sub_no 时默认写成「19(1)」
+  const baseNum = q.question_no == null ? '?' : String(q.question_no)
+  const defaultLabel = q.sub_no ? `${baseNum}(${q.sub_no})` : `${baseNum}.`
+  const displayNum = opts.numLabel != null ? opts.numLabel : defaultLabel
 
   const stars = difficultyStars(q.difficulty)
   const tags = Array.isArray(q.tags) ? q.tags.filter(Boolean) : []
@@ -68,10 +79,12 @@ function renderHandoutQuestion(q, showAnswers) {
     : ''
 
   let html = `<div class="question ${typeClass}">`
-  if (q.parent_stem) {
+  // 公共题干：独立大题里 parent_stem 作为材料块印在题号上方；
+  // 题组子题（suppressStem）已在组头印过，这里跳过，避免「规定」重复出现。
+  if (q.parent_stem && !opts.suppressStem) {
     html += `<div class="q-stem">${renderContent(q.parent_stem)}</div>`
   }
-  html += `<div class="q-head"><span class="q-num">${escapeHtml(dotLabel)}</span>`
+  html += `<div class="q-head"><span class="q-num">${escapeHtml(displayNum)}</span>`
   html += stars ? `<span class="q-diff">${stars}</span>` : ''
   html += tagHtml
   html += `<span class="q-text">${renderContent(q.content || '')}</span></div>`
@@ -82,11 +95,11 @@ function renderHandoutQuestion(q, showAnswers) {
     html += `<div class="q-image"><img src="${escapeHtml(q.image_url)}" alt="原题" /></div>`
   }
 
-  const opts = normalizeOptions(q.options)
-  if (opts.length) {
+  const normalizedOpts = normalizeOptions(q.options)
+  if (normalizedOpts.length) {
     const cols = optionColumns(q.options)
     html += `<div class="opts opts-${cols}">`
-    opts.forEach((opt, i) => {
+    normalizedOpts.forEach((opt, i) => {
       html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContentInline(opt)}</span>`
     })
     html += `</div>`
@@ -117,6 +130,50 @@ function renderHandoutQuestion(q, showAnswers) {
 }
 
 /**
+ * 把同一套卷里「同题号、带公共题干」的连续行合并成题组：
+ *   组头印一次「32. 规定：…」（题号写在题干前面），
+ *   下面各小问只写「（1）…」「（2）…」，公共题干不再重复刷。
+ * 不带 parent_stem 的单行题、以及英语语篇题（parent_stem 是整篇原文、无同号兄弟行）
+ * 原样返回，不影响独立题与英语语篇题版式。
+ */
+function consolidateHandoutRows(questions) {
+  const out = []
+  const n = questions.length
+  const noOf = (x) => (x.question_no == null ? null : String(x.question_no))
+  let i = 0
+  while (i < n) {
+    const q = questions[i]
+    const no = noOf(q)
+    const nextNo = i + 1 < n ? noOf(questions[i + 1]) : null
+    // 题组起点：本题带 parent_stem，且下一行是同题号（必然是同大题的小问）
+    if (q.parent_stem && no != null && nextNo === no) {
+      const items = []
+      while (i < n && noOf(questions[i]) === no) { items.push(questions[i]); i++ }
+      const stem = items.find(x => x.parent_stem)?.parent_stem || ''
+      out.push({ type: 'group', no, parentStem: stem, items })
+    } else {
+      out.push({ type: 'single', q })
+      i++
+    }
+  }
+  return out
+}
+
+/** 题组 HTML：组头（题号 + 公共题干）只印一次，下面小问各自成行。 */
+function renderHandoutGroup(node, showAnswers) {
+  let html = `<div class="question-group">`
+  // 题号写在题干前面：32. 规定：若若干个相同的有理数……
+  html += `<div class="q-head q-head-stem"><span class="q-num">${escapeHtml(node.no)}.</span>`
+  html += `<span class="q-text">${renderContent(node.parentStem)}</span></div>`
+  for (const it of node.items) {
+    const subLabel = it.sub_no ? `（${it.sub_no}）` : ''
+    html += renderHandoutQuestion(it, showAnswers, { suppressStem: true, numLabel: subLabel })
+  }
+  html += `</div>`
+  return html
+}
+
+/**
  * 讲义主体 HTML（.page 内容）。
  * @param {object} o
  * @param {string} o.title        讲义标题
@@ -128,8 +185,14 @@ export function buildHandoutBody({ title, groups = [], showAnswers = false, show
   const total = groups.reduce((n, g) => n + (g.questions?.length || 0), 0)
   const groupHtml = groups.map(g => {
     const meta = [g.grade, g.examDate ? String(g.examDate).slice(0, 10) : ''].filter(Boolean).join(' · ')
-    const body = (g.questions || [])
-      .map(q => renderHandoutQuestion(showImage ? { ...q, _showImage: true } : q, showAnswers))
+    const withImage = (q) => showImage ? { ...q, _showImage: true } : q
+    const body = consolidateHandoutRows(g.questions || [])
+      .map(node => {
+        if (node.type === 'group') {
+          return renderHandoutGroup({ ...node, items: node.items.map(withImage) }, showAnswers)
+        }
+        return renderHandoutQuestion(withImage(node.q), showAnswers)
+      })
       .join('')
     return `<div class="handout-group">
       <div class="group-head">${escapeHtml(g.paperName)}${meta ? `<span class="group-meta">${escapeHtml(meta)}</span>` : ''}</div>
