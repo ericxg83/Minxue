@@ -4182,6 +4182,9 @@ app.get('/api/wrong-questions/search', async (req, res) => {
     // [2026-10-14 移动端组卷] 再纯加字段：parent_stem / sub_no / question_number。
     //   移动端错题卡片用 sub_no + question_number 渲染「第10题(2)」小标（与列表接口同源），
     //   搜索结果若缺这三列，小标消失 = 同一道题在两个入口长得不一样。
+    // [2026-11-04 移动端难度筛选] 纯加字段：difficulty。
+    //   搜索态也要按难度筛选（与列表态共用同一套档位判据），结果行必须带出难度；
+    //   列表接口 /wrong-questions/student/:id 早已下发 q.difficulty（:4090），此处对齐。
     // ⛔ 不改现有字段名与语义，PC 端不读新字段即可（纯加法）。
     // ⛔ 口径对齐：与列表接口 /wrong-questions/student/:id 用同一条 is_complete 闸。
     //   不加的话会搜出「列表里根本不显示」的残缺题，老师勾进组卷 → 卷面丢图丢选项，
@@ -4206,6 +4209,7 @@ app.get('/api/wrong-questions/search', async (req, res) => {
          q.answer_source,
          COALESCE(q.subject, wq.subject) AS subject,
          q.parent_stem, q.sub_no, q.question_number,
+         q.difficulty,
          q.task_id
        FROM ${TABLES.WRONG_QUESTIONS} wq
        LEFT JOIN ${TABLES.QUESTIONS} q ON q.id = wq.question_id

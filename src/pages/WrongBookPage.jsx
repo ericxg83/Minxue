@@ -86,6 +86,9 @@ const normalizeSearchHit = hit => ({
       parent_stem: hit.parent_stem,
       sub_no: hit.sub_no,
       question_number: hit.question_number,
+      // 难度筛选（2026-11-04）：搜索态与列表态共用同一套难度档位判据，
+      // 缺了它搜索行 diffOf 恒为 null、全部落进「未判定」档 —— 字段不对齐事故的典型形状。
+      difficulty: hit.difficulty,
     }
     : null,
 })
@@ -149,11 +152,24 @@ export default function WrongBookPage({
     DIFFICULTY_TIERS.filter(t => questions.some(q => t.match(diffOf(q))))
   , [questions])
 
+  // 难度过滤统一判据：列表态与搜索态共用，保证同一档位在两个入口含义一致。
+  const matchesDifficulty = i =>
+    difficulty === 'all' || DIFFICULTY_TIERS.find(t => t.id === difficulty)?.match(diffOf(i))
+
+  // 已选档位兜底：档位集合基于数据分布计算，若搜索结果里没有当前已选档，
+  // chip 会整档消失 → 老师卡在「筛选后空结果」里无法取消。补上已选档保证可退出
+  // （铁律 12 同型：筛选空结果必须可行动，不能把出口藏没了）。
+  const ensureActiveTier = tiers => {
+    if (difficulty === 'all') return tiers
+    const active = DIFFICULTY_TIERS.find(t => t.id === difficulty)
+    return !active || tiers.some(t => t.id === difficulty) ? tiers : [...tiers, active]
+  }
+
   const visible = questions.filter(i =>
     (filter === 'review' ? ['review_1', 'review_2'].includes(lifecycle(i)) : lifecycle(i) === filter)
     && inDateRange(i, dateRange)
     && (subject === 'all' || subjectOf(i) === subject)
-    && (difficulty === 'all' || DIFFICULTY_TIERS.find(t => t.id === difficulty)?.match(diffOf(i)))
+    && matchesDifficulty(i)
   )
 
   // ── 搜索找题（2026-10-14 移动端自由组卷）──────────────────────────────
@@ -216,6 +232,23 @@ export default function WrongBookPage({
   useEffect(() => () => { searchSeqRef.current += 1 }, [])
 
   const clearSearch = () => setKeyword('')
+
+  // 搜索态难度筛选（2026-11-04）：档位集合基于**搜索结果**（而非列表数据）计算——
+  // 搜索结果的难度分布与列表不同，用列表档位会出现「chip 显示了但搜出的题都不在该档」。
+  const searchDifficultyTiers = useMemo(() =>
+    DIFFICULTY_TIERS.filter(t => searchItems.some(q => t.match(diffOf(q))))
+  , [searchItems])
+  // 搜索结果按难度过滤（50 条上限，客户端过滤成本可忽略，不套 useMemo）。
+  const filteredSearchItems = searchItems.filter(matchesDifficulty)
+
+  // 难度 chip 渲染（列表态 / 搜索态共用）：点击切换、再点取消。
+  const renderDifficultyChips = tiers => tiers.map(t => (
+    <FilterChip
+      key={t.id}
+      active={difficulty === t.id}
+      onClick={() => setDifficulty(difficulty === t.id ? 'all' : t.id)}
+    >{t.label}</FilterChip>
+  ))
 
   // 搜索态下的"全选"对象是搜索结果；列表态下是筛选后可见项。
   // 两者同域（wq.id），重复勾选由 toggleSelectVisible 的合并逻辑兜住。
@@ -352,6 +385,11 @@ export default function WrongBookPage({
               : `没有找到含「${trimmedKeyword}」的错题，换个关键词试试`}
       </div>
     )}
+    {isSearchMode && searchItems.length > 0 && ensureActiveTier(searchDifficultyTiers).length > 0 && (
+      <div className='mb-2 flex items-center gap-1.5 overflow-x-auto pb-0.5' style={{ scrollbarWidth: 'none' }}>
+        {renderDifficultyChips(ensureActiveTier(searchDifficultyTiers))}
+      </div>
+    )}
     {!isSearchMode && (
       <>
     <MobileSegmentedTabs items={tabs} value={filter} onChange={setFilter} ariaLabel='错题复习状态' />
@@ -368,12 +406,10 @@ export default function WrongBookPage({
             ))}
           </>
         )}
-        {difficultyTiers.length > 0 && (
+        {ensureActiveTier(difficultyTiers).length > 0 && (
           <>
             <span className='mx-0.5 h-3.5 w-px flex-shrink-0' style={{ background: 'var(--border-light)' }} aria-hidden='true' />
-            {difficultyTiers.map(t => (
-              <FilterChip key={t.id} active={difficulty === t.id} onClick={() => setDifficulty(difficulty === t.id ? 'all' : t.id)}>{t.label}</FilterChip>
-            ))}
+            {renderDifficultyChips(ensureActiveTier(difficultyTiers))}
           </>
         )}
       </div>
@@ -389,7 +425,9 @@ export default function WrongBookPage({
       ? (searching && searchItems.length === 0
         ? <div className='py-16 text-center text-[13px]' style={{ color: 'var(--text-tertiary)' }}>正在搜索…</div>
         : searchItems.length > 0
-          ? <MobileList>{searchItems.map(renderRow)}</MobileList>
+          ? (filteredSearchItems.length > 0
+            ? <MobileList>{filteredSearchItems.map(renderRow)}</MobileList>
+            : <EmptyState icon={Search} title='没有符合难度筛选的结果' description='点击上方「全部」chip 放宽难度筛选' className='py-16' />)
           : searchFailed
             ? <EmptyState icon={Search} title='搜索失败' description='请检查网络后重试，或换个关键词' className='py-16' />
             : !questions.length
