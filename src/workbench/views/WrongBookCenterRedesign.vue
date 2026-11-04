@@ -206,7 +206,7 @@ import PageHeader from '../components/ui/PageHeader.vue'
 import StatsCard from '../components/ui/StatsCard.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import { getStudents, createGeneratedExam, getGeneratedExamsByStudent } from '../../services/apiService'
+import { getStudents, createGeneratedExam, getGeneratedExamsByStudent, expandQuestionIdsForPaper } from '../../services/apiService'
 import { exportWrongBookPDF } from '../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
 import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../domain/examNaming'
@@ -353,8 +353,21 @@ const goEditOriginalQuestion = (item) => {
       } catch { ElMessage.info('已取消生成'); return }
     }
     const examName = buildExamNameWithSeq(baseName, existing, student.id)
-    const exam = await createGeneratedExam({ student_id: student.id, name: examName, question_ids: questionIds })
+    // 整题入卷（2026-11-04 负责人口径）：错题往往只是某道大题的一个小问，学生单独
+    // 拿到「(2) 求证…」缺上下文、做得莫名其妙 ⇒ 建卷前把同题其余小问一并补进来。
+    // 判据在服务端（server/utils/questionGroupExpand.js），前端只消费结果。
+    const expanded = await expandQuestionIdsForPaper(questionIds)
+    const paperQuestionIds = expanded.questionIds
+    const exam = await createGeneratedExam({ student_id: student.id, name: examName, question_ids: paperQuestionIds })
     if (!exam?.id) throw new Error('创建重练卷失败')
+    // 渲染题单以 exam.question_ids 为准（后端还会兜底展开一次，幂等）——
+    // 卷面印的题与判题读的 question_ids 必须是同一份，否则题号对位整体错位。
+    const examQuestionIds = Array.isArray(exam.question_ids) && exam.question_ids.length > 0
+      ? exam.question_ids.map(String)
+      : paperQuestionIds
+    const groupNote = examQuestionIds.length > questionIds.length
+      ? `（含同题小问 ${examQuestionIds.length - questionIds.length} 个）`
+      : ''
     const suffix = droppedCount ? `（${droppedCount} 道练习册自包含错题未纳入重练）` : ''
     // r102（负责人裁决①）：直接接移动端的重练卷模块 —— 组卷后调同一个统一导出引擎
     // exportWrongBookPDF（移动端错题本「生成重练」同一条管线：服务端 Chromium 渲染
@@ -365,7 +378,7 @@ const goEditOriginalQuestion = (item) => {
       const paper = await exportWrongBookPDF({
         studentId: student.id,
         studentName: student.name,
-        questionIds,
+        questionIds: examQuestionIds,
         title: `${student.name || '学生'} - ${examName}`,
         showAnswers: false,
         qrContent: buildRetryTaskUrl(exam.id),
@@ -375,7 +388,7 @@ const goEditOriginalQuestion = (item) => {
       console.error('[WrongBookCenter] 重练卷 PDF 生成失败:', paperError?.message || paperError)
       paperMessage = `PDF 生成失败：${paperError?.message || '未知错误'}（重练卷已创建，可从学生档案「最近重练」重打）`
     }
-    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${suffix}${paperMessage ? ' · ' + paperMessage : ''}。可点「家长分享卡」下载成长摘要图转发给家长`)
+    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${examQuestionIds.length} 题${groupNote}${suffix}${paperMessage ? ' · ' + paperMessage : ''}。可点「家长分享卡」下载成长摘要图转发给家长`)
     wrongBookStore.clearSelection()
     emit('exam-created', exam)
     if (!embedded.value) router.push({ path: '/students/' + student.id, query: { tab: 'retry' } })

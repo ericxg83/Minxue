@@ -90,14 +90,18 @@ const katexRender = (latex, displayMode) => {
  * 统一走 preprocessMath（Unicode 上标/√/×÷≥≤≠ → LaTeX）+ splitToSegments
  * （数学片段自动识别），数学片段交 KaTeX，中文等文本片段原样转义输出。
  */
-const renderMath = (text) => {
+const renderMath = (text, { forceInline = false } = {}) => {
   if (!text) return ''
   const processed = preprocessMath(String(text))
   const segments = splitToSegments(processed)
   const mathSegs = segments.filter((s) => s.isMath && s.text)
   const hasRealText = segments.some((s) => !s.isMath && s.text.trim().length > 0)
-  // 独立成行唯一数学片段（如答案行）用块级排版，与前端口径一致
-  const standalone = mathSegs.length === 1 && !hasRealText
+  // 独立成行唯一数学片段（如答案行）用块级排版，与前端口径一致。
+  // ⛔ 选项必须传 forceInline：选项是「必然是行内项」的位置，整段只有公式
+  //    （纯数字 17、纯分数 \frac{3}{4}）不等于「这是独立公式」—— 否则 displayMode
+  //    会让「A.」停在第 1 行、答案掉到第 2 行居中，四个选项各自悬空、卷面散架。
+  //    同族事故见 src/utils/mathText.js#renderContentInline 注释，前端组卷预览已修。
+  const standalone = !forceInline && mathSegs.length === 1 && !hasRealText
   return segments
     .map((seg) => (seg.isMath && seg.text ? katexRender(seg.text, standalone) : escapeHtml(seg.text)))
     .join('')
@@ -192,6 +196,14 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
     items: paperOrder.filter((it) => it.blockKey === b.key),
   }))
 
+  // 卷面题数按**大题号**计（与 pdfGenerator.buildPaperBody 同口径）：整题入卷后
+  // questions.length 是小问数，印成「共 12 题」而卷面只有 5 个编号会让人以为丢题。
+  const paperNumCount = paperOrder.reduce((max, it) => Math.max(max, it.num), 0)
+  const totalSubCount = (questions || []).length
+  const countText = paperNumCount > 0 && totalSubCount > paperNumCount
+    ? `共 ${paperNumCount} 题（${totalSubCount} 个小问）`
+    : `共 ${totalSubCount} 题`
+
   let html = `<div class="page">
     ${qrSvg ? `<div class="qr-container">${qrSvg}<div class="qr-text">扫码做题</div></div>` : ''}
     <div class="head-area">
@@ -203,7 +215,7 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
         <span>得分：<span class="blank"></span></span>
       </div>
       <div class="divider"></div>
-      <div class="total-info">共 ${questions.length} 题</div>
+      <div class="total-info">${countText}</div>
     </div>
   `
   blocks.forEach((blk) => {
@@ -242,7 +254,7 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
         const cols = maxLen <= 8 ? 4 : maxLen <= 20 ? 2 : 1
         html += `<div class="opts opts-${cols}">`
         opts.forEach((opt, i) => {
-          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderMath(opt)}</span>`
+          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderMath(opt, { forceInline: true })}</span>`
         })
         html += `</div>`
       }

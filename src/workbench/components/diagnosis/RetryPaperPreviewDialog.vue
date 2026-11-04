@@ -123,7 +123,7 @@
  */
 import { computed, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getWrongQuestionsByStudent, fetchWrongQuestionsPage, createGeneratedExam, getGeneratedExamsByStudent, getStudentById } from '../../../services/apiService'
+import { getWrongQuestionsByStudent, fetchWrongQuestionsPage, createGeneratedExam, getGeneratedExamsByStudent, getStudentById, expandQuestionIdsForPaper } from '../../../services/apiService'
 import { exportWrongBookPDF } from '../../../utils/wrongBookPdfExporter'
 import { buildRetryTaskUrl } from '../../../utils/retryTaskUrl'
 import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../../domain/examNaming'
@@ -295,15 +295,26 @@ async function submit() {
       } catch { ElMessage.info('已取消生成'); creating.value = false; return }
     }
     const examName = buildExamNameWithSeq(baseName, existing, props.studentId)
-    const exam = await createGeneratedExam({ student_id: props.studentId, name: examName, question_ids: questionIds })
+    // 整题入卷（2026-11-04）：勾中的小问所属大题补全其余小问，判据走服务端
+    // server/utils/questionGroupExpand.js（与错题中心同一份实现）
+    const expanded = await expandQuestionIdsForPaper(questionIds)
+    const paperQuestionIds = expanded.questionIds
+    const exam = await createGeneratedExam({ student_id: props.studentId, name: examName, question_ids: paperQuestionIds })
     if (!exam?.id) throw new Error('创建重练卷失败')
+    // 渲染题单以 exam.question_ids 为准（后端兜底展开，幂等）——卷面与判题同源
+    const examQuestionIds = Array.isArray(exam.question_ids) && exam.question_ids.length > 0
+      ? exam.question_ids.map(String)
+      : paperQuestionIds
+    const groupNote = examQuestionIds.length > questionIds.length
+      ? `（含同题小问 ${examQuestionIds.length - questionIds.length} 个）`
+      : ''
     // PDF 失败不回滚组卷：卷已入「最近重练」，老师可从历史重打
     let paperMessage = ''
     try {
       const paper = await exportWrongBookPDF({
         studentId: props.studentId,
         studentName: studentName.value || '学生',
-        questionIds,
+        questionIds: examQuestionIds,
         title: `${studentName.value || '学生'} - ${examName}`,
         showAnswers: false,
         qrContent: buildRetryTaskUrl(exam.id)
@@ -313,7 +324,7 @@ async function submit() {
       console.error('[RetryPaperPreview] 重练卷 PDF 生成失败:', paperError?.message || paperError)
       paperMessage = `PDF 生成失败：${paperError?.message || '未知错误'}（卷已建好，可从学生档案「最近重练」重打）`
     }
-    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${questionIds.length} 题${dropped ? `（${dropped} 道未关联题目已剔除）` : ''}${paperMessage ? ' · ' + paperMessage : ''}`)
+    ElMessage.success(`已生成重练卷「${exam.name}」，共 ${examQuestionIds.length} 题${groupNote}${dropped ? `（${dropped} 道未关联题目已剔除）` : ''}${paperMessage ? ' · ' + paperMessage : ''}`)
     emit('created', exam)
     visible.value = false
   } catch (error) {

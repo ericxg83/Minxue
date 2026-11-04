@@ -215,7 +215,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Aim, ArrowLeft, ArrowRight, Loading, Refresh, User, WarningFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam, getRetryQuestionIdsByKp } from '../../services/apiService'
+import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam, getRetryQuestionIdsByKp, expandQuestionIdsForPaper } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
 import { isRetryPaperTask } from '../utils/retryPaperState'
 import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../domain/examNaming'
@@ -462,10 +462,15 @@ async function createExamFromItems(items, kpName = '') {
     } catch { ElMessage.info('已取消生成'); return }
   }
   const examName = buildExamNameWithSeq(baseName, existing, student.value.id)
-  const exam = await createGeneratedExam({ student_id: student.value.id, name: examName, question_ids: questionIds })
+  // 整题入卷（2026-11-04）：定向卷同样把「小问所属大题」补全，口径见
+  // server/utils/questionGroupExpand.js（与错题中心/诊断弹窗同一份实现）
+  const expanded = await expandQuestionIdsForPaper(questionIds)
+  const exam = await createGeneratedExam({ student_id: student.value.id, name: examName, question_ids: expanded.questionIds })
   if (!exam?.id) throw new Error('创建重练卷失败')
+  const paperCount = Array.isArray(exam.question_ids) && exam.question_ids.length > 0 ? exam.question_ids.length : questionIds.length
   const who = kpName ? `「${kpName}」` : '该考点'
-  ElMessage.success(`已为${who}生成定向重练卷，共 ${questionIds.length} 题`)
+  const groupNote = paperCount > questionIds.length ? `（含同题小问 ${paperCount - questionIds.length} 个）` : ''
+  ElMessage.success(`已为${who}生成定向重练卷，共 ${paperCount} 题${groupNote}`)
   exams.value = await getGeneratedExamsByStudent(student.value.id, false)
 }
 

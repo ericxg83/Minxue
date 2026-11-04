@@ -5,6 +5,7 @@ import { Toast } from 'antd-mobile'
 import { useStudentStore, useWrongQuestionStore, useExamStore } from '../../store'
 import { mockWrongQuestions } from '../../data/mockData'
 import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds } from '../../services/apiService'
+import { orderQuestionsByIds } from '../../utils/questionListOrder'
 import { buildRetryTaskUrl } from '../../utils/retryTaskUrl'
 import { countSameBaseToday } from '../../domain/examNaming'
 import dayjs from 'dayjs'
@@ -63,6 +64,9 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   const [generatedExamId, setGeneratedExamId] = useState(validExistingId || '')
   const examIdRef = useRef(validExistingId || '') // 同步保存组卷ID，避免导出时 state 未刷新
   const [savedExamName, setSavedExamName] = useState('') // 保存后的带序号最终名，供展示/文件名统一使用
+  // 组卷记录的权威题单（后端建卷时已把「小问所属大题」整题补全）。
+  // 打印/下载必须按它回拉题目 —— 只印一个小问、判题却按整题走就会整卷错位。
+  const paperQuestionIdsRef = useRef([])
 
   // 实时题目引用：异步补齐题目数据后，导出/打印始终使用最新题目列表，避免闭包读到旧数据
   const previewRef = useRef(previewQuestions)
@@ -107,6 +111,37 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
   useEffect(() => {
     ensureEnriched()
   }, [])
+
+  /**
+   * 按「组卷题单」回拉题目（2026-11-04 整题入卷）。
+   *
+   * 建卷时后端会把勾中小问所属大题的其他小问补进 question_ids；本页的
+   * previewQuestions 是老师进预览前选的题（可能只有一个小问）。若照旧打印，
+   * 卷面印 1 题、判题按 3 题对位 ⇒ 整卷错位。所以有权威题单时一律以它为准，
+   * 顺序也按题单（批量接口不保证返回顺序，打散就丢连排）。
+   */
+  const ensurePaperQuestions = async () => {
+    const ids = Array.isArray(paperQuestionIdsRef.current) ? paperQuestionIdsRef.current : []
+    const current = previewRef.current || []
+    if (ids.length > 0) {
+      const same = current.length === ids.length
+        && current.every((q, i) => String(q?.id) === String(ids[i]))
+      if (!same) {
+        try {
+          const fullQs = await getQuestionsByIds(ids)
+          if (fullQs && fullQs.length > 0) {
+            const ordered = orderQuestionsByIds(fullQs, ids)
+            setPreviewQuestions(ordered)
+            previewRef.current = ordered
+            return ordered
+          }
+        } catch (e) {
+          console.warn('[PrintPreview] 按组卷题单回拉题目失败，退回本地题单:', e?.message || e)
+        }
+      }
+    }
+    return await ensureEnriched()
+  }
 
   // 预热渲染服务：Render 免费实例会休眠、Chromium 冷启动需数秒。进预览页即后台打一次
   // 健康检查，趁用户还在看预览时把它唤醒，真正点"下载 PDF"时就不用等冷启动。
@@ -318,13 +353,18 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
         if (exam?.id) {
           examIdRef.current = exam.id
           setGeneratedExamId(exam.id)
+          // 权威题单：后端建卷时已把同题小问补全（整题入卷），打印/判题都按它走
+          const examQids = Array.isArray(exam.question_ids) && exam.question_ids.length > 0
+            ? exam.question_ids.map(String)
+            : questionIds.map(String)
+          paperQuestionIdsRef.current = examQids
           // 加入 store，使后续同天组卷的序号继续递增
           if (addGeneratedExam) {
             addGeneratedExam({
               id: exam.id,
               student_id: currentStudent.id,
               name: examName,
-              question_ids: questionIds,
+              question_ids: examQids,
               created_at: exam.created_at || new Date().toISOString(),
               status: 'ungraded',
               source: 'generated',
@@ -350,7 +390,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     try {
       saved = await saveGeneratedExamRecord()
       setPdfStage('正在加载试卷数据…')
-      questions = await ensureEnriched()
+      questions = await ensurePaperQuestions()
       setPdfStage('正在生成 PDF，请稍候…')
       const result = await generatePDF(questions)
       if (result && result.pdfBlob) {
@@ -421,7 +461,7 @@ export default function PrintPreview({ onClose, questions: propQuestions, existi
     try {
       saved = await saveGeneratedExamRecord()
       setPdfStage('正在加载试卷数据…')
-      const questions = await ensureEnriched()
+      const questions = await ensurePaperQuestions()
       if (!questions || questions.length === 0) throw new Error('没有题目可打印')
 
       // Android Capacitor 的 WebView 不保证 iframe.contentWindow.print() 有效，

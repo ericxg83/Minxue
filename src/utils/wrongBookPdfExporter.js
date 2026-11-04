@@ -3,6 +3,8 @@ import { saveAs } from 'file-saver'
 import { getQuestionsByIds } from '../services/apiService'
 import { triggerBrowserPrint } from './browserPrint'
 import { exportServerPDF } from './serverPdfExporter'
+// 批量接口不保证返回顺序，必须按题单重排后再渲染（否则同组小问被打散、卷面编号分叉）
+import { orderQuestionsByIds } from './questionListOrder'
 // 排卷字段完整性判据（2026-10-15 事故防御）：缺排卷字段时强制拉全量补齐
 import { isMissingRetryLayoutFields } from './retryPaperOrder'
 
@@ -136,6 +138,8 @@ export async function exportWrongBookPDF({
         const map = {}
         fullQs.forEach(q => { map[q.id] = q })
         qs = qs ? qs.map(q => map[q.id] || q) : fullQs
+        // 卷面题序 = 题单顺序（判题侧按同一份 question_ids 对位）
+        qs = orderQuestionsByIds(qs, ids)
       }
     } catch (e) {
       console.warn('[WrongBookPdfExporter] 拉取完整题目失败，使用本地数据:', e.message)

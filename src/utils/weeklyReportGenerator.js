@@ -1,8 +1,10 @@
-import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds, getTasksByStudent, updateGeneratedExam } from '../services/apiService'
+import { createGeneratedExam, getGeneratedExamsByStudent, getQuestionsByIds, getTasksByStudent, updateGeneratedExam, expandQuestionIdsForPaper } from '../services/apiService'
 import { triggerCustomHTMLPrint } from './browserPrint'
 import { renderFullHTML, exportServerPDF, getKatexCssWithInlineFonts } from './serverPdfExporter'
 import { detectProductionEnv } from './wrongBookPdfExporter'
 import { renderMathInContainer, preloadKatexFonts } from './pdfGenerator'
+import { orderQuestionsByIds } from './questionListOrder'
+import { buildRetryPaperOrder } from './retryPaperOrder'
 import { periodWord } from './reportPeriodWord'
 import dayjs from 'dayjs'
 import isoWeek from 'dayjs/plugin/isoWeek'
@@ -1288,19 +1290,25 @@ async function resolveReusableExamId(studentId, examName, wrongQuestionIds) {
 async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestionIds, examName, totalCount = 0, mode = 'week') {
   if (!wrongQuestionIds || wrongQuestionIds.length === 0) return ''
 
-  // 1. 拉取完整题目数据
-  const fullQs = await getQuestionsByIds(wrongQuestionIds, studentId)
+  // 0. 整题入卷（2026-11-04 负责人口径）：与错题中心/诊断弹窗同一套判据 ——
+  //    错题往往只是某道大题的一个小问，只印小问学生没法做。
+  //    ⛔ 渲染的题、二维码指向的组卷、判题读的 question_ids 必须是同一份题单。
+  const expanded = await expandQuestionIdsForPaper(wrongQuestionIds)
+  const paperQuestionIds = expanded.questionIds
+
+  // 1. 拉取完整题目数据（按题单顺序重排：批量接口不保证返回顺序，打散就丢连排）
+  const fullQs = orderQuestionsByIds(await getQuestionsByIds(paperQuestionIds, studentId), paperQuestionIds)
   if (!fullQs || fullQs.length === 0) return ''
 
   // 2. 先拿到 exam 记录（幂等复用优先，否则新建；examId 用于二维码）
   let qrContent = undefined
   try {
-    let examId = await resolveReusableExamId(studentId, examName, wrongQuestionIds)
+    let examId = await resolveReusableExamId(studentId, examName, paperQuestionIds)
     if (!examId) {
       const examRecord = await createGeneratedExam({
         student_id: studentId,
         name: examName,
-        question_ids: wrongQuestionIds,
+        question_ids: paperQuestionIds,
       })
       examId = examRecord?.id
     }
@@ -1314,8 +1322,9 @@ async function renderExamFullHTMLForReport(studentId, studentName, wrongQuestion
   // embedPaperCssInBody：把 buildPaperCSS scoped 内嵌到 body，合并周报时样式随 body 保留，
   // 排版与移动端「生成试卷」（PrintPreview）完全一致
   // 标题如实标注「精选 N / 本周期共 M」，让家长知道这是优先重练的一小批、其余在错题本。
+  // N 按**卷面大题数**算（连排小问共用一个号），否则整题入卷后同一道大题会被数成 3 题。
   const pw = periodWord(mode)
-  const shown = fullQs.length
+  const shown = buildRetryPaperOrder(fullQs).reduce((max, it) => Math.max(max, it.num), 0) || fullQs.length
   const titleSuffix = totalCount > shown
     ? `（精选 ${shown} 题 · ${pw}共 ${totalCount} 题）`
     : `（${shown} 题）`

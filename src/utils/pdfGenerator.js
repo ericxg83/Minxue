@@ -2,7 +2,7 @@ import qrcode from 'qrcode-generator'
 import renderMathInElement from 'katex/dist/contrib/auto-render.mjs'
 import { KATEX_CSS_WITH_FONTS as katexCss } from './katexCssWithFonts'
 import { isSvgCode } from './geometryDisplay'
-import { renderContent, auditLoopDotRendering } from './mathText'
+import { renderContent, renderContentInline, auditLoopDotRendering } from './mathText'
 import { normalizeOptions, optionColumns } from './optionText'
 // 多小问（题组）共享题干展示口径：与 PC 错题卡片、服务端重练卷 PDF 共用同一套实现
 import { resolveQuestionDisplayStem } from './questionStem'
@@ -298,7 +298,12 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
         const cols = optionColumns(q.options)
         html += `<div class="opts opts-${cols}">`
         opts.forEach((opt, i) => {
-          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContent(opt)}</span>`
+          // ⛔ 选项是「必然是行内项」的位置，必须走 renderContentInline。
+          // renderContent 的「独立公式」启发式会把整段只有公式的选项（纯数字 17、
+          // 纯分数 \frac{3}{4}）判成 $$...$$ ⇒ KaTeX displayMode 块级居中，
+          // 结果是「A.」在第 1 行、答案掉到第 2 行居中，四个选项各自悬空、卷面散架。
+          // 与 composePaperPdf / handoutPdf / lecturePdf 同口径（2026-10-21 组卷预览事故的同一族）。
+          html += `<span class="opt">${String.fromCharCode(65 + i)}. ${renderContentInline(opt)}</span>`
         })
         html += `</div>`
       }
@@ -354,6 +359,14 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
     console.error('[试卷自检] 循环小数标记在渲染产物里丢失，印出来的题目会变义：', loopDotLosses)
   }
 
+  // 卷面题数按**大题号**计（连排小问共用一个号）：整题入卷后 questions.length 是
+  // 小问数，直接印「共 12 题」而卷面只有 5 个编号，老师/学生都会以为丢了题。
+  const paperNumCount = paperOrder.reduce((max, it) => Math.max(max, it.num), 0)
+  const totalSubCount = (questions || []).length
+  const countText = paperNumCount > 0 && totalSubCount > paperNumCount
+    ? `共 ${paperNumCount} 题（${totalSubCount} 个小问）`
+    : `共 ${totalSubCount} 题`
+
   return `<div class="page">
     <div id="qr-container" class="qr-container" style="display:none;">
       <img id="qr-img" class="qr-canvas" />
@@ -368,7 +381,7 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
         <span>得分：<span class="blank"></span></span>
       </div>
       <div class="divider"></div>
-      <div class="total-info">共 ${questions.length} 题</div>
+      <div class="total-info">${countText}</div>
     </div>
     ${RETRY_PAPER_BLOCKS
       .map(b => renderSection(paperOrder.filter(it => it.blockKey === b.key), b.label))

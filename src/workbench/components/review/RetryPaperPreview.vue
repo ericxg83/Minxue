@@ -32,7 +32,7 @@
           <span>班级：<i class="rpp-blank"></i></span>
           <span>得分：<i class="rpp-blank"></i></span>
         </div>
-        <p class="rpp-total">共 {{ questions.length }} 题 · 卷面预览（与打印版同口径，未含判定结果）</p>
+        <p class="rpp-total">{{ countText }} · 卷面预览（与打印版同口径，未含判定结果）</p>
       </header>
 
       <section
@@ -219,6 +219,20 @@ const blocks = computed(() => {
       return { ...def, rows }
     })
     .filter(Boolean)
+})
+
+/** 卷面题数：按大题号计（连排小问共号）；真的含小问时补注小问数，与打印版同口径 */
+const countText = computed(() => {
+  const ids = (props.questionIds || []).filter(Boolean)
+  const pos = new Map(ids.map((id, i) => [id, i]))
+  const base = questions.value
+    .slice()
+    .sort((a, b) => (pos.get(a?.id) ?? 9999) - (pos.get(b?.id) ?? 9999))
+  const numCount = buildRetryPaperOrder(base).reduce((max, it) => Math.max(max, it.num), 0)
+  const subCount = base.length
+  return numCount > 0 && subCount > numCount
+    ? `共 ${numCount} 题（${subCount} 个小问）`
+    : `共 ${subCount} 题`
 })
 
 onMounted(load)

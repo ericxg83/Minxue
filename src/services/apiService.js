@@ -449,6 +449,35 @@ export const getQuestionsByIds = async (questionIds, studentId) => {  if (!quest
   return (data.questions || []).map(parseQuestionFields)
 }
 
+/**
+ * 错题卷「整题入卷」扩展（2026-11-04 负责人口径）。
+ *
+ * 老师勾的是错题（往往只是某道大题的一个小问），学生需要看到整道题：
+ * 同 task+页+题号的其余小问一并入卷，卷面才会连排成「10(1). 10(2). 10(3).」。
+ * 判据（空 sub_no 兄弟 / 同 sub 内容冲突 / parent_stem 不一致不扩展）在
+ * server/utils/questionGroupExpand.js —— 前端不得自己另写一份。
+ *
+ * ⛔ 渲染与组卷必须用同一个题单：先拿本函数的结果去拉题/渲染，
+ *    再用同一份 ids 调 createGeneratedExam（后端会再兜底展开一次，幂等）。
+ */
+export const expandQuestionIdsForPaper = async (questionIds) => {
+  const ids = Array.isArray(questionIds) ? questionIds.filter(Boolean) : []
+  if (ids.length === 0) return { questionIds: [], groups: [], addedCount: 0 }
+  try {
+    const data = await apiRequest('/questions/expand-groups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    })
+    const out = Array.isArray(data.questionIds) && data.questionIds.length > 0 ? data.questionIds : ids
+    return { questionIds: out, groups: data.groups || [], addedCount: data.addedCount || 0 }
+  } catch (e) {
+    // 扩展失败不阻断组卷：退回原题单，行为与改动前一致
+    console.warn('[expandQuestionIdsForPaper] 整题展开失败，使用原题单:', e?.message || e)
+    return { questionIds: ids, groups: [], addedCount: 0 }
+  }
+}
+
 // ── 错题「待补入」清单（2026-09-27）──
 // 闸1 分层（2026-09-23 P2）把系统侧缺项（缺图/缺选项/缺答案/题型未定）的错题
 // 自动记「本次不加入」放行、不拦卷。本接口列出这些欠账（按学生分组）：
@@ -869,6 +898,21 @@ export const getExamGradingDetail = async (examId) => {
 export const getRetryTask = async (taskId) => {
   const data = await apiRequest(`/retry-tasks/${taskId}`)
   return data.task
+}
+
+/**
+ * 把上传后的 AI 批改任务挂到重练卷上，并把卷置 grading。
+ *
+ * 唯一实现：二维码入口页（移动端 RetryTask）与 PC 批改中心「补传答卷」都调本函数。
+ * 卷是否「已交卷」的权威判据仍是 tasks.generated_exam_id（见 utils/retryPaperState.js），
+ * 本接口只负责把 retry_task_id / status 同步过去，避免两端各写一套 PATCH。
+ */
+export const linkRetryTask = async (examId, retryTaskId) => {
+  return apiRequest(`/retry-tasks/${examId}/link`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ retryTaskId })
+  })
 }
 
 export const createGeneratedExam = async (examData) => {

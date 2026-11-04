@@ -119,6 +119,8 @@ import { processTask, generateAnswerForQuestion, extractAnswerFromAnalysis, norm
 // 本地占位标签/难度（difficulty 默认 3），写入 tags_source='ai' 后退出筛选。
 import { generateTag as generateTagWithLLM } from './backfillTags.js'
 import { resetModelIndex, WORKBOOK_OCR_VENDOR_CHAIN, isDegradedAnswerEngine } from './config/ai.js'
+// 错题卷「整题入卷」：小问成错题 ⇒ 同组全部小问一起组卷（见 utils/questionGroupExpand.js）
+import { expandQuestionIdsForPaper } from './utils/questionGroupExpand.js'
 import weeklyReportRouter from './routes/weeklyReport.js'
 import shareCardRouter from './routes/shareCard.js'
 import worksheetsRouter from './routes/worksheets.js'
@@ -4471,6 +4473,43 @@ app.delete('/api/wrong-questions/:id', async (req, res) => {
 })
 
 // Generated Exams
+
+/**
+ * 错题卷「整题入卷」扩展（2026-11-04 负责人口径）。
+ *
+ * 老师勾的是错题（往往只是某道大题的一个小问），但学生需要看到整道题：
+ * 同 task+页+题号的其余小问一并入卷，卷面才会连排成「10(1). 10(2). 10(3).」。
+ * 判据与放弃条件见 utils/questionGroupExpand.js 文件头（空 sub_no 兄弟、
+ * 同 sub 内容冲突、parent_stem 不一致的组一律不扩展）。
+ *
+ * 组卷侧同样会调一次（POST /api/generated-exams）作为兜底，本端点供需要
+ * **先拿到完整题单再渲染**的调用方（周报再测卷 / 移动端打印预览）提前展开。
+ */
+app.post('/api/questions/expand-groups', async (req, res) => {
+  try {
+    const { ids } = req.body || {}
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.json({ success: true, questionIds: [], groups: [], addedCount: 0 })
+    }
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const validIds = ids.map(String).filter((id) => uuidRegex.test(id))
+    if (validIds.length === 0) {
+      return res.json({ success: true, questionIds: [], groups: [], addedCount: 0 })
+    }
+    const result = await expandQuestionIdsForPaper(validIds)
+    return res.json({
+      success: true,
+      questionIds: result.ids,
+      groups: result.groups,
+      addedCount: result.addedCount,
+    })
+  } catch (error) {
+    // 扩展是「让卷子更完整」的增强，失败不能让老师组不了卷 —— 返回原题单由调用方继续。
+    console.error('[expand-groups] 整题展开失败，退回原题单:', error.message)
+    return res.json({ success: false, questionIds: req.body?.ids || [], groups: [], addedCount: 0, error: error.message })
+  }
+})
+
 app.post('/api/generated-exams', async (req, res) => {
   try {
     const { studentId, name, questionIds } = req.body
@@ -4478,13 +4517,29 @@ app.post('/api/generated-exams', async (req, res) => {
       return res.status(400).json({ error: '缺少 studentId、name 或 questionIds' })
     }
 
+    // 整题入卷（兜底）：任何入口建卷都把「多小问大题」补全，question_ids 是判题
+    // 的唯一依据，必须与卷面渲染的题单同源 —— 所以扩展只能发生在这里或调用方
+    // 显式先调 /api/questions/expand-groups，前端不得自己另拼一份。
+    let finalQuestionIds = questionIds
+    let expansion = null
+    try {
+      const expanded = await expandQuestionIdsForPaper(questionIds)
+      finalQuestionIds = expanded.ids
+      expansion = { addedCount: expanded.addedCount, groups: expanded.groups }
+      if (expanded.addedCount > 0) {
+        console.log(`[generated-exams] 整题入卷：+${expanded.addedCount} 个小问（${expanded.groups.length} 道大题补全）`)
+      }
+    } catch (e) {
+      console.error('[generated-exams] 整题展开失败，按原题单建卷:', e.message)
+    }
+
     const { rows } = await query(
       `INSERT INTO ${TABLES.GENERATED_EXAMS} (student_id, name, question_ids)
        VALUES ($1, $2, $3) RETURNING *`,
-      [studentId, name, JSON.stringify(questionIds)]
+      [studentId, name, JSON.stringify(finalQuestionIds)]
     )
 
-    res.status(201).json({ success: true, exam: rows[0] })
+    res.status(201).json({ success: true, exam: rows[0], expansion })
   } catch (error) {
     console.error('创建错题卷失败:', error)
     res.status(500).json({ error: error.message })
