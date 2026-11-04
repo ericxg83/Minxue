@@ -57,21 +57,23 @@ test('★ 红线：穷举全部组合，任何写入的 errorCount 都必须 ≥
   for (const existing of existingVariants) {
     for (const isCorrect of [true, false]) {
       for (const skipWrongBook of [true, false]) {
-        const d = decideRetrySettlementItem({ existing, isCorrect, skipWrongBook })
-        checked++
-        if (d.action === RETRY_SETTLE_ACTION.SKIP) {
-          assert.equal(d.errorCount, null, `skip 不得产出 errorCount（${JSON.stringify({ existing, isCorrect, skipWrongBook })}）`)
-          assert.equal(d.status, null, `skip 不得产出 status（${JSON.stringify({ existing, isCorrect, skipWrongBook })}）`)
-          continue
+        for (const notAttempted of [true, false]) {
+          const d = decideRetrySettlementItem({ existing, isCorrect, skipWrongBook, notAttempted })
+          checked++
+          if (d.action === RETRY_SETTLE_ACTION.SKIP) {
+            assert.equal(d.errorCount, null, `skip 不得产出 errorCount（${JSON.stringify({ existing, isCorrect, skipWrongBook, notAttempted })}）`)
+            assert.equal(d.status, null, `skip 不得产出 status（${JSON.stringify({ existing, isCorrect, skipWrongBook, notAttempted })}）`)
+            continue
+          }
+          assert.ok(
+            Number.isInteger(d.errorCount) && d.errorCount >= 1,
+            `写入 errorCount 必须 ≥ 1，实际 ${d.errorCount}（${JSON.stringify({ existing, isCorrect, skipWrongBook, notAttempted })}）`
+          )
         }
-        assert.ok(
-          Number.isInteger(d.errorCount) && d.errorCount >= 1,
-          `写入 errorCount 必须 ≥ 1，实际 ${d.errorCount}（${JSON.stringify({ existing, isCorrect, skipWrongBook })}）`
-        )
       }
     }
   }
-  assert.equal(checked, existingVariants.length * 4, '组合数不对，穷举窗口被改窄了')
+  assert.equal(checked, existingVariants.length * 8, '组合数不对，穷举窗口被改窄了')
 })
 
 test('★ 红线：不存在任何输入能让结算写出 error_count = 0', () => {
@@ -79,8 +81,10 @@ test('★ 红线：不存在任何输入能让结算写出 error_count = 0', () 
   for (const existing of existingVariants) {
     for (const isCorrect of [true, false]) {
       for (const skipWrongBook of [true, false]) {
-        const d = decideRetrySettlementItem({ existing, isCorrect, skipWrongBook })
-        assert.notEqual(d.errorCount, 0, `error_count=0 会让学生看到「我没做错过」的错题（${JSON.stringify({ existing, isCorrect, skipWrongBook })}）`)
+        for (const notAttempted of [true, false]) {
+          const d = decideRetrySettlementItem({ existing, isCorrect, skipWrongBook, notAttempted })
+          assert.notEqual(d.errorCount, 0, `error_count=0 会让学生看到「我没做错过」的错题（${JSON.stringify({ existing, isCorrect, skipWrongBook, notAttempted })}）`)
+        }
       }
     }
   }
@@ -156,6 +160,51 @@ test('skipWrongBook 只在答错时生效；答对时由「不在册」那条守
   assert.equal(correctSkip.action, RETRY_SETTLE_ACTION.UPDATE, '答对仍要推进生命周期（skipWrongBook 不拦答对）')
 })
 
+// ── D. 空题新口径（2026-11-04 负责人确认）────────────────────────────────
+//
+// 重练卷空题 = 零信号：不计错误次数、不动掌握档位、留册等下次重印。
+// 一刀切「空=不会」的代价：误伤「量大/没时间而空」的零信号题，且 error_count
+// 虚高会把没做的题推向周报再测卷选题前排（weeklyReport.js 同难度内 error_count 优先）。
+// 老师明确标「错」的空题不带 notAttempted，仍走 wrong 分支——裁量权保留。
+
+test('★ 空题新口径：notAttempted + 答错 ⇒ skip（不计错、不退档、留册）', () => {
+  for (const lc of ALL_LIFECYCLES) {
+    const d = decideRetrySettlementItem({ existing: existingRow(lc, 3), isCorrect: false, notAttempted: true })
+    assert.equal(d.action, RETRY_SETTLE_ACTION.SKIP, `${lc} 档的空题不得被结算动到`)
+    assert.equal(d.reason, 'blank_not_attempted')
+    assert.equal(d.errorCount, null, `空题不得 +1 错误次数（${lc}）`)
+    assert.equal(d.nextLifecycle, lc, `空题不得退档（${lc}）`)
+    assert.equal(d.countsAs, null, '空题跳过不得计入 mastered/upgraded/reset 统计')
+  }
+})
+
+test('★ 空题新口径：notAttempted + 不在册 ⇒ skip（不得凭空建行）', () => {
+  const d = decideRetrySettlementItem({ existing: null, isCorrect: false, notAttempted: true })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.SKIP)
+  assert.equal(d.reason, 'blank_not_attempted')
+  assert.equal(d.errorCount, null)
+})
+
+test('★ 空题新口径：notAttempted 只在答错时生效，判对照常推进', () => {
+  const d = decideRetrySettlementItem({ existing: existingRow('new', 1), isCorrect: true, notAttempted: true })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.UPDATE, '空题被判「对」说明老师有明确结论，照常推进')
+  assert.equal(d.nextLifecycle, 'review_1')
+  assert.equal(d.errorCount, 1)
+})
+
+test('★ 空题新口径：老师标「错」的空题（notAttempted=false）仍正常惩罚', () => {
+  const d = decideRetrySettlementItem({ existing: existingRow('review_1', 2), isCorrect: false, notAttempted: false })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.UPDATE)
+  assert.equal(d.errorCount, 3, '「他就是不会」的空题由老师标错，必须 +1')
+  assert.equal(d.nextLifecycle, 'new')
+})
+
+test('★ 空题新口径：notAttempted 优先于 skipWrongBook（reason 记 blank_not_attempted）', () => {
+  const d = decideRetrySettlementItem({ existing: existingRow('new', 1), isCorrect: false, skipWrongBook: true, notAttempted: true })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.SKIP)
+  assert.equal(d.reason, 'blank_not_attempted', '两个都跳过时，审计 reason 应记更具体的空题口径')
+})
+
 test('生命周期状态机未被本次抽函数改动（与 test/lifecycleQueue.test.mjs 同口径）', () => {
   assert.equal(getNextLifecycle('new', true), 'review_1')
   assert.equal(getNextLifecycle('review_1', true), 'mastered')
@@ -217,6 +266,32 @@ test('C3. 纯函数里必须保留「答对 + 不在册 ⇒ skip」守卫（防�
   )
   if (seg !== null && !seg.includes('correct_without_existing_row')) {
     fails.push('守卫的 reason 标识被改动了，请同步更新本锁与报告口径')
+  }
+  assert.deepEqual(fails, [])
+})
+
+test('C4. 空题口径必须贯通结算链路：finalize 传参 notAttempted + 审计留痕 not_attempted', () => {
+  const fails = []
+  const fn = anchoredSlice(
+    FINALIZER_SRC,
+    'export const finalizeGeneratedExamResults',
+    12000,
+    'finalizeGeneratedExamResults 函数体',
+    fails
+  )
+  if (fn !== null) {
+    if (!fn.includes('notAttempted: r.notAttempted === true')) {
+      fails.push('结算结果归一化丢了 notAttempted —— 空题会被当答错结算（2026-11-04 口径回归）')
+    }
+    if (!fn.includes('notAttempted: result.notAttempted')) {
+      fails.push('结算循环没有把 notAttempted 传给 decideRetrySettlementItem —— 空题口径断链')
+    }
+    if (!fn.includes('not_attempted: result.notAttempted === true')) {
+      fails.push('结算审计没写 not_attempted —— 回填/审计无法区分「未作答跳过」与「真实判错」')
+    }
+    if (!fn.includes("(result.skipWrongBook || result.notAttempted) ? 'skip' : 'settle'")) {
+      fails.push('空题跳过在审计里必须记 wrong_book_action=skip，不得伪装成真实判错')
+    }
   }
   assert.deepEqual(fails, [])
 })

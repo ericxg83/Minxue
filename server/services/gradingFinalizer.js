@@ -384,7 +384,12 @@ export const finalizeGeneratedExamResults = async ({
       .map(r => ({
         questionId: r.questionId,
         isCorrect: r.isCorrect === true,
-        skipWrongBook: r.skipWrongBook === true
+        skipWrongBook: r.skipWrongBook === true,
+        // [2026-11-04 空题新口径] 客户端声明「学生未作答且老师未明确判定」。
+        // 服务端不盲信：下面用 DB 的 answer_source 复核（复核页加载后老师可能
+        // 做过「AI 重解析」补出学生答案，旧快照里的 blank 已不成立），
+        // 过期的声明降级为普通结算，避免静默吞掉一次真实判错。
+        notAttempted: r.notAttempted === true
       }))
     : []
 
@@ -395,6 +400,22 @@ export const finalizeGeneratedExamResults = async ({
       upgradedCount: 0,
       resetCount: 0,
       lifecycleChanges: []
+    }
+  }
+
+  // [2026-11-04] notAttempted 复核：只信此刻 DB 里仍是 answer_source='blank' 的题。
+  const claimedBlankIds = normalizedResults.filter(r => r.notAttempted).map(r => r.questionId)
+  if (claimedBlankIds.length > 0) {
+    const { rows: notBlankRows } = await query(
+      `SELECT id FROM ${TABLES.QUESTIONS}
+       WHERE id = ANY($1::uuid[]) AND (answer_source IS DISTINCT FROM 'blank')`,
+      [claimedBlankIds]
+    )
+    if (notBlankRows.length > 0) {
+      const staleBlankIds = new Set(notBlankRows.map(row => row.id))
+      for (const r of normalizedResults) {
+        if (staleBlankIds.has(r.questionId)) r.notAttempted = false
+      }
     }
   }
 
@@ -434,7 +455,8 @@ export const finalizeGeneratedExamResults = async ({
     const decision = decideRetrySettlementItem({
       existing,
       isCorrect: result.isCorrect,
-      skipWrongBook: result.skipWrongBook
+      skipWrongBook: result.skipWrongBook,
+      notAttempted: result.notAttempted
     })
 
     if (decision.countsAs === 'mastered') masteredCount++
@@ -570,18 +592,28 @@ export const finalizeGeneratedExamResults = async ({
            generated_exam_id: generatedExamId,
            settlement_key: settlementKey,
            settlement_mode: 'retry',
-           wrong_book_action: result.skipWrongBook ? 'skip' : 'settle'
+           // [2026-11-04] 空题跳过也记 'skip'，审计里不再伪装成真实判错（'settle'）；
+           //   not_attempted 留痕让回填/审计能精确区分「未作答跳过」与「真实判错」，
+           //   不必再靠 questions.answer_source 的"当前值"反推历史。
+           wrong_book_action: (result.skipWrongBook || result.notAttempted) ? 'skip' : 'settle',
+           not_attempted: result.notAttempted === true
          })]
       )
     }
   })
 
   // 知识点/掌握度同步是尽力而为的旁路（失败仅告警），放在事务外避免长事务持锁。
+  // [2026-11-04 空题新口径] notAttempted 的题是零信号，不参与知识点掌握度同步
+  // （syncQuestionsKnowledgeAndMastery 内部本就按 answer_source='blank' 跳过，
+  // 这里在结算侧显式过滤，把口径写死在源头，防上游跳过逻辑日后被改动）。
   if (pendingResults.length > 0) {
-    try {
-      await syncReviewResultsMastery({ studentId, results: pendingResults })
-    } catch (error) {
-      console.error(`[GradingFinalizer] mastery sync failed exam=${generatedExamId}:`, error.message)
+    const masteryResults = pendingResults.filter(r => !(r.notAttempted && !r.isCorrect))
+    if (masteryResults.length > 0) {
+      try {
+        await syncReviewResultsMastery({ studentId, results: masteryResults })
+      } catch (error) {
+        console.error(`[GradingFinalizer] mastery sync failed exam=${generatedExamId}:`, error.message)
+      }
     }
   }
 

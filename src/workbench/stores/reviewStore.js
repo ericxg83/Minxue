@@ -1775,7 +1775,12 @@ export const useReviewStore = defineStore('review', () => {
         .map(q => ({
           questionId: q.id,
           isCorrect: effectiveIsCorrect(q),
-          skipWrongBook: q.review_status === REVIEW_STATUS.WRONG_NO_BOOK
+          skipWrongBook: q.review_status === REVIEW_STATUS.WRONG_NO_BOOK,
+          // [2026-11-04 空题新口径] 学生未作答且老师没碰过 ⇒ notAttempted，
+          //   服务端按 skip 结算：不计错误次数、不动掌握档位、留在错题册等下次重印。
+          //   老师明确判过的空题（对/错/不入册）不带此标记，按老师的结论结算——
+          //   确认「他就是不会」时手动标「错」仍会正常扣分（裁量权保留）。
+          notAttempted: q.answer_source === 'blank' && !q.review_status
         }))
         .filter(r => r.isCorrect != null)
       if (results.length > 0 && currentStudent.value?.id) {

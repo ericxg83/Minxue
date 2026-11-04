@@ -71,6 +71,7 @@ export const getNextLifecycle = (current, isCorrect) => {
  *        该生这道题在错题本里的现有行；null/undefined = 不在册
  * @param {boolean} input.isCorrect      本次重练该题的判定结果
  * @param {boolean} input.skipWrongBook  调用方声明「这道题不要进错题本」（仅在答错时有意义）
+ * @param {boolean} input.notAttempted  重练卷空题（学生未作答且老师未明确判定，2026-11-04）
  * @returns {{
  *   action: 'insert'|'update'|'skip',
  *   reason: string,
@@ -81,7 +82,7 @@ export const getNextLifecycle = (current, isCorrect) => {
  *   countsAs: ?'mastered'|'upgraded'|'reset'  // 结算统计口径
  * }}
  */
-export function decideRetrySettlementItem({ existing = null, isCorrect = false, skipWrongBook = false } = {}) {
+export function decideRetrySettlementItem({ existing = null, isCorrect = false, skipWrongBook = false, notAttempted = false } = {}) {
   const currentLifecycle = existing?.lifecycle_status || LIFECYCLE_STATUS.NEW
 
   const skip = (reason) => ({
@@ -93,6 +94,18 @@ export function decideRetrySettlementItem({ existing = null, isCorrect = false, 
     errorCount: null,
     countsAs: null
   })
+
+  // ★ 2026-11-04 新口径（负责人确认）：重练卷空题 = 零信号，不产生任何结算动作。
+  //   重练卷的空题混着两种来源：「不会而空」（有负信号）和「量大/没时间而空」（零信号），
+  //   系统分不开；且这题本来就在错题册里（因旧错入卷），空题判错 = 对同一个旧错误
+  //   二次惩罚、没有任何新证据。一刀切「空=不会」的实证代价：error_count 虚高会把
+  //   没做的题推向周报再测卷选题前排（weeklyReport.js 选题排序：同难度内
+  //   error_count 优先，前端取前 N），且完成率越低的学生被误扣越多。
+  //   信号不丢：题留册、档位不动，下次重印还会出，学生真做一次信号自动补上；
+  //   掌握度也只在做对时上升，skip 永远不会制造假掌握。
+  //   notAttempted 由调用方按「answer_source='blank' 且老师未明确判定」推导；
+  //   老师明确标「错」的空题不带此标记，仍走 wrong 分支（「他就是不会」的裁量权保留）。
+  if (notAttempted && !isCorrect) return skip('blank_not_attempted')
 
   // 调用方显式声明不入册（学生空答/跳过），且本题确实没答对 —— 保持原语义。
   // 注意：`skipWrongBook` 只在答错时生效（答对本来就不该入册，见下一条）。
