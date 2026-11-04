@@ -5215,3 +5215,16 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   - 调用方零改：PC 现有调用不传 class ⇒ `undefined` ⇒ `JSON.stringify` 自动省略 ⇒ 服务端 `COALESCE` 保留原值，无回归；`StudentSwitcher` 已正确采集，改后自然落库与回显。
 - **验证计划（若落地）**：① 真机 `POST /api/students` 带 class → 落库非空、`GET /api/students` 回显 class；② 回归锁 `test/studentClassPersist.test.mjs`：内联合成旧版（create/update 不传 class、GET 不返 class）判红 + 新树判绿 + 反向自检；③ 四道闸全过（npm test 全绿 / lint 0 新增 error / 隔离构建 / 冒烟读 DOM：切换学生页班级可录入可回显）。
 - **处置**：本 automation 巡检发现，C 级自决权不覆盖（公共 API 响应体新增字段 + 写库路径 + 共享 apiService 跨 lane）→ 只提案，等负责人拍板。
+
+## 2026-11-01 巡检交接项 · r376 僵尸锁遗留「已完成未提交」A 级修复
+
+- **性质**：本巡检轮（读 _loop_state.json 得 `state:running, round:376`，自 14:48 GMT+8 起运行约 5h，无 r376 报告；`git status` 现 3 个未提交文件）→ 判定 r376 为**僵尸锁**（会话消亡未释放）。本轮只读核查，未触碰、未提交、未回滚这些脏项。
+- **缺陷（真实，已实证）**：移动端错题本 `fetchWrongQuestionsPage` 消费 `/api/wrong-questions/student/:studentId`（server/index.js:4078-4109），该端点 `jsonb_build_object(...)` 显式**不含 `full_image_url` 与 `tags_source`**（含 `image_url`/`manual_tags`/`ai_tags`）。
+  - 后果①：`WrongQuestionDetailModal` 的「查看完整原图」按钮与图片 `onError` 兜底恒失效（`full_image_url` 恒 undefined）。
+  - 后果②：手动标签被 `ai_tags` 静默覆盖（`tags_source` 恒 undefined → 永远走 ai_tags 分支）。
+- **r376 已落地文件（完整、未提交）**：
+  - `src/utils/wrongQuestionDetailFields.js`（新增，32 行，纯函数 `resolveWrongQuestionDetailFields`：`tags_source` 缺失且 `manual_tags` 非空→手动标签；`full_image_url` 缺失→回落 `image_url`）
+  - `test/wrongQuestionDetailFields.test.mjs`（新增，7 用例含 2 条反向自检）
+  - `src/components/WrongQuestionDetailModal.jsx`（M，6+/4-：引入 helper 并替换 3 处 `q.tags_source`/`q.full_image_url` 用法）
+- **只读验证**：`node --test test/wrongQuestionDetailFields.test.mjs` → 7/7 全绿；`pruneDeadDeclarations --check --only src server/utils server/config server/routes` 本 lane 可删 0 条。
+- **处置建议（待负责人或下一接管轮）**：这是已完成的正确 A 级修复，四道闸（npm test / lint / 隔离构建+冒烟）需补跑后提交。本巡检因锁被占仅做只读核查与交接，未提交、未改动。

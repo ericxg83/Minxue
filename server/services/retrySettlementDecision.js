@@ -72,6 +72,10 @@ export const getNextLifecycle = (current, isCorrect) => {
  * @param {boolean} input.isCorrect      本次重练该题的判定结果
  * @param {boolean} input.skipWrongBook  调用方声明「这道题不要进错题本」（仅在答错时有意义）
  * @param {boolean} input.notAttempted  重练卷空题（学生未作答且老师未明确判定，2026-11-04）
+ * @param {?{rowTouchedSince: boolean}} input.reversal
+ *        [2026-11-04 补交对账翻案] 调用方断言「该题在同一份卷的上次结算里被判错，
+ *        本次补交判对」。rowTouchedSince=true 表示上次结算之后错题行又被别人动过
+ *        （老师改判 / 另一份卷结算过）⇒ 保守模式：只回退 error_count，不推进生命周期。
  * @returns {{
  *   action: 'insert'|'update'|'skip',
  *   reason: string,
@@ -79,10 +83,11 @@ export const getNextLifecycle = (current, isCorrect) => {
  *   nextLifecycle: string,
  *   status: ?string,       // 要写入的 wrong_questions.status；skip 时为 null
  *   errorCount: ?number,   // 要写入的 error_count；skip 时为 null
- *   countsAs: ?'mastered'|'upgraded'|'reset'  // 结算统计口径
+ *   countsAs: ?'mastered'|'upgraded'|'reset',  // 结算统计口径
+ *   conservative: ?boolean // true = 落地方只回写 error_count，不写 lifecycle/status/practice_count
  * }}
  */
-export function decideRetrySettlementItem({ existing = null, isCorrect = false, skipWrongBook = false, notAttempted = false } = {}) {
+export function decideRetrySettlementItem({ existing = null, isCorrect = false, skipWrongBook = false, notAttempted = false, reversal = null } = {}) {
   const currentLifecycle = existing?.lifecycle_status || LIFECYCLE_STATUS.NEW
 
   const skip = (reason) => ({
@@ -110,6 +115,41 @@ export function decideRetrySettlementItem({ existing = null, isCorrect = false, 
   // 调用方显式声明不入册（学生空答/跳过），且本题确实没答对 —— 保持原语义。
   // 注意：`skipWrongBook` 只在答错时生效（答对本来就不该入册，见下一条）。
   if (skipWrongBook && !isCorrect) return skip('skip_wrong_book')
+
+  // ★ 2026-11-04 补交对账翻案（负责人拍板「支持补交 + 自动对账翻案」）：
+  //   同一份卷上次已结算为「错」、本次补交判「对」⇒ 撤销上次结算的虚增
+  //   （那次「判错」来自未拍摄页面被按空白计错 / AI 误判，不是一次真实作答），
+  //   并按正常判对路径推进。三条边界：
+  //   1. 仅单向翻案：已结算「对」的题本次判错/仍错 ⇒ 由调用方分类维持首判，
+  //      OCR 抖动不得借补交把掌握度降档。
+  //   2. 上次结算后错题行被别人动过（老师改判 / 另一份卷结算过）⇒ 保守模式：
+  //      只回退 error_count，不动 lifecycle/practice_count/status，防二次推进。
+  //   3. 行已不存在（老师改判时整行删除）⇒ 无处落地，skip，不复活
+  //      （与下方「答对 + 不在册 ⇒ skip」同一红线）。
+  if (reversal && isCorrect) {
+    if (!existing) return skip('reversal_without_existing_row')
+    const conservative = reversal.rowTouchedSince === true
+    const nextLifecycle = conservative ? currentLifecycle : getNextLifecycle(currentLifecycle, true)
+    const status = nextLifecycle === LIFECYCLE_STATUS.MASTERED
+      ? WRONG_STATUS.MASTERED
+      : WRONG_STATUS.PENDING
+    return {
+      action: RETRY_SETTLE_ACTION.UPDATE,
+      reason: conservative ? 'reversal_error_count_only' : 'reversal_wrong_to_correct',
+      previousLifecycle: currentLifecycle,
+      nextLifecycle,
+      status,
+      // 撤销上次判错的 +1，但守住 error_count ≥ 1 全局不变量
+      errorCount: Math.max((existing.error_count || 1) - 1, 1),
+      countsAs: conservative
+        ? null
+        : (nextLifecycle === LIFECYCLE_STATUS.MASTERED && currentLifecycle !== LIFECYCLE_STATUS.MASTERED
+          ? 'mastered'
+          : (nextLifecycle !== currentLifecycle ? 'upgraded' : null)),
+      // true = 落地方只回写 error_count，不写 lifecycle/status/practice_count
+      conservative
+    }
+  }
 
   // ★ 2026-10-15 修复：答对 + 不在错题本 ⇒ 没有错题可记，不得凭空建行。
   //   这条守卫就是「学生说我没做错过」的根治点，⛔ 不要改回无条件 INSERT。

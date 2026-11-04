@@ -20,12 +20,17 @@ const getSettlementRows = async ({ questionIds, studentId, settlementKey }) => {
   // judgements.question_id / student_id 是 TEXT 列（见 010 迁移），
   // 按 uuid[] 转换会让 PG 报 "operator does not exist: text = uuid"，
   // 整个重判结算（POST /api/questions/:id/rejudge）直接 500。
+  // [2026-11-04 补交对账] 补选出 is_correct / created_at / not_attempted 并按时间排序：
+  //   同一题在同一种 settlement_key 下可以有多条审计（补交翻案会追加），
+  //   「已结算值」= 每题最新一条**真实结算**（not_attempted 跳过行不算，见 finalizeGeneratedExamResults）。
   const { rows } = await query(
-    `SELECT question_id
+    `SELECT question_id, is_correct, created_at,
+            (metadata->>'not_attempted')::boolean AS not_attempted
      FROM ${TABLES.JUDGEMENTS}
      WHERE student_id = $1
        AND question_id = ANY($2::text[])
-       AND metadata->>'settlement_key' = $3`,
+       AND metadata->>'settlement_key' = $3
+     ORDER BY created_at ASC`,
     [String(studentId), questionIds.map(String), settlementKey]
   )
   return rows
@@ -426,11 +431,36 @@ export const finalizeGeneratedExamResults = async ({
     studentId,
     settlementKey
   })
-  const settledIds = new Set(existingSettlements.map(row => row.question_id))
-  const pendingResults = normalizedResults.filter(r => !settledIds.has(r.questionId))
+  // [2026-11-04 补交对账翻案] 已结算值 = 每题最新一条「真实结算」审计行
+  // （not_attempted 跳过行是零信号留痕，不算结算 —— 空题在补交判对时应走正常结算，
+  //   而不是被当成「已结算为错」去翻案）。同一题多条审计时取时间最新。
+  const settledValueById = new Map()
+  const settledAtById = new Map()
+  for (const row of existingSettlements) {
+    if (row.not_attempted === true) continue
+    settledValueById.set(row.question_id, row.is_correct === true)
+    settledAtById.set(row.question_id, row.created_at)
+  }
+  const settledIds = new Set(settledValueById.keys())
+  // 分类：未结算 → 正常结算；已结算为「错」+ 本次判「对」→ 翻案；其余已结算 → 维持首判。
+  // 仅单向翻案（错→对）：对→错不借补交落锤，OCR 抖动不得降掌握度（老师可手动改判）。
+  const pendingResults = []
+  const reversalResults = []
+  for (const r of normalizedResults) {
+    const prevSettled = settledValueById.get(r.questionId)
+    if (prevSettled === undefined) {
+      pendingResults.push(r)
+      continue
+    }
+    if (prevSettled === false && r.isCorrect) {
+      r.priorSettledAt = settledAtById.get(r.questionId)
+      reversalResults.push(r)
+    }
+    // prevSettled === true，或 prevSettled === false 且本次仍判错/空 ⇒ 维持首判，跳过
+  }
 
   const { rows: existingWqRows } = await query(
-    `SELECT id, question_id, lifecycle_status, error_count
+    `SELECT id, question_id, lifecycle_status, error_count, updated_at
      FROM ${TABLES.WRONG_QUESTIONS}
      WHERE student_id = $1 AND question_id = ANY($2::uuid[])`,
     [studentId, questionIds]
@@ -446,7 +476,9 @@ export const finalizeGeneratedExamResults = async ({
   const updateQuestionIds = []
   const updateQuestionValues = []
 
-  for (const result of pendingResults) {
+  // [2026-11-04 补交对账] 翻案题与首判题走同一个纯函数决策 + 同一个落地方，
+  // 差异只通过 reversal 输入与 conservative 输出表达（同一件事只准一个实现）。
+  for (const result of [...pendingResults, ...reversalResults]) {
     const existing = wqByQuestionId.get(result.questionId)
 
     // 单题判定收在纯函数里（services/retrySettlementDecision.js），本循环只负责落地。
@@ -456,7 +488,14 @@ export const finalizeGeneratedExamResults = async ({
       existing,
       isCorrect: result.isCorrect,
       skipWrongBook: result.skipWrongBook,
-      notAttempted: result.notAttempted
+      notAttempted: result.notAttempted,
+      reversal: result.priorSettledAt != null
+        ? {
+            // 上次结算本身也会写错题行（同事务 NOW()，时间戳相等）；
+            // 严格大于 = 结算之后又被别人动过 ⇒ 保守翻案（只回 error_count）。
+            rowTouchedSince: existing ? existing.updated_at > result.priorSettledAt : false
+          }
+        : null
     })
 
     if (decision.countsAs === 'mastered') masteredCount++
@@ -475,7 +514,9 @@ export const finalizeGeneratedExamResults = async ({
         id: existing.id,
         status: decision.status,
         lifecycleStatus: decision.nextLifecycle,
-        errorCount: decision.errorCount
+        errorCount: decision.errorCount,
+        // 保守翻案只回 error_count，不动 lifecycle/status/practice_count
+        conservative: decision.conservative === true
       })
     }
 
@@ -532,6 +573,18 @@ export const finalizeGeneratedExamResults = async ({
     }
 
     for (const row of updatedRows) {
+      if (row.conservative === true) {
+        // [2026-11-04 补交对账] 保守翻案：上次结算后错题行被别人动过（老师改判 /
+        // 另一份卷结算过）⇒ 只回退 error_count，不碰 lifecycle/status/practice_count，
+        // 防止把别人刚推进的档位再推一格（假掌握保险丝）。
+        await client.query(
+          `UPDATE ${TABLES.WRONG_QUESTIONS}
+           SET error_count = $1, updated_at = NOW()
+           WHERE id = $2`,
+          [row.errorCount, row.id]
+        )
+        continue
+      }
       await client.query(
         `UPDATE ${TABLES.WRONG_QUESTIONS}
          SET status = $1, lifecycle_status = $2, error_count = $3,
@@ -582,7 +635,10 @@ export const finalizeGeneratedExamResults = async ({
     )
 
     // 结算审计（settlement_key 是幂等判据）：必须在事务内落库。
-    for (const result of pendingResults) {
+    // [2026-11-04 补交对账] 翻案题追加审计行（同 key 下每题可有多条，取最新为准），
+    //   metadata 带 reversal + prior_value，回放对账时能区分「首判」与「撤销上次结算」。
+    for (const result of [...pendingResults, ...reversalResults]) {
+      const isReversal = result.priorSettledAt != null
       await client.query(
         `INSERT INTO ${TABLES.JUDGEMENTS}
          (question_id, student_id, source, is_correct, metadata)
@@ -595,8 +651,12 @@ export const finalizeGeneratedExamResults = async ({
            // [2026-11-04] 空题跳过也记 'skip'，审计里不再伪装成真实判错（'settle'）；
            //   not_attempted 留痕让回填/审计能精确区分「未作答跳过」与「真实判错」，
            //   不必再靠 questions.answer_source 的"当前值"反推历史。
-           wrong_book_action: (result.skipWrongBook || result.notAttempted) ? 'skip' : 'settle',
-           not_attempted: result.notAttempted === true
+           wrong_book_action: isReversal
+             ? 'reversal'
+             : ((result.skipWrongBook || result.notAttempted) ? 'skip' : 'settle'),
+           not_attempted: result.notAttempted === true,
+           reversal: isReversal,
+           ...(isReversal ? { prior_value: false } : {})
          })]
       )
     }
@@ -606,8 +666,10 @@ export const finalizeGeneratedExamResults = async ({
   // [2026-11-04 空题新口径] notAttempted 的题是零信号，不参与知识点掌握度同步
   // （syncQuestionsKnowledgeAndMastery 内部本就按 answer_source='blank' 跳过，
   // 这里在结算侧显式过滤，把口径写死在源头，防上游跳过逻辑日后被改动）。
-  if (pendingResults.length > 0) {
-    const masteryResults = pendingResults.filter(r => !(r.notAttempted && !r.isCorrect))
+  // [2026-11-04 补交对账] 翻案题是真实信号（判对），必须参与掌握度同步。
+  const settleAndReversalResults = [...pendingResults, ...reversalResults]
+  if (settleAndReversalResults.length > 0) {
+    const masteryResults = settleAndReversalResults.filter(r => !(r.notAttempted && !r.isCorrect))
     if (masteryResults.length > 0) {
       try {
         await syncReviewResultsMastery({ studentId, results: masteryResults })
@@ -622,8 +684,9 @@ export const finalizeGeneratedExamResults = async ({
     masteredCount,
     upgradedCount,
     resetCount,
+    reversalCount: reversalResults.length,
     lifecycleChanges,
-    settled: pendingResults.length,
+    settled: settleAndReversalResults.length,
     skipped: settledIds.size
   }
 }

@@ -48,11 +48,18 @@
           class="rpp-q"
           :class="{ 'rpp-q--cont': row.isContinuation }"
         >
-          <div v-if="row.parentStem && !row.isContinuation" class="rpp-q-stem">
+          <!-- 题组组头：题号写在公共题干前面（2026-11-04 定稿，与打印版同口径），只印一次 -->
+          <div v-if="row.isGroupedSub && !row.isContinuation" class="rpp-q-head">
+            <span class="rpp-q-num">{{ row.groupNum }}.</span>
+            <MathRender class="rpp-q-text" :content="row.parentStem" autoDetect />
+          </div>
+          <!-- 独立题 / 英语语篇：公共题干保持独立块（原版式） -->
+          <div v-if="!row.isGroupedSub && row.parentStem && !row.isContinuation" class="rpp-q-stem">
             <MathRender :content="row.parentStem" autoDetect />
           </div>
           <div class="rpp-q-head">
-            <span class="rpp-q-num">{{ row.label }}.</span>
+            <span v-if="row.isGroupedSub" class="rpp-q-num">（{{ row.subNo }}）</span>
+            <span v-else class="rpp-q-num">{{ row.label }}.</span>
             <span v-if="row.stars" class="rpp-q-diff">{{ row.stars }}</span>
             <MathRender class="rpp-q-text" :content="row.content" autoDetect />
           </div>
@@ -91,8 +98,10 @@
  * 口径一致性（重要）：
  *   渲染逻辑与 server/services/wrongRetryPdfService.buildPaperBody 保持同构：
  *     · 按题型分块（选择题 / 填空题 / 解答题）
- *     · 同一 (task_id, page_number, question_number) 的连续小问连排成一个题组块，
- *       编号写成 10(1). / 10(2).，公共题干 parent_stem 只在组内首题渲染一次
+ *     · 同一 (task_id, page_number, question_number) 的连续小问连排成一个题组块：
+ *       带公共题干的题组，组头印「10. 公共题干」（题号在题干前、只印一次），
+ *       小问行只写「（1）」（原卷 sub_no，判题对位依赖）；
+ *       无公共题干的小问 / 独立题 / 英语语篇保持「10(1).」独立编号原版式
  *     · 填空题给横线、解答题给作答区
  *   题干/小问号取自 src/utils/questionStem.js（与 PC / 移动端 / PDF 三处共用）。
  *   若上述口径变化，必须同步本组件，否则老师看到的预览会和打印出来的卷对不上。
@@ -198,7 +207,7 @@ const blocks = computed(() => {
       const items = paperOrder.filter((it) => it.blockKey === def.key)
       if (items.length === 0) return null
 
-      const rows = items.map(({ question: q, label, isContinuation }) => {
+      const rows = items.map(({ question: q, label, isContinuation, num, subNo }) => {
         const { parentStem, content } = resolveQuestionDisplayStem(q)
         const opts = normalizeOpts(q?.options)
         const maxLen = opts.length ? Math.max(...opts.map(o => String(o || '').length)) : 0
@@ -207,6 +216,11 @@ const blocks = computed(() => {
           key: q?.id || `${def.key}-${label}`,
           type: def.key,
           isContinuation,
+          // 题组排版（2026-11-04 负责人定稿）：带公共题干的小问行 → 组头印「4. 题干」、
+          // 小问行印「（原卷 subNo）」；独立题/英语语篇保持原版式。与打印版三处同口径。
+          isGroupedSub: subNo !== '' && !!parentStem,
+          groupNum: num,
+          subNo,
           parentStem,
           content,
           label,

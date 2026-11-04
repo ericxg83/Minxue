@@ -3617,9 +3617,12 @@ export const processSlimGrading = async (job) => {
     if (questionIds.length === 0) return fail('组卷无题目')
 
     // 排卷需要 question_number / sub_no / page_number / task_id（题组连排判定）
+    // [2026-11-04 补交对账] answer_source / is_correct 供「补交守卫」判断这题
+    // 是否已经有旧判定（此前提交批过 / 原作业判过）—— 未对位时保留旧结果。
     const { rows: bankQuestions } = await query(
       `SELECT id, content, answer, analysis, question_type, options,
-              question_number, sub_no, page_number, task_id
+              question_number, sub_no, page_number, task_id,
+              answer_source, is_correct
        FROM ${TABLES.QUESTIONS} WHERE id = ANY($1)`,
       [questionIds]
     )
@@ -3710,6 +3713,7 @@ export const processSlimGrading = async (job) => {
     let autoCount = 0
     let manualCount = 0
     let orphanOcrCount = 0
+    let keptPriorCount = 0
 
     for (const { item, ocr, matchedBy } of pairs) {
       // OCR 多出来的答案（卷面上没有对应的题）：不做判定，避免污染题目行
@@ -3736,6 +3740,21 @@ export const processSlimGrading = async (job) => {
         confidence: null,
       }
       alignRecords.push(alignRec)
+
+      // ── ⓪ 补交守卫（2026-11-04 补交对账）：本次没对位（页面没拍 / OCR 没读到）
+      // 但题行已有过一次判定（此前提交批过，或原作业判过）的题 ⇒ 保留旧判定：
+      //   · 不预填覆盖 —— 「行 = 最新一次批改」语义会把已判对的题抹成未作答；
+      //   · 不进结算 —— 其结论已在上次结算里（或正等老师处理）。
+      // 只补拍新页面时，已批页面的题天然落进这条守卫，补交因此是安全的；
+      // 首次提交时未拍摄页面同样保留原作业旧判定，不再按空白二次计错。
+      // 注意 matched-but-blank（拍到了但学生真空着）不走这条 —— 那是真空题，
+      // 由下方 blank 分支 + notAttempted 口径处理（零信号，不结算）。
+      const hasPriorJudgment = (stored.answer_source && stored.answer_source !== 'blank') || stored.is_correct !== null
+      if (matchedBy === 'none' && hasPriorJudgment) {
+        alignRec.keptPrior = true
+        keptPriorCount++
+        continue
+      }
 
       // ── ① 学生未作答（2026-09-17 P0：提到最前）──────────────────────
       // 终态 blank：不需要参考答案，也不该占老师的待办。
@@ -3816,7 +3835,8 @@ export const processSlimGrading = async (job) => {
     const unmatchedPaper = alignRecords.filter((r) => r.matchedBy === 'none').length
     console.log(
       `   [Slim] 卷面对位：卷面 ${paperOrder.length} 题 / OCR ${ocrQuestions.length} 条 → ` +
-      `题号匹配 ${matchedByNumber}，位置兜底 ${matchedByPosition}，未作答 ${unmatchedPaper}，孤立答案 ${orphanOcrCount}`
+      `题号匹配 ${matchedByNumber}，位置兜底 ${matchedByPosition}，未作答 ${unmatchedPaper}，孤立答案 ${orphanOcrCount}` +
+      (keptPriorCount > 0 ? `，保留旧判定 ${keptPriorCount}（补交未拍到的已批题）` : '')
     )
     if (orphanOcrCount > 0) {
       console.warn(`   ⚠️ [Slim] OCR 识别出 ${orphanOcrCount} 条卷面上没有对应题目的答案，已跳过（不参与判定）`)
@@ -3903,9 +3923,18 @@ export const processSlimGrading = async (job) => {
     //     重跑/多次调用不会重复推进生命周期；
     //   · 老师之后改判走 PUT /api/questions/:id → finalizeRejudgeResult（**另一把** key），
     //     所以「先结算、后改判」能正常纠正，不会造成假掌握。
+    //   · [2026-11-04 空题口径贯通] blank 结果（本次照片里真空着 / 没拍到且无旧判定）
+    //     带 notAttempted=true ⇒ 结算侧按「零信号」跳过：不计错、不退档、留册
+    //     （与 e5a1ae5 的手动完成复核路径同口径）。
+    //   · [2026-11-04 补交对账] 已结算为错的题本次判对 ⇒ 结算侧自动翻案
+    //     （撤销虚增 + 推进档位），见 gradingFinalizer / retrySettlementDecision。
     const settledResults = results
       .filter((r) => r.isCorrect !== null)
-      .map((r) => ({ questionId: r.questionId, isCorrect: r.isCorrect }))
+      .map((r) => ({
+        questionId: r.questionId,
+        isCorrect: r.isCorrect,
+        notAttempted: r.reason === 'blank'
+      }))
     const allAuto = manualCount === 0 && autoCount > 0
     if (settledResults.length > 0) {
       const gradePayload = { id: generatedExamId, studentId, results: settledResults }
@@ -3980,6 +4009,8 @@ export const processSlimGrading = async (job) => {
         matchedByPosition,
         unmatchedPaper,
         orphanOcrCount,
+        // [2026-11-04 补交对账] 本次保留旧判定的题数（未对位且已有过判定）
+        keptPriorCount,
         // 口径版本：排卷口径若再变，靠它区分历史数据与新数据
         orderVersion: 2,
       },
@@ -6174,6 +6205,11 @@ export const processWorkbookGrading = async (job) => {
 
 - question_number 从印刷体题号读取，必须是数字
 - 如果一道大题包含多个小问（如 21.(1)、21.(2)、22.(1)、22.(2)），必须将每个小问拆成独立的 question 对象输出：question_number 填大题号，sub_no 填小问号，content 只写该小问的题干，student_answer 只写该小问的手写答案。不要把多个小问合并成一道题
+- ⚠️ 多小问大题的卷面排版有两种形态，都要认（2026-11-04 重练卷改版为新排版）：
+  · 行内拼接形：小问行印「21(1). 题干」——question_number=21、sub_no="1"；
+  · 分行形（本系统重练卷现行排版）：大题行印「21. 公共题干……」，下面小问行只印「（1）」「（2）」（不重复大题号）。
+    此时 question_number 读上方大题行的「21.」，sub_no 填小问行括号里的号（"1"/"2"…），
+    小问行的学生作答必须归属到该小问自己的 question 对象，不能并进大题行。
 - ⚠️【拆小问绝不能丢掉大题的公共题干】每个拆出来的小问对象都必须带 parent_stem：
   填该大题第一个小问标号（(1)）**之前的公共题干原文**（公共已知条件、公共图形文字描述、公共设问前提），
   一个字都不能少、不能改写；同一大题拆出的所有小问，parent_stem 必须逐字相同。

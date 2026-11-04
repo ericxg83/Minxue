@@ -215,13 +215,90 @@ test('生命周期状态机未被本次抽函数改动（与 test/lifecycleQueue
   assert.equal(getNextLifecycle('new', false), 'new')
 })
 
+// ── E. 补交对账翻案（2026-11-04 负责人拍板「支持补交 + 自动对账翻案」）────────
+//
+// 场景：重练卷分次提交 —— 首次只拍了部分页面，未拍摄页面的题被（旧口径）按
+// 「未作答=不会」结算成错；补交剩余页面后，这些题判对 ⇒ 自动撤销上次的虚增。
+// 仅单向翻案（错→对）：对→错不借补交落锤，OCR 抖动不得降掌握度。
+
+test('★ 翻案：上次结算为错 + 本次判对 ⇒ 回退 error_count 并推进生命周期', () => {
+  const d = decideRetrySettlementItem({
+    existing: existingRow('new', 2),
+    isCorrect: true,
+    reversal: { rowTouchedSince: false }
+  })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.UPDATE)
+  assert.equal(d.reason, 'reversal_wrong_to_correct')
+  assert.equal(d.errorCount, 1, '上次判错虚增的 +1 必须回退（2 → 1）')
+  assert.equal(d.nextLifecycle, 'review_1', '翻案判对照常推进档位')
+  assert.equal(d.countsAs, 'upgraded', '翻案是真实信号，计入升级统计')
+  assert.notEqual(d.conservative, true, '行没被动过 ⇒ 走完整翻案')
+})
+
+test('★ 翻案：review_1 判对 ⇒ 推到 mastered（countsAs=mastered）', () => {
+  const d = decideRetrySettlementItem({
+    existing: existingRow('review_1', 3),
+    isCorrect: true,
+    reversal: { rowTouchedSince: false }
+  })
+  assert.equal(d.nextLifecycle, 'mastered')
+  assert.equal(d.countsAs, 'mastered')
+  assert.equal(d.errorCount, 2)
+})
+
+test('★ 翻案：error_count=1 时回退不得跌破 1（全局不变量）', () => {
+  const d = decideRetrySettlementItem({
+    existing: existingRow('new', 1),
+    isCorrect: true,
+    reversal: { rowTouchedSince: false }
+  })
+  assert.equal(d.errorCount, 1, 'error_count ≥ 1，只推进档位不再往下扣')
+})
+
+test('★ 翻案保守模式：行在结算后被别人动过 ⇒ 只回 error_count，不动档位', () => {
+  for (const lc of ALL_LIFECYCLES) {
+    const d = decideRetrySettlementItem({
+      existing: existingRow(lc, 3),
+      isCorrect: true,
+      reversal: { rowTouchedSince: true }
+    })
+    assert.equal(d.action, RETRY_SETTLE_ACTION.UPDATE)
+    assert.equal(d.reason, 'reversal_error_count_only')
+    assert.equal(d.errorCount, 2)
+    assert.equal(d.nextLifecycle, lc, `保守模式不得动档位（${lc}）`)
+    assert.equal(d.countsAs, null, '保守模式没推进档位，不得计入升级统计')
+    assert.equal(d.conservative, true, `保守模式必须显式标记（${lc}）`)
+  }
+})
+
+test('★ 翻案：错题行已不存在（老师改判时删行）⇒ skip，不复活', () => {
+  const d = decideRetrySettlementItem({
+    existing: null,
+    isCorrect: true,
+    reversal: { rowTouchedSince: false }
+  })
+  assert.equal(d.action, RETRY_SETTLE_ACTION.SKIP)
+  assert.equal(d.reason, 'reversal_without_existing_row')
+  assert.equal(d.errorCount, null)
+})
+
+test('★ 翻案只单向：reversal + 判错 ⇒ 走普通判错路径（调用方分类不会放进来，防御性锁定）', () => {
+  const d = decideRetrySettlementItem({
+    existing: existingRow('new', 1),
+    isCorrect: false,
+    reversal: { rowTouchedSince: false }
+  })
+  assert.equal(d.reason, 'wrong_existing_row', 'reversal 分支只在判对时生效')
+  assert.equal(d.errorCount, 2)
+})
+
 // ── C. 源码锁（fail-closed）──────────────────────────────────────────────
 
 test('C1. 结算循环必须调用纯函数判定，不得把判定内联回循环', () => {
   const fails = []
   const loop = anchoredRange(
     FINALIZER_SRC,
-    'for (const result of pendingResults) {',
+    'for (const result of [...pendingResults, ...reversalResults]) {',
     '// ⚠️ 结算原子化',
     'gradingFinalizer 结算循环',
     fails
@@ -289,8 +366,52 @@ test('C4. 空题口径必须贯通结算链路：finalize 传参 notAttempted + 
     if (!fn.includes('not_attempted: result.notAttempted === true')) {
       fails.push('结算审计没写 not_attempted —— 回填/审计无法区分「未作答跳过」与「真实判错」')
     }
-    if (!fn.includes("(result.skipWrongBook || result.notAttempted) ? 'skip' : 'settle'")) {
-      fails.push('空题跳过在审计里必须记 wrong_book_action=skip，不得伪装成真实判错')
+    if (!fn.includes("wrong_book_action: isReversal")) {
+      fails.push('结算审计的 wrong_book_action 分支被改掉 —— 空题 skip / 翻案 reversal 的留痕口径回归')
+    }
+  }
+  assert.deepEqual(fails, [])
+})
+
+// ── F. worker 自动批改路径贯通（2026-11-04 补交对账配套）────────────────────
+//
+// e5a1ae5 把空题口径接进了「老师完成复核」路径（reviewStore），但 worker 自动批改
+// （processSlimGrading）当时没接 —— 自动批改的空题仍会被当答错结算。本节锁死：
+//   C5. worker 结算 payload 必须带 notAttempted（blank 结果 ⇒ 零信号）；
+//   C6. worker 必须保留「未对位且有旧判定的题不覆盖不重结算」守卫（补交安全的前提）。
+
+const WORKER_SRC = readFileSync(join(ROOT, 'server/worker.js'), 'utf8')
+
+test('C5. worker 结算 payload 必须把 blank 结果标记为 notAttempted（空题口径贯通自动批改）', () => {
+  const fails = []
+  const seg = anchoredSlice(
+    WORKER_SRC,
+    'const settledResults = results',
+    1200,
+    'worker processSlimGrading 结算 payload',
+    fails
+  )
+  if (seg !== null && !seg.includes("notAttempted: r.reason === 'blank'")) {
+    fails.push('worker 结算 payload 丢了 notAttempted —— 自动批改的空题会被当答错结算（2026-11-04 口径回归）')
+  }
+  assert.deepEqual(fails, [])
+})
+
+test('C6. worker 必须保留「未对位且有旧判定 ⇒ 保留旧结果」的补交守卫', () => {
+  const fails = []
+  const seg = anchoredSlice(
+    WORKER_SRC,
+    'const hasPriorJudgment =',
+    1600,
+    'worker processSlimGrading 补交守卫',
+    fails
+  )
+  if (seg !== null) {
+    if (!seg.includes("matchedBy === 'none'")) {
+      fails.push('补交守卫没有按「未对位」判定 —— 只补拍新页面时已批题目会被覆盖成未作答')
+    }
+    if (!seg.includes('keptPrior')) {
+      fails.push('补交守卫没有在对位明细里留 keptPrior 标记 —— 批改页无法区分「保留旧判定」的题')
     }
   }
   assert.deepEqual(fails, [])

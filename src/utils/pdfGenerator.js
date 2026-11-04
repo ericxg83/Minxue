@@ -263,11 +263,14 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
   function renderSection(items, label) {
     if (items.length === 0) return ''
     let html = `<div class="section-header">${label}</div>`
-    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只渲染：
-    // 同一大题的连续小问合成一个题组块，只占一个编号（写成「10(1).」「10(2).」），
-    // 公共题干只渲染一次。单独一问答错被选进来（不成组）时按非连排分支完整渲染
-    // 公共条件 —— 单题也能作答。
-    items.forEach(({ question: q, label: qLabel, isContinuation }) => {
+    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只渲染。
+    // 题组排版（2026-11-04 负责人定稿，与讲义 handoutPdf / 讲解版 lecturePdf 同口径）：
+    //   · 带公共题干（parent_stem）的小问行 → 组头印「4. 公共题干」（题号写在题干前面，
+    //     全卷只印一次），小问行只写「（1）」（**原卷 sub_no** —— OCR 读卷面后
+    //     normalizeRetryPaperLabel 靠它对回判题键 4(1)，不能用组内序号）；
+    //   · 独立题 / 无公共题干的小问 / 英语语篇（stem 是整篇原文）→ 保持原版式逐字不变。
+    // ⛔ 判题键 label（'4(1)'）本身不变 —— 变的只是卷面印刷形态。
+    items.forEach(({ question: q, label: qLabel, isContinuation, num, subNo }) => {
       const { parentStem, content } = resolveQuestionDisplayStem(q)
       const typeClass = q.question_type === 'choice' ? 'q-choice' : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
       const dotLabel = `第${qLabel}题`
@@ -275,8 +278,16 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
       checkLoopDots(content, `${dotLabel}题干`)
       if (showAnswers && q.answer) checkLoopDots(q.answer, `${dotLabel}参考答案`)
       if (Array.isArray(q.options)) q.options.forEach((o, i) => checkLoopDots(o, `${dotLabel}选项${String.fromCharCode(65 + i)}`))
+      const isGroupedSub = subNo !== '' && !!parentStem
+      const stars = difficultyStars(q.difficulty)
+      const starsHtml = stars ? `<span class="q-diff">${stars}</span>` : ''
       html += `<div class="question ${typeClass}">`
-      if (parentStem && !isContinuation) {
+      if (isGroupedSub) {
+        // 题组组头：题号 + 公共题干同行（题号在前），只在此页印一次
+        if (!isContinuation) {
+          html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderContent(parentStem)}</span></div>`
+        }
+      } else if (parentStem && !isContinuation) {
         html += `<div class="q-stem">${renderContent(parentStem)}</div>`
       }
       // 方案 A：前置小问答案提示（数据由调用方注入 q._prereq_hints；暂无数据时不渲染）
@@ -285,9 +296,12 @@ export function buildPaperBody({ title, studentName, questions, showAnswers, sho
           html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderContent(h.answer)}</div>`
         }
       }
-      // 卷面难度星级（★☆☆ 简单 / ★★☆ 中等 / ★★★ 难）；无难度值时不渲染，避免假难度误导
-      const stars = difficultyStars(q.difficulty)
-      html += `<div class="q-head"><span class="q-num">${qLabel}.</span>${stars ? `<span class="q-diff">${stars}</span>` : ''}<span class="q-text">${renderContent(content)}</span></div>`
+      if (isGroupedSub) {
+        // 小问行：原卷小问号（判题对位依赖），难度星级随小问行（与讲义题组同口径）
+        html += `<div class="q-head"><span class="q-num">（${subNo}）</span>${starsHtml}<span class="q-text">${renderContent(content)}</span></div>`
+      } else {
+        html += `<div class="q-head"><span class="q-num">${qLabel}.</span>${starsHtml}<span class="q-text">${renderContent(content)}</span></div>`
+      }
       const illustration = q._illustration_resolved ?? getQuestionIllustration(q)
       if (illustration) {
         html += `<div class="q-image"><img src="${illustration}" alt="配图" /></div>`

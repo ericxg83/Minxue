@@ -221,18 +221,27 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
   blocks.forEach((blk) => {
     if (blk.items.length === 0) return
     html += `<div class="section-header" style="font-size:15px;font-weight:bold;margin:8px 0 6px;padding:4px 0 4px 10px;border-left:4px solid #4F46E5;background:#F5F6FF;">${blk.label}</div>`
-    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只负责渲染：
-    //   · 同一大题的连续小问共用一个编号，写成「10(1).」「10(2).」；
-    //   · 公共题干（parent_stem）只渲染一次（组内首题），后继小问不重复；
-    //   · 每个小问各自渲染自己的题干与作答区，仍按小问分别计分。
-    // 只有单独一问答错被选进来（不成组）时，它自带 parent_stem，
-    // 会按「非连排」分支完整渲染公共条件 —— 单题也能作答。
-    blk.items.forEach(({ question: q, label, isContinuation }) => {
+    // 编号与连排判定已在 buildRetryPaperOrder 内完成（与判题侧同源），此处只负责渲染。
+    // 题组排版（2026-11-04 负责人定稿，与讲义 handoutPdf / 讲解版 lecturePdf 同口径）：
+    //   · 带公共题干（parent_stem）的小问行 → 组头印「4. 公共题干」（题号写在题干前面，
+    //     全卷只印一次），小问行只写「（1）」（**原卷 sub_no** —— OCR 读卷面后
+    //     normalizeRetryPaperLabel 靠它对回判题键 4(1)，不能用组内序号）；
+    //   · 独立题 / 无公共题干的小问 / 英语语篇（stem 是整篇原文）→ 保持原版式逐字不变。
+    // ⛔ 判题键 label（'4(1)'）本身不变 —— 变的只是卷面印刷形态。
+    blk.items.forEach(({ question: q, label, isContinuation, num, subNo }) => {
       const { parentStem, content } = resolveQuestionDisplayStem(q)
       const typeClass = q.question_type === 'choice' ? 'q-choice'
         : q.question_type === 'fill' ? 'q-fill' : 'q-answer'
+      const isGroupedSub = subNo !== '' && !!parentStem
+      const stars = difficultyStars(q.difficulty)
+      const starsHtml = stars ? `<span class="q-diff">${stars}</span>` : ''
       html += `<div class="question ${typeClass}">`
-      if (parentStem && !isContinuation) {
+      if (isGroupedSub) {
+        // 题组组头：题号 + 公共题干同行（题号在前），只在此处印一次
+        if (!isContinuation) {
+          html += `<div class="q-head"><span class="q-num">${num}.</span><span class="q-text">${renderMath(parentStem)}</span></div>`
+        }
+      } else if (parentStem && !isContinuation) {
         html += `<div class="q-stem">${renderMath(parentStem)}</div>`
       }
       // 方案 A：前置小问答案提示（「在(1)的条件下」→ 印出 (1) 的结果作已知条件）
@@ -241,9 +250,12 @@ const buildPaperBody = ({ title, studentName, questions, qrSvg }) => {
           html += `<div class="q-prereq">已知：第(${h.ref})问的结果为 ${renderMath(h.answer)}</div>`
         }
       }
-      // 卷面难度星级（★☆☆ 简单 / ★★☆ 中等 / ★★★ 难）；无难度值时不渲染，避免假难度误导
-      const stars = difficultyStars(q.difficulty)
-      html += `<div class="q-head"><span class="q-num">${label}.</span>${stars ? `<span class="q-diff">${stars}</span>` : ''}<span class="q-text">${renderMath(content)}</span></div>`
+      if (isGroupedSub) {
+        // 小问行：原卷小问号（判题对位依赖），难度星级随小问行（与讲义题组同口径）
+        html += `<div class="q-head"><span class="q-num">（${subNo}）</span>${starsHtml}<span class="q-text">${renderMath(content)}</span></div>`
+      } else {
+        html += `<div class="q-head"><span class="q-num">${label}.</span>${starsHtml}<span class="q-text">${renderMath(content)}</span></div>`
+      }
       const illu = getQuestionIllustration(q)
       if (illu) {
         html += `<div class="q-image"><img src="${escapeHtml(illu)}" alt="配图" /></div>`
