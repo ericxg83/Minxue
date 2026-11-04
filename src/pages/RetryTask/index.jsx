@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { motion } from 'motion/react'
 import {  Camera,  Image as ImageIcon,  Loader2,  Upload,  ClipboardList,  CheckCircle2,  Clock  } from 'lucide-react'
 import { Toast } from 'antd-mobile'
-import { apiRequest, getRetryTask } from '../../services/apiService'
+import { getRetryTask, linkRetryTask } from '../../services/apiService'
 
 // HEIC 预览格：浏览器解不开 HEIC 时 onError 切占位（不白屏）。
 // HEIC 上传由后端 fixFileIfNeeded needsHeicTranscode 用 heic-decode 转 jpg。
@@ -98,6 +98,21 @@ export default function RetryTask({ taskId, onBack }) {
     }
   }, [])
 
+  // 上传中 / 已选未上传时离开页面 = 本次提交静默丢失。
+  // 移动端 WebView 切后台会直接中止 fetch，老师既看不到成功也看不到失败，
+  // 事后只能看到卷还停在「待学生作答」（2026-11-03 五份重练卷就是这么丢的）。
+  // 浏览器层面拦一次，至少让「离开」变成一个需要确认的动作。
+  useEffect(() => {
+    if (!uploading && pendingFiles.length === 0) return
+    const guard = (e) => {
+      e.preventDefault()
+      e.returnValue = ''
+      return ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [uploading, pendingFiles.length])
+
   const status = task?.status && STATUS_META[task.status] ? task.status : 'ungraded'
   const meta = STATUS_META[status]
   const StatusIcon = meta.icon
@@ -191,11 +206,8 @@ export default function RetryTask({ taskId, onBack }) {
       }
 
       // 关联批改任务并置 grading。
-      // 走 apiRequest 拿超时与重试：这步失败会让任务停在"待批改"，需可恢复（见 catch）。
-      await apiRequest(`/retry-tasks/${taskId}/link`, {
-        method: 'PATCH',
-        body: JSON.stringify({ retryTaskId: firstTaskId })
-      })
+      // 走 httpCore 拿超时与重试：这步失败会让任务停在"待批改"，需可恢复（见 catch）。
+      await linkRetryTask(taskId, firstTaskId)
 
       // 清理本地预览
       files.forEach((p) => p.url && URL.revokeObjectURL(p.url))

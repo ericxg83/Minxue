@@ -238,6 +238,19 @@
                 >
                   改批改方式
                 </ActionButton>
+                <!-- 待学生作答的重练卷：补传答卷（2026-11-04）
+                     手机的扫码入口要跨境外链路（pages.dev 页面 + onrender API），
+                     一旦上传中断/页面被切走，老师这边只会看到「等待学生作答」，
+                     服务端连一条失败痕迹都没有（2026-11-03 五份卷就是这么消失的）。
+                     这条通道走本机后端（PC 工作台 /api 直连本地服务），是现场可用的兜底。 -->
+                <ActionButton
+                  v-if="canUploadRetryAnswer(selectedTask)"
+                  variant="ghost"
+                  :loading="retryAnswerUploading"
+                  @click="pickRetryAnswer(selectedTask)"
+                >
+                  上传答卷<el-icon><Upload /></el-icon>
+                </ActionButton>
                 <ActionButton variant="primary" @click="openTask(selectedTask)">
                   {{ selectedTask.actionLabel }}<el-icon><ArrowRight /></el-icon>
                 </ActionButton>
@@ -290,6 +303,16 @@
         </div>
       </el-drawer>
 
+      <!-- 补传答卷的文件选择器（隐藏）：与移动端扫码页同一个 accept 口径 -->
+      <input
+        ref="retryAnswerInput"
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+        multiple
+        style="display: none"
+        @change="onRetryAnswerPicked"
+      />
+
       <!-- 改批改方式（练习册 / 答案库 / 日常作业 互转）—— 见 ConvertRouteDialog.vue -->
       <ConvertRouteDialog v-model="convertRouteVisible" :task="convertRouteTask" @converted="handleRouteConverted" />
     </div>
@@ -299,7 +322,7 @@
 <script setup>
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowRight, Check, Loading, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowRight, Check, Loading, Refresh, Upload, WarningFilled } from '@element-plus/icons-vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import ConvertRouteDialog from '../components/review/ConvertRouteDialog.vue'
@@ -309,7 +332,8 @@ import MiniStat from '../components/ui/MiniStat.vue'
 import PageHeader from '../components/ui/PageHeader.vue'
 import StatusTag from '../components/ui/StatusTag.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
-import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
+import { getGeneratedExamsByStudent, getStudents, getTasksByStudent, invalidateCache, linkRetryTask, retryTask, TASK_ROUTE_CONVERT_ENABLED, TASK_ROUTE_CONVERT_DISABLED_HINT } from '../../services/apiService'
+import { taskService } from '../../services/taskService'
 import { humanizeError } from '../utils/humanizeError'
 import { ossThumbUrl } from '../../utils/ossThumb'
 import {
@@ -820,6 +844,59 @@ function openPaperPreview(task) {
 }
 function closePaperPreview() {
   previewTask.value = null
+}
+
+// ── 补传答卷（2026-11-04）：待学生作答的重练卷，老师在电脑上直接交 ──
+// 为什么在 PC 上做：扫码链路是「pages.dev 页面 + onrender API」两跳境外网络，
+// 上传中断时页面会被切走/请求会被中止，服务端连一行 tasks 都不留，
+// 事后只能看到卷停在「等待学生作答」（2026-11-03 五份卷实况）。
+// 这条通道打的是本机后端（工作台 dev/preview 的 /api 同源），不依赖上面任何一跳。
+// ⛔ 上传/关联都走移动端同一套实现（taskService.uploadRetryAnswer + linkRetryTask），
+//    卷「有没有交卷」的判据仍是 tasks.generated_exam_id，这里不新增第二套状态。
+const retryAnswerInput = ref(null)
+const retryAnswerTarget = ref(null)
+const retryAnswerUploading = ref(false)
+
+function canUploadRetryAnswer(task) {
+  return !!task?.id && task.source === 'retry' && task.retryState === RETRY_PAPER_STATE.ISSUED
+}
+
+function pickRetryAnswer(task) {
+  if (!canUploadRetryAnswer(task) || retryAnswerUploading.value) return
+  retryAnswerTarget.value = task
+  retryAnswerInput.value?.click()
+}
+
+async function onRetryAnswerPicked(event) {
+  const input = event?.target
+  const files = Array.from(input?.files || [])
+  if (input) input.value = '' // 允许同一批照片再次选择（重试路径）
+  const task = retryAnswerTarget.value
+  retryAnswerTarget.value = null
+  if (!files.length || !task) return
+
+  retryAnswerUploading.value = true
+  try {
+    // generatedExamId 随表单下发 ⇒ 服务端建 task 时即写入 generated_exam_id，
+    // 后面的 link 只负责同步 retry_task_id / status（与扫码页完全同序）。
+    const res = await taskService.uploadRetryAnswer(task.id, files)
+    const created = (res?.tasks || []).filter((t) => !t.error)
+    if (created.length === 0) {
+      const firstError = (res?.tasks || []).find((t) => t.error)?.message
+      throw new Error(firstError || '上传失败，请检查照片后重试')
+    }
+    await linkRetryTask(task.id, created[0].id)
+    // 卷列表缓存里没有这份答卷，不失效的话卡片会继续显示「待学生作答」（最长 10 分钟）
+    invalidateCache('generated', task.studentId)
+    invalidateCache('summary')
+    ElMessage.success(`已上传 ${files.length} 页答卷，AI 开始批改`)
+    await loadData({ force: true })
+  } catch (err) {
+    console.error('[GradeCenter] 补传答卷失败:', err)
+    ElMessage.error('上传答卷失败: ' + (err.message || '未知错误'))
+  } finally {
+    retryAnswerUploading.value = false
+  }
 }
 
 function showToast(message) {
