@@ -65,6 +65,7 @@ body{margin:0;padding:0;background:#fff}
 .lec-pageno{font-size:12px;color:#999999;flex-shrink:0}
 .lec-stem{margin-bottom:2mm}
 .lec-stem-text{font-size:16px;line-height:1.85;color:#1C1C1A}
+.lec-stem-no{font-weight:bold;margin-right:1mm}
 .lec-q{font-size:19px;line-height:1.8;color:#1C1C1A;margin-bottom:1mm}
 .lec-q-no{font-weight:bold;margin-right:2mm}
 .lec-opts{display:grid;gap:1.5mm 6mm;margin-top:3mm;font-size:16px;color:#1C1C1A}
@@ -101,11 +102,20 @@ function renderLectureFooter(it) {
   return `<div class="lec-foot">${parts.join('')}</div>`
 }
 
-/** 单页（一个小问 / 一道无小问的题）。题号一律用**原卷题号**，绝不重编号。 */
-function renderLecturePage(it, idx, total, { showImage = false } = {}) {
+/**
+ * 单页（一个小问 / 一道无小问的题）。题号一律用**原卷题号**，绝不重编号。
+ * @param {object} o
+ *   - showImage {boolean} 是否印原题裁片图（几何含图题用）
+ *   - groupCtx  {object|null} 题组上下文 { bigNum, stem, subSeq, isFirst }；null = 独立页。
+ *     题组首小问页印「19. 公共题干」（题号写在题干前面），行内小问写「（1）」；
+ *     续页只写「（2）」，公共题干不重复（2026-11-04 负责人定稿，同讲义口径）。
+ *     ⛔ 拆页粒度不变：题组内每个小问仍各占一页（一小问一页是唯一模式）。
+ *     角标是**原卷定位器**，恒用原卷小问号（「第 25 题(2-1)」），不随组内序号变。
+ */
+function renderLecturePage(it, idx, total, { showImage = false, groupCtx = null } = {}) {
+  // 角标（原卷定位器）：原卷题号 + 原卷小问号，题组/独立页同一口径
   const numLabel = it.question_no == null ? '' : String(it.question_no)
   const subLabel = it.sub_no ? `(${it.sub_no})` : ''
-  const dotLabel = it.sub_no ? `${numLabel}${subLabel}` : (numLabel ? `${numLabel}.` : '')
   const badge = [it.resource_name || '题库题', numLabel ? `第 ${numLabel} 题${subLabel}` : '']
     .filter(Boolean).join(' · ')
 
@@ -113,14 +123,25 @@ function renderLecturePage(it, idx, total, { showImage = false } = {}) {
   html += `<div class="lec-head"><span class="lec-badge">${escapeHtml(badge)}</span>`
   html += `<span class="lec-pageno">${idx + 1} / ${total}</span></div>`
 
-  if (it.parent_stem) {
-    // 素排题干（2026-11-02 参照版式：去掉灰底盒与「公共题干」标签，题干就是正文）
-    html += `<div class="lec-stem"><div class="lec-stem-text">${renderContent(it.parent_stem)}</div></div>`
+  if (groupCtx) {
+    // 题组：公共题干只在首小问页印一次，且题号写在题干前面（「19. 规定：…」）
+    if (groupCtx.isFirst && groupCtx.stem) {
+      html += `<div class="lec-stem"><div class="lec-stem-text">`
+      html += `<span class="lec-stem-no">${escapeHtml(groupCtx.bigNum)}.</span>${renderContent(groupCtx.stem)}</div></div>`
+    }
+    html += `<div class="lec-q">`
+    html += `<span class="lec-q-no">（${groupCtx.subSeq}）</span>`
+    html += `<span class="lec-q-text">${renderContent(it.content || '')}</span></div>`
+  } else {
+    if (it.parent_stem) {
+      // 素排题干（2026-11-02 参照版式：去掉灰底盒与「公共题干」标签，题干就是正文）
+      html += `<div class="lec-stem"><div class="lec-stem-text">${renderContent(it.parent_stem)}</div></div>`
+    }
+    const dotLabel = it.sub_no ? `${numLabel}${subLabel}` : (numLabel ? `${numLabel}.` : '')
+    html += `<div class="lec-q">`
+    html += dotLabel ? `<span class="lec-q-no">${escapeHtml(dotLabel)}</span>` : ''
+    html += `<span class="lec-q-text">${renderContent(it.content || '')}</span></div>`
   }
-
-  html += `<div class="lec-q">`
-  html += dotLabel ? `<span class="lec-q-no">${escapeHtml(dotLabel)}</span>` : ''
-  html += `<span class="lec-q-text">${renderContent(it.content || '')}</span></div>`
 
   const opts = normalizeOptions(it.options)
   if (opts.length) {
@@ -164,8 +185,49 @@ export function buildLectureBody({ items = [], showImage = false } = {}) {
     return '<div class="lec-empty">试题篮是空的</div>'
   }
   const sorted = [...list].sort(compareLectureItem)
-  const total = sorted.length
-  return sorted.map((it, i) => renderLecturePage(it, i, total, { showImage })).join('')
+  const grouped = groupLectureItems(sorted)
+  const total = grouped.length
+  return grouped.map((g, i) => renderLecturePage(g.it, i, total, { showImage, groupCtx: g.groupCtx })).join('')
+}
+
+/**
+ * 把「同卷同题号、带公共题干」的连续行收成题组（2026-11-04 负责人定稿）：
+ *   首小问页印「19. 公共题干」（题号写在题干前面），后续小问页只写「（2）」，
+ *   公共题干不再逐页重复。独立行（无同号兄弟行，含英语语篇单勾一问）原样返回。
+ * 收组判据与讲义 consolidateHandoutRows 同口径：**连续** + 同 (resource_id, question_no)
+ * + 起点带 parent_stem —— 必须带 resource_id：讲解版排序不比卷，跨卷同号题会相邻，
+ * 不比卷就会把两份卷的第 25 题错并成一个题组。
+ * ⛔ 拆页粒度不变：题组内每个小问仍各占一页（一小问一页是唯一模式）。
+ */
+function groupLectureItems(list) {
+  const out = []
+  const n = list.length
+  let i = 0
+  while (i < n) {
+    const it = list[i]
+    const no = it?.question_no
+    const rid = it?.resource_id
+    // 题组起点：本题带 parent_stem，且下一行是同卷同题号（必然是同大题的小问）
+    if (it?.parent_stem && no != null && rid != null) {
+      let j = i + 1
+      while (j < n && list[j]?.resource_id === rid && list[j]?.question_no === no) j++
+      const size = j - i
+      if (size > 1) {
+        const stem = it.parent_stem
+        for (let k = 0; k < size; k++) {
+          out.push({
+            it: list[i + k],
+            groupCtx: { bigNum: String(no), stem, subSeq: k + 1, isFirst: k === 0 },
+          })
+        }
+        i = j
+        continue
+      }
+    }
+    out.push({ it, groupCtx: null })
+    i++
+  }
+  return out
 }
 
 /**

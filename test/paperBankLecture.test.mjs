@@ -90,6 +90,7 @@ test('★ 讲解版页面顺序 = 原卷题号自然序，不依赖篮子勾选�
     createBasketItem(q({ id: 'b', question_no: 25, sub_no: '2-1', parent_stem: 'S' })),
   ]
   const body = buildLectureBody({ items, showImage: true })
+  // 角标 = 原卷定位器，恒用原卷小问号（不随组内序号变）；题组化只改行内排版
   const i1 = body.indexOf('第 25 题(1)')
   const i21 = body.indexOf('第 25 题(2-1)')
   const i22 = body.indexOf('第 25 题(2-2)')
@@ -126,10 +127,11 @@ test('★ 讲解版不得重编号（不得使用组卷的 sub_label 口径）',
 })
 
 // ─────────────────────────────────────────────────────────────
-// ③ 公共题干逐页重复（一小问一页的代价，也是讲解的便利）
+// ③ 题组排版（2026-11-04 负责人定稿：题号写在公共题干前面，小问只写（1）（2），
+//    公共题干不再逐页重复 —— 推翻旧版「每页重复」的怪排版）
 // ─────────────────────────────────────────────────────────────
 
-test('★ 两个小问各占一页时，公共题干在两页上都印（每页 1 次）', () => {
+test('★ 题组：首小问页「19. 公共题干」（题号在前），续页只写（2），题干只印一次', () => {
   const stem = '已知二次函数 y=ax²+2x+c 的图象经过点 (1, 4)'
   const body = buildLectureBody({
     items: [
@@ -137,8 +139,40 @@ test('★ 两个小问各占一页时，公共题干在两页上都印（每页 
       createBasketItem(q({ id: 'b', question_no: 19, sub_no: '2', parent_stem: stem })),
     ],
   })
-  assert.equal(count(body, 'lec-stem-text'), 2, '公共题干必须每页重复')
-  assert.ok(!body.includes('19(1)(2)'), '小问号不得拼接成怪形态')
+  assert.equal(count(body, '<section class="lec-page"'), 2, '一小问一页粒度不变：两问仍各占一页')
+  assert.equal(count(body, 'lec-stem-text'), 1, '公共题干只印一次（不再逐页重复）')
+  assert.ok(body.includes('<span class="lec-stem-no">19.</span>'), '题号必须写在公共题干前面')
+  assert.ok(body.includes('<span class="lec-q-no">（1）</span>'), '首小问行内写（1）')
+  assert.ok(body.includes('<span class="lec-q-no">（2）</span>'), '续页行内只写（2）')
+  assert.ok(!body.includes('<span class="lec-q-no">19('), '行内题号不得再拼 19(1)/19(2)（角标原卷号不算）')
+  const iStem = body.indexOf('lec-stem-no')
+  const iQ1 = body.indexOf('（1）')
+  const iQ2 = body.indexOf('（2）')
+  assert.ok(iStem !== -1 && iStem < iQ1 && iQ1 < iQ2, '版式顺序：题号+公共题干 → （1） → （2）')
+})
+
+test('★ 独立行不误收组：单勾一道小问（无同号兄弟行）保持原版式 19(2)', () => {
+  const body = buildLectureBody({
+    items: [
+      createBasketItem(q({ id: 'a', question_no: 19, sub_no: '2', parent_stem: '公共题干' })),
+      createBasketItem(q({ id: 'b', question_no: 20 })),
+    ],
+  })
+  assert.ok(body.includes('19(2)'), '单勾小问行内仍是 19(2)（无兄弟行不成组）')
+  assert.ok(body.includes('20.'), '无小问独立题题号 20.')
+  assert.equal(count(body, 'lec-stem-text'), 1, '独立页公共题干照常素排')
+})
+
+test('★ 跨卷同号不误并组：两份卷各有第 25 题，不得并成一个题组', () => {
+  const stem = '公共题干'
+  const body = buildLectureBody({
+    items: [
+      createBasketItem(q({ id: 'a', resource_id: 'res-A', question_no: 25, sub_no: '1', parent_stem: stem })),
+      createBasketItem(q({ id: 'b', resource_id: 'res-B', question_no: 25, sub_no: '1', parent_stem: stem })),
+    ],
+  })
+  assert.equal(count(body, '<span class="lec-q-no">25(1)</span>'), 2, '两卷的 25(1) 各自独立成页，行内题号不串组')
+  assert.equal(count(body, 'lec-stem-text'), 2, '跨卷同号必须各自印自己的公共题干')
 })
 
 // ─────────────────────────────────────────────────────────────
