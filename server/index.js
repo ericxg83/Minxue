@@ -3297,8 +3297,9 @@ app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
       [String(result.analysis), id]
     )
 
-    // 与参考答案的一致性提示（不阻断、不覆盖）：字符串相等或数值相等视为一致，
-    // 判不等只是提示「请自行核对」，宁可多提示也不悄悄吞掉矛盾。
+    // [2026-11-04 优化] 老师点开「解析」现场生成时，如果发现引擎解出的答案与当前参考答案不一致（answer_mismatch），
+    // 自动把参考答案（answer 和 ai_answer）同步更新为引擎的正确答案，并联动触发 judgeAnswer 重判和结算（从错题本移出等）。
+    // 这样彻底解决「解析写着正确答案、参考答案却是错的导致系统依然判错」的割裂矛盾！
     const storedAnswer = String(q.answer || '').trim()
     const engineAnswer = String(solvedAnswer || '').trim()
     const sameAnswer = !!storedAnswer && (
@@ -3306,7 +3307,35 @@ app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
       || (Number.isFinite(parseFloat(storedAnswer)) && Number.isFinite(parseFloat(engineAnswer))
           && parseFloat(storedAnswer) === parseFloat(engineAnswer))
     )
-    console.log(`[解析补全] q=${String(id).slice(0, 8)} 解析已落库（engine=${result.engine}${storedAnswer ? (sameAnswer ? '，与参考答案一致' : `，⚠️ 引擎答案「${engineAnswer}」与参考答案「${storedAnswer}」不一致`) : '，本题无参考答案'}）`)
+
+    if (engineAnswer && !sameAnswer) {
+      console.log(`[解析补全] 自动对齐参考答案 q=${String(id).slice(0, 8)}：旧参考答案「${storedAnswer}」→ 引擎新答案「${engineAnswer}」`)
+      await query(
+        `UPDATE ${TABLES.QUESTIONS}
+            SET answer = $1, ai_answer = $1, answer_exception = FALSE, answer_exception_reason = NULL, updated_at = NOW()
+          WHERE id = $2 AND deleted_at IS NULL`,
+        [engineAnswer, id]
+      )
+      // 如果有学生答案，自动过重判与结算链路
+      if (q.student_id) {
+        const { isCorrect } = judgeAnswer(q.student_answer, engineAnswer, q.question_type)
+        const oldIsCorrect = q.is_correct
+        try {
+          await finalizeRejudgeResult({
+            question: { ...q, answer: engineAnswer, analysis: String(result.analysis) },
+            isCorrect,
+            oldIsCorrect,
+            source: 'pc_ensure_analysis_sync',
+            manualOverride: true
+          })
+          console.log(`[解析补全] 自动对齐后重判结算完成：is_correct=${isCorrect}`)
+        } catch (settleErr) {
+          console.error(`[解析补全] 自动对齐后重判结算失败 q=${id}:`, settleErr.message)
+        }
+      }
+    }
+
+    console.log(`[解析补全] q=${String(id).slice(0, 8)} 解析已落库（engine=${result.engine}${storedAnswer ? (sameAnswer ? '，与参考答案一致' : `，已自动同步对齐参考答案「${engineAnswer}」`) : '，本题原无参考答案已写入'}）`)
 
     done(() => res.json({
       success: true,
