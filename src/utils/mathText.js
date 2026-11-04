@@ -105,6 +105,83 @@ export function normalizeFractions(s) {
   return s
 }
 
+/**
+ * 分段定义花括号 → \begin{cases}（2026-11-04 「定义运算※」题红色源码事故）。
+ *
+ * 背景：练习册的「定义新运算」题在卷面上用大花括号把两条分支括在一起：
+ *   m※n = { √m-√n (m>n) ; √m+√n (m<n) }
+ * OCR 逐字符转录成 `{ ... ; ... }`。此前 splitToSegments 在 `;` 处（`;` 不在
+ * isMathChar）把数学段拦腰切断，`{` 与 `}` 落进不同片段，KaTeX 拿到**不配对的
+ * 花括号**报 ParseError ⇒ 红色源码回显 `{ \sqrt{m}-\sqrt{n} (m>n)`——
+ * 2026-10-10 cases 事故的同型（结构被切断），只是这次切断它的不是空格而是分号。
+ *
+ * 修法：渲染层兜底（与 markdown 管道表同一理由：存量数据不用回填、页面与 PDF
+ * 共用 renderContent 一条口径）——把「花括号组内部顶层含 ; 或 ；」的组转成真正的
+ * cases 环境，`\\` 分行后由 splitToSegments 的 envDepth 把环境体整体锁进一个数学段。
+ *
+ * 保守边界（防误伤）：
+ *   - 只在花括号组**内部顶层**切出 ≥2 个非空分段才转换。集合用顿号/逗号分隔
+ *     （`{-0.25、∛27、0}`）、题型记号 `{√3}`（表示 √3 的小数部分）都不含分号，
+ *     原样放行；
+ *   - 已有的 `\begin{cases}...\end{cases}` 内部无顶层分号，不受影响；
+ *   - 不配对的孤立 `{` 原样放行，交给下游既有兜底；
+ *   - 深度不为 0（花括号/圆括号/方括号内）的分号不是分隔符。
+ */
+function convertPiecewiseBraces(s) {
+  if (!s.includes('{')) return s
+  const isSep = (ch) => ch === ';' || ch === '；'
+  let out = ''
+  let i = 0
+  while (i < s.length) {
+    if (s[i] !== '{') {
+      out += s[i]
+      i++
+      continue
+    }
+    // 找配对花括号（嵌套平衡）；找不到说明是孤立 `{`，原样放行
+    let depth = 0
+    let close = -1
+    for (let j = i; j < s.length; j++) {
+      if (s[j] === '{') depth++
+      else if (s[j] === '}') {
+        depth--
+        if (depth === 0) { close = j; break }
+      }
+    }
+    if (close === -1) {
+      out += s[i]
+      i++
+      continue
+    }
+    const inner = s.slice(i + 1, close)
+    // 顶层切分：只有深度为 0 的 ; / ；才算分支分隔符
+    const parts = []
+    let cur = ''
+    let d = 0
+    for (const ch of inner) {
+      if (ch === '{' || ch === '(' || ch === '[') d++
+      else if (ch === '}' || ch === ')' || ch === ']') d--
+      if (d === 0 && isSep(ch)) {
+        parts.push(cur)
+        cur = ''
+      } else {
+        cur += ch
+      }
+    }
+    parts.push(cur)
+    if (parts.length >= 2 && parts.every((p) => p.trim().length > 0)) {
+      const rows = parts.map((p) => p.replace(/\s*[\r\n]+\s*/g, ' ').trim())
+      out += '\\begin{cases}' + rows.join(' \\\\ ') + '\\end{cases}'
+      i = close + 1
+      continue
+    }
+    // 不是分段定义（无顶层分号 / 有空分支）：原样保留整个花括号组
+    out += s.slice(i, close + 1)
+    i = close + 1
+  }
+  return out
+}
+
 function preprocessMath(text) {
   let s = String(text || '')
 
@@ -114,6 +191,12 @@ function preprocessMath(text) {
   s = s.replace(/\$\$?/g, '')
   s = s.replace(/\\\(/g, '').replace(/\\\)/g, '')
   s = s.replace(/\\\{/g, '{').replace(/\\\}/g, '}')
+
+  // 0.45 分段定义花括号 { A ; B } → \begin{cases}A\\B\end{cases}
+  //     必须在花括号反转义之后（这样 \{...\} 转义形态也能命中）、
+  //     convertSqrt 之前（√ 的转换在 cases 行内正常进行）。
+  //     事故与边界见 convertPiecewiseBraces 注释。
+  s = convertPiecewiseBraces(s)
 
   // 0.5 Unicode 上标 → 单个整体指数（²⁰²¹ → ^{2021}，严禁拆成 ^{2}^{0}^{2}^{1}）
   //     含上标字母 ᵐⁿ 与上标括号 ⁽⁾（如 aᵐ⁽ⁿ⁾ → a^{m(n)}）
@@ -845,6 +928,7 @@ function auditLoopDotRendering(text, label = '') {
 export {
   preprocessMath,
   convertSqrt,
+  convertPiecewiseBraces,
   splitToSegments,
   isMathChar,
   isMathInnerSpace,

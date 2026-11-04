@@ -24,7 +24,7 @@ import { useMemo } from 'react'
 import katex from 'katex'
 // 复用打印链路的纯函数与符号表，不再重复定义一份：本组件是 utils/mathText.js 的 fork，
 // 第 40 轮「裸源码上屏」缺陷就是两份实现漂移造成的——能共用的必须共用。
-import { convertSqrt, SUP_BASE, SUB_BASE, normalizeFractions } from '../../utils/mathText.js'
+import { convertSqrt, convertPiecewiseBraces, SUP_BASE, SUB_BASE, normalizeFractions } from '../../utils/mathText.js'
 
 // ── 智能 plain-text → LaTeX 转换器 ──
 
@@ -128,6 +128,12 @@ function preprocessMath(text) {
   result = result.replace(/([0-9A-Za-z])([\u0305\u0307])/g, (_m, base, mark) =>
     mark === '\u0307' ? `\\dot{${base}}` : `\\bar{${base}}`
   )
+
+  // === 0.45 分段定义花括号 { A ; B } → \begin{cases}A\\B\end{cases} ===
+  // 与 src/utils/mathText.js 步骤 0.45 同源同码（共用 convertPiecewiseBraces，
+  // 铁律14：两份渲染实现必须同改）。不转则 `;` 把数学段拦腰切断，
+  // `{` 与 `}` 落进不同片段 ⇒ KaTeX 红色源码（2026-11-04 定义运算※题事故）。
+  result = convertPiecewiseBraces(result)
 
   // === 0.5 根号：√x / √(x) / √17(a²+b²) → \sqrt{...}（直接复用打印链路的 convertSqrt）===
   // 本组件 isMathChar 不认 √：不转则根号留在文本段（正文字体、没有上面那条横线），
