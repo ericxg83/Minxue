@@ -37,7 +37,9 @@ test('A. 重练判「对」必须解除错题标记并回退 status（重练＝�
   const seg = anchoredSlice(
     FINALIZER_SRC,
     'export const finalizeGeneratedExamResults',
-    9000,
+    // [2026-11-04 补交对账] 函数体加长（对账分类 + 保守翻案分支）后，
+    // 判「对」解除标记的 UPDATE 块后移到 ~8400-9000，窗口必须盖住它。
+    12000,
     'finalizeGeneratedExamResults',
     fails
   )
