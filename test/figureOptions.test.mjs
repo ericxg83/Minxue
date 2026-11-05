@@ -206,3 +206,13 @@ test('前后端完整性镜像: 图形选项题结果逐字一致', () => {
   assert.match(read('src/utils/questionCompleteness.js'), /isFigureOptionQuestion/)
   assert.match(read('server/utils/questionCompleteness.js'), /isFigureOptionQuestion/)
 })
+
+// ── 复核页存量兼容：截图事故里 options 恰是四个空串，不能被当成「有文字选项」 ──
+
+test('复核页: 空串选项不挡住图形选项提示，且提供整条重裁入口', () => {
+  const vue = read('src/workbench/components/review/QuestionDetailPanel.vue')
+  assert.match(vue, /String\(o\)\.trim\(\) && !isFigureOptionText\(o\)/)
+  assert.match(vue, /把选项图框成配图/)
+  // 图形选项题必须强制显示原卷裁片，不能被 AI 重绘的单幅图替换
+  assert.match(vue, /isFigureOption\.value && q\.value\?\.geometry_image_url/)
+})

@@ -678,7 +678,8 @@ const isFigureOption = computed(() => {
   const q0 = q.value || {}
   if (String(q0.image_type || '').trim().toLowerCase() === FIGURE_OPTION_IMAGE_TYPE) return true
   const opts = optionsList.value || []
-  if (opts.some(o => !isFigureOptionText(o))) return false
+  // 空串选项（截图事故里正是 ["","","",""]）不算真实文字选项，不能挡住兜底判定
+  if (opts.some(o => String(o).trim() && !isFigureOptionText(o))) return false
   return normalizeType(q0) === 'choice' && !!q0.geometry_image_url
     && FIGURE_OPTION_STEM_RE.test(`${q0.parent_stem || ''} ${q0.content || ''}`)
 })
