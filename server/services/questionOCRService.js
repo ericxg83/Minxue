@@ -1,4 +1,5 @@
 import { callVisionCompletion, callVendorVisionCompletion, WORKBOOK_OCR_VENDOR_CHAIN } from '../config/ai.js'
+import { FIGURE_OPTION_TEXT_RULES } from '../../src/utils/figureOptions.js'
 
 /**
  * 单题「区域重识别」服务（PC 批改工作台「重新识别本题」用）
@@ -34,6 +35,8 @@ const buildQuestionPrompt = () => `你是一位资深数学老师，正在做试
 - 数学式同样是纯文本 + Unicode 符号，规则同 content。
 - 原图有几个选项就输出几个，不要凑数。
 - **原图根本没有选项时返回空数组 []，不要自己编造选项。**
+
+${FIGURE_OPTION_TEXT_RULES}
 
 【answer（参考答案）】
 - 原图**印有或手写**参考答案时才转录（选择题通常只写字母，如 "B"；填选题写最终结果，允许 KaTeX 如 \\frac{\\sqrt{2}}{2}）。

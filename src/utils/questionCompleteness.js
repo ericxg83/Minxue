@@ -7,7 +7,10 @@
  * 前端要即时拦住老师标错（reviewStore.reviewQuestion）并渲染「缺项」清单，
  * 等后端返回再提示会让老师以为点生效了；后端要守住移动端/Worker/脚本等其它入口。
  * 改动此文件时必须同步改服务端那一份，并跑 test/wrongBookRisks.test.mjs。
+ * 图形选项判据不在这里另写：两份都 import src/utils/figureOptions.js 的同一实现。
  */
+
+import { isFigureOptionQuestion } from './figureOptions.js'
 
 // 引图关键词。
 // [2026-09-21] `图1` → `图[0-9]+`：原正则只认「图1」，而卷面常见的「图2」「图8」
@@ -134,6 +137,9 @@ export function resolveEffectiveQuestionType(question) {
   const keep = { type: declared || null, corrected: false, reason: null }
   if (declared !== 'choice') return keep
   if (toOptionsArray(question?.options).length > 0) return keep
+  // 图形选项题即使 options 为空也仍是选择题：四个选项在配图里，不是填空题。
+  // 不豁免的话会被纠偏成 fill，编辑页「选项」区块整个不渲染，老师连补都没处补。
+  if (isFigureOptionQuestion(question)) return keep
 
   const text = String(question?.content || '')
   if (hasExplicitOptionMarkers(text)) return keep
@@ -203,7 +209,12 @@ export function checkQuestionCompleteness(question) {
   const effectiveType = resolveEffectiveQuestionType(question).type
   if (effectiveType === 'choice') {
     const opts = toOptionsArray(question.options)
-    if (opts.length === 0) {
+    // 图形选项题（A/B/C/D 四个选项本身是图）：选项内容落在 geometry_image_url 那张
+    // 「整条选项图」里，options 为空不等于这道题不可用 —— 视觉求解与老师复核看的是图。
+    // 必须同时满足「有图形选项标记」且「确实有选项图」才豁免；只有标记没图仍是残题，
+    // 照拦（否则会把一道看不见选项的题放过错题本闸门）。判据不在这里另写一份。
+    const hasOptionFigure = isFigureOptionQuestion(question) && !!question.geometry_image_url
+    if (opts.length === 0 && !hasOptionFigure) {
       issues.push('选择题缺少选项')
       codes.push(COMPLETENESS_CODES.missing_options)
     }

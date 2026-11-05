@@ -15,6 +15,7 @@ import sharp from 'sharp'
 import { TABLES, TASK_STATUS } from './config/neon.js'
 import { query } from './config/neon.js'
 import { AI_CONFIG, buildOCRPrompt, buildOptionsBackfillPrompt, buildAnswerGenerationPrompt, getCurrentVLModel, rotateVLModel, callVisionCompletion, callVendorVisionCompletion, callAnswerEngineCompletion, ANSWER_ENGINE, ANSWER_QUALITY, isDegradedAnswerEngine, needsConsensusSampling, describeAnswerEngine, ANSWER_SOLVE_VISION_VENDOR_CHAIN, WORKBOOK_OCR_VENDOR_CHAIN, GENERAL_OCR_VENDOR_CHAIN } from './config/ai.js'
+import { FIGURE_OPTION_OCR_RULES } from '../src/utils/figureOptions.js'
 import { collectMissingChoiceItems, buildBackfillGroups, parseBackfillJson, applyOptionsBackfill } from './utils/optionsBackfill.js'
 import { updateTaskStatus, createQuestions, batchUpdateQuestionTags, createJudgement, updateQuestionAnswer, markAnswerException, markAnswerExceptionIfAbsent, markAiAnswerRisk, findCachedQuestionByFingerprint, cacheQuestion, incrementQuestionUseCount, updateQuestionCacheId, getWorksheetAnswersBySection, deleteQuestionsByTaskId, addSelfContainedWrongQuestion } from './services/neonService.js'
 import { uploadImage } from './services/ossService.js'
@@ -6163,9 +6164,10 @@ export const processWorkbookGrading = async (job) => {
   ⚠️ 2026-09-20 事故：本 prompt 原先没有配图字段，全卷「如图」的几何题配图从未被采集，
   落库后 geometry_image_url 全空 → 错题本/周末课件题单/讲题白板里的几何题没有图，
   学生在白板上看到的是一道没有图形的几何证明题。**引图题漏填 image_bbox 等同于这道题不可用。**
-  · image_type：图形类别，"geometry"（几何图/示意图）| "chart"（函数图/统计图表）| "none"（无配图）。
+  · image_type：图形类别，"geometry"（几何图/示意图）| "chart"（函数图/统计图表）| "option_figures"（四个选项本身是图）| "none"（无配图）。
   · image_bbox：**配图本身**的外接矩形（0-1000 归一化，与 block_coordinates 同一坐标系）；
     只框图形（几何图、函数图、统计图表、示意图），不要把题干文字、选项文字、答题横线框进去。
+    ⚠️ 唯一例外见下方「图形选项专章」：选项本身就是图时，必须把四幅选项图连同标号整条框进来。
     没有配图时填 null。
   · has_figure：本题是否有配图并给出了 image_bbox（true/false）。
   · ⚠️ 常见排版陷阱：很多试卷把好几道题的配图集中排成一行，图的正下方标注"第1题图"
@@ -6186,13 +6188,13 @@ export const processWorkbookGrading = async (job) => {
   - 只填【选项正文】，绝不能带 A/B/C/D 标号：卷面印的「（A）3/4」「(B) 4/3」「A. apple」
     要去掉标号，只留 ["3/4", "4/3", "apple"]，按 A、B、C、D 顺序排列。
     标号由界面按顺序自动生成，options 里再带一遍会显示成 "A. （A）3/4"。
-  - 选项是【图形】时（如「下列作图中正确的是」配四张图），填该选项图的简短描述，
-    形如 ["选项A图", "选项B图", "选项C图", "选项D图"]，或带上能区分四张图的特征
-    （如 ["图A：开口向上的抛物线与斜率为正的直线", …]）。
-    **绝不能因为选项是图就把 options 留空。**
+  - 选项是【图形】时按下方「图形选项专章」处理：必须写能区分四幅图的描述。
+    ⛔ 不许留空、不许回抄 ["A","B","C","D"]、不许四项全写「选项A图」这类无区分度占位。
   - 判断题的 options 填 ["正确", "错误"]。
   - 填空题/解答题等非选择题 options 填 []。
   - 选项正文里的分数、根号、指数按「数学符号识别规范」原样转录（如 "3/8"、"√15/15"）。
+
+${FIGURE_OPTION_OCR_RULES}
 
 【数学符号识别规范（印刷体题干，必须严格遵守）】
 - 题干中的数学式子必须完整、准确地转录，禁止漏写、替换或臆造符号。

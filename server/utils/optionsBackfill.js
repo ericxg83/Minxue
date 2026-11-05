@@ -13,6 +13,7 @@
 // 铁律：只回填「当前 options 为空的选择题」，绝不覆盖已有选项、绝不动题干与答案。
 
 import { normalizeQuestionType } from '../services/judgeService.js'
+import { isUndifferentiatedFigureOptions } from '../../src/utils/figureOptions.js'
 
 /**
  * 判定一道题是否「缺选项的选择题」。
@@ -110,6 +111,12 @@ export const sanitizeBackfillOptions = (list) => {
   )]
   if (cleaned.length < 2 || cleaned.length > MAX_OPTIONS) return null
   if (cleaned.some(o => o.length > MAX_OPTION_LEN)) return null
+  // 图形选项题的退化占位（["选项A图","选项B图",…] / ["A","B","C","D"]）：
+  // 写进去只会让前端「看起来有选项」，四幅图其实一个都没描述，比空数组更隐蔽。
+  if (isUndifferentiatedFigureOptions(cleaned)) return null
+  // 整组恰好是连续大写字母 A、B、C…（模型把选项标号回抄了一遍）。
+  // 收窄到 ≥3 项且严格连续：['a','b'] 这类正常的单字母选项正文不能误伤。
+  if (cleaned.length >= 3 && cleaned.every((o, i) => o === String.fromCharCode(65 + i))) return null
   return cleaned
 }
 

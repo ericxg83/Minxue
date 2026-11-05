@@ -1,6 +1,11 @@
 import axios from 'axios'
 import { createRateLimiter } from '../utils/aiRateLimiter.js'
 import { recordDegraded, clearDegraded } from '../services/quotaSentinel.js'
+import {
+  FIGURE_OPTION_OCR_RULES,
+  FIGURE_OPTION_TEXT_RULES,
+  FIGURE_OPTION_ANSWER_RULE
+} from '../../src/utils/figureOptions.js'
 
 // 从请求 endpoint 推断供应商名（供配额哨兵归因；未知域名回退为主机名）
 // ⚠️ 2026-10-04 修复：原先读 axios client.defaults.baseURL —— 但 postWith429Retry 复用的是
@@ -2417,6 +2422,8 @@ export const buildOptionsBackfillPrompt = (items) => {
 5. 只返回 JSON，不要任何额外说明。格式：
 {"items": [{"index": 0, "options": ["..."]}, {"index": 1, "options": []}]}
 
+${FIGURE_OPTION_TEXT_RULES}
+
 待匹配题干（index 从 0 开始，返回时必须原样携带）：
 ${lines}`
 }
@@ -2458,7 +2465,7 @@ return `你是一个专业的作业题目识别助手。请识别图片中的题
       "english_kind": null,  // 仅英语页使用：choice_passage(短文挖空选A/B/C) | word_bank(选词填空) | word_form(词形填空) | sentence_transform(句型转换) | phonetic(语音拼写) | writing(书面/情景表达)；非英语题填 null。逐条标记，整页英语题必须保持同一种类一致语义
       "block_coordinates": { "x": 0, "y": 0, "width": 1000, "height": 1000 },
       "text_bbox": { "x": 0, "y": 0, "width": 1000, "height": 600 },
-      "image_type": "geometry/chart/none",
+      "image_type": "geometry/chart/option_figures/none",
       "image_bbox": null,  // 有配图时填 { "x": 640, "y": 180, "width": 200, "height": 130 }（只框图形本身）
       "geometry_image": null
     }
@@ -2474,6 +2481,8 @@ return `你是一个专业的作业题目识别助手。请识别图片中的题
    会让框整体拉伸出页面，前端定位和配图裁剪全部错位。
 4. image_bbox 是【配图本身】的外接矩形，只框图形（几何图、函数图、统计图表、示意图），
    不要把题干文字、选项文字、答题横线框进去。
+   ⚠️ 唯一例外：A/B/C/D 四个选项本身就是图的题（见下方「图形选项专章」），
+   此时必须把四幅选项图连同标号整条框进来，只框一格会丢掉另外三个选项。
    ⚠️ 常见排版陷阱：很多试卷把好几道题的配图集中排成一行，图的正下方标注"第1题图"
    "第2题图"…，而不是把图放在各自题目的正下方。遇到这种排版，必须按下方标注找到
    属于本题的那一格图，只框那一格（例如第2题就框标注"第2题图"的那一张），
@@ -2502,6 +2511,7 @@ return `你是一个专业的作业题目识别助手。请识别图片中的题
    只留 ["3/4", "4/3"]、["apple", "SAS"] 这样的正文，按 A、B、C、D 顺序排列。
    标号由界面按顺序自动生成，options 里再带一遍会显示成 "A. （A）3/4"。
    判断题的 options 填 ["正确", "错误"]；非选择题 options 填 []。
+   ⚠️ 四个选项本身是图形时按下方「图形选项专章」处理，绝不能把 options 留空。
 10. 【标题要分清两个字段，不要混用】
    - page_title 只读【页面顶部/页眉的印刷体标题】，用于给这份作业命名，尽量完整（含"第X章"、圈序号 ①②③、课时号 19.1(1) 等）。
      不要把题号、题干、学生姓名、班级、页码、"一、选择题"这类栏目名当标题。整页没有印刷标题就填 null，不要编造。
@@ -2551,6 +2561,8 @@ ${legacy ? `   - 你要【独立解出本题】再填 answer。题目已印了�
     ⛔ 事故现场：整页「8AU3 Exercise 5 语法专项」被返回 questions: []，而 0 题会触发
     分页 × 模型轮换 × 任务重投的连锁重试（一页能烧掉一小时），这份作业因此卡了一整天。
     只有整页确实一道题都没有（纯答案页、空白页、封面、纯目录）时，才允许返回空数组。
+
+${FIGURE_OPTION_OCR_RULES}
 
 ${legacy ? `【答案字段强约束（防止串行污染与算术幻觉）】
 - 「answer」 与 「student_answer」 是两个**互相独立**的字段。answer 是题目印刷区显式给出的或你独立解出的标准答案；student_answer 是学生写在答题区的内容。两者绝不能混入对方的数字串——例如学生写了 83，answer 不能再出现 83。
@@ -2682,6 +2694,7 @@ export const buildAnswerGenerationPrompt = () => `你是一个中小学题目解
 5. 多空填空题按空的顺序用中文逗号分隔，不要写"第一空为…"这类叙述。
 6. 不要把"求解过程"填进 answer：answer 只是最终结果（"解方程"是过程，"方程的解"才是结果）。
 7. 确实无法唯一确定答案时，answer 填 "待人工补充"，不要编造。
+${FIGURE_OPTION_ANSWER_RULE}
 
 【算术自检（写 analysis 前必须过一遍）】
 - analysis 里出现的具体算式，其四则运算结果必须等于你给出的 answer。

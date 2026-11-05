@@ -38,6 +38,7 @@
 
 import { hasFigureReference } from './questionCompleteness.js'
 import { inheritSharedStemFigures, isDegenerateFigureBox, clampImageBboxToBlock } from './figureBoxTrust.js'
+import { isFigureOptionQuestion } from '../../src/utils/figureOptions.js'
 
 /**
  * 归一化 0-1000 坐标 → 像素坐标。
@@ -127,6 +128,13 @@ export async function cropGeometryFigures ({
     .map(q => {
       const imageBbox = q.image_bbox || (q.geometry_image?.bbox || null)
       const imageType = q.image_type || 'geometry'
+      // 图形选项题（image_type=option_figures / options 全是「图A：…」）：
+      // image_bbox 按 prompt 要求框的是【整条四幅选项图】，它常常与题目 block
+      // 左对齐、同宽（正是 isDegenerateFigureBox 判为"从 block 机械推出来的"形态），
+      // 且横向极宽。若照常过退化框/超大框两道闸，会把四个选项图整条丢掉 ——
+      // 于是复核页只剩一格图或干脆没图，老师无法判题。这里为它开白名单，
+      // 并让裁剪端跳过「像素墨迹收紧」（四幅小图 + 字母标号会被判非图形）。
+      const figureOptions = isFigureOptionQuestion(q)
       if (!imageBbox) {
         if (hasFigureReference(q)) {
           log(`   ⚠️ [几何图] ${q.id}: 题干含"如图"关键词但未返回 bbox`)
@@ -135,18 +143,18 @@ export async function cropGeometryFigures ({
       }
       const pageNo = q.page_number || fallbackPage
       const dims = pageDims instanceof Map ? pageDims.get(pageNo) : null
-      if (isDegenerateFigureBox(imageBbox, q.block_coordinates)) {
+      if (!figureOptions && isDegenerateFigureBox(imageBbox, q.block_coordinates)) {
         log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框未定位到图形(${JSON.stringify(imageBbox)})，跳过裁剪`)
         return null
       }
-      const safeBbox = clampImageBboxToBlock(imageBbox, q.block_coordinates)
+      const safeBbox = figureOptions ? { ...imageBbox } : clampImageBboxToBlock(imageBbox, q.block_coordinates)
       if (!safeBbox) {
         log(`   ⚠️ [几何图] 第 ${q.question_number} 题配图框与题目完全对不上(${JSON.stringify(imageBbox)})，跳过裁剪`)
         return null
       }
       const pixelBbox = dims ? denormalizeBbox(safeBbox, dims.w, dims.h) : safeBbox
       const cacheKey = `${pageNo}:${JSON.stringify(safeBbox)}`
-      return { q, pixelBbox, cacheKey, imageType, pageNo }
+      return { q, pixelBbox, cacheKey, imageType, pageNo, skipRefine: figureOptions }
     })
     .filter(Boolean)
 
@@ -154,7 +162,7 @@ export async function cropGeometryFigures ({
   const cache = new Map()
   if (tasks.length > 0) {
     log(`   [几何图] ⚡ 并行裁剪 ${tasks.length} 张配图...`)
-    await Promise.allSettled(tasks.map(async ({ q, pixelBbox, cacheKey, pageNo }) => {
+    await Promise.allSettled(tasks.map(async ({ q, pixelBbox, cacheKey, pageNo, skipRefine }) => {
       if (cache.has(cacheKey)) {
         q.geometry_image_url = cache.get(cacheKey)
         return
@@ -164,7 +172,9 @@ export async function cropGeometryFigures ({
         warn(`   ⚠️ [几何图] 第 ${q.question_number} 题缺第 ${pageNo} 页图 buffer，跳过裁剪`)
         return
       }
-      q.geometry_image_url = await cropImage(pageBuffer, pixelBbox, studentId, q.id)
+      // 图形选项题：整条四幅小图 + A/B/C/D 标号必须原样保留，
+      // 像素墨迹收紧闸（refineFigureBoxOnPage）会把这种多面板图判成"分不出图形"而丢弃。
+      q.geometry_image_url = await cropImage(pageBuffer, pixelBbox, studentId, q.id, { skipRefine })
       if (q.geometry_image_url) cache.set(cacheKey, q.geometry_image_url)
     }))
   }

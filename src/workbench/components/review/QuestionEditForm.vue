@@ -17,7 +17,7 @@
 
     <!-- 配图 -->
     <div class="qef-section qef-image-section">
-      <div class="qef-label">配图</div>
+      <div class="qef-label">{{ figureOption ? '选项图（A/B/C/D 四幅）' : '配图' }}</div>
       <div class="qef-image-wrap">
         <img v-if="displayImageUrl" :src="displayImageUrl" class="qef-image" />
         <div v-else class="qef-no-image">
@@ -44,8 +44,10 @@
     <!-- 选项（仅选择题） -->
     <div class="qef-section" v-if="localForm.question_type === 'choice'">
       <div class="qef-label">选项</div>
-      <div v-if="localForm.options.length === 0" class="qef-tip qef-tip--warn">
-        当前没有选项 —— 点上方「重新识别本题」框选原卷该题区域可自动补全。
+      <div v-if="figureOption || localForm.options.length === 0" class="qef-tip qef-tip--warn">
+        若卷面上 A/B/C/D 是四幅图：请用上方「原卷裁剪」把四幅图连同标号<b>整条</b>框成选项图，
+        并在下面填每幅图的区分特征（如「图A：抛物线开口向下、直线斜率为正」）。
+        纯文字「重新识别本题」补不出选项图本身。
       </div>
       <div v-for="(opt, idx) in localForm.options" :key="idx" class="qef-option-row">
         <span class="qef-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
@@ -86,7 +88,9 @@ const props = defineProps({
   displayImageUrl: { type: String, default: '' },
   showCrop: { type: Boolean, default: false },
   // 是否提供「重新识别本题」入口（整页 OCR 漏识别选项时的补全手段）
-  showRecognizeQuestion: { type: Boolean, default: false }
+  showRecognizeQuestion: { type: Boolean, default: false },
+  // 本题 A/B/C/D 四个选项本身是图形（判据由父组件按落库字段给出）
+  figureOption: { type: Boolean, default: false }
 })
 
 const emit = defineEmits([

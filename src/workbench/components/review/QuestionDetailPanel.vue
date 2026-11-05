@@ -207,6 +207,7 @@
             :display-image-url="displayImageUrl"
             :show-crop="true"
             :show-recognize-question="true"
+            :figure-option="isFigureOption"
             @image-upload="handleImageUpload"
             @image-crop="handleCropFromPaper"
             @image-delete="deleteImage"
@@ -244,7 +245,7 @@
             <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
           <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
-    <div class="ops-q-label">配图</div>
+    <div class="ops-q-label">{{ isFigureOption ? '选项图（A/B/C/D 四幅，点击可放大）' : '配图' }}</div>
     <div class="ops-image-wrap">
       <!-- 干净 SVG 源码（几何重建）→ 直接内联渲染 -->
       <div v-if="displayType === 'svg_code'" class="tikz-svg-container"
@@ -295,6 +296,9 @@
   </div>
           <div class="ops-q-section" v-if="optionsList.length > 0">
             <div class="ops-q-label">选项</div>
+            <div v-if="isFigureOption" class="ops-figure-option-tip">
+              四幅选项图见上方「选项图」，下方文字只是每幅图的特征描述；判题请对照图形（点击配图可放大）。
+            </div>
             <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
               :class="{ 'option-highlight': opt === q.answer }">
               <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
@@ -303,11 +307,16 @@
           </div>
           <!-- 选择题但选项为空：整页 OCR 漏识别选项的典型形态。
                旧版这里整块隐藏，老师只看到题干、既不知道缺了什么，也不知道下一步做什么，
-               点「标错」被完整性门禁拦下后才回头找原因。这里直接给出原因 + 出口。 -->
+               点「标错」被完整性门禁拦下后才回头找原因。这里直接给出原因 + 出口。
+               ⚠️ 选项是四幅图时（2026-11-05 反馈）纯文字重识别补不出图，
+               必须给「把整条选项图框成配图」这个唯一有效的出口。 -->
           <div class="ops-q-section" v-else-if="normalizeType(q) === 'choice'">
             <div class="ops-q-label">选项</div>
             <div class="ops-options-missing">
-              <span>未识别到选项，这道题暂时无法加入错题本</span>
+              <span>未识别到选项文字。若卷面上 A/B/C/D 是四幅图，请直接把四幅图连同标号整条框成配图，再对照原卷判题 —— 纯文字「重新识别」补不出选项图。</span>
+              <el-button text size="small" type="success" @click="openCropDialog('figure')">
+                把选项图框成配图
+              </el-button>
               <el-button text size="small" type="primary" @click="handleEnterEdit">
                 去编辑里「重新识别本题」
               </el-button>
@@ -444,6 +453,7 @@
       </div>
       <div v-if="cropMode === 'recognize'" class="crop-mode-hint">
         把这道题的<b>题干和选项一起</b>框进来（默认已按题目位置预选，可直接调整）。
+        ⚠️ 选项是图形时，重识别只能补出文字描述、补不出选项图本身 —— 请改用「从原卷截图」把四幅图整条框成配图。
       </div>
       <!-- 配图模式的多页提示：跨页排版的题，配图在下一页，框题干页只会得到空图 -->
       <div v-else-if="cropPages.length > 1" class="crop-mode-hint crop-mode-hint--muted">
@@ -453,6 +463,10 @@
         <template v-else>
           题干和配图被排到两页时，点上方<b>翻页</b>找到印着配图的那一页，再框选。
         </template>
+      </div>
+      <div v-if="cropMode === 'figure' && (isFigureOption || optionsList.length === 0)" class="crop-mode-hint">
+        四个选项本身就是图：请把<b>四幅小图连同 A/B/C/D 标号整条框进来</b>（分两行排布也要一次框住两行），
+        不要只框其中一格 —— 只框一格会让另外三个选项丢失，批改时无法判定。
       </div>
       <div v-if="cropPreviewUrl" class="crop-preview-bar">
         <span class="crop-preview-label">预览</span>
@@ -572,6 +586,7 @@ import { ElMessage, ElMessageBox, ElLoading, ElCheckbox } from 'element-plus'
 // 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
 // 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
 import { parseBbox, unionBbox } from '../../../utils/questionBbox'
+import { FIGURE_OPTION_IMAGE_TYPE, isFigureOptionText } from '../../../utils/figureOptions.js'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera, MagicStick } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
@@ -653,6 +668,20 @@ const typeLabel = computed(() => {
   return TYPE_MAP[normalizeType(q.value)] || '未知题型'
 })
 const optionsList = computed(() => normalizeOptions(q.value?.options || []))
+// 图形选项题（A/B/C/D 本身是四幅图）的展示判据。
+// 主判据只读落库字段（真值源 src/utils/figureOptions.js，前后端共用）；下面一段是**存量兼容**：
+// 2026-11-05 之前落库的这类题没有 image_type 标记，表现为「选择题 + 选项为空 +
+// 题干问哪幅图象 + 只有一格配图」。它只用于展示提示与强制显示原卷裁片，
+// 不参与入册 / 判题口径，故不写回服务端。
+const FIGURE_OPTION_STEM_RE = /大致图[象像]|图[象像].{0,6}可能是|下列.{0,10}(?:作图|图形|图[象像]).{0,8}(?:正确|可能)/
+const isFigureOption = computed(() => {
+  const q0 = q.value || {}
+  if (String(q0.image_type || '').trim().toLowerCase() === FIGURE_OPTION_IMAGE_TYPE) return true
+  const opts = optionsList.value || []
+  if (opts.some(o => !isFigureOptionText(o))) return false
+  return normalizeType(q0) === 'choice' && !!q0.geometry_image_url
+    && FIGURE_OPTION_STEM_RE.test(`${q0.parent_stem || ''} ${q0.content || ''}`)
+})
 
 // 参考答案来源（答案库 / AI 解答，两档）。纯展示，帮助老师判断该不该相信这个答案 ——
 // 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
@@ -724,12 +753,21 @@ watch(() => q.value?.id, () => {
 })
 
 const displayImageUrl = computed(() => {
+  // 图形选项题：四个选项图必须看原卷裁片。若这里走 getGeometryDisplayUrl，
+  // 一旦存在 AI 重绘的 clean_geometry_svg / tikz_svg_url，页面会把四幅选项图
+  // 换成「重绘的其中一幅」，另外三个选项当场消失（2026-11-05 截图同型）。
+  if (isFigureOption.value && q.value?.geometry_image_url) {
+    return q.value.geometry_image_url
+  }
   if (showOriginal.value && q.value?.geometry_image_url) {
     return q.value.geometry_image_url
   }
   return getGeometryDisplayUrl(q.value).url
 })
 const displayType = computed(() => {
+  if (isFigureOption.value && q.value?.geometry_image_url) {
+    return 'raw'
+  }
   if (showOriginal.value && q.value?.geometry_image_url) {
     return 'raw'
   }
@@ -2123,6 +2161,18 @@ const handleRetryGeometry = async () => {
   border: 1px dashed var(--wb-warning, #e6a23c);
   border-radius: var(--wb-radius-xs, 4px);
   background: var(--wb-warning-light, #fdf6ec);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--wb-text-secondary);
+}
+
+/* 图形选项题：四幅选项图在上方配图区，这里提醒别把文字描述当成选项本身 */
+.ops-figure-option-tip {
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--wb-primary, #409eff);
+  border-radius: var(--wb-radius-xs, 4px);
+  background: var(--wb-primary-light, #ecf5ff);
   font-size: 13px;
   line-height: 1.6;
   color: var(--wb-text-secondary);
