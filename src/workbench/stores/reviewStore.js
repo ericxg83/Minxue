@@ -1772,16 +1772,24 @@ export const useReviewStore = defineStore('review', () => {
     if (!task) return
     if (source.value === 'paper') {
       const results = allQuestions.value
-        .map(q => ({
-          questionId: q.id,
-          isCorrect: effectiveIsCorrect(q),
-          skipWrongBook: q.review_status === REVIEW_STATUS.WRONG_NO_BOOK,
+        .map(q => {
           // [2026-11-04 空题新口径] 学生未作答且老师没碰过 ⇒ notAttempted，
           //   服务端按 skip 结算：不计错误次数、不动掌握档位、留在错题册等下次重印。
           //   老师明确判过的空题（对/错/不入册）不带此标记，按老师的结论结算——
           //   确认「他就是不会」时手动标「错」仍会正常扣分（裁量权保留）。
-          notAttempted: q.answer_source === 'blank' && !q.review_status
-        }))
+          const notAttempted = q.answer_source === 'blank' && !q.review_status
+          return {
+            questionId: q.id,
+            // [2026-11-05] 空题的 questions.is_correct 已改为 null（零信号），
+            //   但结算仍要按「本次没答对 + notAttempted」送进 finalize 才能留下
+            //   wrong_book_action='skip' 审计；这里给的是**结算信号**，不是题目行的
+            //   AI 结论（两者语义分离，见 server/utils/retryBlankCaliber.js）。
+            //   不这么写，filter 会把空题整个丢掉，结算审计口径就断了。
+            isCorrect: notAttempted ? false : effectiveIsCorrect(q),
+            skipWrongBook: q.review_status === REVIEW_STATUS.WRONG_NO_BOOK,
+            notAttempted
+          }
+        })
         .filter(r => r.isCorrect != null)
       if (results.length > 0 && currentStudent.value?.id) {
         await gradeGeneratedExam(task.id, currentStudent.value.id, results)

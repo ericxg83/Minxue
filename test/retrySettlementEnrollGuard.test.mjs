@@ -391,8 +391,15 @@ test('C5. worker 结算 payload 必须把 blank 结果标记为 notAttempted（�
     'worker processSlimGrading 结算 payload',
     fails
   )
-  if (seg !== null && !seg.includes("notAttempted: r.reason === 'blank'")) {
-    fails.push('worker 结算 payload 丢了 notAttempted —— 自动批改的空题会被当答错结算（2026-11-04 口径回归）')
+  // 2026-11-05：判据收敛进 server/utils/retryBlankCaliber.js#isRetryBlankResult，
+  // 字面量 `r.reason === 'blank'` 与唯一实现调用都合法；锁盯的是「payload 仍按空题
+  // 口径标 notAttempted」，不是某个具体拼写（纯函数版另有 test/retryPaperBlankCaliber.test.mjs 锁）。
+  if (seg !== null) {
+    const hasNotAttempted = seg.includes('notAttempted:')
+    const usesBlankCaliber = seg.includes('isRetryBlankResult(r)') || seg.includes("r.reason === 'blank'")
+    if (!hasNotAttempted || !usesBlankCaliber) {
+      fails.push('worker 结算 payload 丢了 notAttempted 空题判据 —— 自动批改的空题会被当答错结算（2026-11-04 口径回归）')
+    }
   }
   assert.deepEqual(fails, [])
 })

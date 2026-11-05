@@ -36,10 +36,14 @@
             :style="getOverlayStyle(store.currentReviewQuestion)"
             :title="`第${overlayNumberLabel}题`"
           >
+            <!-- 2026-11-05：角标必须走 6 态（store.getAiState），不能直读 is_correct。
+                 重练卷空题旧链路曾写 answer_source='blank' + is_correct=false，
+                 直接读 is_correct 会给「未作答」画红叉，负责人看到的就是「AI 判定为错误」。 -->
             <span class="overlay-number">
               {{ overlayNumberLabel }}
-              <span v-if="store.currentReviewQuestion.is_correct === true" class="overlay-icon correct">✓</span>
-              <span v-else-if="store.currentReviewQuestion.is_correct === false" class="overlay-icon wrong">✗</span>
+              <span v-if="store.getAiState(store.currentReviewQuestion) === 'correct'" class="overlay-icon correct">✓</span>
+              <span v-else-if="store.getAiState(store.currentReviewQuestion) === 'wrong'" class="overlay-icon wrong">✗</span>
+              <span v-else-if="store.getAiState(store.currentReviewQuestion) === 'blank'" class="overlay-icon blank" title="未作答">空</span>
             </span>
           </div>
         </div>
@@ -620,6 +624,12 @@ const switchToPage = (page) => {
 
 .overlay-icon.wrong {
   color: var(--wb-danger);
+}
+
+/* 未作答：中性灰，不是红叉（2026-11-05 重练卷空题口径） */
+.overlay-icon.blank {
+  color: var(--wb-text-muted, #94a3b8);
+  font-size: 9px;
 }
 
 /* ── 缩放控制 ── */

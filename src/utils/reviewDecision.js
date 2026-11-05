@@ -27,7 +27,12 @@ export const WRONG_BOOK_SKIP_REASONS = Object.freeze([
 export const isWrongResult = question =>
   question?.review_status === REVIEW_STATUS.WRONG ||
   question?.review_status === REVIEW_STATUS.WRONG_NO_BOOK ||
-  (question?.review_status == null && question?.is_correct === false)
+  // 「未作答」是独立终态，不是 AI 判错：与 getReviewState / classifyReviewBucket
+  // 的 blank 优先同源。重练卷空题按 2026-11-04 新口径属零信号（不计错、留册），
+  // 而旧批改链路曾同时写下 answer_source='blank' + is_correct=false，
+  // 会让 needsWrongBookDecision 把空题当成「判错待入册」塞进错题门禁。
+  // 老师明确标错的空题走上面两条人工结论分支，仍算错（裁量权保留）。
+  (question?.review_status == null && question?.is_correct === false && question?.answer_source !== 'blank')
 
 export const needsWrongBookDecision = (question, isInBook) =>
   isWrongResult(question) &&

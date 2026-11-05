@@ -35,6 +35,9 @@ import { classifyQuestionLocally } from './utils/localTagger.js'
 // 2026-10-05 抽出，因「小问只看 content」导致 681 道多小问大题的知识点关联判错。
 import { buildTaggingInput } from './services/knowledgeService.js'
 import { finalizeGradingBatch } from './services/gradingFinalizer.js'
+// 重练卷空题「落库 is_correct 必须 null」的唯一口径（2026-11-05，见文件头注释）。
+// 不在这里内联判断，否则展示层与判题层又会各写一套（陈昊煜红叉事故根因）。
+import { isRetryBlankResult, resolveRetryStoreIsCorrect } from './utils/retryBlankCaliber.js'
 import { classifyLastError } from './pendingTaskRecovery.js'
 import { isValidImageBuffer, checkImageResolution, checkFigureCropResolution } from './utils/imageValidator.js'
 import { downloadImageBufferNoProxy } from './utils/noProxyHttp.js'
@@ -3768,8 +3771,16 @@ export const processSlimGrading = async (job) => {
         // L1-a（2026-09-23）：blank 的 confidence 统一 1.0（原来是 0）。
         // 0 < 0.8 入册阈值 ⇒ 空题命中 low_confidence ⇒ 整卷被错题弹窗拦下。
         // 空题是终态（未作答等同不会），老师无需为它拍板任何事。
+        //
+        // ★ 2026-11-05 空题口径贯通（陈昊煜重练卷红叉事故）：
+        //   results 里的 isCorrect:false **仅用于结算**（配合下方 notAttempted ⇒ skip），
+        //   落库 questions.is_correct 与对位明细都不许带 false —— 「未作答」只由
+        //   answer_source='blank' 表达，再写 false 会让批改中心卷面框画红叉、
+        //   isWrongResult 把空题当 AI 判错并塞进错题门禁。
+        //   主 OCR 管线对空答案从来就是 is_correct=null（judgeAnswer 返回 null），
+        //   这里与之对齐。唯一实现见 server/utils/retryBlankCaliber.js。
         results.push({ questionId: stored.id, isCorrect: false, source: 'ocr', confidence: 1, reason: 'blank', studentAnswer: '' })
-        alignRec.isCorrect = false
+        alignRec.isCorrect = null
         alignRec.confidence = 1
         autoCount++
         continue
@@ -3879,6 +3890,10 @@ export const processSlimGrading = async (job) => {
       // 已被刷成 blank，但 COALESCE(NULL, 0) 会把 0 留下 ⇒ 空题继续命中 low_confidence
       // 拦整卷（与上面「answer_source 按最新一次批改刷新」同款不对称，一并抹平）。
       const nextConfidence = nextAnswerSource === 'blank' ? 1 : (r.confidence ?? null)
+      // ★ 2026-11-05：空题落库 is_correct 恒 null（零信号），不再写 false。
+      //   结算层的 isCorrect:false 是「本次没答对」的结算信号，不是题目行的 AI 结论；
+      //   两个语义必须在这里分开，否则批改中心会把「未作答」显示成「AI 判定为错误」。
+      const storeIsCorrect = resolveRetryStoreIsCorrect(r)
       await query(
         `UPDATE ${TABLES.QUESTIONS}
          SET student_answer = $1,
@@ -3887,7 +3902,7 @@ export const processSlimGrading = async (job) => {
              confidence = COALESCE($3, confidence),
              updated_at = NOW()
          WHERE id = $4`,
-        [nextAnswerSource === 'blank' ? '' : nextStudentAnswer, r.isCorrect, nextConfidence, r.questionId, nextAnswerSource]
+        [nextAnswerSource === 'blank' ? '' : nextStudentAnswer, storeIsCorrect, nextConfidence, r.questionId, nextAnswerSource]
       ).catch((e) => {
         prefillFailures.push({ questionId: r.questionId, message: e.message })
         console.error(`[Slim] 预填 is_correct/student_answer 失败 q=${r.questionId?.substring(0, 8)}:`, e.message)
@@ -3933,7 +3948,7 @@ export const processSlimGrading = async (job) => {
       .map((r) => ({
         questionId: r.questionId,
         isCorrect: r.isCorrect,
-        notAttempted: r.reason === 'blank'
+        notAttempted: isRetryBlankResult(r)
       }))
     const allAuto = manualCount === 0 && autoCount > 0
     if (settledResults.length > 0) {
