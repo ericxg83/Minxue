@@ -329,6 +329,15 @@
             <div v-if="optionImages.length" class="ops-figure-option-tip">
               A/B/C/D 四幅选项图见上方四格，卷面上选项就是这四幅图；判题请对照图形（点击可放大）。
             </div>
+            <!-- 图形选项题却没采到任何图：11-02 及更早的存量卷（当时 OCR 契约还不支持
+                 「选项可以是图」）落库成 ["图A","图B","图C","图D"] + 空配图。
+                 不能沿用「四幅图见上方」的文案（上方根本没有图），必须给原因 + 唯一有效的出口。 -->
+            <div v-else-if="isFigureOption && !displayImageUrl" class="ops-figure-option-tip ops-figure-option-tip--missing">
+              <span>这道题的 A/B/C/D 是四幅图，但系统里没有采到选项图（历史 OCR 不支持图形选项）。纯文字「重新识别」补不出图，请直接从原卷把四幅图连同标号整条框成配图。</span>
+              <el-button text size="small" type="warning" @click="openCropDialog('figure')">
+                把选项图框成配图
+              </el-button>
+            </div>
             <div v-else-if="isFigureOption" class="ops-figure-option-tip">
               四幅选项图见上方「选项图」，下方文字只是每幅图的特征描述；判题请对照图形（点击配图可放大）。
             </div>
@@ -637,7 +646,7 @@ import { ElMessage, ElMessageBox, ElLoading, ElCheckbox } from 'element-plus'
 // 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
 // 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
 import { parseBbox, unionBbox } from '../../../utils/questionBbox'
-import { FIGURE_OPTION_IMAGE_TYPE, isFigureOptionText, normalizeOptionImages } from '../../../utils/figureOptions.js'
+import { FIGURE_OPTION_IMAGE_TYPE, isFigureOptionText, isFigureOptionQuestion, normalizeOptionImages } from '../../../utils/figureOptions.js'
 import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
@@ -727,6 +736,12 @@ const optionsList = computed(() => normalizeOptions(q.value?.options || []))
 const FIGURE_OPTION_STEM_RE = /大致图[象像]|图[象像].{0,6}可能是|下列.{0,10}(?:作图|图形|图[象像]).{0,8}(?:正确|可能)/
 const isFigureOption = computed(() => {
   const q0 = q.value || {}
+  // 共享判据优先（前后端唯一真值源）：image_type='option_figures' 或
+  // options 全是图形选项文字（含 11-02 存量卷的 "图A" / "A图：…" 形态）。
+  // ⚠️ 这些存量题同时没有 geometry_image_url，下面的「有图」兜底判不到它们，
+  //    若不走共享判据，复核页会把「图A/图B/图C/图D」当普通文字选项渲染，
+  //    既不显示四幅图、也不给补图出口（2026-11-06 负责人截图报障 #19）。
+  if (isFigureOptionQuestion(q0)) return true
   if (String(q0.image_type || '').trim().toLowerCase() === FIGURE_OPTION_IMAGE_TYPE) return true
   const opts = optionsList.value || []
   // 空串选项（截图事故里正是 ["","","",""]）不算真实文字选项，不能挡住兜底判定
@@ -2264,6 +2279,13 @@ const handleRetryGeometry = async () => {
   font-size: 13px;
   line-height: 1.6;
   color: var(--wb-text-secondary);
+}
+
+/* 图形选项题「无图」是可行动诊断，不是普通提示：琥珀底 + 按钮常驻 */
+.ops-figure-option-tip--missing {
+  border-left-color: var(--wb-warning, #e6a23c);
+  background: #fdf6ec;
+  color: #8a5a13;
 }
 
 /* 逐幅选项图（方案 B）：A/B/C/D 四格各自独立，默认两行两列保证窄栏下看得清，
