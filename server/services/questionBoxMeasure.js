@@ -71,6 +71,55 @@ export const MEASURE_PROMPT = `你是版面切段器。图中是一页作业/试
 const ORDER_TOLERANCE = 40
 
 /**
+ * 把模型输出归一成 `{segments:[...]}`（纯函数，便于回归测试）。
+ *
+ * [2026-11-06 修复] 此前的解析是 `/\{[\s\S]*\}/` + `obj.segments`，只认对象包裹。
+ * 实测一模卷 21 页里有 2 页（徐汇 p1、p4）模型返回**裸数组**：
+ *   ```json [ {"no":1,"y_top":148,"y_bottom":302}, ... ] ```
+ * 抠 `{...}` 得到 `{"no":1,...},{"no":2,...}`（丢掉外层方括号）⇒ JSON.parse 失败
+ * ⇒ 判「返回不可解析」⇒ 整页 8 道题全都没有裁片图（老师看到题目没配图，且不报错）。
+ * 段元素字段（no / y_top / y_bottom）本来就对，只是没被包进 segments。
+ *
+ * @param {any} content 模型原始输出（字符串 / 对象 / 数组）
+ * @returns {{segments:Array}|object|null} 归一后的对象；认不出返回 null
+ */
+export function normalizeMeasureObj (content) {
+  if (content && typeof content === 'object') {
+    return Array.isArray(content) ? { segments: content } : content
+  }
+  if (typeof content !== 'string') return null
+  const asSegments = (v) => (Array.isArray(v) ? { segments: v } : null)
+
+  // ① 剥掉 ```json 围栏后按**整串**解析：裸数组与标准对象都能吃，最不容易误伤
+  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  const whole = (fenced ? fenced[1] : content).trim()
+  try {
+    const v = JSON.parse(whole)
+    const segs = asSegments(v)
+    if (segs) return segs
+    if (v && Array.isArray(v.segments)) return v
+  } catch { /* 落到下面按片段抠 */ }
+
+  // ② 前后带解释文字的对象包裹
+  const mo = content.match(/\{[\s\S]*\}/)
+  if (mo) {
+    try {
+      const v = JSON.parse(mo[0])
+      if (v && Array.isArray(v.segments)) return v
+    } catch { /* 继续 */ }
+  }
+  // ③ 前后带解释文字的裸数组
+  const ma = content.match(/\[[\s\S]*\]/)
+  if (ma) {
+    try {
+      const segs = asSegments(JSON.parse(ma[0]))
+      if (segs) return segs
+    } catch { /* 继续 */ }
+  }
+  return null
+}
+
+/**
  * 退化输出闸门（纯函数，便于回归测试）。
  *
  * 允许「并排题共用同一纵向带」（这是放宽 prompt 的目的，区间可以相等/重叠），
@@ -166,11 +215,7 @@ export async function measurePageQuestionBoxes ({ imageBuffer, questions, onlyVe
     } catch (e) {
       return { error: String(e?.message || e).slice(0, 200) }
     }
-    let obj = content
-    if (typeof obj === 'string') {
-      const m = obj.match(/\{[\s\S]*\}/)
-      try { obj = m ? JSON.parse(m[0]) : null } catch { obj = null }
-    }
+    const obj = normalizeMeasureObj(content)
     return { obj, rawText: typeof content === 'string' ? content.slice(0, 400) : '' }
   }
 

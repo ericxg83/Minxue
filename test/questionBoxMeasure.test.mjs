@@ -10,7 +10,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { validateMeasureSegments } from '../server/services/questionBoxMeasure.js'
+import { validateMeasureSegments, normalizeMeasureObj } from '../server/services/questionBoxMeasure.js'
 
 const seg = (no, yTop, yBottom) => ({ no, y_top: yTop, y_bottom: yBottom })
 
@@ -139,4 +139,38 @@ test('模型整体错乱（逆序 108 > 容差 40）→ 拦下（2026-09-20 590f
   const r = validateMeasureSegments(segs, 14)
   assert.equal(r.ok, false)
   assert.match(r.error, /乱序/)
+})
+
+
+// ── 2026-11-06：模型返回裸数组导致整页无配图（徐汇一模 p1/p4 实测）────────────
+test('裸数组（无 segments 包裹）→ 归一成 segments', () => {
+  // 徐汇一模 p1 真实形状：6 段，元素字段是 no / y_top / y_bottom
+  const raw = '```json\n[ {"no": 1, "y_top": 148, "y_bottom": 302}, {"no": 2, "y_top": 302, "y_bottom": 376}, {"no": 3, "y_top": 376, "y_bottom": 470}, {"no": 4, "y_top": 470, "y_bottom": 560}, {"no": 5, "y_top": 560, "y_bottom": 700}, {"no": 6, "y_top": 700, "y_bottom": 880} ]\n```'
+  const obj = normalizeMeasureObj(raw)
+  assert.ok(obj && Array.isArray(obj.segments), '裸数组必须被归一成 segments')
+  assert.equal(obj.segments.length, 6)
+  // 归一后必须能直接过闸门（修复前这里恒判「返回不可解析」）
+  assert.equal(validateMeasureSegments(obj.segments, 6).ok, true)
+})
+
+test('裸数组前后带解释文字 → 仍能解析', () => {
+  const raw = '下面是切段结果：\n[{"no":1,"y_top":100,"y_bottom":200},{"no":2,"y_top":200,"y_bottom":300}]\n以上。'
+  const obj = normalizeMeasureObj(raw)
+  assert.equal(obj?.segments?.length, 2)
+})
+
+test('标准对象包裹 / 围栏 → 解析不变', () => {
+  assert.equal(normalizeMeasureObj('{"segments":[{"no":1,"y_top":1,"y_bottom":9}]}').segments.length, 1)
+  assert.equal(normalizeMeasureObj('```json\n{"segments":[{"no":1,"y_top":1,"y_bottom":9}]}\n```').segments.length, 1)
+  // 已是对象/数组时不得改形状
+  assert.equal(normalizeMeasureObj({ segments: [{ no: 1 }] }).segments.length, 1)
+  assert.equal(normalizeMeasureObj([{ no: 1 }, { no: 2 }]).segments.length, 2)
+})
+
+test('认不出的输出 → null（不许瞎猜）', () => {
+  assert.equal(normalizeMeasureObj('抱歉，我无法识别这张图'), null)
+  assert.equal(normalizeMeasureObj(''), null)
+  assert.equal(normalizeMeasureObj(null), null)
+  // 对象但 segments 不是数组 → 不伪造
+  assert.equal(normalizeMeasureObj('{"segments":"oops"}'), null)
 })
