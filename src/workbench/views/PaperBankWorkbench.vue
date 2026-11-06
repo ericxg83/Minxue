@@ -58,6 +58,39 @@
                 <span class="pb-paper__meta">{{ p.question_count || 0 }} 题</span>
                 <span v-if="isParsing(p)" class="pb-paper__parsing">解析中 {{ p.question_parse_done_pages || 0 }}/{{ p.question_parse_total_pages || '?' }}</span>
               </button>
+              <!-- 上传的原件常驻入口（2026-11-06）：不用 hover、不用进菜单，点一下就打开老师自己传的那份文件 -->
+              <div class="pb-paper__files">
+                <a
+                  v-if="(p.question_files || []).length === 1"
+                  class="pb-file-link"
+                  :href="p.question_files[0].url"
+                  target="_blank"
+                  rel="noopener"
+                  title="打开上传的原卷文件"
+                >原卷 ↗</a>
+                <button
+                  v-else-if="(p.question_files || []).length > 1"
+                  type="button"
+                  class="pb-file-link"
+                  title="选择要打开的原卷文件"
+                  @click.stop="openSourceFiles(p, 'questions')"
+                >原卷 {{ p.question_files.length }} 份 ↗</button>
+                <a
+                  v-if="(p.answer_files || []).length === 1"
+                  class="pb-file-link"
+                  :href="p.answer_files[0].url"
+                  target="_blank"
+                  rel="noopener"
+                  title="打开上传的官方答案原件"
+                >答案册 ↗</a>
+                <button
+                  v-else-if="(p.answer_files || []).length > 1"
+                  type="button"
+                  class="pb-file-link"
+                  title="选择要打开的答案原件"
+                  @click.stop="openSourceFiles(p, 'answers')"
+                >答案册 {{ p.answer_files.length }} 份 ↗</button>
+              </div>
               <div class="pb-paper__ops">
                 <button type="button" title="上传题目/照片" @click.stop="openUploadDialog(p.id, 'questions')">题目</button>
                 <button type="button" title="上传官方答案" @click.stop="openUploadDialog(p.id, 'answers')">答案</button>
@@ -162,6 +195,14 @@
                     {{ editingId === q.id ? '收起编辑' : '改难度 / 标签' }}
                   </button>
                   <a v-if="q.image_url" class="pb-link" :href="q.image_url" target="_blank" rel="noopener">看原题图</a>
+                  <!-- 原卷是整份上传文件；PDF 直接跳到本题所在页，多张照片按页码选对应那张 -->
+                  <a
+                    v-if="questionSourceUrl(q)"
+                    class="pb-link"
+                    :href="questionSourceUrl(q)"
+                    target="_blank"
+                    rel="noopener"
+                  >看原卷{{ q.page_no ? `（第 ${q.page_no} 页）` : '' }} ↗</a>
                 </div>
 
                 <div v-if="editingId === q.id" class="pb-editor">
@@ -176,6 +217,14 @@
                   <label class="pb-editor__tags">标签
                     <input :value="(q.tags || []).join(',')" placeholder="逗号分隔，如 压轴题,易错" @change="saveTags(q, $event)" />
                   </label>
+                  <!-- OCR 会认错字（嘉定一模 23(2) 曾把 AC·DF 认成 AC²-DE²），老师要能就地改文字 -->
+                  <label v-if="q.parent_stem != null" class="pb-editor__text">公共题干
+                    <textarea v-model="textDraft.parent_stem" rows="3" />
+                  </label>
+                  <label class="pb-editor__text">题目文字
+                    <textarea v-model="textDraft.content" rows="3" />
+                  </label>
+                  <button type="button" class="pb-link pb-editor__save" @click="saveText(q)">保存文字</button>
                   <span class="pb-editor__hint">改完立刻保存，全库筛选项跟着变</span>
                 </div>
               </div>
@@ -296,6 +345,7 @@
       <p v-else class="pb-hint">
         支持 <strong>PDF</strong>（推荐，无拍照变形）或 <strong>多张照片</strong>（JPEG / PNG / WebP）。
         上传后系统在后台拆题，可以离开本页，解析完再回来。
+        你上传的文件会<strong>原样留档</strong>，之后在卷名下方点「原卷」就能打开。
       </p>
       <WorkbenchSelect v-model="uploadPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择试卷" />
       <input ref="fileInput" type="file" multiple accept=".pdf,image/jpeg,image/png,image/webp" style="display:none" @change="onFilesPicked" />
@@ -307,6 +357,24 @@
         <el-button @click="showUploadDialog = false">取消</el-button>
         <el-button type="primary" :disabled="!uploadPaperId || !pickedFiles.length" :loading="uploading" @click="handleUpload">开始解析</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 多份原件（一次上传多张照片/多个 PDF 时）逐份列出，点文件名直接打开 -->
+    <el-dialog v-model="showFilesDialog" :title="filesDialog.title" width="440px">
+      <p class="pb-hint">这些都是你上传的原件，点文件名在新标签页打开。</p>
+      <div class="pb-file-list">
+        <a
+          v-for="(f, i) in filesDialog.files"
+          :key="f.url"
+          class="pb-file-item"
+          :href="f.url"
+          target="_blank"
+          rel="noopener"
+        >
+          <span :title="f.name">{{ f.name || `第 ${i + 1} 份` }}</span>
+          <span>{{ f.kind === 'pdf' ? 'PDF' : '图片' }} ↗</span>
+        </a>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -373,6 +441,9 @@ const composeTitle = ref('')
 // 几何/图表题没有图根本没法讲；文字已完整的题多印一张小裁片也无碍。想不印手动取消勾选。
 const composeWithImage = ref(true)
 const editingId = ref('')
+const textDraft = ref({ parent_stem: '', content: '' })
+const showFilesDialog = ref(false)
+const filesDialog = ref({ title: '', files: [] })
 
 // 右侧卷面（常驻，和题目列表同一页）
 const previewKind = ref('student')
@@ -438,6 +509,8 @@ let repaintTimer = null
 let repaintToken = 0
 
 const totalQuestionCount = computed(() => papers.value.reduce((n, p) => n + (p.question_count || 0), 0))
+// 题目行要按所属卷找「原卷」入口；字段名与后端 /api/paper-bank/papers 逐字一致
+const papersById = computed(() => new Map(papers.value.map(p => [p.id, p])))
 const blocks = computed(() => groupBasket(basket.value))
 const summary = computed(() => basketSummary(basket.value))
 const totals = computed(() => composePaperTotals(blocks.value))
@@ -486,6 +559,33 @@ const thumbUrl = (url) => ossThumbUrl(url, 480) || url
 // ⛔ 必须在界面上区分 —— 「答案一定要对，不要去猜」，老师要能一眼看出这条答案是谁给的。
 const ANSWER_SOURCE_LABELS = { official: '官方答案', printed: '卷面印刷', manual: '老师手填', ai: 'AI 解出' }
 const answerSourceLabel = (s) => (ANSWER_SOURCE_LABELS[s] ? `（${ANSWER_SOURCE_LABELS[s]}）` : '')
+
+// ── 上传原件（2026-11-06）：题目原件与答案原件分开放，卷级可点，题级直达本题页 ──
+const openSourceFiles = (p, kind) => {
+  const files = kind === 'questions' ? (p.question_files || []) : (p.answer_files || [])
+  if (!files.length) return
+  if (files.length === 1) {
+    window.open(files[0].url, '_blank', 'noopener')
+    return
+  }
+  filesDialog.value = {
+    title: `${p.name} · ${kind === 'questions' ? '原卷文件' : '答案原件'}（${files.length} 份）`,
+    files,
+  }
+  showFilesDialog.value = true
+}
+
+/** 题目行「看原卷」：单份 PDF 加 #page= 跳到本题所在页；多张照片按页码取对应那张。 */
+const questionSourceUrl = (q) => {
+  const files = papersById.value.get(q.resource_id)?.question_files || []
+  if (!files.length) return ''
+  if (files.length === 1) {
+    const f = files[0]
+    return f.kind === 'pdf' && q.page_no ? `${f.url}#page=${q.page_no}` : f.url
+  }
+  const idx = Math.min(Math.max((Number(q.page_no) || 1) - 1, 0), files.length - 1)
+  return files[idx]?.url || files[0].url
+}
 
 const loadPapers = async () => {
   papers.value = await getPaperBankPapers()
@@ -584,19 +684,37 @@ const composeSubtitle = () => {
 
 // ── 难度 / 标签行内编辑 ──
 // updatePaperBankQuestion 早就存在但此前全仓无人调用 ⇒ 难度筛选恒空（改不了就没有数据）。
-const toggleEditor = (id) => { editingId.value = editingId.value === id ? '' : id }
+const toggleEditor = (id) => {
+  if (editingId.value === id) { editingId.value = ''; return }
+  const q = questions.value.find(x => x.id === id)
+  editingId.value = id
+  textDraft.value = { parent_stem: q?.parent_stem || '', content: q?.content || '' }
+}
 
 const applyQuestionPatch = async (q, patch, okMsg) => {
   try {
     const updated = await updatePaperBankQuestion(q.id, patch)
     Object.assign(q, patch)
-    if (updated) Object.assign(q, updated, patch)
-    // 篮子里的同一题要同步，否则出卷还是旧难度/标签
+    // ⛔ 不能整体 Object.assign(q, updated)：PUT 返回的 answer 是「题目自带答案」，
+    //    列表行的 answer 是 attachEffectiveAnswer 算出的「有效答案」（可能来自官方答案册），
+    //    整体覆盖会把参考答案显示清空。只同步本次真正改过的字段。
+    if (updated) {
+      for (const k of ['difficulty', 'tags', 'content', 'parent_stem', 'question_type']) {
+        if (k in patch && k in updated) q[k] = updated[k]
+      }
+    }
+    // 篮子里的同一题要同步，否则出卷还是旧难度/标签/题干
     basket.value = basket.value.map(it => (it.id === q.id ? { ...it, ...patch } : it))
     ElMessage.success(okMsg)
   } catch (e) {
     ElMessage.error(e?.payload?.message || e.message || '保存失败')
   }
+}
+
+const saveText = (q) => {
+  const patch = { content: textDraft.value.content }
+  if (q.parent_stem != null) patch.parent_stem = textDraft.value.parent_stem
+  applyQuestionPatch(q, patch, '题干已保存')
 }
 
 const saveDifficulty = (q, ev) => {
@@ -1132,6 +1250,22 @@ onUnmounted(() => {
 .pb-paper__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pb-paper__meta { font-size: 11px; color: #999; flex-shrink: 0; }
 .pb-paper__parsing { font-size: 10px; color: #185fa5; flex-shrink: 0; }
+/* 上传原件常驻入口：不 hover 也能看见，点开就是老师自己传的那份文件 */
+.pb-paper__files { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 8px 6px 8px; }
+.pb-file-link {
+  border: 0; background: transparent; padding: 0; font-size: 11px;
+  color: #185fa5; cursor: pointer; text-decoration: none;
+}
+.pb-file-link:hover { text-decoration: underline; }
+.pb-file-list { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow: auto; }
+.pb-file-item {
+  display: flex; justify-content: space-between; gap: 10px; align-items: center;
+  padding: 8px 6px; border-bottom: 1px solid #f0ede6; font-size: 12px;
+  color: #185fa5; text-decoration: none;
+}
+.pb-file-item:hover { background: #f7f9ff; }
+.pb-file-item span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-file-item span:last-child { flex-shrink: 0; font-size: 11px; color: #999; }
 .pb-paper__ops { display: flex; gap: 6px; padding: 0 8px 6px 8px; }
 .pb-paper__ops button {
   border: 0; background: transparent; padding: 0; font-size: 11px; color: #666; cursor: pointer;
@@ -1184,6 +1318,13 @@ onUnmounted(() => {
   font-size: 12px; padding: 3px 6px; border: 1px solid #ddd; border-radius: 5px; background: #fff;
 }
 .pb-editor__tags input { width: 190px; }
+.pb-editor__text { flex: 1 1 100%; align-items: flex-start; }
+.pb-editor textarea {
+  flex: 1; min-width: 0; font-size: 12px; line-height: 1.6; padding: 5px 7px;
+  border: 1px solid #ddd; border-radius: 5px; background: #fff; resize: vertical;
+  font-family: inherit;
+}
+.pb-editor__save { font-size: 11px; color: #185fa5; }
 .pb-editor__hint { font-size: 10px; color: #aaa; }
 .pb-row__figure { display: block; max-width: 340px; max-height: 240px; object-fit: contain; border: 1px solid #e5e3dc; border-radius: 6px; margin: 8px 0 2px; background: #fff; }
 .pb-more {

@@ -16,7 +16,7 @@
 import { Router } from 'express'
 import multer from 'multer'
 import { query } from '../config/neon.js'
-import { uploadPDF, headObjectExists } from '../services/ossService.js'
+import { uploadPDF, uploadImage, headObjectExists } from '../services/ossService.js'
 import { getCDNUrl } from '../config/oss.js'
 import {
   parsePaperResource,
@@ -37,6 +37,78 @@ const upload = multer({
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
+// ── 上传原件留档（2026-11-06）──
+//
+// 老师要能直接点开「我上传的那份原题文件」对照 OCR 结果，所以上传的文件本身必须留档。
+// 题目原件与答案原件分开存到 resources.metadata.sourceFiles（jsonb 纯加法，不改 Schema）。
+// ⛔ 答案册绝不能再写 pdf_url：pdf_url 的历史语义是题目原卷（worksheets 视图也在读），
+//    旧实现上传答案 PDF 会覆盖它，老师点「原卷」就会打开答案册。
+// ⛔ 存档必须在后台解析启动前 await 完成：解析结束会回填 metadata.pageTitles，
+//    两边同时读改写 metadata 会互相覆盖（不同键，但是两次独立 UPDATE）。
+
+/** 把上传文件（PDF / 照片）上传到 OSS，生成可点击的原件记录。单份失败只跳过该份。 */
+async function archiveUploads(files, label) {
+  const out = []
+  for (const [i, f] of files.entries()) {
+    try {
+      const isPdf = f.mimetype === 'application/pdf'
+      const url = isPdf
+        ? await uploadPDF(f.buffer, f.originalname, 'paper-bank')
+        : await uploadImage(f.buffer, f.originalname, 'paper-bank')
+      out.push({
+        url,
+        name: f.originalname || `${label} ${i + 1}`,
+        kind: isPdf ? 'pdf' : 'image',
+        size: f.size || null,
+      })
+    } catch (e) {
+      console.warn(`[paperBank] ${label}原件存档失败（不影响解析）:`, e.message)
+    }
+  }
+  return out
+}
+
+/** 只覆盖 sourceFiles 下的一个键，保留 metadata 里其它键（pageTitles / parseWarnings 等）。 */
+async function saveSourceFiles(resourceId, kind, files) {
+  if (!files.length) return
+  await query(
+    `UPDATE resources
+        SET metadata = COALESCE(metadata, '{}'::jsonb)
+             || jsonb_build_object(
+                  'sourceFiles',
+                  COALESCE(metadata->'sourceFiles', '{}'::jsonb)
+                    || jsonb_build_object($2::text, $3::jsonb)
+                )
+      WHERE id = $1`,
+    [resourceId, kind, JSON.stringify(files)]
+  )
+}
+
+/** 老卷（2026-11-06 前上传）只有 pdf_url，且它存的就是题目原卷 ⇒ 直接当单份原件用。 */
+const normalizeSourceFiles = (list, legacyUrl) => {
+  const files = (Array.isArray(list) ? list : [])
+    .filter(f => f && typeof f.url === 'string' && /^https?:\/\//.test(f.url))
+    .map(f => ({
+      url: f.url,
+      name: f.name || '原题文件',
+      kind: f.kind === 'pdf' ? 'pdf' : 'image',
+      size: f.size ?? null,
+    }))
+  if (files.length) return files
+  return legacyUrl ? [{ url: legacyUrl, name: '原卷 PDF', kind: 'pdf', size: null }] : []
+}
+
+/** 列表接口把原件清单提成顶层字段 —— 前后端字段名逐字对齐：question_files / answer_files。 */
+const withSourceFiles = (r) => {
+  const meta = r.metadata && typeof r.metadata === 'object' ? r.metadata : {}
+  const src = meta.sourceFiles && typeof meta.sourceFiles === 'object' ? meta.sourceFiles : {}
+  return {
+    ...r,
+    question_files: normalizeSourceFiles(src.questions, r.pdf_url),
+    answer_files: normalizeSourceFiles(src.answers, null),
+  }
+}
+
 // ── 卷列表 ──
 
 router.get('/papers', async (req, res) => {
@@ -53,7 +125,7 @@ router.get('/papers', async (req, res) => {
         WHERE r.resource_type = 'exam'
         ORDER BY r.created_at DESC`
     )
-    res.json({ success: true, papers: rows })
+    res.json({ success: true, papers: rows.map(withSourceFiles) })
   } catch (e) {
     res.status(500).json({ error: '试卷题库加载失败', message: e.message })
   }
@@ -177,15 +249,14 @@ router.post('/papers/:id/parse-answers', upload.array('files', 40), async (req, 
     }
 
     // 留一份原件指针：老师复核时要能打开原始答案册对照。
-    // （parsePdfInBackground 内部也会上传一次，但那个 URL 写在 worksheets 视图上、
-    //   对 exam 资源是空操作，所以这里自己存一份到真实表的 pdf_url。）
-    if (pdf) {
-      try {
-        const pdfUrl = await uploadPDF(pdf.buffer, pdf.originalname, 'paper-bank')
-        await query(`UPDATE resources SET pdf_url = $2 WHERE id = $1`, [resourceId, pdfUrl])
-      } catch (e) {
-        console.warn('[paperBank] 答案 PDF 存档失败（不影响解析）:', e.message)
-      }
+    // ⛔ 2026-11-06：答案原件只进 metadata.sourceFiles.answers，**不再写 pdf_url**，
+    //    pdf_url 是题目原卷（worksheets 视图也在读），覆盖后「看原卷」会打开答案册。
+    //    照片答案以前完全没有留档，这里一并补上。
+    try {
+      const answerFiles = await archiveUploads(pdf ? [pdf] : images, '答案')
+      await saveSourceFiles(resourceId, 'answers', answerFiles)
+    } catch (e) {
+      console.warn('[paperBank] 答案原件存档失败（不影响解析）:', e.message)
     }
 
     res.json({ success: true, parsing: true, message: '答案已上传，解析已开始' })
@@ -228,14 +299,17 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
       return res.status(400).json({ error: '不能混传', message: 'PDF 请单独上传；拍照请只传图片' })
     }
 
-    // 题目 PDF 存一份原始文件：老师可以随时打开原卷核对
-    if (pdf) {
-      try {
-        const pdfUrl = await uploadPDF(pdf.buffer, pdf.originalname, 'paper-bank')
-        await query(`UPDATE resources SET pdf_url = $2 WHERE id = $1`, [resourceId, pdfUrl])
-      } catch (e) {
-        console.warn('[paperBank] 原卷 PDF 上传失败（不影响解析）:', e.message)
+    // 题目原件留档：老师点「原卷」就能打开自己上传的那份文件核对 OCR。
+    // PDF 同时保持 pdf_url 的历史语义；多张照片按上传顺序逐张留档（以前完全没有留档）。
+    // ⛔ 必须在解析启动前完成，避免与 metadata.pageTitles 回填互相覆盖。
+    try {
+      const questionFiles = await archiveUploads(pdf ? [pdf] : images, '原卷')
+      if (pdf && questionFiles.length) {
+        await query(`UPDATE resources SET pdf_url = $2 WHERE id = $1`, [resourceId, questionFiles[0].url])
       }
+      await saveSourceFiles(resourceId, 'questions', questionFiles)
+    } catch (e) {
+      console.warn('[paperBank] 原卷存档失败（不影响解析）:', e.message)
     }
 
     await setPaperParseStatus(resourceId, { status: 'parsing', totalPages: 0, donePages: 0 })

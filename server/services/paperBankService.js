@@ -246,7 +246,12 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
   const { content } = await callVisionCompletion({
     imageDataURL,
     systemPrompt: buildOCRPrompt(),
-    userText: '请识别这张试卷页面上的全部题目，按 JSON 格式返回。',
+    // 2026-11-06 嘉定一模 23(2) 事故：卷面「BC·CF = AC·DF」被 OCR 成「BC·CF = AC² - DE²」，
+    // 乘号后的字母被臆造成平方与减号。只给试卷题库这条链加逐字照抄约束，
+    // ⛔ 不改全局 buildOCRPrompt（批改主链路与练习册共用，不能动）。
+    userText: '请识别这张试卷页面上的全部题目，按 JSON 格式返回。求证/计算类等式必须逐字照抄卷面：'
+      + '乘号「·」后面的字母不得改写成上标平方或减号，字母不得互换、不得增删项'
+      + '（反例：卷面 AC·DF 不能写成 AC²-DE²）。看不清的字符宁可照原样保留，也不要用数学关系猜补。',
     temperature: 0.05,
     maxTokens: 8192,
     // 显式链：整页卷子 OCR 与学生作业拍照 OCR 是同族任务，
@@ -678,6 +683,8 @@ export async function updatePaperQuestion(id, patch = {}) {
   const params = [id]
   const put = (col, val) => { params.push(val); sets.push(`${col} = $${params.length}`) }
   if ('content' in patch) put('content', patch.content)
+  // 公共题干也会 OCR 错，老师行内校对时要能一起改（2026-11-06 嘉定一模 23(2) 事故）
+  if ('parent_stem' in patch) put('parent_stem', patch.parent_stem)
   if ('options' in patch) { params.push(JSON.stringify(patch.options || [])); sets.push(`options = $${params.length}::jsonb`) }
   if ('question_type' in patch) put('question_type', normalizeQuestionType(patch.question_type))
   if ('answer' in patch) {
