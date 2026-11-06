@@ -125,11 +125,33 @@ test('★ 选项列数按**显示宽度**算，不按 LaTeX 源码长度', () =>
   assert.equal(optionColumns([]), 1)
   assert.equal(optionColumns(null), 1)
 })
-test('反向自检：少了分隔行就绝不出表格（判据必须靠分隔行，不能只看竖线）', () => {
-  const noSep = '| x | ... | 0 |\n| y | ... | 1 |'
-  assert.ok(!renderContent(noSep).includes('md-table'), '缺分隔行不得渲染成表格')
-  // 正向：补上分隔行后必须出表格
-  assert.ok(renderContent('| x | 0 |\n|---|---|\n| y | 1 |').includes('md-table'))
+// 2026-11-06 口径变更：OCR 转录卷面表格**不会**补 `|---|---|` 分隔行（徐汇/杨浦一模 20 题
+// 的 x/y 对应值表就是裸两行），旧判据「必须靠分隔行」会让这类表格在页面上渲染成一串裸竖线。
+// 现在允许「无分隔行」的表格，但判据收紧成三道：连续 ≥2 行、每行首尾都是 |、每行 ≥3 格。
+// ⚠️ 下面这组反向自检锁住的就是这三道闸 —— 不许为了多认表格把它们放宽。
+test('★ 无分隔行的 OCR 表格要认（≥2 行 / 首尾竖线 / ≥3 格），绝对值与短行仍不许认', () => {
+  // 正向：徐汇一模 20 题题干原文形态（无分隔行，全部行进 tbody，不臆造表头）
+  const ocr = '| x | ... | 0 |\n| y | ... | 1 |'
+  const blocks = splitMarkdownTables(ocr)
+  assert.equal(blocks.length, 1)
+  assert.equal(blocks[0].type, 'table')
+  assert.equal(blocks[0].header, null, '无分隔行时不得把首行当表头')
+  assert.equal(blocks[0].rows.length, 2)
+  const html = renderContent(ocr)
+  assert.ok(html.includes('<table class="md-table">'))
+  assert.ok(!html.includes('<thead>'), '不能把数据行渲染成表头')
+
+  // 反向①：两格短行（正文里的 | a | b | 更可能是排版噪声，宁可不认）
+  assert.equal(splitMarkdownTables('| a | b |\n| c | d |').some(b => b.type === 'table'), false)
+  // 反向②：绝对值/行列式（首字符不是 |）
+  assert.equal(splitMarkdownTables('$|\\vec{a}|=3$\n$|\\vec{b}|=4$').some(b => b.type === 'table'), false)
+  assert.equal(splitMarkdownTables('当 |x|>1 时\n且 |x|<3 时').some(b => b.type === 'table'), false)
+  // 反向③：只有一行竖线、或中间夹空行
+  assert.equal(splitMarkdownTables('| x | ... | 0 |').some(b => b.type === 'table'), false)
+  assert.equal(splitMarkdownTables('| x | ... | 0 |\n\n| y | ... | 1 |').some(b => b.type === 'table'), false)
+
+  // 正向：补上分隔行仍然照旧出表头
+  assert.ok(renderContent('| x | 0 |\n|---|---|\n| y | 1 |').includes('<thead>'))
 })
 
 // ─────────────────────────────────────────────────────────────

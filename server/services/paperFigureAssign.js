@@ -19,8 +19,13 @@
  *      抠不出来的行只能是 target，永不当源，也永不整张兜底。
  *   ② target 只收「自己无图 + 高度是一行文字条」的行；高裁片自成一题，
  *      覆盖它等于毁掉它自己的内容（嘉定 22 的 (2) 就在此列）。
+ *      唯一例外：该行**自己的正文**写着「如图 / 图中 / 图N」——它离了图没法做，
+ *      必须补（杨浦 24(1) 实测：高 74、两行字，第一个字就是「如图 1」）。
+ *      例外只认 content，⛔ 不认 parent_stem（题干里的「如图」是全小题共用的）。
  *   ③ 图源优先整题行（题干图是全小题共用的「如图」），其次组内最高的小问。
  *   ④ 题干行永不被小问的图覆盖。
+ *   ⑤ 整行裁片里没有任何图形（纯正文/选项/空白）⇒ 调用方**不挂配图**，
+ *      由 analyzeCropFigure 的 hasFigure 判定；配图只承载图形，不承载正文重影。
  *
  * 两个消费方（同一实现，禁止各写一套）：
  *   ① paperBankService.parsePageToQuestions —— 新卷解析的裁片后置步；
@@ -31,6 +36,12 @@ import sharp from 'sharp'
 
 /** 「带图行」的最小归一化高度（0-1000 页高）。一行文字 ≈ 15-30；图形块实测 106-356。 */
 export const FIG_MIN_NORM_H = 60
+
+/**
+ * 「这块非文字带算不算一幅图」的最小像素高度（4x 裁片）。
+ * 一行正文的墨迹带 20~37px；作图题里当已知条件的那条线段只有 3px（嘉定 22(2) 实测）。
+ */
+export const FIG_MIN_BAND_H = 50
 
 /** 墨迹阈值：灰度 < 200 记为墨点。与裁片/图形带全链路同口径。 */
 const INK = 200
@@ -145,7 +156,7 @@ function blankFrameLines(data, width, height, frame) {
  * ⛔ 没传 figureIdx = 没有任何「谁带图」的证据 ⇒ 返回 []（fail closed）。
  *    历史上的高度启发式就是 2026-11-06 事故的根因，不允许再作为默认行为。
  */
-export function planSubrowFigureAssignments(rows, figureIdx) {
+export function planSubrowFigureAssignments(rows, figureIdx, opts = {}) {
   const list = Array.isArray(rows) ? rows : []
   let fig
   if (figureIdx instanceof Set) fig = figureIdx
@@ -153,6 +164,11 @@ export function planSubrowFigureAssignments(rows, figureIdx) {
   else if (Array.isArray(figureIdx)) fig = new Set(figureIdx.map((v, i) => (v ? i : -1)).filter(i => i >= 0))
   else fig = new Set()
   if (!fig.size) return []
+  // 「自己已经有图的行」——含**有图但抠不干净**的行（它们挂整张裁片兜底）。
+  // ⛔ 这两类必须分开：fig 只决定「谁能当图源」，withFig 决定「谁不许被覆盖」。
+  //   混成一个就会出事（2026-11-06 实测）：杨浦 25(2) 自己有图 6~图 10，只是抠不干净，
+  //   正文又写着「如图 6」，如果只按 fig 判，它会被当成无图行，拿 (1) 的图覆盖掉自己的五幅图。
+  const withFig = opts.withFigure instanceof Set ? opts.withFigure : fig
 
   const groups = new Map()
   for (let i = 0; i < list.length; i++) {
@@ -168,6 +184,17 @@ export function planSubrowFigureAssignments(rows, figureIdx) {
     const b = list[i] && list[i].bbox
     const h = b ? Number(b.height) : 0
     return Number.isFinite(h) ? h : 0
+  }
+
+  // 「这一行自己说了要图」——只认**小问自己的 content**，⛔ 不看 parent_stem：
+  // 题干里写「如图」是全小题共用的，用 parent_stem 判会把每个小问都判成需要图。
+  // 实测两例（杨浦一模 24）：(1) 高 74（两行字，含①②），按高度闸会被挡在图外，
+  // 但它的正文第一句就是「如图1，建立平面直角坐标系」——(1) 离了图没法做；
+  // 而嘉定一模 22(2)（「作出以线段 EF 为底边的黄金三角形」，高 200）正文不提图，
+  // 高度闸必须继续挡住它 —— 给它补题干那张图就是 11-06 事故本身。
+  const asksForFigure = (i) => {
+    const c = String((list[i] && list[i].content) || '')
+    return /如图|图中|图\s*\d/.test(c)
   }
 
   const plans = []
@@ -187,8 +214,10 @@ export function planSubrowFigureAssignments(rows, figureIdx) {
     for (const i of idxs) {
       if (i === srcIdx) continue
       if (!list[i].sub_no) continue        // 题干行永不被小问的图覆盖
-      if (fig.has(i)) continue             // 自己有图，不覆盖
-      if (hOf(i) >= FIG_MIN_NORM_H) continue // 高裁片自成一题，覆盖会毁掉它自己的内容
+      if (withFig.has(i)) continue         // 自己已经有图（干净图带或整张兜底），不覆盖
+      // 高裁片自成一题，覆盖会毁掉它自己的内容；唯一例外是它正文自己写着「如图」
+      // （杨浦 24(1) 实测：两行字但第一个字就是「如图1」）。
+      if (hOf(i) >= FIG_MIN_NORM_H && !asksForFigure(i)) continue
       plans.push({ targetIdx: i, sourceIdx: srcIdx })
     }
   }
@@ -219,11 +248,34 @@ export function planSubrowFigureAssignments(rows, figureIdx) {
  * - 带边框的阅读材料框：先抹白框线再分段（嘉定一模 22 实测，见 detectContentFrame）。
  */
 export async function extractFigureBandFromCrop(cropBuffer) {
+  const r = await analyzeCropFigure(cropBuffer)
+  return r.band
+}
+
+/**
+ * 「这一行裁片里到底有没有图形」的完整判定（extractFigureBandFromCrop 的带诊断版本）。
+ *
+ * @returns {Promise<{band:Buffer|null, hasFigure:boolean, reason:string}>}
+ *   - `band`：抠出来的干净图形带（能去掉正文时）；抠不干净时为 null；
+ *   - `hasFigure`：**裁片里存在成块的图形**。为 false 表示这片区域只有正文/选项/空白，
+ *     此时调用方**不得**把整张裁片当配图 —— 那等于把题干文字再贴一遍，
+ *     负责人 2026-11-06 报障的徐汇 20（三个小问各贴同一张表格）、嘉定 22(2)（贴自己的正文）
+ *     就是这个形态。
+ *   - `reason`：`ok` / `no-figure-band`（纯文字）/ `no-ink` / `too-small` /
+ *     `band-not-clean`（有图但抠不干净）/ `error`。
+ *
+ * ⚠️ hasFigure 与 band 是两个独立结论，别合并：
+ *   杨浦一模 25(2) 是「两段正文 + 图 6~图 10 排成两行 + 图注」的多图版式，
+ *   最高那块图只有 155px、合并后 figH 196 < 裁片高 25% ⇒ 抠不干净（band=null），
+ *   但那里确实有五幅图：整张裁片兜底是**对**的，绝不能因为 band=null 就当纯文字删掉。
+ */
+export async function analyzeCropFigure(cropBuffer) {
+  let sawFigure = false
   try {
     const { data, info } = await sharp(cropBuffer).greyscale().raw().toBuffer({ resolveWithObject: true })
     const width = Number(info.width) || 0
     const height = Number(info.height) || 0
-    if (width < 40 || height < 60) return null
+    if (width < 40 || height < 60) return { band: null, hasFigure: false, reason: 'too-small' }
 
     // 抹白内容框的框线后再做剖面；⚠️ 只从**派生副本**抹白，最终仍从原图裁（不重编码、不掉色）
     let prof = data
@@ -282,7 +334,7 @@ export async function extractFigureBandFromCrop(cropBuffer) {
         bands.push({ top, bottom })
       }
     }
-    if (!bands.length) return null
+    if (!bands.length) return { band: null, hasFigure: false, reason: 'no-ink' }
 
     const bandMaxSpan = (b) => {
       let m = 0
@@ -313,7 +365,12 @@ export async function extractFigureBandFromCrop(cropBuffer) {
       const h = b.bottom - b.top + 1
       if (h > figBandH) { fig = b; figBandH = h }
     }
-    if (!fig || figBandH < 50) return null
+    // 「有没有图」的最后一道闸：最高的一块非文字带至少 50px 高才算图形。
+    // 低于这个量级只可能是短文字行、下划线、页码、或作图题里那条作为已知条件的线段
+    // （嘉定一模 22(2) 的 EF 只有 3px 高 + 两个字母）。这类裁片一律判「无图」。
+    if (!fig || figBandH < FIG_MIN_BAND_H) return { band: null, hasFigure: false, reason: 'no-figure-band' }
+    // ↓ 到这里已确认裁片里有图：下面只决定「能不能把正文裁干净」，裁不干净不等于没图。
+    sawFigure = true
 
     const bandRange = (b) => {
       let lo = width, hi = -1
@@ -367,7 +424,10 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     const figTop = Math.max(0, figTopInk - topMargin)
     const figBottom = Math.min(height, figBottomInk + 6)
     const figH = figBottom - figTop
-    if (figH < 50 || figH < height * 0.25) return null
+    if (figH < FIG_MIN_BAND_H) return { band: null, hasFigure: true, reason: 'band-not-clean' }
+    // 合并后仍不足裁片高的 25%：多图版式（杨浦 25(2) 的图 6~图 10 排成两行）会把
+    // 上下段正文一起带进来 —— 裁不干净就不裁，交给调用方用整张裁片兜底。
+    if (figH < height * 0.25) return { band: null, hasFigure: true, reason: 'band-not-clean' }
 
     // ── 横向裁紧（2026-11-03）──
     // 源裁片是「整页宽」的横条（实测 2144px 宽），而图形常常只占其中一小块，
@@ -397,13 +457,15 @@ export async function extractFigureBandFromCrop(cropBuffer) {
     // 极端情况（横向墨迹范围过小）退化为整幅宽，避免裁出细条
     if (cropWidth < 40) { cropLeft = 0; cropWidth = width }
 
-    return await sharp(cropBuffer)
+    const band = await sharp(cropBuffer)
       .extract({ left: cropLeft, top: figTop, width: cropWidth, height: figBottom - figTop })
       .withMetadata({ icc: 'srgb' }) // 与裁片同源：输出不留无头 JPEG（下游 raw() 会报色彩空间未设）
       .jpeg({ quality: 92 }) // 与 cropQuestionImage 同口径；82 在 4x 细节上有可见块状伪影
       .toBuffer()
+    return { band, hasFigure: true, reason: 'ok' }
   } catch (e) {
     console.warn('[paperFigureAssign] 图形带提取失败:', e.message)
-    return null
+    // 抛错前已经确认过有图 → 让调用方走整张兜底，而不是把整行的图丢掉
+    return { band: null, hasFigure: sawFigure, reason: 'error' }
   }
 }

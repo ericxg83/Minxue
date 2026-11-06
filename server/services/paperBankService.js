@@ -31,7 +31,7 @@ import {
   PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
 } from '../config/ai.js'
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
-import { planSubrowFigureAssignments, extractFigureBandFromCrop } from './paperFigureAssign.js'
+import { planSubrowFigureAssignments, analyzeCropFigure } from './paperFigureAssign.js'
 import { stripPageRulingLines } from './pageRulingClean.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
@@ -494,7 +494,12 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     // ⛔ 不改全局 buildOCRPrompt（批改主链路与练习册共用，不能动）。
     userText: '请识别这张试卷页面上的全部题目，按 JSON 格式返回。求证/计算类等式必须逐字照抄卷面：'
       + '乘号「·」后面的字母不得改写成上标平方或减号，字母不得互换、不得增删项'
-      + '（反例：卷面 AC·DF 不能写成 AC²-DE²）。看不清的字符宁可照原样保留，也不要用数学关系猜补。',
+      + '（反例：卷面 AC·DF 不能写成 AC²-DE²）。看不清的字符宁可照原样保留，也不要用数学关系猜补。'
+      // 卷面表格：OCR 原来只抄裸竖线（`| x | ... | -4 |`），不带 markdown 分隔行，
+      // 页面就渲染成一串裸竖线（徐汇/杨浦一模 20 题的 x-y 对应值表实测）。
+      // 要求补一行分隔行后，渲染器走标准表头路径，PDF/讲义同口径。
+      + '卷面上的表格必须用 markdown 管道表返回，并在数据行前补一行分隔行（如 |---|），'
+      + '不要在表格外复制一份表格文字。',
     temperature: 0.05,
     maxTokens: 8192,
     // 显式链：整页卷子 OCR 与学生作业拍照 OCR 是同族任务，
@@ -573,26 +578,37 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     } else {
       // 裁片缓冲按行留底：下面的「小问组配图共享」要用同一份像素判图，
       // 不再重复 cropQuestionImage（4x 图重复裁一次就是一次多余的 sharp 解码）。
-      const cropBufs = new Array(rows.length).fill(null)
+      const figBands = new Map()   // 行下标 → 该行自己的干净图形带
       for (let i = 0; i < rows.length; i++) {
         const box = measured?.boxes?.[String(i)]
         if (!box) continue
         rows[i].bbox = box
         const cropped = await cropQuestionImage(hiPage, box)
-        if (cropped) {
-          cropBufs[i] = cropped
-          try {
-            // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
-            //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
-            //      同页多道缺号题的裁片会互相覆盖，最后所有行都指向同一张图；
-            //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
-            //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
-            //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
-            rows[i].image_url = await uploadImage(
-              cropped, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}.jpg`, 'paper-bank')
-          } catch (e) {
-            logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题裁片上传失败: ${e.message}`)
-          }
+        if (!cropped) continue
+        // ── 配图只承载「图形」（2026-11-06）──
+        // 负责人报障两例：徐汇一模 20 的三个小问各贴同一张表格图、嘉定一模 22(2) 贴的
+        // 是它自己那段正文。两者都是「把裁片当配图」的必然结果：裁片是**整行区域**，
+        // 纯文字行裁出来就是题干的重影，老师看到的是同一段字被贴了两遍。
+        // 现在的判据：先判这片区域**有没有图**（analyzeCropFigure），
+        //   ① 有图且能裁干净 → 用干净图形带；
+        //   ② 有图但裁不干净（多图版式/图形与正文交错）→ 整张裁片兜底（宁可带文字，不可丢图）；
+        //   ③ **没有图 → 不挂配图**（image_url 留空），页面只显示「看原卷」。
+        const fig = await analyzeCropFigure(cropped)
+        if (!fig.hasFigure) continue
+        if (fig.band) figBands.set(i, fig.band)
+        const imgBuf = fig.band || cropped
+        const kind = fig.band ? 'fig' : 'crop'
+        try {
+          // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
+          //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
+          //      同页多道缺号题的裁片会互相覆盖，最后所有行都指向同一张图；
+          //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
+          //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
+          //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
+          rows[i].image_url = await uploadImage(
+            imgBuf, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}-${kind}.jpg`, 'paper-bank')
+        } catch (e) {
+          logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题配图上传失败: ${e.message}`)
         }
       }
 
@@ -611,23 +627,11 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
       //   ③ target 只收自己无图 + 一行文字条的行，高裁片绝不覆盖；
       //   ④ 抠不出图 ⇒ 不共享、不兜底。
       try {
-        const groups = new Map()
-        rows.forEach((r, i) => {
-          const key = `${r.page_no ?? ''}|${String(r.question_no ?? '')}`
-          if (!groups.has(key)) groups.set(key, [])
-          groups.get(key).push(i)
-        })
-        const figBands = new Map()   // 行下标 → 该行自己的干净图形带
-        for (const idxs of groups.values()) {
-          if (idxs.length < 2) continue
-          for (const i of idxs) {
-            const buf = cropBufs[i]
-            if (!buf) continue
-            const band = await extractFigureBandFromCrop(buf)
-            if (band) figBands.set(i, band)
-          }
-        }
-        const figPlans = planSubrowFigureAssignments(rows, figBands)
+        // figBands 已在上面的裁片循环里算好（一行只判一次图，不重复解码）
+        // withFigure：所有「有图」的行（含抠不干净挂整张的），这些行绝不能被共享覆盖
+        const withFigure = new Set()
+        rows.forEach((r, i) => { if (r.image_url) withFigure.add(i) })
+        const figPlans = planSubrowFigureAssignments(rows, figBands, { withFigure })
         const sourceDone = new Set()
         for (const pl of figPlans) {
           const src = rows[pl.sourceIdx]

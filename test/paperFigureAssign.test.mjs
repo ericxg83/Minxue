@@ -11,6 +11,7 @@ import sharp from 'sharp'
 import {
   planSubrowFigureAssignments,
   extractFigureBandFromCrop,
+  analyzeCropFigure,
   FIG_MIN_NORM_H,
 } from '../server/services/paperFigureAssign.js'
 
@@ -44,6 +45,49 @@ test('⛔ 高裁片（h≥60）自己无图也不算 target：覆盖它会毁掉
   // 组内唯一带图的是另一道题的行，不得把 h=200 的 (2) 覆盖掉
   const plans = planSubrowFigureAssignments(rows, new Set([0]))
   assert.deepEqual(plans, [])
+})
+
+// ── 「如图」例外：正文自己写着要图的，高度闸要让路（杨浦一模 24 实测）──
+test('★ 高裁片但正文写着「如图1」→ 必须补图（杨浦 24(1)，h=74）', () => {
+  const rows = [
+    { ...row('a', 24, '1', 74), content: '(1) 如图1，建立平面直角坐标系。① 求此抛物线的表达式；' },
+    { ...row('b', 24, '2', 240), content: '(2) 如图2，在这场篮球赛中…' },
+  ]
+  const plans = planSubrowFigureAssignments(rows, new Set([1]))
+  assert.equal(plans.length, 1)
+  assert.equal(plans[0].targetIdx, 0)
+  assert.equal(plans[0].sourceIdx, 1)
+})
+
+test('⛔ 高裁片正文不提图 → 仍然不许覆盖（嘉定 22(2)：「作出以线段 EF 为底边…」）', () => {
+  const rows = [
+    { ...row('a', 22, '1', 35), content: '(1) 请写出图中 AP/AB 的值是 ______；' },
+    { ...row('b', 22, '2', 200), content: '(2) 我们把顶角为 36° 的等腰三角形称为黄金三角形…作出以线段 EF 为底边的黄金三角形 EFG（保留作图痕迹）' },
+  ]
+  const plans = planSubrowFigureAssignments(rows, new Set([0]))
+  // (2) 高 200 且正文只有「作图痕迹」四个字里的「图」，不构成「要图」
+  assert.deepEqual(plans, [])
+})
+
+test('⛔「如图」例外只认 content，不认 parent_stem（题干里的如图是全小题共用的）', () => {
+  const rows = [
+    { ...row('a', 22, '1', 200), content: '(1) 求 m 的值；', parent_stem: '如图，在梯形 ABCD 中…' },
+    { ...row('b', 22, '2', 240), content: '(2) 求面积。', parent_stem: '如图，在梯形 ABCD 中…' },
+  ]
+  const plans = planSubrowFigureAssignments(rows, new Set([1]))
+  assert.deepEqual(plans, [], 'parent_stem 有「如图」不得把高裁片变成 target')
+})
+
+test('⛔ 自己有图但抠不干净（挂整张兜底）的行，不许被共享覆盖（杨浦 25(2) 有五幅图）', () => {
+  // (1) 能抠出干净图带；(2) 有多图、抠不干净 → 挂整张，正文写着「如图 6」
+  const rows = [
+    { ...row('a', 25, '1', 235), content: '(1) 如图 6，将正方形纸片对折…' },
+    { ...row('b', 25, '2', 260), content: '(2) 如图 6 至图 10 的方式操作…' },
+  ]
+  const plans = planSubrowFigureAssignments(rows, new Set([0]), { withFigure: new Set([0, 1]) })
+  assert.deepEqual(plans, [], '自己已经有图（整张也是图），不得被换成兄弟小问的图')
+  // 反证：不传 withFigure 时（老口径）它会错误地变成 target
+  assert.equal(planSubrowFigureAssignments(rows, new Set([0])).length, 1)
 })
 
 test('整题行（题干）有图时优先作图源，小问共享题干图（嘉定 22 正解）', () => {
@@ -160,6 +204,54 @@ test('文字行 + 大图：抠掉文字行，只留图形带', async () => {
 test('纯文字裁片（无大带）→ null，调用方整张兜底', async () => {
   const crop = await makeCrop([{ top: 20, bottom: 50 }, { top: 70, bottom: 100 }, { top: 120, bottom: 150 }])
   assert.equal(await extractFigureBandFromCrop(crop), null)
+})
+
+// ── 「裁片里到底有没有图」：hasFigure（2026-11-06 徐汇 20 / 嘉定 22(2) 报障）──
+// 判据分两层：band 能不能裁干净是「观感」，hasFigure 才是「该不该挂配图」。
+// 纯正文行裁出来就是题干的重影 —— 挂上去老师看到同一段字被贴两遍。
+
+test('★ 纯文字裁片：hasFigure=false（不挂配图，绝不拿正文当配图）', async () => {
+  const crop = await makeCrop([{ top: 20, bottom: 50 }, { top: 70, bottom: 100 }, { top: 120, bottom: 150 }])
+  const r = await analyzeCropFigure(crop)
+  assert.equal(r.band, null)
+  assert.equal(r.hasFigure, false)
+  assert.equal(r.reason, 'no-figure-band')
+})
+
+test('★ 只有一条已知线段 + 两个字母（嘉定 22(2) 形态）→ hasFigure=false', async () => {
+  // 三行正文（最宽 360）+ 一条 4px 线 + 两个字母块：图形量级远不到「一幅图」
+  const crop = await makeCrop([
+    { top: 20, bottom: 50 },
+    { top: 70, bottom: 100, w: 300 },
+    { top: 150, bottom: 154, x: 140, w: 120 },
+    { top: 160, bottom: 176, x: 140, w: 120 },
+  ])
+  const r = await analyzeCropFigure(crop)
+  assert.equal(r.hasFigure, false)
+  assert.equal(r.band, null)
+})
+
+test('★ 有图但抠不干净（多图版式）→ band=null 但 hasFigure=true（必须整张兜底，不许当纯文字删图）', async () => {
+  // 模拟杨浦 25(2)：正文 + 一块 150px 高的图 + 图注；图高 < 裁片高 25% ⇒ 裁不干净
+  const crop = await makeCrop([
+    { top: 20, bottom: 50 },
+    { top: 80, bottom: 110 },
+    { top: 400, bottom: 550 },
+    { top: 600, bottom: 620, w: 300 },
+  ], { h: 800 })
+  const r = await analyzeCropFigure(crop)
+  assert.equal(r.band, null, '裁不干净时不给 band')
+  assert.equal(r.hasFigure, true, '但必须承认这里有图')
+  assert.equal(r.reason, 'band-not-clean')
+})
+
+test('★ 有图且能裁干净 → band 非空且 hasFigure=true', async () => {
+  const crop = await makeCrop([{ top: 20, bottom: 50 }, { top: 70, bottom: 100 }, { top: 140, bottom: 290 }])
+  const r = await analyzeCropFigure(crop)
+  assert.equal(r.hasFigure, true)
+  assert.ok(r.band)
+  assert.equal(r.reason, 'ok')
+  assert.equal(await extractFigureBandFromCrop(crop).then(b => !!b), true, '旧入口行为不变')
 })
 
 test('纯图形裁片（单一大带）→ 返回该带', async () => {

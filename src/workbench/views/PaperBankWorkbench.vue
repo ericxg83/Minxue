@@ -188,7 +188,7 @@
           </EmptyState>
 
           <div v-else class="pb-rows">
-            <article v-for="q in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id) }">
+            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id) }">
               <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" />
 
               <div class="pb-row__body">
@@ -200,10 +200,16 @@
                   <span class="pb-row__paper">{{ q.resource_name }}</span>
                 </div>
 
-                <div v-if="q.parent_stem" class="pb-row__stem">
+                <!-- 题干在**同一道题的小问之间只显示一次**（2026-11-06）。
+                     数据里 parent_stem 逐行冗余存储（每行都要能单独组卷），逐行渲染会让
+                     「20(1) 表格 / 20(2) 同一张表格 / 20(3) 同一张表格」——负责人报障的
+                     「三张表格」就是这个形态（当时是 recrop 的图片，图片撤掉后文字表格照样重复）。
+                     判据只比「紧邻的上一行」：题号相同且题干逐字相同才隐藏，
+                     所以筛选/搜索把同组打散时，每组第一条仍会正常显示题干。 -->
+                <div v-if="showStem(q, qi)" class="pb-row__stem">
                   <MathRender :content="q.parent_stem" auto-detect />
                 </div>
-                <div class="pb-row__text"><MathRender :content="q.content" auto-detect /></div>
+                <div v-if="bodyText(q)" class="pb-row__text"><MathRender :content="bodyText(q)" auto-detect /></div>
 
                 <!-- 原题裁片图行内展示（2026-11-01 负责人反馈：小拇指缩略图看不清几何图形，等于没图）。
                      数据里 64/64 题都有裁片图，此前只是展示位置太隐蔽。 -->
@@ -658,6 +664,22 @@ const emptyHint = computed(() => {
 const isParsing = (p) => p.question_parse_status === 'parsing' || p.parse_status === 'parsing'
 
 const questionLabel = (q) => (q.question_no == null ? '?' : `${q.question_no}${q.sub_no ? `(${q.sub_no})` : ''}.`)
+// 题干去重（2026-11-06）：parent_stem 逐行冗余存储，同一道题的多个小问只在**第一条**显示题干。
+// 只比紧邻上一行：筛选/搜索把同组打散时每组第一条照样显示；题干不同的（不同题）不受影响。
+const showStem = (q, i) => {
+  if (!q.parent_stem) return false
+  const prev = i > 0 ? questions.value[i - 1] : null
+  if (!prev || prev.parent_stem !== q.parent_stem) return true
+  return prev.resource_id !== q.resource_id || String(prev.question_no) !== String(q.question_no)
+}
+// 整题行（题干本身）的 content 常常是把 parent_stem 又抄了一遍（OCR 行为，嘉定 22 实测），
+// 卡片上就变成同一段材料印两遍。逐字相同（忽略空白）时只留题干，不显示正文。
+const normText = (s) => String(s || '').replace(/\s+/g, '')
+const bodyText = (q) => {
+  const c = String(q.content || '')
+  if (!c || !q.parent_stem) return c
+  return normText(c) === normText(q.parent_stem) ? '' : c
+}
 const typeLabel = (t) => ({ choice: '选择题', fill: '填空题', judge: '判断题', answer: '解答题' }[t] || '解答题')
 const stars = (d) => '★'.repeat(Math.max(1, Math.min(3, d <= 2 ? 1 : d === 3 ? 2 : 3)))
 // 列表缩略图走统一入口（OSS 追加 resize 参数），⛔ 不直接引原图

@@ -748,8 +748,7 @@ function escapeHtml(text) {
 const MD_TABLE_SEPARATOR = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/
 
 /** 按 `|` 切单元格；`$...$` 内部的 `|`（绝对值/行列式）不切。 */
-function splitMarkdownTableCells(line) {
-  const s = String(line == null ? '' : line).trim().replace(/^\|/, '').replace(/\|$/, '')
+function splitMarkdownTableCells(line) {  const s = String(line == null ? '' : line).trim().replace(/^\|/, '').replace(/\|$/, '')
   const cells = []
   let cur = ''
   let inMath = false
@@ -775,9 +774,21 @@ function parseMarkdownTableAligns(sepLine) {
 }
 
 /**
+ * 「这一行像不像表格里的一行」——**无分隔行**版表格的判据（2026-11-06）。
+ * 必须同时满足：首尾都是 `|`，且切成 ≥3 个单元格。
+ * ⚠️ 单看「行内出现 |」会误伤绝对值：`$|\vec{a}|=3$`、`当 |x|>1 时` 首字符都不是 `|`。
+ */
+function isHeaderlessTableRow(line) {
+  if (line == null) return false
+  const s = String(line).trim()
+  if (s.length < 7 || !s.startsWith('|') || !s.endsWith('|')) return false
+  return splitMarkdownTableCells(s).length >= 3
+}
+
+/**
  * 把文本切成文本块与表格块。不含表格时**返回原文一个块**（逐字不变），
  * 所以所有既有调用方的输出不受影响。
- * @returns {Array<{type:'text',text:string}|{type:'table',header:string[],aligns:string[],rows:string[][]}>}
+ * @returns {Array<{type:'text',text:string}|{type:'table',header:string[]|null,aligns:string[],rows:string[][]}>}
  */
 function splitMarkdownTables(text) {
   const src = String(text == null ? '' : text)
@@ -807,6 +818,31 @@ function splitMarkdownTables(text) {
       i = j
       continue
     }
+    // ── 无分隔行的管道表（2026-11-06）──
+    // OCR 转录卷面表格时**不会**补 markdown 的 `|---|---|` 分隔行，只逐行抄竖线：
+    //   徐汇一模 20 题「函数 y 与自变量 x 的部分对应值如下表」实测就是
+    //   `| x | ... | -4 | -3 | ... |` / `| y | ... | 0 | m | ... |` 两行。
+    // 旧判据只认「有分隔行」，这类表格在页面上就渲染成一串裸竖线。
+    // 判据从严（三道，缺一不可），防止把数学里的绝对值/行列式当表格：
+    //   ① 连续 **≥2 行**都满足「以 | 开头、以 | 结尾」（`$|\vec a|=3$`、`当 |x|>1 时` 都不满足）；
+    //   ② 每行切成 **≥3 个单元格**（`| a | b |` 这种两格短行不算，宁可不渲染）；
+    //   ③ 整段不得含空行（表格中间不可能有空行）。
+    // 表头只作首行数据的旧格式：**全部行都进 tbody**，不臆造表头
+    //（x 行当表头会把「x」加粗居中，卷面本来就没有表头）。
+    if (isHeaderlessTableRow(header) && isHeaderlessTableRow(sep)) {
+      const rows = []
+      let j = i
+      while (j < lines.length && isHeaderlessTableRow(lines[j])) {
+        rows.push(splitMarkdownTableCells(lines[j]))
+        j++
+      }
+      if (rows.length >= 2) {
+        flush()
+        out.push({ type: 'table', header: null, aligns: [], rows })
+        i = j
+        continue
+      }
+    }
     buf.push(header)
     i++
   }
@@ -817,13 +853,15 @@ function splitMarkdownTables(text) {
 /** 表格块 → HTML。单元格内容仍走同一条内容渲染（所以格内的 $...$ 公式照常渲染）。 */
 function renderMarkdownTableHtml(tbl, renderCell) {
   const alignStyle = (i) => (tbl.aligns[i] ? ` style="text-align:${tbl.aligns[i]}"` : '')
-  const head = tbl.header
-    .map((c, i) => `<th${alignStyle(i)}>${renderCell(c)}</th>`)
-    .join('')
+  // header 为 null = 卷面本来就没有表头（OCR 只抄了数据行），全部行进 tbody，
+  // 不臆造表头（把「x」当表头会加粗居中，卷面上它是普通数据）。
+  const head = Array.isArray(tbl.header) && tbl.header.length
+    ? `<thead><tr>${tbl.header.map((c, i) => `<th${alignStyle(i)}>${renderCell(c)}</th>`).join('')}</tr></thead>`
+    : ''
   const body = tbl.rows
     .map(r => `<tr>${r.map((c, i) => `<td${alignStyle(i)}>${renderCell(c)}</td>`).join('')}</tr>`)
     .join('')
-  return `<table class="md-table"><thead><tr>${head}</tr></thead>`
+  return `<table class="md-table">${head}`
     + (body ? `<tbody>${body}</tbody>` : '')
     + '</table>'
 }
