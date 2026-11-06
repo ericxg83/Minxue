@@ -16,7 +16,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { refineFigureRegion } from '../server/utils/figureRegionRefiner.js'
+import { refineFigureRegion, isOffOwnerFigureBox } from '../server/utils/figureRegionRefiner.js'
 
 const W = 400
 const H = 1000
@@ -199,6 +199,39 @@ test('模型框是满宽带 → 纵向保护仍在（不得因关掉水平并集
   assert.equal(out.steps.modelBoxWide, true, '应当被判为满宽带')
   assert.ok(out.y <= 380, `纵向并集必须补到图形上沿（≤380），实得上沿 ${out.y}`)
   assert.ok(out.y + out.height >= 520, `纵向必须覆盖图形下沿（≥520），实得下沿 ${out.y + out.height}`)
+})
+
+// ── 2026-11-06 配图挂错邻题事故：归属闸（server/utils/figureRegionRefiner.js）──
+// 事故：九上期中复习作业6 第5题（等腰直角三角形重叠）OCR 把 image_bbox 落在选项文字行，
+// 收紧在整页窗口抓了【第6题的抛物线图】，入库 + AI 重绘 ⇒ 复核页端出错图。
+test('归属判据：输出框几乎离开模型框且向下漂 → 判定为邻题图', () => {
+  // 生产压缩页实测：模型框 y1171..1440，收紧输出 y1436..1620，重叠仅 4px/184px
+  assert.equal(isOffOwnerFigureBox({ y: 1436, height: 184 }, { y: 1171, height: 269 }), true)
+})
+
+test('归属判据：合法向下收紧（模型框含手写，重叠 10%）不得误伤', () => {
+  assert.equal(isOffOwnerFigureBox({ y: 320, height: 100 }, { y: 210, height: 120 }), false)
+})
+
+test('归属判据：向上抓回真图（模型框偏到图注/下一题文字）不受影响', () => {
+  assert.equal(isOffOwnerFigureBox({ y: 300, height: 100 }, { y: 400, height: 150 }), false)
+})
+
+test('归属判据：框内正常收紧 / 参数缺失 → 一律不拦', () => {
+  assert.equal(isOffOwnerFigureBox({ y: 300, height: 100 }, { y: 310, height: 80 }), false)
+  assert.equal(isOffOwnerFigureBox(null, { y: 310, height: 80 }), false)
+  assert.equal(isOffOwnerFigureBox({ y: 300, height: 0 }, { y: 310, height: 80 }), false)
+})
+
+test('集成：模型框落在选项文字行、下方是邻题配图 → 收紧必须拒绝出图', () => {
+  const ink = makeInk()
+  figureShape(ink, 150, 260, 200, 100)    // 本题图形（模型框上方，窗口内只露一点）
+  denseBlock(ink, 300, 360, 100, 300)     // 本题选项/文字带
+  figureShape(ink, 470, 590, 200, 100)    // 下一题的配图（模型框下方、完全不相交）
+  denseBlock(ink, 610, 650, 100, 300)     // 下一题题干文字（硬边界）
+  const box = { x: 110, y: 330, width: 180, height: 110 }  // 落在文字行，没框到任何图形
+  const out = refineFigureRegion(ink, W, H, box)
+  assert.equal(out, null, '宁可不给配图，也不得把下一题的图裁成本题配图')
 })
 
 

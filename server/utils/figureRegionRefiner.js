@@ -34,6 +34,25 @@ const MIN_SIDE_RATIO = 0.02    // 结果任一边不足页面 2% → 判失败
 const MAX_GROWTH_H = 2.0
 const MAX_GROWTH_W = 1.7
 
+// ── 归属闸：收紧结果不得整体漂到「模型框下方的另一道题」（2026-11-06 事故）──
+// 事故实例：九上期中复习作业6 第5题（两个等腰直角三角形重叠 △ADE）的 OCR 模型把
+// image_bbox 落在了本题选项文字行（未框到图形）。收紧在整页搜索窗里就近挑图形带，
+// pickNearest 选中了【下一题第6题的抛物线图】：模型框 y1171..1440，输出框 y1436..1620，
+// 纵向重叠仅 4px / 184px = 2.2%，却通过了所有既有闸（尺寸未超 MAX_GROWTH、仍是图形带）。
+// 结果 geometry_image_url 存了邻题的抛物线图，AI 重绘又照着错图重画一遍，复核页端出
+// 一张与三角形题干毫无关系的坐标图，判题/解析也以错图为据。
+// ⇒ 收紧是「在模型框附近让边」，不是「在整页另找一张图」。输出框几乎离开模型框且
+// **向下**漂移时，判为没定位到本题图形，返回 null（宁可不给配图，也不给错图；
+// 缺图题由 figureRelocateSweep 的强视觉重定位补图，本模块不放松任何既有判据）。
+// 只拦「向下」：模型框偏到图形下方图注/下一题文字、收紧往上抓回真图是历史修复能力
+// （test/figureRegionRefiner.test.mjs 用例①），不受影响。
+// 阈值标定（FIGURE_REFINE_DEBUG=1 实测 8 个既有回归用例 + 本次事故页）：
+//   合法下限 0.10（模型框含手写、收紧向下补出整张图形，test 用例③）
+//   事故实测 0.022（第5题输出框 y1436..1620 vs 模型框 y1171..1440）
+// ⇒ 取 0.06，两侧各留 1.6~2.7 倍余量；只拦「几乎完全离开模型框」的情形。
+const MIN_MODEL_OVERLAP_RATIO = 0.06  // 输出框与模型框的纵向重叠至少占输出框高度 6%
+const DRIFT_DOWN_START_RATIO = 0.5   // 输出框上沿已越过模型框中线才算「向下漂移」
+
 // ── 模型框宽度可信度（2026-09-23 用户明确不接受「配图带题干文字」）──
 // 线上实测（420 道引图题）：模型给的 image_bbox 有 21 道宽度≈整题带（≥0.9×block 宽），
 // 裁出来必然是「图形 + 题干续行 + 选项字母 + 下一题题号」——老师原话「不接受配图带题干文字」。
@@ -359,6 +378,27 @@ function trimToMainComponent(ink, w, h, x, y, width, height) {
 }
 
 /**
+ * 归属判据（纯函数，供 refineFigureRegion 与回归测试共用）：
+ * 收紧结果是否已整体漂到「模型框下方的另一道题」。
+ *
+ * 只拦同时满足两条的情形：① 输出框上沿已越过模型框中线（向下漂移）；
+ * ② 输出框与模型框的纵向重叠不足输出框高度的 6%。
+ * 向上抓回真图（模型框偏到图注/下一题文字）不受影响 —— 那种情况 driftDown=false。
+ *
+ * @param {{y:number,height:number}} out 最终会被裁出来的框（trimToMainComponent 之后）
+ * @param {{y:number,height:number}} box 模型给的原框（与 out 同坐标系）
+ * @returns {boolean} true = 抓到的是别的题的图，应返回 null 不给配图
+ */
+export function isOffOwnerFigureBox(out, box) {
+  if (!out || !box) return false
+  const outH = Number(out.height), boxH = Number(box.height)
+  if (!(outH > 0) || !(boxH > 0)) return false
+  const modelOv = Math.max(0, Math.min(out.y + outH, box.y + boxH) - Math.max(out.y, box.y))
+  const driftDown = out.y > box.y + boxH * DRIFT_DOWN_START_RATIO
+  return driftDown && modelOv / outH < MIN_MODEL_OVERLAP_RATIO
+}
+
+/**
  * @param {Uint8Array} ink 整页墨迹掩码（1=墨）
  * @param {Object} box 模型框（与 ink 同坐标系）
  * @returns {Object|null} 收紧后的框 {x,y,width,height,steps}；判不出图形返回 null
@@ -489,6 +529,11 @@ export function refineFigureRegion(ink, w, h, box) {
       outH = mainComp.height
     }
   }
+
+  // ── 归属校验（最后一道闸，见顶部 MIN_MODEL_OVERLAP_RATIO 注释）──
+  // 用【最终】输出框（trimToMainComponent 之后）比对模型框：上下收紧/去手写都可能挪框，
+  // 判据必须落在真正会被裁出来的那块区域上，否则形同虚设。
+  if (isOffOwnerFigureBox({ y: finalY, height: outH }, box)) return null
 
   return {
     x: finalX,
