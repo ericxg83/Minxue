@@ -1493,7 +1493,10 @@ export const useReviewStore = defineStore('review', () => {
     q.answer = resp.answer
     if (resp.analysis) q.analysis = resp.analysis
     if (typeof resp.is_correct !== 'undefined') q.is_correct = resp.is_correct
-    q.answer_source = 'ai'
+    // 练习册答案库直查命中时后端写的是 answer_source='worksheet'（响应带 source='worksheet'）。
+    // 无条件写 'ai' 会把可信的官方答案标成「AI 解答」—— 2026-11-06 直查提前到
+    // 「答案为空也查」之后这条路径更常用，标签不能再错。
+    q.answer_source = resp.source === 'worksheet' ? 'worksheet' : 'ai'
   }
 
   // 「解析补全」成功后的本地同步（2026-11-06 扩展）。

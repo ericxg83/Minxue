@@ -17,12 +17,20 @@
     2026-11-06：点「解析」必须顺带把参考答案补齐 —— 后端生成解析后写 answer 并重判，
     或（已有解析但答案为空时）直接从解析文本反填答案；前端同步 store + 清缓存，
     老师一次点击就能接着批改对错，不必再走「AI 重解析」那一整套流程。
+
+    同日入口收敛（负责人拍板）：顶部常驻的「AI 重解析」按钮与此处作用重复，已撤。
+    · 本胶囊是唯一主入口，按状态变形：都有 → 「查看解析」；缺任一项 → 「解析并补答案」；
+      重算在途 → 显示进度。
+    · 低频的「强制重算」降为弹窗内一行次级文字链，emit('recompute') 交给父组件
+      handleRecomputeAnswer，仍走 /recompute-answer ⇒ 跨页在途恢复、答案库直查、
+      降级提示、结论横幅全部原样保留，零能力损失。
   -->
   <span v-if="q" class="ana-link">
-    <el-tooltip :content="hasAnalysis ? '查看这道题的完整解析（参考答案为空时会自动补齐）' : '这道题还没有解析，点开由 AI 现场生成并补齐参考答案'" placement="top" :show-after="200">
+    <el-tooltip :content="entryTip" placement="top" :show-after="200">
       <button type="button" class="ana-link__btn" @click="openViewer">
-        <el-icon :size="12"><Reading /></el-icon>
-        <span>解析</span>
+        <el-icon v-if="recomputing" :size="12" class="is-loading"><Loading /></el-icon>
+        <el-icon v-else :size="12"><Reading /></el-icon>
+        <span>{{ entryLabel }}</span>
       </button>
     </el-tooltip>
 
@@ -80,6 +88,23 @@
         />
         <MathRender v-if="analysis" :content="analysis" autoDetect />
       </div>
+
+      <!-- 低频动作：补图后重看、或觉得参考答案不对时才用，不占常驻位置。
+           仍由父组件 handleRecomputeAnswer 走 /recompute-answer，在途恢复等能力不丢。 -->
+      <template #footer>
+        <div class="ana-src__footer">
+          <button
+            type="button"
+            class="ana-src__recompute"
+            :disabled="recomputing"
+            @click="requestRecompute"
+          >
+            <el-icon v-if="recomputing" class="is-loading"><Loading /></el-icon>
+            {{ recomputing ? `重新计算中 ${recomputeJob?.elapsed ?? 0}s…` : '重新计算' }}
+          </button>
+          <span class="ana-src__footer-hint">补图后重看，或觉得参考答案不对时用</span>
+        </div>
+      </template>
     </el-dialog>
   </span>
 </template>
@@ -95,6 +120,9 @@ import MathRender from '../MathRender.vue'
 const props = defineProps({
   question: { type: Object, default: null }
 })
+// 强制重算仍由父组件 QuestionDetailPanel.handleRecomputeAnswer 执行：那上面绑着
+// 跨页在途恢复 / 答案库直查 / 降级提示 / 结论横幅，本组件只负责把动作递过去。
+const emit = defineEmits(['recompute'])
 
 const store = useReviewStore()
 const q = computed(() => props.question || store.currentReviewQuestion)
@@ -107,13 +135,38 @@ const q = computed(() => props.question || store.currentReviewQuestion)
 //   老师点开只看到一句废话。占位串题现在表现为「点开重新生成覆盖」，正是修复路径。
 // localAnalysis：本次会话刚生成、还没同步回题目列表对象时的本地兜底（store 按题号
 //   id 现查同步，切学生后列表里可能找不到那一行，弹窗不能因此白屏）。
+// ⚠️ store 里的解析优先：重新计算会写入新解析，若本地兜底文本仍压在上面，
+//   老师会看到「答案更新了、解析还是旧的」。
 const localAnalysis = ref('')
 const analysis = computed(() => {
-  if (localAnalysis.value) return localAnalysis.value
-  const t = String(q.value?.analysis || '').trim()
-  return hasUsableAnalysis(q.value) ? t : ''
+  const stored = String(q.value?.analysis || '').trim()
+  if (stored && hasUsableAnalysis(q.value)) return stored
+  return localAnalysis.value
 })
 const hasAnalysis = computed(() => analysis.value.length > 0)
+const hasAnswer = computed(() => !!String(q.value?.answer || '').trim())
+
+// 重算在途状态存在 store（按题目 ID 建档），切题 / 整页重载回来都还在，
+// 主入口与弹窗内次级动作共用这一份，禁止再起组件级 ref。
+const recomputeJob = computed(() => store.recomputeJobFor(q.value?.id))
+const recomputing = computed(() => !!recomputeJob.value?.loading)
+
+// 入口按状态变形：老师不用再猜「解析」和「AI 重解析」该点哪个。
+const entryLabel = computed(() => {
+  if (recomputing.value) return `重算中 ${recomputeJob.value?.elapsed ?? 0}s…`
+  if (hasAnalysis.value && hasAnswer.value) return '查看解析'
+  return '解析并补答案'
+})
+const entryTip = computed(() => {
+  if (recomputing.value) return '这道题正在重新计算，完成后会自动更新参考答案与解析'
+  if (hasAnalysis.value && hasAnswer.value) return '查看这道题的完整解析'
+  if (!hasAnalysis.value) return '这道题还没有解析，点开由 AI 现场生成并补齐参考答案'
+  return '解析已有但参考答案为空，点开自动补齐并重新判对错'
+})
+const requestRecompute = () => {
+  if (recomputing.value) return
+  emit('recompute')
+}
 
 const viewerVisible = ref(false)
 // 按需生成三态（2026-10-15 方案 A）
@@ -136,11 +189,13 @@ const openViewer = async () => {
   syncNote.value = ''
   syncWarn.value = ''
   viewerVisible.value = true
-  const hasAnswer = !!String(q.value?.answer || '').trim()
+  // 强制重算在途时只展示弹窗，不再并发发一个 ensure-analysis：两条链路会同时
+  // 写 answer / analysis 并各自重判，结果谁后落库谁说了算。
+  if (recomputing.value) return
   // 只有「解析有 / 答案也有」才是纯查看，秒开不请求。
   // 答案为空时必须再走一次同步：否则老师看到解析末尾写着「答案为 8 − √19」，
-  // 参考答案栏却还是空的，得回去点「AI 重解析」那一整套流程（用户报障的场景）。
-  if (hasAnalysis.value && hasAnswer) return
+  // 参考答案栏却还是空的（历史上报障后只能另找「AI 重解析」，现在已收敛）。
+  if (hasAnalysis.value && hasAnswer.value) return
   if (generating.value) return // 防重入（弹窗互斥下理论到不了，双保险）
   needsFullSolve.value = !hasAnalysis.value
   await generate()
@@ -167,7 +222,7 @@ const generate = async () => {
       if (studentId) clearStudentCaches(studentId)
     } else if (answerWasEmpty && !resp?.answer) {
       // 解析里没有可核对的答案标记 / 被闸拦下：给出可行动诊断，别让按钮看起来坏了
-      syncWarn.value = '解析已就绪，但没能从解析里提取出可核对的参考答案。请直接点参考答案栏手填，或用「AI 重解析」重算'
+      syncWarn.value = '解析已就绪，但没能从解析里提取出可核对的参考答案。请直接点参考答案栏手填，或点下方「重新计算」'
     }
     if (resp?.answer_mismatch) {
       mismatchTip.value = `AI 解出的答案（${resp.engine_answer}）与原参考答案（${resp.existing_answer}）不一致，已自动更新参考答案并重新判对错，请核对`
@@ -183,6 +238,17 @@ const generate = async () => {
     generating.value = false
   }
 }
+
+// 重算收尾后清掉上一轮「生成解析失败 / 抽不出答案」的旧提示：答案已经补上了，
+// 弹窗里还挂着过时的错误条会自相矛盾（结论由面板的常驻横幅与 toast 承接）。
+watch(() => recomputeJob.value?.loading, (loading, prev) => {
+  if (prev === true && loading === false) {
+    genError.value = ''
+    syncWarn.value = ''
+    syncNote.value = ''
+    mismatchTip.value = ''
+  }
+})
 
 // 切题即收起弹窗并复位生成态：否则翻到下一题时，弹窗还挂着上一题的解析，容易被当成当前题的
 // （批改场景里老师是连续翻题的，串题比看不见更危险）。
@@ -254,5 +320,36 @@ watch(() => q.value?.id, () => {
 }
 .ana-src__alert {
   margin-bottom: 10px;
+}
+
+/* 弹窗底部的低频动作：文字链形态，不与主入口抢视觉层级 */
+.ana-src__footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-start;
+}
+.ana-src__recompute {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wb-primary);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+.ana-src__recompute:hover:not(:disabled) {
+  text-decoration: underline;
+}
+.ana-src__recompute:disabled {
+  color: var(--wb-text-tertiary, #9ca3af);
+  cursor: default;
+}
+.ana-src__footer-hint {
+  color: var(--wb-text-tertiary, #9ca3af);
+  font-size: 11px;
 }
 </style>

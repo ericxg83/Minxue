@@ -202,9 +202,10 @@ test('index.js 的迁移清单与 import 严格对位，且不允许退回裸 aw
   //   resource_questions，补 试卷题库 需要的 7 列；纯加法，不碰任何既有表）。
   // 53 → 54：2026-10-18 新增 064_similar_question_groups（疑似同类题组表：字符相似聚类
   //   + 同知识点辅助 → 老师确认 → 沉淀为考法 draft；只做分组快照，不动任何错题记录）。
+  // 54 → 55：2026-11-06 新增 065_add_question_option_images（图形选项题的图片列）。
   //   新增迁移时**必须**同步改这里，否则回归锁会误报「迁移清单不完整」，
   //   而真实风险（键名与函数名不对位、台账被绕过）反而没人看。
-  assert.equal(items.length, 54, `迁移清单必须完整，实际 ${items.length} 项`)
+  assert.equal(items.length, 55, `迁移清单必须完整，实际 ${items.length} 项`)
 
   for (const { key, fn } of items) {
     assert.equal(key, fn, `迁移键与函数名必须一致，发现 ['${key}', ${fn}]`)
