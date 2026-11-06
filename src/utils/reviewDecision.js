@@ -334,3 +334,31 @@ export const getReferenceAnswerOrigin = (question) => {
     hint: '卷面不印答案，此参考答案由 AI 自动求解，仅供参考。若与您的判断不符，请直接改判。'
   }
 }
+
+/**
+ * 「解析补全」响应 → 本地题目对象的同步补丁（唯一实现，PC store 与其它消费方共用）。
+ *
+ * 背景（2026-11-06 报障）：后端 ensure-analysis 已经把参考答案写库并重判，
+ * 前端却只同步了 analysis ⇒ 库里有答案、页面参考答案栏仍空，还挂着旧的
+ * 「未采集到配图」红条，老师以为没生效，又去点一遍「AI 重解析」。
+ * 判据收敛到这里，避免后端写过的列在前端漏一项就复辟「不同步」。
+ *
+ * 只映射后端确实改过的列：answer / ai_answer / is_correct / 异常与风险标注。
+ * ⛔ 绝不动 answer_source —— 后端没改它，擅自写 'ai' 会把答案库来源
+ *    （'worksheet'）误标成 AI 解答（getReferenceAnswerOrigin 靠它出标签）。
+ * @returns {Object} 空对象表示无需同步
+ */
+export const buildAnalysisSyncPatch = (resp) => {
+  if (!resp || typeof resp !== 'object') return {}
+  const patch = {}
+  if (resp.analysis) patch.analysis = resp.analysis
+  if (resp.answer_synced && resp.answer) {
+    patch.answer = resp.answer
+    patch.ai_answer = resp.answer
+    patch.answer_exception = false
+    patch.answer_exception_reason = null
+    patch.ai_answer_risk_reason = null
+    if ('is_correct' in resp) patch.is_correct = resp.is_correct
+  }
+  return patch
+}

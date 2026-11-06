@@ -580,8 +580,11 @@ export const getRecomputeAnswerStatus = async (questionId) => {
   return apiRequest(`/questions/${questionId}/recompute-answer/status`)
 }
 
-// 题干行「解析」按钮的按需补全（2026-10-15 方案 A）：解析缺失时点开现场生成。
-// 后端只写 questions.analysis，绝不动参考答案 / is_correct / 判题结论。
+// 题干行「解析」按钮的按需补全（2026-10-15 方案 A，2026-11-06 联动参考答案）：
+// 解析缺失时点开现场生成；解析已在但参考答案为空时，后端直接从解析文本反填答案。
+// 两条路径都写 answer 并重判结算，响应带 answer / answer_synced / is_correct，
+// 前端据此同步 store 并清缓存 —— 老师点一次「解析」就能接着批改对错，
+// 不用再走「AI 重解析」。⚠️ 不要在调用方另写一份答案同步判据。
 // 超时口径与 recomputeQuestionAnswer 完全一致：后端 DEADLINE_MS=210s，前端必须严格
 // 大于它（240s）且禁重试（attempts=1，防 POST 重放重复烧引擎额度）。
 export const ensureQuestionAnalysis = async (questionId) => {

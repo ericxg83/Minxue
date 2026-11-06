@@ -95,6 +95,10 @@ import { judgeAnswer } from './services/judgeService.js'
 import { checkQuestionCompleteness, hasFigureReference } from './utils/questionCompleteness.js'
 import { isFigurePreflightSkipEnabled, MISSING_FIGURE_SKIP_REASON } from './utils/figureRequirementGuard.js'
 import { isConstructionQuestion } from './utils/constructionQuestionGuard.js'
+// 解析补全「从已有解析反填参考答案」用的三道闸：叙述残句 / 数值验算（与
+// scripts/backfill-extract-answer-from-analysis.mjs 及 worker 主链路同口径）
+import { isNarrativeAnswer } from './utils/aiParseSelfCheck.js'
+import { validateArithmeticAnswer } from './utils/arithmeticAnswerValidator.js'
 import { planTaskRouteChange, resolveRouteKind, shouldResetTaskName, isRouteAutoName, buildAutoTaskName, describeRouteRisk, isRouteConvertEnabled, ROUTE_CONVERT_DISABLED_MESSAGE } from './utils/taskRoute.js'
 import { requeueGeometryRedrawOnRejudgeWrong } from './utils/geometryRequeueOnRejudge.js'
 import { syncQuestionCompleteness, syncQuestionCompletenessQuietly } from './services/questionCompletenessSync.js'
@@ -3126,11 +3130,15 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
 // 老师误以为这道题「不该有解析」。现在按钮恒亮：点开时若库里没有可用解析，现场调
 // 引擎把题解一遍并落库。
 //
-// ⛔ 唯一写库点：**只写 questions.analysis 一列** —— answer / is_correct / ai_answer /
-//    answer_exception / 判题结论（judgements）一律不碰。参考答案以答案库/原判定为准
-//    （官方/教师审核的可信级别高于 AI），对错判定不重算，错题本/掌握度零扰动。
-//    引擎解出的答案与库中参考答案不一致时不阻断，响应带 answer_mismatch 由前端提示，
-//    裁决权在老师。
+// 【参考答案联动（2026-11-06）】老师点「解析」后，参考答案必须同步，不能再逼他
+// 走一遍「AI 重解析」才能批改对错。两条路径共用端点内唯一实现 syncReferenceAnswer：
+//   ① 库里没有解析 → 引擎现解，解析落库后把引擎答案写进 answer 并重判结算；
+//   ② 库里已有解析但 answer 为空 → 不烧引擎，直接从解析文本抽答案反填（带三道闸）。
+// 已有答案且与强模型解不符时沿用 11-04 的自动对齐口径（写答案 + 重判 + 审计），
+// 响应带 answer_mismatch，前端明确提示"已替换"，最终裁决权仍在老师。
+// ⚠️ 写答案前必须把 student_answer / is_correct 等字段一次读全：11-04 的版本只 SELECT
+//    answer/analysis 却拿 q.student_answer 去判等 ⇒ 恒为 undefined，等于拿"没有学生答案"
+//    重判一次并可能写进错题本。口径与 recompute-answer 保持一致。
 // 已有可用解析（非空且非「AI重批生成 YYYY-MM-DD」占位串，判据与前端
 // src/utils/reviewDecision.hasUsableAnalysis 同口径）→ 秒回不烧引擎；占位串视为
 // 无解析，点开重新生成正好覆盖修复（0922 重批脚本的历史缺陷，全库 210 条）。
@@ -3159,26 +3167,134 @@ app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
   try {
     const { id } = req.params
 
+    // SELECT 必须与 recompute-answer 同款齐全：11-04 的自动对齐分支只查 answer/analysis，
+    // 却拿 q.student_answer / q.is_correct 去判等与结算 ⇒ 恒为 undefined，等于用「没有
+    // 学生答案」重判一次并写进错题本。判等、结算、完整性检查所需字段一次读全。
     const { rows } = await query(
-      `SELECT id, student_id, answer, analysis, question_type,
-              content, parent_stem, options, geometry_image_url
+      `SELECT id, task_id, student_id, student_answer, answer, analysis, question_type,
+              content, parent_stem, options, answer_source, ai_answer, is_correct,
+              confidence, review_status, geometry_image_url
        FROM ${TABLES.QUESTIONS} WHERE id = $1 AND deleted_at IS NULL`,
       [id]
     )
     if (rows.length === 0) return done(() => res.status(404).json({ error: '题目不存在' }))
     const q = rows[0]
+    const storedAnswer = String(q.answer || '').trim()
+    const options = Array.isArray(q.options) ? q.options : []
+
+    // 两个答案是否等价：字面相同，或都是可解析数值且数值相同（"8" 与 "8.0"）。
+    const answersAgree = (a, b) => {
+      const x = String(a ?? '').trim()
+      const y = String(b ?? '').trim()
+      if (!x || !y) return false
+      if (x === y) return true
+      return Number.isFinite(parseFloat(x)) && Number.isFinite(parseFloat(y))
+        && parseFloat(x) === parseFloat(y)
+    }
+
+    // 【唯一写参考答案实现】引擎新解 / 已有解析反填两条路径都走这里，口径与
+    // recompute-answer 一致：写答案 + 清异常标注 + 重判结算 + 判题审计。
+    // manualOverride 必须为 false —— 这是 AI 自动补答案，不得推翻老师已下的人工结论
+    //（gradingFinalizer 的 review_status 复位只认人工触发）。
+    const syncReferenceAnswer = async ({ answer, analysisText, sourceTag }) => {
+      const nextAnswer = String(answer || '').trim()
+      if (!nextAnswer) return null
+      await query(
+        `UPDATE ${TABLES.QUESTIONS}
+            SET answer = $1, ai_answer = $1,
+                answer_exception = FALSE, answer_exception_reason = NULL,
+                ai_answer_risk_reason = NULL, updated_at = NOW()
+          WHERE id = $2 AND deleted_at IS NULL`,
+        [nextAnswer, q.id]
+      )
+      const { isCorrect } = judgeAnswer(q.student_answer, nextAnswer, q.question_type)
+      if (q.student_id) {
+        // 结算失败不能吞掉「答案已写库」这个主结果（口径同 recompute-answer）。
+        try {
+          await finalizeRejudgeResult({
+            question: { ...q, answer: nextAnswer, analysis: analysisText },
+            isCorrect,
+            oldIsCorrect: q.is_correct,
+            source: sourceTag,
+            manualOverride: false
+          })
+        } catch (settleErr) {
+          console.error(`[解析补全] 参考答案已写库但结算失败 q=${q.id}:`, settleErr.message)
+        }
+      } else {
+        await query(
+          `UPDATE ${TABLES.QUESTIONS} SET is_correct = $1, updated_at = NOW() WHERE id = $2`,
+          [isCorrect, q.id]
+        )
+      }
+      createJudgement({
+        questionId: q.id,
+        studentId: q.student_id,
+        source: sourceTag,
+        isCorrect,
+        answer: nextAnswer,
+        studentAnswer: q.student_answer,
+        metadata: { origin: sourceTag, fromAnalysisSync: true }
+      }).catch(e => console.error('[Shadow] judgements写入失败 (解析补全):', e.message))
+      console.log(`[解析补全] 参考答案「${storedAnswer || '(空)'}」→「${nextAnswer}」q=${String(q.id).slice(0, 8)} source=${sourceTag}`)
+      return { answer: nextAnswer, is_correct: isCorrect }
+    }
+
+    // 【已有解析反填】不烧引擎：解析末尾常写着「答案为 8 − √19」，参考答案却是空的
+    //（历史上被缺图预判闸 / 验算闸清空）。此时点「解析」应当就地补齐，而不是让老师
+    // 再走一遍「AI 重解析」。抽取必须过与回填脚本 / worker 主链路相同的闸，宁可不填
+    // 也不填错：归一化 → AI 占位串 → 叙述残句 → 客观题数值验算。
+    const extractAnswerFromExistingAnalysis = (question, analysisText) => {
+      const raw = extractAnswerFromAnalysis('', analysisText, options)
+      const candidate = String(normalizeGeneratedAnswer(
+        { question_type: question.question_type, options }, raw || ''
+      ) || '').trim()
+      if (!candidate) return null
+      if (!validateAIAnswer(candidate, analysisText).isValid) return null
+      if (isNarrativeAnswer(candidate)) return null
+      if (['choice', 'fill', 'judge'].includes(question.question_type) && /[0-9]/.test(candidate)) {
+        const content = [question.parent_stem, question.content]
+          .filter(s => s && String(s).trim()).join('\n')
+        try {
+          const v = validateArithmeticAnswer(content, candidate)
+          if (v && v.applicable && !v.isValid) return null
+        } catch { /* 验算器异常时保守放行，与回填脚本同口径 */ }
+      }
+      return candidate
+    }
 
     const existingAnalysis = String(q.analysis || '').trim()
     const existingIsUsable = existingAnalysis.length > 0
       && !/^AI重批生成\s*\d{4}-\d{2}-\d{2}$/.test(existingAnalysis)
     if (existingIsUsable) {
-      return done(() => res.json({ success: true, analysis: existingAnalysis, generated: false }))
+      if (!storedAnswer) {
+        const extracted = extractAnswerFromExistingAnalysis(q, existingAnalysis)
+        if (extracted) {
+          const synced = await syncReferenceAnswer({
+            answer: extracted,
+            analysisText: existingAnalysis,
+            sourceTag: 'pc_ensure_analysis_from_text'
+          })
+          if (synced) {
+            return done(() => res.json({
+              success: true, analysis: existingAnalysis, generated: false,
+              answer: synced.answer, answer_synced: true, answer_sync_source: 'analysis',
+              is_correct: synced.is_correct, answer_mismatch: false,
+              engine_answer: extracted, existing_answer: null
+            }))
+          }
+        }
+      }
+      return done(() => res.json({
+        success: true, analysis: existingAnalysis, generated: false,
+        answer: storedAnswer || null, answer_synced: false, answer_mismatch: false,
+        engine_answer: null, existing_answer: storedAnswer || null
+      }))
     }
 
     // 与 worker.js 批改链路 / recompute-answer 逐字同构：parent_stem + content + options
     //（缺其中任一项都会被引擎判为缺条件 → 永远解不出）。
     const content = [q.parent_stem, q.content].filter(s => s && String(s).trim()).join('\n')
-    const options = Array.isArray(q.options) ? q.options : []
     const fullContent = options.length > 0
       ? `${content}\n选项：${formatOptionsForPrompt(options)}`
       : content
@@ -3289,7 +3405,8 @@ app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
       return
     }
 
-    // ⛔ 唯一写库点：只写 analysis 列（2026-10-15 方案 A 的硬承诺）。
+    // 这一句只写 analysis。参考答案 / 判题结论一律交给上面的
+    // syncReferenceAnswer 唯一实现，避免两条路径各写一份结算逻辑。
     await query(
       `UPDATE ${TABLES.QUESTIONS}
           SET analysis = $1, updated_at = NOW()
@@ -3297,54 +3414,36 @@ app.post('/api/questions/:id/ensure-analysis', async (req, res) => {
       [String(result.analysis), id]
     )
 
-    // [2026-11-04 优化] 老师点开「解析」现场生成时，如果发现引擎解出的答案与当前参考答案不一致（answer_mismatch），
-    // 自动把参考答案（answer 和 ai_answer）同步更新为引擎的正确答案，并联动触发 judgeAnswer 重判和结算（从错题本移出等）。
-    // 这样彻底解决「解析写着正确答案、参考答案却是错的导致系统依然判错」的割裂矛盾！
-    const storedAnswer = String(q.answer || '').trim()
     const engineAnswer = String(solvedAnswer || '').trim()
-    const sameAnswer = !!storedAnswer && (
-      storedAnswer === engineAnswer
-      || (Number.isFinite(parseFloat(storedAnswer)) && Number.isFinite(parseFloat(engineAnswer))
-          && parseFloat(storedAnswer) === parseFloat(engineAnswer))
-    )
+    const agree = answersAgree(storedAnswer, engineAnswer)
+    // ① 参考答案为空 → 直接补齐：老师点一次「解析」就能接着批改对错，
+    //    不必再走「AI 重解析」（2026-11-06 需求）。
+    // ② 已有答案但与强模型解不符 → 沿用 11-04 自动对齐口径（写答案 + 重判结算），
+    //    响应带 answer_mismatch，前端明确告知「已替换」，最终裁决权仍在老师。
+    const synced = engineAnswer && !agree
+      ? await syncReferenceAnswer({
+          answer: engineAnswer,
+          analysisText: String(result.analysis),
+          sourceTag: 'pc_ensure_analysis_sync'
+        })
+      : null
 
-    if (engineAnswer && !sameAnswer) {
-      console.log(`[解析补全] 自动对齐参考答案 q=${String(id).slice(0, 8)}：旧参考答案「${storedAnswer}」→ 引擎新答案「${engineAnswer}」`)
-      await query(
-        `UPDATE ${TABLES.QUESTIONS}
-            SET answer = $1, ai_answer = $1, answer_exception = FALSE, answer_exception_reason = NULL, updated_at = NOW()
-          WHERE id = $2 AND deleted_at IS NULL`,
-        [engineAnswer, id]
-      )
-      // 如果有学生答案，自动过重判与结算链路
-      if (q.student_id) {
-        const { isCorrect } = judgeAnswer(q.student_answer, engineAnswer, q.question_type)
-        const oldIsCorrect = q.is_correct
-        try {
-          await finalizeRejudgeResult({
-            question: { ...q, answer: engineAnswer, analysis: String(result.analysis) },
-            isCorrect,
-            oldIsCorrect,
-            source: 'pc_ensure_analysis_sync',
-            manualOverride: true
-          })
-          console.log(`[解析补全] 自动对齐后重判结算完成：is_correct=${isCorrect}`)
-        } catch (settleErr) {
-          console.error(`[解析补全] 自动对齐后重判结算失败 q=${id}:`, settleErr.message)
-        }
-      }
-    }
-
-    console.log(`[解析补全] q=${String(id).slice(0, 8)} 解析已落库（engine=${result.engine}${storedAnswer ? (sameAnswer ? '，与参考答案一致' : `，已自动同步对齐参考答案「${engineAnswer}」`) : '，本题原无参考答案已写入'}）`)
+    console.log(`[解析补全] q=${String(id).slice(0, 8)} 解析已落库（engine=${result.engine}${synced ? `，参考答案已同步为「${synced.answer}」` : agree ? '，参考答案与引擎一致' : '，未改动参考答案'}）`)
 
     done(() => res.json({
       success: true,
       analysis: String(result.analysis),
       generated: true,
       engine: result.engine,
-      answer_mismatch: !!(storedAnswer && !sameAnswer),
+      answer_mismatch: !!(storedAnswer && !agree),
       engine_answer: engineAnswer,
-      existing_answer: storedAnswer || null
+      existing_answer: storedAnswer || null,
+      // 前端据此把参考答案、正误结论、异常标注一次性同步进 store，否则库里写了、
+      // 页面仍显示空答案 + 旧的「缺配图」警告（用户看到的「不同步」正是这一截）。
+      answer: synced?.answer || storedAnswer || null,
+      answer_synced: !!synced,
+      answer_sync_source: synced ? 'engine' : null,
+      ...(synced ? { is_correct: synced.is_correct } : {})
     }))
   } catch (error) {
     // 数据库不可用与「引擎算不出来」分开报（口径同 recompute-answer，注释见彼处）。

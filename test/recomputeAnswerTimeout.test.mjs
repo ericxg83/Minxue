@@ -331,10 +331,10 @@ assert.ok(
   )
 }
 
-// ── ⑦ 解析补全端点（2026-10-15 方案 A）：与重解析同链同闸，但只写 analysis 列 ──
-// 题干行「解析」按钮改为恒亮：库里没解析时点开现场生成。核心承诺（负责人确认的方案）：
-// 引擎结果**只把解析写进 questions.analysis**，answer / is_correct / 判题结论一律不碰 ——
-// 参考答案以答案库/原判定为准（可信级别高于 AI），对错判定不重算，错题本/掌握度零扰动。
+// ── ⑦ 解析补全端点（2026-11-06 口径）：与重解析同链同闸 + 参考答案联动 ──
+// 旧承诺「只写 analysis」已废：老师点「解析」后参考答案必须同步，否则还要再走一遍
+// 「AI 重解析」才能批改对错。现在锁的是「怎么联动才安全」：唯一写答案实现、字段读全、
+// AI 不得冒充人工改判、已有解析可零引擎反填（带闸）、响应契约与前端同步字段齐全。
 {
   const anaBody = routeBody(indexSrc, "app.post('/api/questions/:id/ensure-analysis'")
   // 同链：不得在端点内另起炉灶重新定义通道链（必须引用模块级共享常量，防配置分叉）
@@ -352,24 +352,56 @@ assert.ok(
   assert.ok(/ai-declined/.test(anaBody), 'AI 自述不会时必须返回 ai-declined（终态），别让老师反复重试白烧额度')
   assert.ok(/blocked-model-config/.test(anaBody), '命中禁用模型必须报错拒绝执行，绝不静默放行')
   assert.ok(/empty-question-content/.test(anaBody), '题干为空必须单独识别并给可行动文案')
-  // ⛔ 核心承诺：唯一写库点只写 analysis 列
-  assert.ok(
-    /SET\s+analysis\s*=\s*\$1,\s*updated_at\s*=\s*NOW\(\)/.test(anaBody),
-    '解析补全唯一写库点必须只写 analysis 列（SET analysis = $1, updated_at = NOW()）'
-  )
-  // 绝不触碰参考答案 / 判题结论相关写入（anaBody 已剥注释，按关键字扫违规）
-  const forbiddenWrites = ['answer =', 'is_correct', 'ai_answer', 'answer_exception', 'judgements', 'judgeAnswer', 'finalizeRejudgeResult']
-  for (const kw of forbiddenWrites) {
-    assert.equal(
-      anaBody.includes(kw),
-      false,
-      `解析补全端点不得触碰「${kw}」——只写 analysis 是方案 A 的硬承诺，动了就是改判题结论`
-    )
+  // ⛔ SELECT 字段必须读全：11-04 的自动对齐分支只查 answer/analysis，却拿
+  //    q.student_answer / q.is_correct 去判等与结算 ⇒ 恒为 undefined，等于用
+  //    「没有学生答案」重判一次并可能写进错题本。
+  const selStart = anaBody.indexOf('SELECT')
+  // ⛔ 锚点缺失必须直接判红，不能用 `selStart >= 0 && ...slice(...)` 短路
+  //   （test/sourceLockFailClosed.test.mjs 的 fail-open 元判据会拦，且那种写法
+  //    在锚点被改名后会让整把锁静默失效）。
+  if (selStart < 0) assert.fail('解析补全端点未找到 SELECT（源码锁锚点失效）')
+  const selEnd = anaBody.indexOf('FROM', selStart)
+  if (selEnd < 0) assert.fail('解析补全端点未找到 FROM（源码锁锚点失效）')
+  const selectPart = anaBody.slice(selStart, selEnd)
+  assert.ok(selectPart, '解析补全端点必须显式 SELECT 题目字段')
+  for (const col of ['student_answer', 'is_correct', 'answer_source', 'confidence', 'review_status', 'geometry_image_url']) {
+    assert.ok(selectPart.includes(col), `解析补全 SELECT 必须读出 ${col}（判等 / 结算 / 完整性检查要用）`)
   }
-  // 引擎答案与参考答案打架时：不覆盖、只提示（不悄悄吞掉矛盾）
+
+  // 写参考答案必须收敛到唯一实现：引擎新解与「已有解析反填」两条路径各写一份
+  // 结算逻辑就是下一次判题口径分叉的入口。
+  assert.ok(anaBody.includes('const syncReferenceAnswer = async'), '写参考答案必须收敛到端点内唯一实现')
+  assert.equal(
+    anaBody.split('SET answer = ').length - 1, 1,
+    '写 answer 的 UPDATE 只能有一处，禁止两条路径各写一份'
+  )
+  assert.equal(
+    anaBody.split('syncReferenceAnswer({').length - 1, 2,
+    '引擎新解与已有解析反填两条路径都必须走同一个写答案实现'
+  )
+  assert.ok(anaBody.includes('judgeAnswer(q.student_answer'), '重判必须用真实学生答案，不能拿 undefined 判等')
+  assert.ok(anaBody.includes('manualOverride: false'), 'AI 自动补答案必须显式声明非人工触发')
+  assert.equal(
+    anaBody.includes('manualOverride: true'), false,
+    'manualOverride=true 会让 AI 自动补答案推翻老师已下的人工结论'
+  )
+  assert.ok(anaBody.includes('answer_exception_reason = NULL'), '补答案必须一并清掉旧的缺图 / 验算异常标注')
+
+  // 已有解析但参考答案为空：必须能零引擎反填，且抽取要过与回填脚本同款的三道闸
+  assert.ok(anaBody.includes('if (!storedAnswer)'), '已有解析但参考答案为空时必须尝试反填')
+  assert.ok(anaBody.includes('extractAnswerFromExistingAnalysis'), '已有解析反填必须走独立抽取分支（不烧引擎）')
+  for (const gate of ['normalizeGeneratedAnswer', 'validateAIAnswer', 'isNarrativeAnswer', 'validateArithmeticAnswer']) {
+    assert.ok(anaBody.includes(gate), `已有解析反填必须过 ${gate} 闸（宁可不填也不填错）`)
+  }
+
+  // 响应契约：前端靠这些字段同步 store、清缓存、给「可以直接批改对错了」反馈
+  for (const key of ['answer_synced', 'answer_sync_source', 'is_correct', 'existing_answer']) {
+    assert.ok(anaBody.includes(key), `响应必须带 ${key}（前端据此同步页面，否则「库里有、页面空」）`)
+  }
+  // 引擎答案与已有参考答案打架时：自动对齐写库，但必须把矛盾透出给老师，不得静默
   assert.ok(
     /answer_mismatch/.test(anaBody),
-    '引擎答案与参考答案不一致时必须返回 answer_mismatch 供前端提示，不得静默'
+    '引擎答案与已有参考答案不一致时必须返回 answer_mismatch 供前端提示，不得静默'
   )
   // 超时后不得写库（与重解析同款防护）
   assert.ok(
@@ -390,4 +422,4 @@ assert.ok(
   )
 }
 
-console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型链 + 带图题视觉求解 + deepseek-flash 硬拦 + 批改链路零回归 + 解析补全只写 analysis）')
+console.log('✅ recomputeAnswerTimeout: 全部通过（重解析=点名强模型链 + 带图题视觉求解 + deepseek-flash 硬拦 + 批改链路零回归 + 解析补全联动参考答案且口径安全）')

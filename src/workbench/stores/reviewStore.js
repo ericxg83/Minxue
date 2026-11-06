@@ -13,7 +13,7 @@ import {
   RETRY_STATE_TO_TASK_STATUS,
   isRetryPaperTask,
 } from '../utils/retryPaperState'
-import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect, needsHumanAttention } from '../../utils/reviewDecision'
+import { REVIEW_STATUS, DEFAULT_CONFIDENCE_THRESHOLD, getReviewState, needsWrongBookDecision, effectiveIsCorrect as resolveEffectiveIsCorrect, needsHumanAttention, buildAnalysisSyncPatch } from '../../utils/reviewDecision'
 // 闸1 门禁分层（2026-09-23 P2）：只自动放行「系统没补上」，绝不放行「低置信度需人拍板」
 import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON, WRONG_GATE_AUTO_FLAG, WRONG_GATE_CODE_LABELS } from '../../domain/wrongGateTier.js'
 // 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
@@ -1496,14 +1496,24 @@ export const useReviewStore = defineStore('review', () => {
     q.answer_source = 'ai'
   }
 
-  // 「解析补全」（2026-10-15 方案 A）生成成功后的本地同步：**只写 analysis**，
+  // 「解析补全」成功后的本地同步（2026-11-06 扩展）。
+  // ⛔ 旧版只写 analysis：后端 11-04 起已经会把参考答案一并写库并重判，但页面读的是
+  //   store 里的这个对象 ⇒ 库里有了、界面还显示空答案 + 旧的「缺配图」警告，
+  //   老师以为没生效，又去点一遍「AI 重解析」（用户报障的「不同步」就是这一截）。
+  //   凡是后端写库时动过的列，这里必须同步：answer / ai_answer / is_correct /
+  //   异常标注 / 风险标注。漏清 answer_exception_reason 会让红条挂在已补好的答案上。
   // 与 applyRecomputeAnswer 同款「按 ID 现查」防切学生误写；列表里找不到就不改
   // 本地对象（弹窗自己的 localAnalysis 兜底展示），结果已在库里，回来重新拉题自然可见。
-  const applyGeneratedAnalysis = (questionId, analysis) => {
-    if (!analysis) return
+  // 入参兼容旧的字符串形态（只传解析文本）。
+  const applyGeneratedAnalysis = (questionId, result) => {
+    const payload = typeof result === 'string' ? { analysis: result } : (result || {})
+    // 映射判据走共享实现（src/utils/reviewDecision），禁止在本 store 另写一份：
+    // 后端多清一列、这里漏同步一列，就会复辟「库里有答案页面却还是空」。
+    const patch = buildAnalysisSyncPatch(payload)
+    if (Object.keys(patch).length === 0) return
     const q = allQuestions.value.find(item => String(item.id) === String(questionId))
     if (!q) return
-    q.analysis = analysis
+    Object.assign(q, patch)
   }
 
   /**
