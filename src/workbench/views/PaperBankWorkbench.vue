@@ -7,6 +7,11 @@
         description="左边挑题，右边卷子实时长出来；不想要的题直接在卷面上叉掉"
       >
         <template #actions>
+          <!-- 截图入题库（2026-11-06 负责人需求）：看视频/网课看到好题，截图就收进来，
+               不必先建卷。图片进固定的「截图题库」卷，题号自动接续。 -->
+          <ActionButton variant="secondary" @click="openClipDialog">
+            <el-icon><Camera /></el-icon>截图入题库
+          </ActionButton>
           <ActionButton variant="secondary" @click="openCreateDialog">
             <el-icon><Plus /></el-icon>新建试卷
           </ActionButton>
@@ -52,9 +57,12 @@
               <span class="pb-paper__meta">{{ totalQuestionCount }} 题</span>
             </button>
 
-            <div v-for="p in papers" :key="p.id" class="pb-paper-wrap" :class="{ 'is-active': filterPaper === p.id }">
+            <div v-for="p in sortedPapers" :key="p.id" class="pb-paper-wrap" :class="{ 'is-active': filterPaper === p.id }">
               <button type="button" class="pb-paper" @click="pickPaper(p.id)">
-                <span class="pb-paper__name" :title="p.name">{{ p.name }}</span>
+                <span class="pb-paper__name" :title="p.name">
+                  {{ p.name }}
+                  <span v-if="p.origin === 'screenshot'" class="pb-paper__origin">截图</span>
+                </span>
                 <span class="pb-paper__meta">{{ p.question_count || 0 }} 题</span>
                 <span v-if="isParsing(p)" class="pb-paper__parsing">解析中 {{ p.question_parse_done_pages || 0 }}/{{ p.question_parse_total_pages || '?' }}</span>
               </button>
@@ -168,10 +176,11 @@
             v-else-if="!papers.length"
             :icon="Tickets"
             title="还没有试卷"
-            description="先新建一份试卷，再把卷子拍照或上传 PDF —— 系统会自动拆成一道道题。"
+            description="整份卷子拍照或上传 PDF，系统会自动拆成一道道题；只有一两道好题就直接截图收进来。"
           >
             <template #actions>
               <ActionButton variant="primary" @click="openCreateDialog"><el-icon><Plus /></el-icon>新建试卷</ActionButton>
+              <ActionButton @click="openClipDialog"><el-icon><Camera /></el-icon>截图入题库</ActionButton>
             </template>
           </EmptyState>
 
@@ -245,6 +254,14 @@
                     target="_blank"
                     rel="noopener"
                   >看原卷{{ q.page_no ? `（第 ${q.page_no} 页）` : '' }} ↗</a>
+                  <!-- 截图题库的题允许单条删除：截错了、或一张图里多拆出一行，以前只能删整卷。
+                       普通卷不给这个入口 —— 那是老师上传的整卷，误删的代价太大。 -->
+                  <button
+                    v-if="q.resource_id === clipPaperId"
+                    type="button"
+                    class="pb-link is-danger"
+                    @click="askDeleteQuestion(q)"
+                  >删除本题</button>
                 </div>
 
                 <div v-if="editingId === q.id" class="pb-editor">
@@ -401,6 +418,49 @@
       </template>
     </el-dialog>
 
+    <!-- 截图入题库（2026-11-06 负责人需求）：看视频看到好题，截图就收进题库，不用先建卷 -->
+    <WorkbenchDialog
+      v-model="showClipDialog"
+      title="截图入题库"
+      width="560px"
+      :loading="clipUploading"
+      @closed="resetClipDialog"
+    >
+      <p class="pb-hint">
+        看到好题直接截图，回到这里按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘进来（也可以拖图、或点下面选文件）。
+        识别后存进左侧的<strong>「截图题库」卷</strong>，题号自动往后接，不会覆盖之前收的题。
+        认不出文字的截图也会按图存下来，之后在题目里补字就行。
+      </p>
+      <div
+        class="pb-clip-drop"
+        :class="{ 'is-over': clipDragOver }"
+        role="button"
+        tabindex="0"
+        @click="clipInput?.click()"
+        @keydown.enter.prevent="clipInput?.click()"
+        @dragover.prevent="clipDragOver = true"
+        @dragleave.prevent="clipDragOver = false"
+        @drop.prevent="onClipDrop"
+      >
+        <strong>粘贴 / 拖图 / 点这里选图</strong>
+        <span>PNG · JPEG · WebP，一次最多 12 张</span>
+      </div>
+      <input ref="clipInput" type="file" multiple accept="image/png,image/jpeg,image/webp" style="display:none" @change="onClipPicked" />
+      <div v-if="clipFiles.length" class="pb-clip-grid">
+        <figure v-for="(f, i) in clipFiles" :key="f.key" class="pb-clip-item">
+          <img :src="f.preview" :alt="`待识别截图 ${i + 1}`" />
+          <button type="button" class="pb-clip-item__del" title="移除这张" @click.stop="removeClipFile(i)">×</button>
+        </figure>
+      </div>
+      <p v-if="clipFiles.length" class="pb-clip-count">已选 {{ clipFiles.length }} 张，识别完会自动切到「截图题库」卷</p>
+      <template #footer>
+        <ActionButton variant="ghost" :disabled="clipUploading" @click="showClipDialog = false">取消</ActionButton>
+        <ActionButton variant="primary" :disabled="!clipFiles.length" :loading="clipUploading" @click="handleClipUpload">
+          开始识别
+        </ActionButton>
+      </template>
+    </WorkbenchDialog>
+
     <!-- 多份原件（一次上传多张照片/多个 PDF 时）逐份列出，点文件名直接打开 -->
     <el-dialog v-model="showFilesDialog" :title="filesDialog.title" width="440px">
       <p class="pb-hint">这些都是你上传的原件，点文件名在新标签页打开。</p>
@@ -492,7 +552,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Plus, UploadFilled, Search, Tickets } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, Search, Tickets, Camera } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/ui/PageHeader.vue'
 import FilterBar from '../components/ui/FilterBar.vue'
@@ -500,6 +560,7 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
+import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import MathRender from '../components/MathRender.vue'
 import {
   getPaperBankPapers,
@@ -508,6 +569,8 @@ import {
   deletePaperBankPapers,
   parsePaperBankPaper,
   parsePaperBankAnswers,
+  uploadPaperClips,
+  deletePaperBankQuestion,
   searchPaperBankQuestions,
   updatePaperBankQuestion,
 } from '../../services/apiService.js'
@@ -620,6 +683,17 @@ const uploadMode = ref('questions')
 const pickedFiles = ref([])
 const fileInput = ref(null)
 
+// ── 截图入题库（2026-11-06）──
+// 老师看视频/网课看到好题，截图直接收进题库：不需要先建卷，图片统一进「截图题库」卷。
+const showClipDialog = ref(false)
+const clipFiles = ref([]) // { key, file, preview }
+const clipInput = ref(null)
+const clipDragOver = ref(false)
+const clipUploading = ref(false)
+const CLIP_MAX_FILES = 12 // 与服务端 CLIP_MAX_IMAGES 对齐，前端先挡一层
+let clipSeq = 0
+let clipPollTimer = null
+
 let pollTimer = null
 let repaintTimer = null
 let repaintToken = 0
@@ -627,6 +701,13 @@ let repaintToken = 0
 const totalQuestionCount = computed(() => papers.value.reduce((n, p) => n + (p.question_count || 0), 0))
 // 题目行要按所属卷找「原卷」入口；字段名与后端 /api/paper-bank/papers 逐字一致
 const papersById = computed(() => new Map(papers.value.map(p => [p.id, p])))
+// 截图题库常驻最上：它是老师随手收题的入口，被十几套一模卷压在下面等于藏起来了。
+// ⚠️ Array.sort 稳定（ES2019+），其余卷保持后端 created_at DESC 的顺序，不会被重排。
+const sortedPapers = computed(() => papers.value.slice().sort(
+  (a, b) => (b.origin === 'screenshot' ? 1 : 0) - (a.origin === 'screenshot' ? 1 : 0)
+))
+// 只有截图题库的题给「删除本题」入口（普通卷是整份上传，误删代价太大）
+const clipPaperId = computed(() => papers.value.find(p => p.origin === 'screenshot')?.id || '')
 const blocks = computed(() => groupBasket(basket.value))
 const summary = computed(() => basketSummary(basket.value))
 const totals = computed(() => composePaperTotals(blocks.value))
@@ -950,6 +1031,141 @@ const handleUpload = async () => {
     ElMessage.error(e?.payload?.message || e.message || '上传失败')
   } finally {
     uploading.value = false
+  }
+}
+
+// ── 截图入题库（2026-11-06）──
+//
+// 三条入口收在同一处：Ctrl+V 粘贴、拖图、点选文件。
+// ⛔ 粘贴监听必须挂 window：老师按 Ctrl+V 时焦点通常在 body 或某个按钮上，挂在弹窗元素上会漏。
+//    只在弹窗打开时消费，其余时候一律放行，不影响页面上其它粘贴行为。
+
+const openClipDialog = () => {
+  showClipDialog.value = true
+}
+
+/** 弹窗关闭后统一回收 objectURL（不回收会把整批截图钉在内存里） */
+const resetClipDialog = () => {
+  for (const f of clipFiles.value) {
+    if (f.preview) URL.revokeObjectURL(f.preview)
+  }
+  clipFiles.value = []
+  clipDragOver.value = false
+}
+
+const addClipFiles = (rawFiles) => {
+  const imgs = Array.from(rawFiles || []).filter(f => /^image\//.test(f?.type || ''))
+  if (!imgs.length) {
+    ElMessage.warning('只收图片：截图后按 Ctrl+V，或拖一张 PNG/JPEG 进来')
+    return
+  }
+  const room = CLIP_MAX_FILES - clipFiles.value.length
+  if (room <= 0) {
+    ElMessage.warning(`一次最多 ${CLIP_MAX_FILES} 张，先传这一批，剩下的下一批再贴`)
+    return
+  }
+  const take = imgs.slice(0, room)
+  clipFiles.value = clipFiles.value.concat(take.map(f => ({
+    key: `clip-${++clipSeq}`,
+    file: f,
+    preview: URL.createObjectURL(f),
+  })))
+  if (imgs.length > room) {
+    ElMessage.warning(`只收下前 ${room} 张，剩下的下一批再贴`)
+  }
+}
+
+const removeClipFile = (i) => {
+  const [gone] = clipFiles.value.splice(i, 1)
+  if (gone?.preview) URL.revokeObjectURL(gone.preview)
+}
+
+const onClipPicked = (ev) => {
+  addClipFiles(ev.target?.files)
+  if (ev.target) ev.target.value = '' // 允许再次选同一张
+}
+
+const onClipDrop = (ev) => {
+  clipDragOver.value = false
+  addClipFiles(ev.dataTransfer?.files)
+}
+
+const onGlobalPaste = (ev) => {
+  if (!showClipDialog.value) return
+  const items = Array.from(ev.clipboardData?.items || [])
+  const files = items
+    .filter(it => it.kind === 'file' && /^image\//.test(it.type || ''))
+    .map(it => it.getAsFile())
+    .filter(Boolean)
+  if (!files.length) return // 粘的是文字就正常走浏览器默认行为
+  ev.preventDefault()
+  addClipFiles(files)
+}
+
+const handleClipUpload = async () => {
+  if (!clipFiles.value.length || clipUploading.value) return
+  clipUploading.value = true
+  try {
+    const r = await uploadPaperClips(clipFiles.value.map(f => f.file))
+    showClipDialog.value = false
+    ElMessage.success(r?.message || '截图已收下，正在识别')
+    await loadPapers()
+    // 后台识别，轮询到结束再报「入了多少题」—— 不能先报成功（2026-11-01 的教训）
+    startClipPolling(r?.paperId, r?.beforeCount || 0)
+  } catch (e) {
+    // 409：上一批还在识别。文案已在后端写成人话，直接透出
+    ElMessage.error(e?.payload?.message || e.message || '上传失败')
+  } finally {
+    clipUploading.value = false
+  }
+}
+
+const stopClipPolling = () => {
+  if (clipPollTimer) { clearInterval(clipPollTimer); clipPollTimer = null }
+}
+
+/** 截图识别是后台跑的：轮询截图卷状态，结束后按「题数差」报实际入库了多少道。 */
+const startClipPolling = (paperId, beforeCount) => {
+  stopClipPolling()
+  if (!paperId) return
+  clipPollTimer = setInterval(async () => {
+    try {
+      await loadPapers()
+      const p = papers.value.find(x => x.id === paperId)
+      if (!p || p.question_parse_status === 'parsing') return
+      stopClipPolling()
+      if (p.question_parse_status === 'failed') {
+        ElMessage.error('这批截图没识别成功，换更清晰的图再试一次')
+      } else {
+        const added = Math.max(0, (p.question_count || 0) - beforeCount)
+        ElMessage.success(added ? `已入库 ${added} 道题` : '没识别出文字，已按图片存进截图题库')
+      }
+      // 自动切到截图卷：老师刚收的题要立刻看见，不要让他再去左侧找
+      filterPaper.value = paperId
+      limit.value = PAGE_SIZE
+      await loadQuestions()
+    } catch { /* 轮询失败不打扰老师，下个 tick 再试 */ }
+  }, 3000)
+}
+
+const askDeleteQuestion = async (q) => {
+  try {
+    await ElMessageBox.confirm(
+      `删除「截图题库」里的这道题（${questionLabel(q)}）？只删这一道，不影响同卷其它题。`,
+      '删除题目',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return // 取消
+  }
+  try {
+    await deletePaperBankQuestion(q.id)
+    ElMessage.success('已删除')
+    basket.value = basket.value.filter(it => it.id !== q.id)
+    await loadPapers()
+    await loadQuestions()
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '删除失败')
   }
 }
 
@@ -1329,12 +1545,17 @@ onMounted(async () => {
   measureLeft()
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('keydown', onKeydown)
+  // 截图粘贴：只在「截图入题库」弹窗打开时消费，见 onGlobalPaste
+  window.addEventListener('paste', onGlobalPaste)
 })
 onUnmounted(() => {
   stopPolling()
+  stopClipPolling()
+  resetClipDialog()
   clearTimeout(repaintTimer)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('paste', onGlobalPaste)
 })
 </script>
 
@@ -1598,4 +1819,47 @@ onUnmounted(() => {
 .pb-hint { font-size: 13px; color: #666; line-height: 1.7; margin-bottom: 12px; }
 .pb-upload-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .pb-picked { font-size: 12px; color: #666; }
+
+/* ── 截图入题库（2026-11-06）── */
+/* 卷名旁的来源标识：截图题库不是真卷子，别让老师以为是哪套模拟卷 */
+.pb-paper__origin {
+  display: inline-block; margin-left: 4px; padding: 0 4px;
+  font-size: 9px; line-height: 14px; vertical-align: 1px;
+  color: #8b5cf6; background: #f3efff; border: 1px solid #ddd3fb; border-radius: 3px;
+}
+.pb-link.is-danger { color: #a32d2d; }
+.pb-link.is-danger:hover { color: #7d2020; }
+.pb-hint kbd {
+  display: inline-block; padding: 0 4px; border: 1px solid #d9d5cc;
+  border-bottom-width: 2px; border-radius: 3px; background: #faf9f6;
+  font-family: inherit; font-size: 11px; line-height: 16px; color: #555;
+}
+/* 粘贴/拖拽区：整块可点，虚线框表示「可以往里丢东西」 */
+.pb-clip-drop {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px; padding: 26px 16px; cursor: pointer;
+  border: 1.5px dashed #d6d2c8; border-radius: 10px; background: #fbfaf7;
+  text-align: center; transition: border-color .14s, background .14s;
+}
+.pb-clip-drop:hover { border-color: #b9b3a5; background: #f7f6f1; }
+.pb-clip-drop.is-over { border-color: #8b5cf6; background: #f5f1ff; }
+.pb-clip-drop strong { font-size: 13px; color: #444; }
+.pb-clip-drop span { font-size: 11px; color: #999; }
+.pb-clip-drop:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
+.pb-clip-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px;
+  max-height: 240px; overflow: auto;
+}
+.pb-clip-item {
+  position: relative; margin: 0; border: 1px solid #e6e2d9; border-radius: 8px;
+  overflow: hidden; background: #fff; aspect-ratio: 4 / 3;
+}
+.pb-clip-item img { width: 100%; height: 100%; object-fit: contain; background: #f6f5f1; }
+.pb-clip-item__del {
+  position: absolute; right: 3px; top: 3px; width: 18px; height: 18px;
+  line-height: 16px; padding: 0; border: 1px solid #e6c9c9; border-radius: 50%;
+  background: rgba(255, 255, 255, .94); color: #b4436c; font-size: 12px; cursor: pointer;
+}
+.pb-clip-item__del:hover { background: #fdecef; border-color: #d4537e; }
+.pb-clip-count { margin: 8px 0 0; font-size: 11px; color: #8a8a8a; }
 </style>

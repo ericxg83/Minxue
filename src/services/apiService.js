@@ -1183,6 +1183,20 @@ export const updatePaperBankQuestion = async (id, patch) => {
   return data.question
 }
 
+/**
+ * 截图入题库（2026-11-06）：不建卷、不选卷，图片直接进「截图题库」卷，题号自动接续。
+ * 与服务端后台解析同款：请求立即返回，前端轮询论文卷状态。
+ * 返回值里 beforeCount 是解析前的题数快照，用来算「这一批入了多少题」。
+ */
+export const uploadPaperClips = async (files) => {
+  const fd = new FormData()
+  for (const f of files) fd.append('files', f)
+  return apiRequest('/paper-bank/clips', { method: 'POST', body: fd }, 1)
+}
+
+// 删单题（截图截错了 / 一张图多拆出一行时用）。只删这一行，不动卷。
+export const deletePaperBankQuestion = (id) => apiRequest(`/paper-bank/questions/${id}`, { method: 'DELETE' })
+
 export const clearAllCache = () => {
   try {
     localStorage.removeItem('cache_version')

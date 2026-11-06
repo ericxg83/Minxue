@@ -1247,3 +1247,221 @@ export async function countPaperQuestions(resourceId) {
   )
   return rows[0]?.n || 0
 }
+
+// ── 截图入题库（2026-11-06）────────────────────────────────────────────────
+//
+// 场景：老师看视频/网课时看到一道好题，截图就想收进题库。
+// 现有入口要求「先新建卷 → 选卷 → 上传 → 整卷替换」，这个前缀成本远大于收益，
+// 于是单独开一条「不建卷、直接截图入库」的路。
+//
+// 形态：所有截图统一进**同一个**「截图题库」卷（resources.metadata.origin='screenshot'），
+// 题号在本卷内接着往后排。老师后期量大了再从这个卷里筛出来整理分类。
+//
+// ⛔ 三个不能复用（踩一个就会丢题或污染数据）：
+//   ① 不能走 parsePaperResource：它落库走 replacePaperQuestions（先删后插），
+//      对同一卷第二次截图会把第一批题全部删掉。
+//   ② 不能把 assignGlobalQuestionNumbers 的补号结果直接落库：那套补号按「本批页序」从 1 数，
+//      每批都从 1 开始，跨批次必然撞唯一键 (resource_id, unit_id, question_no, sub_no)。
+//   ③ 不能跑 auditPaperCoverage（逐页题号清点）：截图里通常没有印刷题号，
+//      清点会得出「卷面一个题号都没有 / 库里多出 N 个」的假告警，只会训练老师忽略告警。
+
+export const CLIP_LIBRARY_NAME = '截图题库'
+
+// 一次最多收几张截图（老师一次贴十几张已经是极限；再多请分两批）
+export const CLIP_MAX_IMAGES = Number(process.env.PAPER_CLIP_MAX_IMAGES || 12)
+
+// 截图是单题小图，并发 2 足够（与主链路同一口径：绝不瞬时打满供应商额度）
+const CLIP_CONCURRENCY = 2
+
+/**
+ * 取（或首次创建）截图容器卷。
+ * ⚠️ 用 module 级 promise 做并发合并：老师连点两次「开始识别」时不能创建出两个容器卷。
+ *    正常路径每次都重新查库（幂等），promise 只用于折叠同一瞬时的并发调用。
+ */
+let clipLibraryPromise = null
+export async function getOrCreateClipLibrary() {
+  if (clipLibraryPromise) return clipLibraryPromise
+  clipLibraryPromise = (async () => {
+    const found = await query(
+      `SELECT id, name, question_parse_status
+         FROM resources
+        WHERE resource_type = 'exam' AND metadata->>'origin' = 'screenshot'
+        ORDER BY created_at ASC
+        LIMIT 1`
+    )
+    if (found.rows.length) return found.rows[0]
+    const created = await query(
+      `INSERT INTO resources (resource_type, name, subject, grade, status, answer_status, metadata)
+       VALUES ('exam', $1, NULL, NULL, 'draft', 'none', jsonb_build_object('origin', 'screenshot'))
+       RETURNING id, name, question_parse_status`,
+      [CLIP_LIBRARY_NAME]
+    )
+    return created.rows[0]
+  })().finally(() => { clipLibraryPromise = null })
+  return clipLibraryPromise
+}
+
+/**
+ * 往某个卷**追加**题目（不删已有行）。
+ * 题号接续：本批每一行整体平移到「现有最大题号」之后；同一页同一个原题号算同一道题（小问组共享新题号）。
+ * @returns {{inserted:number, baseNo:number, lastNo:number}}
+ */
+export async function appendPaperQuestions(resourceId, rows) {
+  if (!Array.isArray(rows) || !rows.length) return { inserted: 0, baseNo: 0, lastNo: 0 }
+
+  const { rows: mx } = await query(
+    `SELECT COALESCE(MAX(question_no), 0)::int AS max_no
+       FROM resource_questions WHERE resource_id = $1`,
+    [resourceId]
+  )
+  const baseNo = mx[0]?.max_no || 0
+
+  let cursor = baseNo
+  const groupNo = new Map()
+  const prepared = rows.map((r) => {
+    // 同页同原题号 ⇒ 同一道题的小问，必须共用一个新题号（否则 (1)(2)(3) 会被拆成三道题）
+    const key = `${r.page_no}|${r.question_no == null ? '__solo' : r.question_no}`
+    if (!groupNo.has(key)) { cursor += 1; groupNo.set(key, cursor) }
+    return { ...r, question_no: groupNo.get(key), sub_no: r.sub_no || '' }
+  })
+
+  let inserted = 0
+  await transaction(async (client) => {
+    for (const r of prepared) {
+      const res = await client.query(
+        `INSERT INTO resource_questions
+           (resource_id, unit_id, question_no, sub_no, parent_stem, content, options,
+            question_type, answer, answer_source, analysis, difficulty, tags,
+            page_no, bbox, image_url, page_image_url)
+         VALUES ($1, NULL, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12::text[], $13, $14::jsonb, $15, $16)
+         ON CONFLICT (resource_id, unit_id, question_no, sub_no) DO NOTHING`,
+        [
+          resourceId,
+          r.question_no ?? null,
+          r.sub_no,
+          r.parent_stem || null,
+          r.content || '',
+          JSON.stringify(r.options || []),
+          r.question_type || 'answer',
+          r.answer || null,
+          r.answer_source || null,
+          r.analysis || null,
+          r.difficulty ?? null,
+          r.tags || [],
+          r.page_no ?? null,
+          r.bbox ? JSON.stringify(r.bbox) : null,
+          r.image_url || null,
+          r.page_image_url || null,
+        ]
+      )
+      inserted += res.rowCount || 0
+    }
+  })
+  // ⛔ 返回真实插入行数：题号接续出错时这里会小于 prepared.length，
+  //    前端「已入库 N 道题」按真实数报，不会把静默丢弃说成成功。
+  return { inserted, baseNo, lastNo: cursor }
+}
+
+/** 删单题（截图截错了 / OCR 多拆出一行时用）。题目行删除不影响卷和其它题。 */
+export async function deletePaperQuestion(id) {
+  const { rowCount } = await query('DELETE FROM resource_questions WHERE id = $1', [id])
+  return rowCount > 0
+}
+
+/**
+ * 把一批截图解析成题目，追加进「截图题库」卷。
+ *
+ * 与主链路唯一的分歧在「落库」和「清点」两步，识别/切段/裁片/双模型复核完全同一套零件：
+ * parsePageToQuestions 是逐页识别的唯一实现，这里绝不另写一份 OCR。
+ *
+ * 兜底：OCR 一个字都没读出来的截图**也要存**——老师要的是「把这道题留下来」，
+ * 文字识别是加分项。此时补一行只有图、题干待补的题，老师在界面上手填即可。
+ */
+export async function parseClipImages({ images, logger = console }) {
+  if (!Array.isArray(images) || !images.length) throw new Error('没有收到截图')
+  const batch = images.slice(0, CLIP_MAX_IMAGES)
+
+  const library = await getOrCreateClipLibrary()
+  const resourceId = library.id
+
+  // 页号接续：截图按「第几张」记 page_no，老师点「看原卷」时能在多批截图之间定位到那一张
+  const { rows: mx } = await query(
+    `SELECT COALESCE(MAX(page_no), 0)::int AS max_page
+       FROM resource_questions WHERE resource_id = $1`,
+    [resourceId]
+  )
+  const basePage = mx[0]?.max_page || 0
+
+  await setPaperParseStatus(resourceId, { status: 'parsing', totalPages: batch.length, donePages: 0 })
+
+  let done = 0
+  const pageResults = await mapWithConcurrency(batch, CLIP_CONCURRENCY, async (buf, idx) => {
+    const pageNumber = basePage + idx + 1
+    try {
+      return await parsePageToQuestions({ pageBuffer: buf, pageNumber, logger })
+    } catch (e) {
+      logger.warn?.(`[paperBank] 截图第 ${idx + 1} 张识别失败: ${e?.message || e}`)
+      return { rows: [] }
+    } finally {
+      done += 1
+      await setPaperParseStatus(resourceId, { donePages: done }).catch(() => {})
+    }
+  })
+
+  let rows = []
+  for (const r of pageResults) if (Array.isArray(r?.rows) && r.rows.length) rows = rows.concat(r.rows)
+
+  // OCR 没读出题的截图：整张图存进 OSS 当题，题干留空等老师补
+  const emptyIdx = []
+  pageResults.forEach((r, idx) => { if (!Array.isArray(r?.rows) || !r.rows.length) emptyIdx.push(idx) })
+  for (const idx of emptyIdx) {
+    const pageNumber = basePage + idx + 1
+    try {
+      const url = await uploadImage(batch[idx], `clip-p${pageNumber}.jpg`, 'paper-bank')
+      rows.push({
+        question_no: null,
+        sub_no: '',
+        parent_stem: null,
+        content: '',
+        options: [],
+        question_type: 'answer',
+        answer: null,
+        answer_source: null,
+        analysis: null,
+        difficulty: null,
+        tags: [],
+        page_no: pageNumber,
+        bbox: null,
+        image_url: url,
+        page_image_url: url,
+      })
+    } catch (e) {
+      logger.warn?.(`[paperBank] 截图第 ${idx + 1} 张存图失败: ${e?.message || e}`)
+    }
+  }
+  if (!rows.length) throw new Error('这批截图没能存下来（图片可能已损坏），请重新截图再传')
+
+  // 截图场景必须有图：主链路对「纯文字题」故意不挂裁片（整页 A4 糊满列表），
+  // 但截图本身就是「这道题的那张图」—— 没有图老师就只能看到一串 OCR 文字，等于没收进来。
+  // 所以裁片为空时用整张截图顶上（同页多题会共用同一张，页面侧 showFigure 按 URL 只显示一次）。
+  let imgFilled = 0
+  for (const r of rows) {
+    if (!r.image_url && r.page_image_url) { r.image_url = r.page_image_url; imgFilled += 1 }
+  }
+  if (imgFilled) logger.warn?.(`[paperBank] ${imgFilled} 行无裁片，已用整张截图顶上`)
+
+  // 本批内先补号保证每行有唯一题号，再由 appendPaperQuestions 整体平移到已有题号之后
+  assignGlobalQuestionNumbers(rows)
+  const { inserted, lastNo } = await appendPaperQuestions(resourceId, rows)
+
+  await setPaperParseStatus(resourceId, { status: 'done', donePages: batch.length })
+  await query(
+    `UPDATE resources
+        SET metadata = COALESCE(metadata, '{}'::jsonb)
+             || jsonb_build_object('lastClipAt', to_jsonb($2::text))
+      WHERE id = $1`,
+    [resourceId, new Date().toISOString()]
+  ).catch(e => logger.warn?.(`[paperBank] 截图时间戳回填失败: ${e.message}`))
+
+  return { resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length }
+}

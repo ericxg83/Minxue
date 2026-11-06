@@ -25,6 +25,11 @@ import {
   listPaperQuestions,
   searchPaperQuestions,
   updatePaperQuestion,
+  // 截图入题库（2026-11-06）：同一批零件的第二条落库路径，见下方 /clips
+  parseClipImages,
+  getOrCreateClipLibrary,
+  deletePaperQuestion,
+  CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
 } from '../services/paperBankService.js'
 
@@ -115,6 +120,9 @@ const withSourceFiles = (r) => {
     coverage_summary: meta.coverageAudit?.summary && typeof meta.coverageAudit.summary === 'object'
       ? meta.coverageAudit.summary
       : null,
+    // 卷的来源形态：'screenshot' = 老师随手截图收进来的「截图题库」卷（2026-11-06）。
+    // 前端据此加「截图」标识并置顶；⛔ 不新加列，只读 metadata，老卷一律为 null。
+    origin: meta.origin === 'screenshot' ? 'screenshot' : null,
   }
 }
 
@@ -347,6 +355,93 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
   }
 })
 
+// ── 截图入题库（2026-11-06）──
+//
+// 场景：老师看视频/网课看到一道好题，截图就想收进题库 —— 不该先建卷、再选卷、再上传。
+// 形态：所有截图统一进同一个「截图题库」卷（metadata.origin='screenshot'），题号自动接续，
+//       不覆盖已有的题。老师后期量大了再按这个卷筛出来整理分类。
+// 识别链路与「上传并解析」完全同一套零件（parsePageToQuestions），只有落库方式不同。
+//
+// ⛔ 进程内串行 + 409：识别在后台跑，这期间再提交会被挡住。
+//    不做排队 —— 老师连点两次时排队会把同一批图收两遍，重复题比报错难收拾得多。
+let clipJob = null
+
+// multer 的「文件数超限」抛在中间件层，不会进路由的 try/catch ⇒ 单独包一层给人话。
+const clipUpload = (req, res, next) => {
+  upload.array('files', CLIP_MAX_IMAGES)(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({
+        error: '截图数量超出上限',
+        message: `一次最多 ${CLIP_MAX_IMAGES} 张截图，先传这一批，剩下的下一批再贴`,
+      })
+    }
+    next()
+  })
+}
+
+router.post('/clips', clipUpload, async (req, res) => {
+  try {
+    const files = req.files || []
+    if (!files.length) {
+      return res.status(400).json({ error: '没有收到截图', message: '按 Ctrl+V 粘贴，或拖一张图进来' })
+    }
+    const bad = files.find(f => !IMAGE_MIME_TYPES.includes(f.mimetype))
+    if (bad) {
+      return res.status(400).json({
+        error: '不支持的图片格式',
+        message: '截图请用 PNG / JPEG / WebP（Windows 截图工具默认存的就是 PNG）',
+      })
+    }
+    const tooBig = files.find(f => (f.size || 0) > 20 * 1024 * 1024)
+    if (tooBig) {
+      return res.status(400).json({ error: '图片太大', message: '单张截图请控制在 20MB 以内' })
+    }
+
+    const library = await getOrCreateClipLibrary()
+    // ⛔ 只认进程内的 clipJob，不认库里的 parsing 状态：
+    //    服务重启后 DB 里可能残留 parsing（后台任务随进程一起没了），
+    //    拿它当锁会让截图入口永久 409，而且老师完全看不出该怎么解。
+    if (clipJob) {
+      return res.status(409).json({
+        error: '上一批截图还在识别',
+        message: '等这一批识别完再贴下一批（识别完卷名旁边会显示题数）',
+      })
+    }
+
+    // 解析前的题数快照：前端用它算「这一批入了多少题」
+    const { rows: cnt } = await query(
+      `SELECT COUNT(*)::int AS n FROM resource_questions WHERE resource_id = $1`,
+      [library.id]
+    )
+
+    res.json({
+      success: true,
+      parsing: true,
+      paperId: library.id,
+      beforeCount: cnt[0]?.n || 0,
+      accepted: files.length,
+      message: `${files.length} 张截图已收下，正在识别`,
+    })
+
+    clipJob = parseClipImages({ images: files.map(f => f.buffer) })
+      .then(r => console.log(`[paperBank] 截图入库完成 ${r.resourceId}: +${r.inserted} 题（含 ${r.emptyPages} 张仅存图）`))
+      .catch(async (e) => {
+        console.error('[paperBank] 截图入库失败:', e)
+        await setPaperParseStatus(library.id, { status: 'failed' }).catch(() => {})
+        await query(
+          `UPDATE resources SET metadata = COALESCE(metadata, '{}'::jsonb)
+             || jsonb_build_object('parseError', to_jsonb($2::text))
+           WHERE id = $1`,
+          [library.id, String(e?.message || e).slice(0, 300)]
+        ).catch(() => {})
+      })
+      .finally(() => { clipJob = null })
+  } catch (e) {
+    console.error('[paperBank] 截图上传失败:', e)
+    res.status(500).json({ error: '上传失败', message: e.message })
+  }
+})
+
 // ── 题目读取 ──
 
 // ── 几何矢量图附着：已停用（2026-11-03 负责人定调）──
@@ -433,6 +528,20 @@ router.put('/questions/:id', async (req, res) => {
     res.json({ success: true, question: updated })
   } catch (e) {
     res.status(500).json({ error: '保存失败', message: e.message })
+  }
+})
+
+/**
+ * 删单题（2026-11-06）。截图入库后最需要它：截错了 / 一张图里多拆出一行，
+ * 以前只能删整卷。只删 resource_questions 单行，不动卷、不动答案册、不动其它题。
+ */
+router.delete('/questions/:id', async (req, res) => {
+  try {
+    const ok = await deletePaperQuestion(req.params.id)
+    if (!ok) return res.status(404).json({ error: '题目不存在' })
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: '删除失败', message: e.message })
   }
 })
 
