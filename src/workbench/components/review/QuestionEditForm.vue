@@ -17,12 +17,22 @@
 
     <!-- 配图 -->
     <div class="qef-section qef-image-section">
-      <div class="qef-label">{{ figureOption ? '选项图（A/B/C/D 四幅）' : '配图' }}</div>
+      <div class="qef-label">{{ optionImages.length ? '选项图（A/B/C/D 四幅，各幅独立）' : (figureOption ? '选项图（A/B/C/D 四幅）' : '配图') }}</div>
       <div class="qef-image-wrap">
-        <img v-if="displayImageUrl" :src="displayImageUrl" class="qef-image" />
+        <!-- 有逐幅图时优先四格只读预览；整条横带收进下方折叠链接，避免编辑态图又变回扁条 -->
+        <div v-if="optionImages.length" class="qef-option-figures">
+          <div v-for="(u, idx) in optionImages" :key="u" class="qef-option-figure">
+            <span class="qef-option-figure__label">{{ String.fromCharCode(65 + idx) }}</span>
+            <img :src="u" :alt="`选项 ${String.fromCharCode(65 + idx)} 图`" />
+          </div>
+        </div>
+        <img v-else-if="displayImageUrl" :src="displayImageUrl" class="qef-image" />
         <div v-else class="qef-no-image">
           <el-icon :size="24"><Picture /></el-icon>
           <span>暂无配图</span>
+        </div>
+        <div v-if="optionImages.length" class="qef-tip">
+          四幅图来自原卷逐幅裁片。若需重裁，请用下方「原卷裁剪」重新框选（会更新整条选项图）。
         </div>
         <div class="qef-image-actions">
           <el-upload :show-file-list="false" :before-upload="handleImageUpload"
@@ -86,6 +96,9 @@ import { Picture, Upload, Crop, Delete, Plus, Refresh } from '@element-plus/icon
 const props = defineProps({
   form: { type: Object, required: true },
   displayImageUrl: { type: String, default: '' },
+  // 逐幅选项图（questions.option_images，A/B/C/D 顺序）。只读预览：
+  // 编辑页不提供逐幅替换入口，避免在表单里引入第二套写库白名单。
+  optionImages: { type: Array, default: () => [] },
   showCrop: { type: Boolean, default: false },
   // 是否提供「重新识别本题」入口（整页 OCR 漏识别选项时的补全手段）
   showRecognizeQuestion: { type: Boolean, default: false },
@@ -198,6 +211,36 @@ function removeTag(tag) {
   color: var(--wb-text-tertiary);
   font-size: 13px;
   padding: 8px 0;
+}
+
+/* 逐幅选项图只读预览（与复核页四格同版式） */
+.qef-option-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.qef-option-figure {
+  position: relative;
+  border: 1px solid var(--wb-border, #e4e7ed);
+  border-radius: var(--wb-radius-xs, 4px);
+  background: #fff;
+  padding: 8px 5px 5px;
+}
+.qef-option-figure__label {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--wb-primary, #409eff);
+  background: #fff;
+  padding: 0 3px;
+}
+.qef-option-figure img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: contain;
 }
 
 .qef-image-actions {

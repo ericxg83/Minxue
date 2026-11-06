@@ -24,17 +24,12 @@
             :class="{ 'conf-low': q.confidence < store.confidenceThreshold }">
             {{ Math.round(q.confidence * 100) }}%
           </span>
-          <!-- AI 重解析（2026-09-23 临时按钮）：参考答案缺失时点一下，
-               调答案引擎重算这一题的标准答案并写库。答案已存在时弹确认。
-               替代原来的「识别」tag——那个 tag 只是 answer_source 状态标签（学生答案 OCR 识别），
-               与参考答案无关，老师根本不知道它干嘛用。
-               实测端到端 5~35s（DB 首次建连 + 答案引擎），loading 文案要明确，
-               否则老师对着一个不动的转圈会以为卡死。 -->
-          <el-button size="small" plain :loading="!!recomputeJob?.loading"
-            @click="handleRecomputeAnswer">
-            <el-icon v-if="!recomputeJob?.loading"><MagicStick /></el-icon>
-            {{ recomputeJob?.loading ? `AI 计算中 ${recomputeJob.elapsed}s…` : 'AI 重解析' }}
-          </el-button>
+          <!-- 2026-11-06 入口收敛：常驻的「AI 重解析」按钮已撤。
+               参考答案为空时点题干行「解析」就会自动补齐并重判，两个按钮作用重复；
+               「强制重算」降为解析弹窗内的次级动作（补图后重看 / 怀疑答案不对时才用），
+               由 AnalysisSource emit('recompute') 转给本文件的 handleRecomputeAnswer。
+               这样在途恢复、答案库直查、降级提示整套能力原样保留，
+               下方结论横幅也仍常驻，跨页回来看得到重算结果。 -->
           <template v-if="!editing">
             <el-button size="small" plain @click="handleEnterEdit">
               <el-icon><EditPen /></el-icon> 编辑
@@ -154,6 +149,11 @@
       <div class="ops-ai-row" v-if="q.is_correct != null || q.review_status || getAiState(q) === 'exception' || getAiState(q) === 'blank'">
         <span class="ops-ai-icon" :class="getAiStateClass(q)">{{ getAiStateIcon(q) }}</span>
         <span class="ops-ai-text">{{ getAiStateText(q) }}</span>
+        <!-- 「已复核-AI翻案」只说了冲突，没说红 X 为什么还在、也没说下一步做什么。
+             补一句可行动说明：这是人工错标（不是 AI 判错），要老师点标对才算翻案。 -->
+        <span v-if="isAiReversalConflict" class="ops-ai-reason ops-ai-conflict-tip">
+          AI 现在判对，但人工错标未解除；点下方「标对」确认翻案后红 X 才会变绿
+        </span>
         <!-- 判不出的原因：让老师知道为什么这题要自己定，而不是以为系统坏了 -->
         <span v-if="unjudgedReason" class="ops-ai-reason">{{ unjudgedReason }}</span>
         <!-- 图题风险（视觉推理不稳）从独立 alert 框降为行内小字（2026-09-27 视觉降噪），
@@ -164,8 +164,8 @@
           style="width:100px;margin-left:auto;" />
       </div>
 
-      <!-- 「AI 重解析」的上次结论（2026-09-24）。常驻而非只弹 toast：
-           老师点完按钮常去别处转一圈再回来，3 秒的 toast 早没了，页面又回到
+      <!-- 「重新计算」的上次结论（2026-09-24 引入，2026-11-06 入口收敛后保留）。常驻而非只弹 toast：
+           老师点完重算常去别处转一圈再回来，3 秒的 toast 早没了，页面又回到
            「什么都没变」的样子。这里把结论留在页面上，尤其「AI 明确说不会」
            这种终态，避免老师反复点、每次白等十几秒还烧额度。 -->
       <el-alert
@@ -205,6 +205,7 @@
           <QuestionEditForm
             v-model:form="form"
             :display-image-url="displayImageUrl"
+            :option-images="optionImages"
             :show-crop="true"
             :show-recognize-question="true"
             :figure-option="isFigureOption"
@@ -226,7 +227,7 @@
             <div class="ops-q-label-row">
               <span class="ops-q-label">题干</span>
               <OriginalPaperSource :question="q" />
-              <AnalysisSource :question="q" />
+              <AnalysisSource :question="q" @recompute="handleRecomputeAnswer" />
             </div>
             <!-- 多小问大题的公共题干（迁移 057 parent_stem）：题目被拆成小问后，
                  公共条件挂在这一列。批改页不显示它，老师看到的就是无条件的残缺题
@@ -244,66 +245,106 @@
             <div v-if="q.content" class="ops-q-text"><MathRender :content="q.content" autoDetect /></div>
             <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
-          <div class="ops-q-section ops-image-section" v-if="displayImageUrl">
-    <div class="ops-q-label">{{ isFigureOption ? '选项图（A/B/C/D 四幅，点击可放大）' : '配图' }}</div>
+          <div class="ops-q-section ops-image-section" v-if="displayImageUrl || optionImages.length">
+    <div class="ops-q-label">{{ optionImages.length ? '选项图（A/B/C/D 四幅，点击单独放大）' : (isFigureOption ? '选项图（A/B/C/D 四幅，点击可放大）' : '配图') }}</div>
     <div class="ops-image-wrap">
-      <!-- 干净 SVG 源码（几何重建）→ 直接内联渲染 -->
-      <div v-if="displayType === 'svg_code'" class="tikz-svg-container"
-           v-html="displayImageUrl" @click="openFullscreen"></div>
-      <!-- TikZ 代码 → tikzToSvg 转换后内联 SVG -->
-      <div v-else-if="displayType === 'tikz_code'" class="tikz-svg-container"
-           v-html="renderTikzSvg(displayImageUrl)" @click="openFullscreen"></div>
-      <!-- URL → <img> 标签 -->
-      <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
-      <div style="display:flex; gap:6px; margin-top:4px;">
-        <template v-if="tikzStatus === 'done'">
-          <el-button v-if="!showOriginal && q.geometry_image_url" size="small" plain @click="showOriginal = true">
-            显示原图
+      <!-- 逐幅选项图（2026-11-06 方案 B）：四格各自独立，与原卷四幅小图一一对应。
+           存量题没有 option_images 时走下面原有的单图/横带分支，行为不变。 -->
+      <template v-if="optionImages.length">
+        <div class="ops-figure-layout-bar">
+          <span class="ops-figure-layout-hint">四幅均为原卷裁片，点击可放大并左右翻页对照</span>
+          <el-button-group size="small">
+            <el-button :type="optionFigureLayout === 'grid' ? 'primary' : ''" plain
+                       @click="optionFigureLayout = 'grid'">两行两列</el-button>
+            <el-button :type="optionFigureLayout === 'row' ? 'primary' : ''" plain
+                       @click="optionFigureLayout = 'row'">原卷横排</el-button>
+          </el-button-group>
+        </div>
+        <div class="ops-option-figures" :class="{ 'ops-option-figures--row': optionFigureLayout === 'row' }">
+          <div v-for="(u, idx) in optionImages" :key="u" class="ops-option-figure"
+               @click="openOptionViewer(idx)">
+            <span class="ops-option-figure__label">{{ String.fromCharCode(65 + idx) }}</span>
+            <img :src="u" :alt="`选项 ${String.fromCharCode(65 + idx)} 图`" class="ops-option-figure__img" />
+          </div>
+        </div>
+        <div v-if="q.geometry_image_url" class="ops-figure-strip-link">
+          <el-button text size="small" type="info" @click="fullscreenImage = q.geometry_image_url">
+            查看整条原卷裁片
           </el-button>
-          <el-button v-else-if="showOriginal" size="small" type="primary" plain @click="showOriginal = false">
-            采用TikZ图
-          </el-button>
-        </template>
-        <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
-          几何图重建中...
-        </el-tag>
-        <el-tag v-else-if="tikzStatus === 'processing'" size="small" type="info" effect="dark">
-          几何图重建中...
-        </el-tag>
-        <template v-else-if="tikzStatus === 'failed'">
-          <el-tag size="small" type="danger" effect="dark">重建失败</el-tag>
-          <el-button size="small" type="warning" plain :loading="retryGeometryLoading" @click="handleRetryGeometry">
-            重新生成
-          </el-button>
-        </template>
-        <el-tag v-else-if="tikzStatus === 'none'" size="small" type="info" effect="plain"
-                :title="q.asset_last_error || '视觉模型判定此图无法重建，已回退到裁剪原图'">
-          使用原图
-        </el-tag>
-        <el-button
-          v-if="q.geometry_image_url || q.clean_geometry_svg"
-          size="small" type="primary" plain
-          @click="geomEditorVisible = true"
-        >手工绘制几何图</el-button>
-        <el-tag v-if="geometryConsistency && !geometryConsistency.skipped" size="small" :type="geometryConsistency.pass ? 'success' : 'danger'" effect="dark">
-          几何自洽{{ geometryConsistency.pass ? '通过' : '存疑' }}
-        </el-tag>
-        <el-tag v-else-if="geometryConsistency && geometryConsistency.skipped" size="small" type="info" effect="plain">
-          几何无需校验
-        </el-tag>
-      </div>
+        </div>
+      </template>
+      <template v-else>
+        <!-- 干净 SVG 源码（几何重建）→ 直接内联渲染 -->
+        <div v-if="displayType === 'svg_code'" class="tikz-svg-container"
+             v-html="displayImageUrl" @click="openFullscreen"></div>
+        <!-- TikZ 代码 → tikzToSvg 转换后内联 SVG -->
+        <div v-else-if="displayType === 'tikz_code'" class="tikz-svg-container"
+             v-html="renderTikzSvg(displayImageUrl)" @click="openFullscreen"></div>
+        <!-- URL → <img> 标签 -->
+        <img v-else :src="displayImageUrl" class="ops-image" @click="fullscreenImage = displayImageUrl" />
+        <div style="display:flex; gap:6px; margin-top:4px;">
+          <template v-if="tikzStatus === 'done'">
+            <el-button v-if="!showOriginal && q.geometry_image_url" size="small" plain @click="showOriginal = true">
+              显示原图
+            </el-button>
+            <el-button v-else-if="showOriginal" size="small" type="primary" plain @click="showOriginal = false">
+              采用TikZ图
+            </el-button>
+          </template>
+          <el-tag v-else-if="tikzStatus === 'pending'" size="small" type="warning" effect="dark">
+            几何图重建中...
+          </el-tag>
+          <el-tag v-else-if="tikzStatus === 'processing'" size="small" type="info" effect="dark">
+            几何图重建中...
+          </el-tag>
+          <template v-else-if="tikzStatus === 'failed'">
+            <el-tag size="small" type="danger" effect="dark">重建失败</el-tag>
+            <el-button size="small" type="warning" plain :loading="retryGeometryLoading" @click="handleRetryGeometry">
+              重新生成
+            </el-button>
+          </template>
+          <el-tag v-else-if="tikzStatus === 'none'" size="small" type="info" effect="plain"
+                  :title="q.asset_last_error || '视觉模型判定此图无法重建，已回退到裁剪原图'">
+            使用原图
+          </el-tag>
+          <el-button
+            v-if="q.geometry_image_url || q.clean_geometry_svg"
+            size="small" type="primary" plain
+            @click="geomEditorVisible = true"
+          >手工绘制几何图</el-button>
+          <el-tag v-if="geometryConsistency && !geometryConsistency.skipped" size="small" :type="geometryConsistency.pass ? 'success' : 'danger'" effect="dark">
+            几何自洽{{ geometryConsistency.pass ? '通过' : '存疑' }}
+          </el-tag>
+          <el-tag v-else-if="geometryConsistency && geometryConsistency.skipped" size="small" type="info" effect="plain">
+            几何无需校验
+          </el-tag>
+        </div>
+      </template>
     </div>
   </div>
           <div class="ops-q-section" v-if="optionsList.length > 0">
             <div class="ops-q-label">选项</div>
-            <div v-if="isFigureOption" class="ops-figure-option-tip">
+            <div v-if="optionImages.length" class="ops-figure-option-tip">
+              A/B/C/D 四幅选项图见上方四格，卷面上选项就是这四幅图；判题请对照图形（点击可放大）。
+            </div>
+            <div v-else-if="isFigureOption" class="ops-figure-option-tip">
               四幅选项图见上方「选项图」，下方文字只是每幅图的特征描述；判题请对照图形（点击配图可放大）。
             </div>
-            <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
-              :class="{ 'option-highlight': opt === q.answer }">
-              <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
-              <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" :force-inline="true" /></span>
-            </div>
+            <!-- 有逐幅图时，长文字描述只是 OCR 生成的图形特征备注、并非卷面选项，
+                 默认折叠，避免把「四幅图」的题面重新撑成四段大段文字。数据不删，仍可展开。 -->
+            <template v-if="optionImages.length">
+              <el-button text size="small" type="info" class="ops-option-text-toggle"
+                         @click="optionTextExpanded = !optionTextExpanded">
+                {{ optionTextExpanded ? '收起' : '展开' }}文字描述（图形特征备注，非卷面选项）
+              </el-button>
+            </template>
+            <template v-if="!optionImages.length || optionTextExpanded">
+              <div v-for="(opt, idx) in optionsList" :key="idx" class="ops-option-row"
+                :class="{ 'option-highlight': opt === q.answer }">
+                <span class="ops-opt-letter">{{ String.fromCharCode(65 + idx) }}.</span>
+                <span class="ops-opt-text"><MathRender :content="opt" autoDetect tag="span" :force-inline="true" /></span>
+              </div>
+            </template>
           </div>
           <!-- 选择题但选项为空：整页 OCR 漏识别选项的典型形态。
                旧版这里整块隐藏，老师只看到题干、既不知道缺了什么，也不知道下一步做什么，
@@ -355,8 +396,13 @@
           <!-- [P0-1 完成引导 2026-09-27] 全卷已确认时判定区切换为完成态：
                「过」的尽头直接给出收尾出口，复用顶栏 handleComplete 的错题门禁流程。
                改判仍可用 ← 回看 + Space/X 重判（store 的重判路径不经过这里）。 -->
-          <div v-if="allConfirmed && !currentQIsGateDebt" class="ops-buttons-primary ops-complete-state">
+          <!-- [2026-11-06] 已完成复核的卷仍可改判：store.reviewQuestion 不看 task.status，
+               Space / X 快捷键也一直可用，但完成态把判定按钮整组换掉后老师看不到任何
+               改判入口，会误以为「这卷不能再复核了」。这里只加一个显式开关，
+               点开回到同一组判定按钮，不新增第二条判定路径。 -->
+          <div v-if="allConfirmed && !currentQIsGateDebt && !rejudgePanelOpen && !isAiReversalConflict" class="ops-buttons-primary ops-complete-state">
             <span class="ops-complete-text">本卷 {{ store.reviewProgress.total }} 题已全部确认</span>
+            <el-button size="default" @click="rejudgePanelOpen = true">改判本题</el-button>
             <el-button size="default" type="success" @click="emit('complete-review')">
               {{ store.reviewConfig.completeLabel }} <span class="ops-el-kbd">Enter</span>
             </el-button>
@@ -488,6 +534,9 @@
     />
 
     <el-image-viewer v-if="fullscreenImage" :url-list="[fullscreenImage]" @close="fullscreenImage = ''" />
+    <el-image-viewer v-if="optionViewerIndex >= 0 && optionImages.length"
+      :url-list="optionImages" :initial-index="optionViewerIndex"
+      @close="optionViewerIndex = -1" />
     <el-dialog v-model="showFullscreenSvg" title="几何矢量图" width="480px" :close-on-click-modal="true" @close="fullscreenSvg = ''">
       <div class="tikz-fullscreen-svg" v-html="fullscreenSvg" style="display:flex;justify-content:center;"></div>
     </el-dialog>
@@ -578,7 +627,7 @@ import { tikzToSvg } from '../../../utils/tikzGenerator'
 import { normalizeOptions } from '../../../utils/optionText'
 // 多小问（题组）共享题干展示口径：与错题卡片、重练卷共用同一套实现
 import { resolveQuestionDisplayStem } from '../../../utils/questionStem'
-import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText, getReferenceAnswerOrigin } from '../../../utils/reviewDecision'
+import { getReviewStateLabel, getUnjudgedReasonText, getAiAnswerRiskText, getReferenceAnswerOrigin, buildRejudgeSyncPatch } from '../../../utils/reviewDecision'
 import { ElMessage, ElMessageBox, ElLoading, ElCheckbox } from 'element-plus'
 // bbox 判据统一走共享实现（2026-09-18）：本文件原先自带一份 parseBbox/unionBbox，
 // 是**有意**不拒绝越界框的 —— 因为这里解析出的框只用于「原卷裁剪弹窗的自动预选」，
@@ -586,8 +635,8 @@ import { ElMessage, ElMessageBox, ElLoading, ElCheckbox } from 'element-plus'
 // 越界只会被裁掉，不会画到图外。因此这里传 allowOutOfRange:true 保留原行为，
 // 但实现与解析口径不再各留一份（原先全仓 4 份副本，两份拒绝、两份不拒绝）。
 import { parseBbox, unionBbox } from '../../../utils/questionBbox'
-import { FIGURE_OPTION_IMAGE_TYPE, isFigureOptionText } from '../../../utils/figureOptions.js'
-import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera, MagicStick } from '@element-plus/icons-vue'
+import { FIGURE_OPTION_IMAGE_TYPE, isFigureOptionText, normalizeOptionImages } from '../../../utils/figureOptions.js'
+import { DocumentChecked, Delete, Plus, Upload, Picture, EditPen, ArrowLeft, ArrowRight, RefreshLeft, Crop, Camera } from '@element-plus/icons-vue'
 import MathRender from '../MathRender.vue'
 import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
@@ -684,6 +733,15 @@ const isFigureOption = computed(() => {
     && FIGURE_OPTION_STEM_RE.test(`${q0.parent_stem || ''} ${q0.content || ''}`)
 })
 
+// 逐幅选项图（2026-11-06 方案 B）：questions.option_images jsonb，按 A/B/C/D 顺序
+// 存四幅【各自独立】的原卷裁片。有它 = 四格独立渲染（接近原卷、可单独放大）；
+// 为空 = 存量题，退回整条横带 geometry_image_url 展示，不改动既有行为。
+// 这里只做形状守卫，不另写一份判据：是不是图形选项题仍由 isFigureOption 统一判。
+const optionImages = computed(() => normalizeOptionImages(q.value?.option_images))
+// 四格排版：窄栏默认两行两列（每格看得清），老师可切回原卷的 1×4 横排
+const optionFigureLayout = ref('grid')
+const optionTextExpanded = ref(false)
+
 // 参考答案来源（答案库 / AI 解答，两档）。纯展示，帮助老师判断该不该相信这个答案 ——
 // 事故里老师反复怀疑批改逻辑，实际是 AI 补的参考答案错了。见 utils/reviewDecision.js 注释。
 // [2026-09-27 视觉降噪] 从独立琥珀色块降为「参考答案 · AI 解答」行内小字，悬停仍有说明。
@@ -743,12 +801,26 @@ const aiAnswerRiskReason = computed(() => {
   return getAiAnswerRiskText(q.value)
 })
 
+// 「已复核-AI翻案」的**真实**冲突态：人工错标还在、AI 现在判对。
+// 只会出现在 AI 自动重解析（manualOverride=false，按口径不得推翻老师结论）之后；
+// 老师手动改判 / 编辑保存触发的重判，后端会直接解除标记，不该再出现这个组合。
+// 判据与 getReviewStateLabel 的文案分支同源，但只用于给可行动提示，不参与判定。
+const isAiReversalConflict = computed(() =>
+  (q.value?.review_status === 'wrong' || q.value?.review_status === 'wrong_no_book') &&
+  q.value?.is_correct === true
+)
+
+// 完成态下判定按钮组是隐藏的（P0-1）；这个开关只负责把它临时显示回来。
+// 不写库、不改口径，切题自动收起，避免把上一题的展开状态带到下一题。
+const rejudgePanelOpen = ref(false)
+
 // 用户手动覆盖：默认 false → 显示 TikZ（AI 重画的 clean_geometry_svg）；
 // true → 显示原图（geometry_image_url 裁剪原图）。这是临时 UI 状态，
 // 不写回 DB；切换题目自动重置。
 const showOriginal = ref(false)
 watch(() => q.value?.id, () => {
   showOriginal.value = false
+  rejudgePanelOpen.value = false
   // 重解析结论已按题目 ID 建档存于 store（recomputeJobs），切题无需清理，
   // 各题结论互不串扰（2026-09-25）
 })
@@ -778,6 +850,10 @@ const tikzStatus = computed(() => getTikzStatus(q.value))
 const fullscreenImage = ref('')
 const fullscreenSvg = ref('')
 const showFullscreenSvg = ref(false)
+// 逐幅选项图的查看器：url-list 直接给四幅，initial-index 定位到老师点的那一幅，
+// 放大后左右翻页即可对照四幅，无需退回列表重选。
+const optionViewerIndex = ref(-1)
+const openOptionViewer = (idx) => { optionViewerIndex.value = idx }
 
 // [P4 影子模式] 几何自洽性审计字段展示：拉取该题的几何资产生成记录，读取 tikz_json.consistency
 const geometryConsistency = ref(null)
@@ -869,7 +945,7 @@ const recognizeResult = ref(null)
 const recognizePreviewUrl = ref('')
 let recognizePreviewUrlToRevoke = ''
 
-// 「AI 重解析」按钮（2026-09-23）：调答案引擎重算这一题参考答案。
+// 「重新计算」的在途状态（原「AI 重解析」按钮，2026-09-23 引入）：调答案引擎重算这一题参考答案。
 // 在途状态 / 计时 / 结论横幅都存在 store 的 recomputeJobs 里、按题目 ID 建档
 // （2026-09-25）：离开批改页再回来 loading 仍在、结论不丢；A 题在算不会污染 B 题的按钮。
 const recomputeJob = computed(() => store.recomputeJobFor(q.value?.id))
@@ -1269,7 +1345,8 @@ const cancelQuickStudentAnswerEdit = () => {
   quickStudentAnswerEditing.value = false
   quickStudentAnswerText.value = ''
 }
-// 「AI 重解析」按钮 handler：调答案引擎重算当前题的标准答案。
+// 「重新计算」handler：2026-11-06 起由解析弹窗内的次级动作 emit('recompute') 触发
+//（原先挂在顶部常驻按钮上，因与「解析」作用重复已撤），调答案引擎重算本题标准答案。
 // 已存在答案 → 弹确认框（force=true 强制覆盖）；不存在 → 直接跑。
 // 在途状态与结果全部写回 store.recomputeJobs（按题目 ID 建档）：即便老师中途
 // 离开批改页、组件被卸载，这段异步流程仍会跑完并把答案/结论写回 store，
@@ -1283,7 +1360,7 @@ const handleRecomputeAnswer = async () => {
     try {
       await ElMessageBox.confirm(
         '此题已有参考答案（' + String(question.answer).slice(0, 24) + '…），继续会覆盖现有答案，确定吗？',
-        'AI 重解析',
+        '重新计算',
         { confirmButtonText: '覆盖重算', cancelButtonText: '取消', type: 'warning' }
       )
       force = true
@@ -1338,7 +1415,7 @@ const handleRecomputeAnswer = async () => {
     // 等于没做（实测：重载后标记被清成 {}，续查空转）。所以失败一律留着标记，
     // 由 store.resumeRecomputeJobs 按服务端在途登记表裁决（running 继续等 / failed 出结论）。
     store.finishRecomputeJob(questionId, { type: declined ? 'warning' : 'error', text: readable }, { keepInflight: true })
-    ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `AI 重解析：${readable}` })
+    ElMessage({ type: declined ? 'warning' : 'error', duration: 8000, message: `重新计算：${readable}` })
   }
 }
 const saveQuickStudentAnswer = async () => {
@@ -1362,7 +1439,9 @@ const saveQuickStudentAnswer = async () => {
     try {
       const rejudgeResult = await rejudgeQuestion(question.id)
       if (rejudgeResult?.success) {
-        question.is_correct = rejudgeResult.is_correct
+        // ⛔ 只写 is_correct 会留下半同步：后端判对时已解除人工错标，页面却还挂着
+        // 「错误，本次不入册」+ 红 X「已复核-AI翻案」（2026-11-06 报障）。
+        Object.assign(question, buildRejudgeSyncPatch(rejudgeResult))
       }
     } catch (rejudgeErr) {
       console.warn('重判学生答案失败（不影响保存）:', rejudgeErr.message)
@@ -1522,8 +1601,9 @@ const handleSave = async () => {
     // 保存后自动重批改
     try {
       const rejudgeResult = await rejudgeQuestion(question.id)
-      if (rejudgeResult.success) {
-        question.is_correct = rejudgeResult.is_correct
+      if (rejudgeResult?.success) {
+        // 同上：重批改会连带改写 review_status / status，必须整体套用后端判定快照
+        Object.assign(question, buildRejudgeSyncPatch(rejudgeResult))
       }
     } catch (rejudgeErr) {
       console.warn('重批改失败（不影响保存）:', rejudgeErr.message)
@@ -1650,6 +1730,9 @@ const handleReview = async (result) => {
   if (result !== 'exclude') {
     store.undoHint = { text: resultText[result], questionId: question.id }
   }
+  // 完成态的「改判本题」是临时展开：判完收起。若本题仍是冲突态，
+  // 上面 v-if 里的 !isAiReversalConflict 会继续把判定按钮留在界面上。
+  rejudgePanelOpen.value = false
 }
 const nextQ = () => { store.nextQuestion() }
 const prevQ = () => { store.prevQuestion() }
@@ -2048,8 +2131,10 @@ const handleRetryGeometry = async () => {
 .ai-processing { background: var(--wb-processing); }
 .ops-ai-text { font-size: 13px; color: var(--wb-text-secondary); }
 .ops-ai-reason { font-size: 12px; color: var(--wb-warning); }
+/* 冲突说明较长：允许在判定行内收缩换行，别把红 X / 文案 / 置信度挤出卡片 */
+.ops-ai-conflict-tip { flex: 1; min-width: 0; line-height: 1.4; }
 
-/* 「AI 重解析」上次结论：常驻在参考答案下方，可关闭 */
+/* 「重新计算」上次结论：常驻在参考答案下方，可关闭 */
 .ops-recompute-notice {
   flex-shrink: 0;
   margin: 8px 12px 0;
@@ -2177,6 +2262,67 @@ const handleRetryGeometry = async () => {
   font-size: 13px;
   line-height: 1.6;
   color: var(--wb-text-secondary);
+}
+
+/* 逐幅选项图（方案 B）：A/B/C/D 四格各自独立，默认两行两列保证窄栏下看得清，
+   可切回原卷的 1×4 横排。每格保留原卷自带的 A./B./C./D. 标号，左上角角标便于定位。 */
+.ops-figure-layout-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ops-figure-layout-hint {
+  font-size: 12px;
+  color: var(--wb-text-secondary, #909399);
+}
+.ops-option-figures {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ops-option-figures--row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+.ops-option-figure {
+  position: relative;
+  border: 1px solid var(--wb-border, #e4e7ed);
+  border-radius: var(--wb-radius-xs, 4px);
+  background: #fff;
+  padding: 8px 6px 6px;
+  cursor: zoom-in;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ops-option-figure:hover {
+  border-color: var(--wb-primary, #409eff);
+  box-shadow: 0 0 0 2px var(--wb-primary-light, #ecf5ff);
+}
+.ops-option-figure__label {
+  position: absolute;
+  top: 3px;
+  left: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--wb-primary, #409eff);
+  background: #fff;
+  padding: 0 3px;
+  line-height: 1.2;
+}
+.ops-option-figure__img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  object-fit: contain;
+}
+.ops-figure-strip-link {
+  display: flex;
+  justify-content: flex-end;
+}
+.ops-option-text-toggle {
+  margin: 0 0 6px -8px;
 }
 
 /* 配图 */

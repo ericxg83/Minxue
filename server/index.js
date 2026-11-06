@@ -71,6 +71,7 @@ import { migrateKaofaMultiKp } from './migrations/061_kaofa_multi_kp.js'
 import { migrateKpRelations } from './migrations/062_kp_relations.js'
 import { migratePaperBankQuestions } from './migrations/063_paper_bank_questions.js'
 import { migrateSimilarQuestionGroups } from './migrations/064_similar_question_groups.js'
+import { migrateQuestionOptionImages } from './migrations/065_add_question_option_images.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -5551,7 +5552,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateKaofaMultiKp', migrateKaofaMultiKp],
         ['migrateKpRelations', migrateKpRelations],
         ['migratePaperBankQuestions', migratePaperBankQuestions],
-        ['migrateSimilarQuestionGroups', migrateSimilarQuestionGroups]
+        ['migrateSimilarQuestionGroups', migrateSimilarQuestionGroups],
+        ['migrateQuestionOptionImages', migrateQuestionOptionImages]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

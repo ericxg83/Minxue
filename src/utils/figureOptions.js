@@ -62,6 +62,28 @@ export const isFigureOptionQuestion = (question) => {
 }
 
 /**
+ * 逐幅选项图（questions.option_images）的唯一形状守卫，前后端共用。
+ *
+ * 该列是 jsonb，但存量行可能是 NULL、默认 '[]'、被外部脚本写成 JSON 字符串、
+ * 或混入空串/非 URL 的脏值。任何一处直接 `q.option_images.map(...)` 都会让
+ * 整个复核页面板白屏，所以统一在这里收成「干净的字符串数组」。
+ *
+ * 只保留 http(s) URL（OSS 裁片），最多 8 幅（防止异常数据把版面撑爆），
+ * 空结果 = 没有逐幅图，调用方退回整条横带 geometry_image_url，行为不变。
+ */
+export const normalizeOptionImages = (raw) => {
+  let list = raw
+  if (typeof list === 'string') {
+    try { list = JSON.parse(list) } catch { return [] }
+  }
+  if (!Array.isArray(list)) return []
+  return list
+    .map(u => (typeof u === 'string' ? u.trim() : ''))
+    .filter(u => /^https?:\/\//i.test(u))
+    .slice(0, 8)
+}
+
+/**
  * 「看似有选项、其实是占位」的退化图形选项。
  * 事故记录（server/scripts/backfill-choice-options.mjs:481）：模型面对四张作图选项
  * 会直接回 ["A","B","C","D"] 或 ["选项A图","选项B图",…]，前端渲染成
