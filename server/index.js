@@ -2480,6 +2480,21 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
   try {
     const { id } = req.params
 
+    // [2026-11-06 报障修复] 重判不只改 is_correct：finalizeRejudgeResult 判对时会
+    // 解除 review_status='wrong'/'wrong_no_book'，并同步 status / confidence。
+    // 旧响应只回 is_correct，前端只同步这一列 ⇒ 库里人工错标已清、页面仍挂着
+    // 「错误，本次不入册」+ 红 X「已复核-AI翻案」（数学堂堂清04 #6 实证）。
+    // 这里以**写库之后**的真实行回一份判定快照，前端按共享补丁整体覆盖，
+    // 禁止前端自行推断「判对了就该清标记」（那会把后端的 manualOverride 口径抄第二遍）。
+    const loadJudgementSnapshot = async () => {
+      const { rows } = await query(
+        `SELECT id, is_correct, status, review_status, confidence
+           FROM ${TABLES.QUESTIONS} WHERE id = $1`,
+        [id]
+      )
+      return rows[0] || null
+    }
+
     const { rows } = await query(
       `SELECT id, student_id, student_answer, answer, question_type, is_correct,
               content, parent_stem, geometry_image_url, options, answer_source
@@ -2512,6 +2527,7 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       return res.json({
         success: true,
         is_correct: isCorrect,
+        question: await loadJudgementSnapshot(),
         idempotent: settlement.skipped
       })
     }
@@ -2541,7 +2557,7 @@ app.post('/api/questions/:id/rejudge', async (req, res) => {
       metadata: { oldIsCorrect, questionType: question_type }
     }).catch(e => console.error('[Shadow] judgements写入失败 (pc_rejudge):', e.message))
 
-    res.json({ success: true, is_correct: isCorrect })
+    res.json({ success: true, is_correct: isCorrect, question: await loadJudgementSnapshot() })
   } catch (error) {
     console.error('重批改失败:', error)
     res.status(500).json({ error: error.message })
@@ -2848,7 +2864,12 @@ app.post('/api/questions/:id/recompute-answer', async (req, res) => {
     //   锚定到的单元（tasks.result.sectionMatch），不重新推断单元 —— 重新推断会
     //   把「批改时挂错」变成「重解析时也挂错」，只是把同一个错误换个入口。
     //   查到即返回，不烧额度、不等待；查不到才走原有引擎链。
-    if (force) {
+    // 2026-11-06：答案库直查提前到「参考答案为空」也生效。
+    // 上面的 already-has-answer 闸已挡掉「答案非空且未 force」(409)，能走到这里的
+    // 只有两种：force 覆盖、或答案为空。两种都该先查库 —— 尤其答案为空时，
+    // 库里明明写着官方答案却让 AI 从零解一遍，是最慢最贵的一条路。
+    // 命中即返回、不烧额度；查不到才走下面的引擎链（后续口径不变）。
+    if (force || !String(q.answer || '').trim()) {
       try {
         const bankHit = await lookupWorksheetAnswerForRecompute(id)
         console.log(`[AI 重解析] 答案库直查 q=${String(id).slice(0, 8)} → ${bankHit ? `命中 unit="${bankHit.unit}" ans="${String(bankHit.answer).slice(0, 20)}"` : '未命中'}`)

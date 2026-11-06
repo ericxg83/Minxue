@@ -362,3 +362,31 @@ export const buildAnalysisSyncPatch = (resp) => {
   }
   return patch
 }
+
+/**
+ * 「重批改」(POST /api/questions/:id/rejudge) 响应 → 本地题目对象的同步补丁（唯一实现）。
+ *
+ * 背景（2026-11-06 报障「数学堂堂清04 #6」）：老师在**已完成复核**的卷上编辑学生答案，
+ * 保存触发重批改，后端把 is_correct 从 false 翻成 true，并按人工改判口径解除了
+ * review_status='wrong_no_book'。但前端只写了 `question.is_correct = resp.is_correct`，
+ * 旧的 review_status 留在内存里 ⇒ 页面拼出一个库里根本不存在的状态：
+ * 橙色「错误，本次不入册」+ 红 X +「已复核-AI翻案」，刷新才变绿。
+ *
+ * 判据不能在前端重写「判对了就清标记」——后端是否解除标记由 manualOverride 决定
+ * （AI 自动重解析不得推翻老师结论）。所以只认后端回的**落库后判定快照**，
+ * 有哪列覆盖哪列；`review_status: null` 必须照样写入，否则旧错标不会消失。
+ *
+ * @returns {Object} 空对象表示无需同步
+ */
+export const buildRejudgeSyncPatch = (resp) => {
+  if (!resp || typeof resp !== 'object') return {}
+  // question 是后端新增的判定快照；顶层 is_correct 是历史契约，
+  // 兼容旧版后端 / 其它调用方只回一列的情形。
+  const snap = (resp.question && typeof resp.question === 'object') ? resp.question : resp
+  const patch = {}
+  if ('is_correct' in snap) patch.is_correct = snap.is_correct
+  if ('review_status' in snap) patch.review_status = snap.review_status
+  if ('status' in snap) patch.status = snap.status
+  if ('confidence' in snap) patch.confidence = snap.confidence
+  return patch
+}
