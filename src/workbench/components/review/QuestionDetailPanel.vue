@@ -246,13 +246,13 @@
             <div v-else class="ops-q-text ops-q-text--empty">未识别到题干文本</div>
           </div>
           <div class="ops-q-section ops-image-section" v-if="displayImageUrl || optionImages.length">
-    <div class="ops-q-label">{{ optionImages.length ? '选项图（A/B/C/D 四幅，点击单独放大）' : (isFigureOption ? '选项图（A/B/C/D 四幅，点击可放大）' : '配图') }}</div>
+    <div class="ops-q-label">{{ optionImages.length ? '选项图（四幅原卷裁片，点击单独放大）' : (isFigureOption ? '选项图（A/B/C/D 四幅，点击可放大）' : '配图') }}</div>
     <div class="ops-image-wrap">
       <!-- 逐幅选项图（2026-11-06 方案 B）：四格各自独立，与原卷四幅小图一一对应。
            存量题没有 option_images 时走下面原有的单图/横带分支，行为不变。 -->
       <template v-if="optionImages.length">
         <div class="ops-figure-layout-bar">
-          <span class="ops-figure-layout-hint">四幅均为原卷裁片，点击可放大并左右翻页对照</span>
+          <span class="ops-figure-layout-hint">原卷裁片（卷面自带 A./B./C./D. 标号），点击可放大并左右翻页对照</span>
           <el-button-group size="small">
             <el-button :type="optionFigureLayout === 'grid' ? 'primary' : ''" plain
                        @click="optionFigureLayout = 'grid'">两行两列</el-button>
@@ -261,9 +261,11 @@
           </el-button-group>
         </div>
         <div class="ops-option-figures" :class="{ 'ops-option-figures--row': optionFigureLayout === 'row' }">
+          <!-- 裁片里已经印着原卷的 "A." / "B." / "C." / "D." 标号，
+               前端不再叠加字母角标（会与卷面重复）。放大查看器仍按 idx 定位。 -->
           <div v-for="(u, idx) in optionImages" :key="u" class="ops-option-figure"
+               :title="`点击放大选项 ${String.fromCharCode(65 + idx)}`"
                @click="openOptionViewer(idx)">
-            <span class="ops-option-figure__label">{{ String.fromCharCode(65 + idx) }}</span>
             <img :src="u" :alt="`选项 ${String.fromCharCode(65 + idx)} 图`" class="ops-option-figure__img" />
           </div>
         </div>
@@ -2286,29 +2288,19 @@ const handleRetryGeometry = async () => {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
 }
+/* 无边框无角标：四幅原卷裁片直接贴在白底上，尽量还原卷面，
+   而不是四个带字母徽标的「卡片」。标号用裁片里原卷自带的 A./B./C./D. */
 .ops-option-figure {
-  position: relative;
-  border: 1px solid var(--wb-border, #e4e7ed);
+  border: 1px solid transparent;
   border-radius: var(--wb-radius-xs, 4px);
   background: #fff;
-  padding: 8px 6px 6px;
+  padding: 2px;
   cursor: zoom-in;
   transition: border-color .15s, box-shadow .15s;
 }
 .ops-option-figure:hover {
   border-color: var(--wb-primary, #409eff);
   box-shadow: 0 0 0 2px var(--wb-primary-light, #ecf5ff);
-}
-.ops-option-figure__label {
-  position: absolute;
-  top: 3px;
-  left: 7px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--wb-primary, #409eff);
-  background: #fff;
-  padding: 0 3px;
-  line-height: 1.2;
 }
 .ops-option-figure__img {
   display: block;

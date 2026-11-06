@@ -17,12 +17,11 @@
 
     <!-- 配图 -->
     <div class="qef-section qef-image-section">
-      <div class="qef-label">{{ optionImages.length ? '选项图（A/B/C/D 四幅，各幅独立）' : (figureOption ? '选项图（A/B/C/D 四幅）' : '配图') }}</div>
+      <div class="qef-label">{{ optionImages.length ? '选项图（四幅原卷裁片，卷面自带标号）' : (figureOption ? '选项图（A/B/C/D 四幅）' : '配图') }}</div>
       <div class="qef-image-wrap">
         <!-- 有逐幅图时优先四格只读预览；整条横带收进下方折叠链接，避免编辑态图又变回扁条 -->
         <div v-if="optionImages.length" class="qef-option-figures">
           <div v-for="(u, idx) in optionImages" :key="u" class="qef-option-figure">
-            <span class="qef-option-figure__label">{{ String.fromCharCode(65 + idx) }}</span>
             <img :src="u" :alt="`选项 ${String.fromCharCode(65 + idx)} 图`" />
           </div>
         </div>
@@ -220,21 +219,10 @@ function removeTag(tag) {
   gap: 8px;
 }
 .qef-option-figure {
-  position: relative;
-  border: 1px solid var(--wb-border, #e4e7ed);
+  border: 1px solid transparent;
   border-radius: var(--wb-radius-xs, 4px);
   background: #fff;
-  padding: 8px 5px 5px;
-}
-.qef-option-figure__label {
-  position: absolute;
-  top: 2px;
-  left: 6px;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--wb-primary, #409eff);
-  background: #fff;
-  padding: 0 3px;
+  padding: 2px;
 }
 .qef-option-figure img {
   display: block;
