@@ -21,12 +21,22 @@ test('解析页 2x 只喂 OCR，裁片/整页图必须走 4x 高清页', () => {
   assert.ok(/CROP_RENDER_QUALITY = 0\.92/.test(src), '高清页 JPEG 质量 0.92（canvas 口径 0~1）')
   assert.ok(/cropPageBuffer = null/.test(src), 'parsePageToQuestions 必须接受独立的高清页参数')
   assert.ok(/const hiPage = cropPageBuffer \|\| pageBuffer/.test(src), '高清页缺失时允许退回解析页（降级不阻塞）')
-  // 三个消费点必须全部用 hiPage：整页图上传 / 题目裁片 / 小问图形带源裁片
+  // 消费点必须全部用 hiPage：整页图上传 / 题目裁片。
+  // ⚠️ 2026-11-06 改为「一页只裁一次」：小问配图共享不再重复 cropQuestionImage，
+  //   而是复用同一次高清裁片的像素（cropBufs）判图 —— 所以只有 1 处调用，
+  //   但**绝不允许**出现从 2x 解析页裁剪的调用。
   assert.equal(
     (src.match(/cropQuestionImage\(hiPage, /g) || []).length,
-    2,
-    '题目裁片与小问图形带都必须从高清页裁'
+    1,
+    '题目裁片必须从高清页裁，且一页只裁一次'
   )
+  assert.equal(
+    (src.match(/await cropQuestionImage\(pageBuffer/g) || []).length,
+    0,
+    '绝不允许从 2x 解析页裁片（函数定义 cropQuestionImage(pageBuffer, box) 不算调用）'
+  )
+  assert.ok(/cropBufs\[i\] = cropped/.test(src), '裁片像素必须留底给小问图形判图复用')
+  assert.ok(/const buf = cropBufs\[i\]/.test(src), '小问图形带必须复用高清裁片，不再二次裁剪')
   assert.ok(/uploadImage\(hiPage, `paper-p\$\{pageNumber\}/.test(src), 'page_image_url 必须存高清页（供后续重裁）')
   assert.ok(/scale: CROP_RENDER_SCALE/.test(src), 'parsePaperResource 必须真的渲染 4x 页')
 })

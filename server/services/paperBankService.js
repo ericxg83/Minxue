@@ -571,12 +571,16 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     if (measured?.error) {
       logger.warn?.(`[paperBank] 第 ${pageNumber} 页切段失败（题目照存、无裁片）: ${measured.error}`)
     } else {
+      // 裁片缓冲按行留底：下面的「小问组配图共享」要用同一份像素判图，
+      // 不再重复 cropQuestionImage（4x 图重复裁一次就是一次多余的 sharp 解码）。
+      const cropBufs = new Array(rows.length).fill(null)
       for (let i = 0; i < rows.length; i++) {
         const box = measured?.boxes?.[String(i)]
         if (!box) continue
         rows[i].bbox = box
         const cropped = await cropQuestionImage(hiPage, box)
         if (cropped) {
+          cropBufs[i] = cropped
           try {
             // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
             //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
@@ -592,24 +596,45 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
         }
       }
 
-      // ── 小问组配图共享（2026-11-02，paperFigureAssign）──
+      // ── 小问组配图共享（2026-11-02 建；2026-11-06 按嘉定一模 22 事故重写判据）──
       // 切段以「题号行上沿」为界：「题干→小问→图块在最后」版式的图会整段落进
       // 最后一个下问的切段，其余小问只切到自己的一行文字条（显示为细线 = 没图，
-      // 徐汇一模 25(1)(2) 实测）。组内把带图行（优先抠成图形带）补给文字条行；
-      // 任何失败只降级为「维持现状」，不影响落库。
-      // ⚠️ 2026-11-03 事故修复：此前只把图形带补给「文字条行」，**source（带图行）
-      // 自己保留整段原始裁片**（含小问文字 + 更高），讲解版/讲义里该页图就会带文字、
-      // 且高裁片顶爆版式。现改为 source 也换成同一张干净图形带，整组共享同一张图。
+      // 徐汇一模 25(1)(2) 实测）。组内把图补给文字条行；失败只降级为「维持现状」。
+      //
+      // ⛔ 2026-11-06 事故（嘉定一模 22）：旧实现用 bbox 高度猜「谁是带图行」，
+      //   抠不出干净图形带就**整张源裁片兜底**。(2) 的切段高 200（三行正文 + 一条
+      //   EF 线段）被猜成带图行 ⇒ 兜底成 (2) 的正文 ⇒ 补给 (1)：(1)(2) 都拿着 (2)
+      //   的正文，(1) 真正要的图（题干材料框里的作图）彻底消失。
+      // 新判据是**正证据**（详见 paperFigureAssign 文件头）：
+      //   ① 先逐行实测「能不能抠出图形带」，抠得出来的才算图源；
+      //   ② 图源优先整题行（题干图才是「如图」那张），其次组内最高的小问；
+      //   ③ target 只收自己无图 + 一行文字条的行，高裁片绝不覆盖；
+      //   ④ 抠不出图 ⇒ 不共享、不兜底。
       try {
-        const figPlans = planSubrowFigureAssignments(rows)
+        const groups = new Map()
+        rows.forEach((r, i) => {
+          const key = `${r.page_no ?? ''}|${String(r.question_no ?? '')}`
+          if (!groups.has(key)) groups.set(key, [])
+          groups.get(key).push(i)
+        })
+        const figBands = new Map()   // 行下标 → 该行自己的干净图形带
+        for (const idxs of groups.values()) {
+          if (idxs.length < 2) continue
+          for (const i of idxs) {
+            const buf = cropBufs[i]
+            if (!buf) continue
+            const band = await extractFigureBandFromCrop(buf)
+            if (band) figBands.set(i, band)
+          }
+        }
+        const figPlans = planSubrowFigureAssignments(rows, figBands)
         const sourceDone = new Set()
         for (const pl of figPlans) {
           const src = rows[pl.sourceIdx]
           const tgt = rows[pl.targetIdx]
-          const srcBuf = await cropQuestionImage(hiPage, src.bbox)
-          if (!srcBuf) continue
-          const figBuf = (await extractFigureBandFromCrop(srcBuf)) || srcBuf
-          // source 行也换成干净图形带（同一份图，避免该页图带小问文字 + 高裁片）
+          const figBuf = figBands.get(pl.sourceIdx)
+          if (!figBuf) continue
+          // source 行也换成同一张干净图形带（避免该页图带小问文字 + 高裁片）
           if (!sourceDone.has(pl.sourceIdx)) {
             sourceDone.add(pl.sourceIdx)
             try {
