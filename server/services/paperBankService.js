@@ -23,6 +23,7 @@
  *      模型自己算的答案本版不写（宁可空着，也不给没验算过的值）。
  */
 import sharp from 'sharp'
+import crypto from 'crypto'
 import { query, transaction } from '../config/neon.js'
 import { uploadImage } from './ossService.js'
 import { renderPdfToJpegs } from './pdfService.js'
@@ -52,6 +53,23 @@ const RENDER_SCALE = 2
 const CROP_RENDER_SCALE = 4
 const CROP_RENDER_MAX_EDGE = 4096
 const CROP_RENDER_QUALITY = 0.92 // canvas.toBuffer 的 jpeg 质量是 0~1（不是 sharp 的 0~100）
+
+// ── 配图上传去重（2026-11-06）──
+// 同一道题的多个小问各自裁图时，裁出来常常是**字节完全相同**的一张图
+// （小问行自己没有图，整组都落在题干那张图上）。逐行上传会给同一幅图造出 N 个 URL，
+// 页面只能按 URL 判重 ⇒ 「同一幅图连贴 N 张」——负责人两次报障（徐汇一模 20 的三张表格图、
+// 嘉定一模 22(2) 的正文图）在修掉「图本身错」之后，剩下的就是这一种重复形态。
+// 以内容 md5 做 memo：同一份字节在**本页解析内**只上传一次，多行共用同一个 URL，
+// 页面侧 showFigure 据此只显示一次（判据见 src/workbench/utils/paperRowDisplay.js）。
+// ⛔ 只按内容判等，不按文件名/题号——文件名里含行下标，天然各不相同。
+async function uploadFigureOnce(buf, name, memo) {
+  const key = crypto.createHash('md5').update(buf).digest('hex')
+  const hit = memo.get(key)
+  if (hit) return hit
+  const url = await uploadImage(buf, name, 'paper-bank')
+  if (url) memo.set(key, url)
+  return url
+}
 
 /** 并发映射：保序返回，单点失败不拖垮整批。 */
 export async function mapWithConcurrency(items, limit, fn) {
@@ -579,6 +597,7 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
       // 裁片缓冲按行留底：下面的「小问组配图共享」要用同一份像素判图，
       // 不再重复 cropQuestionImage（4x 图重复裁一次就是一次多余的 sharp 解码）。
       const figBands = new Map()   // 行下标 → 该行自己的干净图形带
+      const figureUploads = new Map()  // 内容 md5 → 已上传 URL（同页同一份字节只传一次）
       for (let i = 0; i < rows.length; i++) {
         const box = measured?.boxes?.[String(i)]
         if (!box) continue
@@ -605,8 +624,8 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
           //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
           //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
           //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
-          rows[i].image_url = await uploadImage(
-            imgBuf, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}-${kind}.jpg`, 'paper-bank')
+          rows[i].image_url = await uploadFigureOnce(
+            imgBuf, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}-${kind}.jpg`, figureUploads)
         } catch (e) {
           logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题配图上传失败: ${e.message}`)
         }
@@ -642,20 +661,20 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
           if (!sourceDone.has(pl.sourceIdx)) {
             sourceDone.add(pl.sourceIdx)
             try {
-              src.image_url = await uploadImage(
+              src.image_url = await uploadFigureOnce(
                 figBuf,
                 `paper-p${pageNumber}-q${src.question_no}-s${src.sub_no || 'x'}-figsrc.jpg`,
-                'paper-bank'
+                figureUploads
               )
             } catch (e) {
               logger.warn?.(`[paperBank] 小问配图共享(source)上传失败 q${src.question_no}(${src.sub_no}): ${e.message}`)
             }
           }
           try {
-            tgt.image_url = await uploadImage(
+            tgt.image_url = await uploadFigureOnce(
               figBuf,
               `paper-p${pageNumber}-q${tgt.question_no}-s${tgt.sub_no || 'x'}-fig.jpg`,
-              'paper-bank'
+              figureUploads
             )
           } catch (e) {
             logger.warn?.(`[paperBank] 小问配图共享上传失败 q${tgt.question_no}(${tgt.sub_no}): ${e.message}`)
