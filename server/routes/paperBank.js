@@ -109,6 +109,12 @@ const withSourceFiles = (r) => {
     // 双模型复核后「两处抄本不一致」的待人工核对清单（2026-11-06）
     ocr_review: Array.isArray(meta.ocrReview) ? meta.ocrReview : [],
     ocr_review_summary: meta.ocrReviewSummary && typeof meta.ocrReviewSummary === 'object' ? meta.ocrReviewSummary : null,
+    // 落库后逐页题号清点（2026-11-06）：卷面有、库里没有 = 漏题；库里多出 = 串号。
+    // 字段名与前端逐字对齐：coverage_audit（原始明细）/ coverage_summary（列表徽标只读这个）。
+    coverage_audit: meta.coverageAudit && typeof meta.coverageAudit === 'object' ? meta.coverageAudit : null,
+    coverage_summary: meta.coverageAudit?.summary && typeof meta.coverageAudit.summary === 'object'
+      ? meta.coverageAudit.summary
+      : null,
   }
 }
 

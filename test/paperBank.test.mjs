@@ -441,7 +441,12 @@ test('★ pdfService 必须与 pdf.js 用同一份 @napi-rs/canvas（按 pdf.mjs
 
 test('★ 落库必须先按题号+小问去重（答题卡页重复识别会撞唯一约束炸成 0 题）', () => {
   const s = stripComments(read('server/services/paperBankService.js'))
-  assert.match(s, /replacePaperQuestions[\s\S]{0,600}seen\.has\(key\)/, '去重判据必须在 replacePaperQuestions 内')
+  // 2026-11-06：去重口径抽成纯函数 dedupePaperRows（原来内联在 replacePaperQuestions 里，
+  // 无法单测，且「一律保留首次」会把补号撞车的真题目静默丢掉）。落库仍必须先过它。
+  assert.match(s, /replacePaperQuestions[\s\S]{0,400}dedupePaperRows\(rows\)/, '落库前必须先去重')
+  assert.match(s, /dedupePaperRows[\s\S]{0,1200}seen\.has\(key\)|seen\.get\(key\)/, '去重判据在 dedupePaperRows 内')
   assert.ok(/String\(r\.question_no \?\? ''\)/.test(s), '去重 key 必须字符串归一（question_no 可能 number 也可能 string）')
-  assert.match(s, /return \{ duplicated \}/, '重复行数必须返回给调用方（写 parseWarning 留痕，不静默吞）')
+  // 重复行数与改号明细都必须返回给调用方（写 parseWarning 留痕，不静默吞）
+  assert.match(s, /return \{ duplicated, renumbered, dropped, renumberedRows \}/, '重复/改号明细必须回传')
+  assert.match(s, /if \(duplicated > 0\)[\s\S]{0,300}appendParseWarning/, '重复行必须写进 parseWarnings')
 })

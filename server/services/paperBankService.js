@@ -82,6 +82,31 @@ export function parseJsonLoose(content) {
   try { return JSON.parse(m[0]) } catch { return null }
 }
 
+/**
+ * 卷面题号归一（2026-11-06 漏题事故）：
+ * 模型给题号的方式并不统一 —— 见过 `6`、`"6"`、`"6."`、`"第6题"`、`"（6）"`、`"6、10分"`。
+ * 旧实现只做 `Number(q.question_number)`，上面除前两种外**全部得到 NaN**，于是整页题号被兜底
+ * 从 1 重编，跟第 1 页撞车，落库去重时被当成重复题静默丢弃（嘉定一模 p2 的 6—10 题就这么没的）。
+ * 这里统一抠出开头的阿拉伯数字；一页里出现「6 和 6(1) 和 6(2)」这类，数字部分相同是小问的事，
+ * 由 sub_no 区分。认不出返回 null（表示「卷面题号不可知」，交给全卷补号），绝不猜。
+ */
+export function normalizeQuestionNo(raw) {
+  if (raw == null) return null
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw > 0 ? Math.trunc(raw) : null
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    // 个别模型给 { value: 6 } / { no: "6" }
+    const inner = raw.value ?? raw.no ?? raw.number
+    return inner == null ? null : normalizeQuestionNo(inner)
+  }
+  const s = String(raw).trim()
+  if (!s) return null
+  // 跳过前导的「第」「(」「（」空白，取开头第一段连续数字（"6." / "第6题" / "6、10分" 都取 6）
+  const m = s.match(/^[\s第\(（\[【]*?(\d{1,3})/)
+  if (!m) return null
+  const n = Number(m[1])
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 /** 选项归一化：去掉 "A."/"（A）"/"A、" 这类标号（标号由界面按顺序生成）。 */
 export function normalizeOptions(options) {
   if (!Array.isArray(options)) return []
@@ -147,28 +172,132 @@ async function appendParseWarning(resourceId, message) {
 // ── 落库 ──
 
 /**
+ * 全卷题号唯一化（2026-11-06 漏题事故）。
+ *
+ * 规则：**卷面印的题号一律不动**；只给「模型没给题号」的行补号，且必须全卷唯一。
+ * 补号位置 = 该行之前出现过的最大印刷题号 + 1，并跳过任何在别处出现过的印刷题号。
+ * 这样「第 2 页整页缺号」会被补成接在第 1 页后面，而不是从 1 重来跟第 1 页撞车。
+ *
+ * ⛔ 不能退回「每页从 1 数」：唯一键是 (resource_id, unit_id, question_no, sub_no)，
+ *   跨页撞号会让 replacePaperQuestions 把**真题目**当重复丢掉（嘉定一模丢了 6—10 题）。
+ * ⛔ 也不能简单「补成大于全卷最大号」：那样缺号题会全部排到卷末，页序与题号彻底错位，
+ *   出卷时按题号排序就会把第 2 页的题排到最后。
+ */
+export function assignGlobalQuestionNumbers(rows) {
+  const printed = new Set()
+  for (const r of rows) {
+    const n = Number(r?.question_no)
+    if (r?.__printedNo && Number.isFinite(n)) printed.add(n)
+  }
+
+  let cursor = 0
+  let filled = 0
+  for (const r of rows) {
+    const n = Number(r?.question_no)
+    if (r?.__printedNo && Number.isFinite(n)) {
+      r.question_no = n
+      if (n > cursor) cursor = n
+      continue
+    }
+    if (r?.__printedNo === false || !Number.isFinite(n)) {
+      cursor += 1
+      let guard = 0
+      while (printed.has(cursor) && guard++ < 500) cursor += 1
+      r.question_no = cursor
+      filled += 1
+    }
+  }
+  return { filled, printedMax: printed.size ? Math.max(...printed) : 0, printedCount: printed.size }
+}
+
+/** 文本相似度（字符二元组 Jaccard），用于判断「两行是不是同一道题被重复识别」。 */
+export function textSimilarity(a, b) {
+  const norm = (s) => String(s || '').replace(/[\s\$\\{}^_]/g, '').replace(/[（]/g, '(').replace(/[）]/g, ')')
+  const A = norm(a)
+  const B = norm(b)
+  if (!A || !B) return A === B ? 1 : 0
+  if (A === B) return 1
+  const grams = (s) => {
+    const set = new Set()
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2))
+    return set
+  }
+  const ga = grams(A)
+  const gb = grams(B)
+  let inter = 0
+  for (const g of ga) if (gb.has(g)) inter += 1
+  const union = ga.size + gb.size - inter
+  return union > 0 ? inter / union : 0
+}
+
+/**
+ * 题号撞车处理（纯函数，可单测）。
+ *   ① 同一页重复：模型把同一题认了两遍 → 丢后一条，计入 duplicated；
+ *   ② 不同页 + 正文高度相似（≥ 0.6）：同一题被邻页重读/答题卡复述 → 丢后一条；
+ *   ③ 不同页 + 正文明显不同：**两道真题目撞了号**（补号出错或卷面重号），
+ *      改号到全卷最大号之后保留，计入 renumbered —— 宁可多一行让老师删，绝不静默少一行。
+ * ⛔ 旧实现是无条件「保留首次」：嘉定一模第 2 页整页被编成 1—7，与第 1 页 1—5 撞号，
+ *   5 道真题就这样消失了，而 warning 只说「重复题号（多为答题卡页）」，没人会去查。
+ */
+export function dedupePaperRows(rows, { similarity = 0.6 } = {}) {
+  const seen = new Map() // key → 首次出现的行
+  const kept = []
+  let duplicated = 0
+  let renumbered = 0
+  const dropped = []
+  const renumberedRows = []
+
+  let maxNo = 0
+  for (const r of rows) {
+    const n = Number(r?.question_no)
+    if (Number.isFinite(n) && n > maxNo) maxNo = n
+  }
+  let spill = maxNo
+
+  for (const r of rows) {
+    const key = `${String(r.question_no ?? '')}|${String(r.sub_no || '')}`
+    const prev = seen.get(key)
+    if (!prev) {
+      seen.set(key, r)
+      kept.push(r)
+      continue
+    }
+    const samePage = Number(prev.page_no) === Number(r.page_no)
+    const sim = textSimilarity(prev.content, r.content)
+    if (samePage || sim >= similarity) {
+      duplicated += 1
+      dropped.push({ page: r.page_no, no: r.question_no, sub: r.sub_no || '', keepPage: prev.page_no, sim: Number(sim.toFixed(2)) })
+      continue
+    }
+    // 撞号且内容不同 ⇒ 真题目，改号保留
+    let fresh = ++spill
+    let guard = 0
+    while (seen.has(`${fresh}|${String(r.sub_no || '')}`) && guard++ < 500) fresh = ++spill
+    const oldNo = r.question_no
+    r.question_no = fresh
+    seen.set(`${fresh}|${String(r.sub_no || '')}`, r)
+    kept.push(r)
+    renumbered += 1
+    renumberedRows.push({ page: r.page_no, from: oldNo, to: fresh, sub: r.sub_no || '', otherPage: prev.page_no })
+  }
+  return { rows: kept, duplicated, renumbered, dropped, renumberedRows }
+}
+
+/**
  * 用一批新行**整体替换**某份卷子的题目清册。
  * 为什么是「先删后插」而不是 upsert：重新解析时题号可能变（切段算法/OCR 结果变了），
  * upsert 会留下一批孤儿行；整卷替换是唯一能让「库里 = 本次解析结果」的写法。
  * ⛔ 全程在事务里，失败不留半份数据。
+ * 去重口径见 dedupePaperRows()。
  */
 export async function replacePaperQuestions(resourceId, rows) {
-  // ⚠️ 唯一约束 resource_questions_resource_id_unit_id_question_no_sub_no_key：
-  // AI 对扫描卷（尤其末尾带答题卡的）可能在两页认出同一 (question_no, sub_no)，
-  // 直接逐行 INSERT 会撞唯一约束把整份卷子炸成 0 题（2026-11-01 杨浦一模实测）。
-  // 落库前按题号+小问去重保序：保留**首次**识别的那行（正文在前、答题卡在后，
-  // 首次通常是更好的识别结果），重复行计数返回、由调用方写 parseWarning 留痕，不静默吞。
-  const seen = new Set()
-  const deduped = []
-  let duplicated = 0
-  for (const r of rows) {
-    const key = `${String(r.question_no ?? '')}|${String(r.sub_no || '')}`
-    if (seen.has(key)) { duplicated += 1; continue }
-    seen.add(key)
-    deduped.push(r)
-  }
+  const { rows: deduped, duplicated, renumbered, dropped, renumberedRows } = dedupePaperRows(rows)
+
   if (duplicated > 0) {
-    console.warn(`[paperBank] 卷 ${resourceId} 识别出 ${duplicated} 行重复题号，已保留首次识别`)
+    console.warn(`[paperBank] 卷 ${resourceId}：${duplicated} 行同题重复（同页重读或邻页复述），已保留首次识别`)
+  }
+  if (renumbered > 0) {
+    console.warn(`[paperBank] 卷 ${resourceId}：${renumbered} 行题号撞车但内容不同，已改号保留（未丢数据）`)
   }
 
   await transaction(async (client) => {
@@ -201,7 +330,7 @@ export async function replacePaperQuestions(resourceId, rows) {
       )
     }
   })
-  return { duplicated }
+  return { duplicated, renumbered, dropped, renumberedRows }
 }
 
 // ── 单页 → 题目行 ──
@@ -390,28 +519,21 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     logger.warn?.(`[paperBank] 第 ${pageNumber} 页整页图上传失败: ${e.message}`)
   }
 
-  // 题号补齐：先收模型给的印刷题号，未给题号的从「本卷最大题号之后顺延」编号。
-  // 为什么要顺延而不是用页内序号：唯一键是 (resource_id, unit_id, question_no, sub_no)，
-  // 顺延能保证兜底号**永远大于所有印刷题号**，绝不会和某道真题的题号撞上
-  //（撞了会让整批 INSERT 失败，整页题目一起丢）。
-  let maxPrinted = 0
-  for (const q of rawList) {
-    const n = Number(q?.question_number)
-    if (Number.isFinite(n) && n > maxPrinted) maxPrinted = n
-  }
-  let spill = maxPrinted
-  const used = new Set()
+  // 题号：**这里只记录卷面印刷的题号**，缺号（null）留给 parsePaperResource 在全卷范围内补。
+  // ⛔ 2026-11-06 漏题事故（嘉定一模丢 6—10 题、徐汇丢 19/24 题）根因就在这里：
+  //   旧代码在本函数内「以本页最大题号为起点顺延」补号；只要某页模型没给出可解析的题号
+  //   （"第6题"/"6."/"（6）" 都会被 Number() 判成 NaN），整页就被编成 1—7，
+  //   与第 1 页的 1—5 撞车，落库时按「题号+小问」跨整卷去重 ⇒ 真题目被当成重复静默丢弃，
+  //   只在 metadata 留一句「识别出 N 行重复题号（多为答题卡页重复识别）」，谁也不会去查。
+  //   补号必须**全卷唯一**：见 assignGlobalQuestionNumbers()。
   const rows = rawList.map((q, i) => {
     const subNo = q?.sub_no == null ? '' : String(q.sub_no)
-    let qno = Number(q?.question_number)
-    if (!Number.isFinite(qno)) qno = ++spill
-    let guard = 0
-    while (used.has(`${qno}|${subNo}`) && guard++ < 200) qno = ++spill
-    used.add(`${qno}|${subNo}`)
+    const qno = normalizeQuestionNo(q?.question_number)
     const printedAnswer = q?.answer == null ? '' : String(q.answer).trim()
     return {
       __key: `${pageNumber}:${i}`,
       question_no: qno,
+      __printedNo: qno != null,
       sub_no: subNo,
       parent_stem: q?.parent_stem ? String(q.parent_stem) : null,
       content: String(q?.content || '').trim(),
@@ -536,6 +658,156 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
  * @param {Buffer[]} [o.images]     直接给多张图片（拍照场景）
  * @param {object}   [o.logger]
  */
+// ── 卷面题号清点闸（2026-11-06 漏题事故）─────────────────────────────────────
+// 事故：嘉定一模 p2 卷面 7 题只入库 2 题、徐汇 p4/p7 各漏 1 题，**页面毫无异常**，
+//   直到老师自己发现。任何「逐字校对」都查不出漏题 —— 校对的对象是已入库的行，
+//   没入库的题根本不在比对范围里。所以要有一道独立于 OCR 的清点：
+//   直接问「这一页印了哪几个大题号」，与库里该页的题号做差集。
+// 判读：卷面有、库里没有 = 漏题（必须报）；库里有、卷面没有 = 题号错/多录（必须报）；
+//   整页无大题号 = 续页（杨浦 p6 是 25 题正文的延续），跳过不误报。
+// ⛔ 调用失败不许当「没问题」：计入 unverified 并在界面显示「未核对」，绝不静默放过。
+const COVERAGE_PAGE_PROMPT = [
+  '你是试卷版面清点员。只看这张试卷扫描图，清点**本页印刷的大题号**。',
+  '规则：',
+  '1. 只输出卷面上真实印着的题号数字（形如 6. 7. 8.），按从上到下顺序。',
+  '2. ⛔ 不要按顺序推断或补号，不要把小问号（(1)(2)(3)）当成大题号，不要读选项标号 A/B/C/D。',
+  '3. 本页若是上一页某题的延续、整页没有任何大题号，question_numbers 返回空数组。',
+  '4. 看不清的题号不要猜，宁可不报。',
+  '只输出 JSON：{"question_numbers":[6,7,8]}',
+].join('\n')
+
+/**
+ * 逐页清点卷面题号，与库里该页的题号做差集。返回可直接落 metadata 的结果对象。
+ * @returns {{pages:Array, summary:Object}}
+ */
+export async function auditPaperCoverage({ pageBuffers, dbRows, logger = console }) {
+  const byPage = new Map()
+  for (const r of dbRows || []) {
+    const p = Number(r.page_no)
+    if (!Number.isFinite(p)) continue
+    if (!byPage.has(p)) byPage.set(p, new Set())
+    const n = Number(r.question_no)
+    if (Number.isFinite(n)) byPage.get(p).add(n)
+  }
+
+  let unverified = 0
+  const results = await mapWithConcurrency(pageBuffers, 2, async (buf, idx) => {
+    const pageNo = idx + 1
+    const dbNums = [...(byPage.get(pageNo) || new Set())].sort((a, b) => a - b)
+    try {
+      // 清点用高清页：题号是大字，但仍然走 4x（复用已渲染的，不额外渲染）
+      const { content } = await callVisionCompletion({
+        imageDataURL: 'data:image/jpeg;base64,' + buf.toString('base64'),
+        systemPrompt: COVERAGE_PAGE_PROMPT,
+        userText: '请清点本页印刷的全部大题号。',
+        temperature: 0,
+        maxTokens: 512,
+        vendorChain: GENERAL_OCR_VENDOR_CHAIN,
+      })
+      const obj = parseJsonLoose(content)
+      const raw = Array.isArray(obj) ? obj : (obj?.question_numbers ?? obj?.numbers ?? null)
+      if (!Array.isArray(raw)) throw new Error('清点结果不可解析：' + String(content).slice(0, 120))
+      const printed = [...new Set(raw.map(normalizeQuestionNo).filter(n => n != null))].sort((a, b) => a - b)
+      if (!printed.length) {
+        // 续页：整页没有大题号，不比对（库里该页有题是正常现象）
+        return { page: pageNo, printed, db: dbNums, missing: [], extra: [], continuation: true }
+      }
+      const printedSet = new Set(printed)
+      const dbSet = new Set(dbNums)
+      return {
+        page: pageNo,
+        printed,
+        db: dbNums,
+        missing: printed.filter(n => !dbSet.has(n)),
+        extra: dbNums.filter(n => !printedSet.has(n)),
+        continuation: false,
+      }
+    } catch (e) {
+      unverified += 1
+      logger.warn?.(`[paperBank] 第 ${pageNo} 页题号清点失败（按未核对记）: ${String(e?.message || e).slice(0, 160)}`)
+      return { page: pageNo, printed: null, db: dbNums, missing: null, extra: null, unverified: true }
+    }
+  })
+
+  const pages = results.filter(Boolean)
+
+  // 「漏题」与「错页」必须分开（2026-11-06 实测数据暴露）：
+  //   徐汇卷面第 4 页印了 19、20 两个题号，20 的正文续到第 5 页，OCR 把这一行记成 page_no=5
+  //   ⇒ 第 4 页「少了 20」、第 5 页「多了 20」。这不是漏题，是**题号记错页**。
+  //   若混在一起报，老师会以为丢题（吓人），真正丢的题反而被噪音淹没。
+  // 判定：某页缺的题号，若在相邻页（±1）多出来，判为错页，从两边都摘掉。
+  const shifted = []
+  const missingByPage = new Map()
+  const extraByPage = new Map()
+  const dbByPage = new Map()
+  const continuationPages = new Set()
+  for (const p of pages) {
+    if (!p || p.unverified) continue
+    dbByPage.set(p.page, new Set(p.db || []))
+    if (p.continuation) { continuationPages.add(p.page); continue }
+    missingByPage.set(p.page, new Set(p.missing || []))
+    extraByPage.set(p.page, new Set(p.extra || []))
+  }
+  for (const [page, missSet] of missingByPage) {
+    for (const no of [...missSet]) {
+      for (const nb of [page + 1, page - 1]) {
+        // 相邻页「多出该题号」= 串到下一页；相邻页是**续页**（本页无题号、正文承接）
+        // 且库里该题号挂在那页 = 题干跨页、题号行在前一页，也算错页而非漏题（杨浦 q25 实证）。
+        const isCont = continuationPages.has(nb)
+        const ex = extraByPage.get(nb)
+        const hasIt = (ex && ex.has(no)) || (isCont && dbByPage.get(nb)?.has(no))
+        if (!hasIt) continue
+        if (ex) ex.delete(no)
+        missSet.delete(no)
+        shifted.push({ no, printedPage: page, dbPage: nb })
+        break
+      }
+    }
+  }
+  for (const p of pages) {
+    if (!p || p.unverified || p.continuation) continue
+    p.missing = [...(missingByPage.get(p.page) || [])].sort((a, b) => a - b)
+    p.extra = [...(extraByPage.get(p.page) || [])].sort((a, b) => a - b)
+  }
+
+  const missing = pages.flatMap(p => (p.missing || []).map(no => ({ page: p.page, no })))
+  const extra = pages.flatMap(p => (p.extra || []).map(no => ({ page: p.page, no })))
+  return {
+    pages,
+    summary: {
+      pagesChecked: pages.filter(p => !p.unverified && !p.continuation).length,
+      pagesContinuation: pages.filter(p => p.continuation).length,
+      pagesUnverified: unverified,
+      missingCount: missing.length,
+      extraCount: extra.length,
+      shiftedCount: shifted.length,
+      missing: missing.slice(0, 40),
+      extra: extra.slice(0, 40),
+      shifted: shifted.slice(0, 40),
+    },
+  }
+}
+
+/**
+ * 重新解析前清掉上一轮的审计结论（2026-11-06）。
+ * parseWarnings / coverageAudit / ocrReview 说的都是「本轮解析」的结果，不清会一直挂着
+ * 早已修好的旧告警（同 15 号经验：计数类字段比它读的列表更容易失效）。
+ * 用 jsonb 的 `-` 只摘这几个顶层键，不动 pageTitles / sourceFiles。
+ */
+async function resetParseAudit(resourceId) {
+  try {
+    await query(
+      `UPDATE resources
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+                 - 'parseWarnings' - 'coverageAudit' - 'ocrReview' - 'ocrReviewSummary'
+        WHERE id = $1`,
+      [resourceId]
+    )
+  } catch (e) {
+    console.warn('[paperBank] 清理上轮审计结果失败（不影响解析）:', e.message)
+  }
+}
+
 export async function parsePaperResource({ resourceId, fileBuffer, mimeType, images, logger = console }) {
   let pages = []
   let hiPages = null // 4x 高清页：只喂裁片/整页图，不喂 OCR（2026-11-03「要高清」）
@@ -567,6 +839,7 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   }
   if (!pages.length) throw new Error('没有可解析的页面')
 
+  await resetParseAudit(resourceId)
   await setPaperParseStatus(resourceId, { status: 'parsing', totalPages: pages.length, donePages: 0 })
 
   let done = 0
@@ -605,17 +878,73 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     ocrCorrected += Number(r.ocrCorrected || 0)
     if (r.ocrSkipped) ocrSkippedPages += 1
   }
+  // ── 全卷题号唯一化（2026-11-06 漏题事故）──
+  // 必须在 deriveAutoTags / 落库之前：缺号行要拿到全卷唯一的题号，
+  // 否则跨页撞号会在 replacePaperQuestions 里被当成「重复题」处理。
+  const numbering = assignGlobalQuestionNumbers(rows)
+  if (numbering.filled > 0) {
+    await appendParseWarning(
+      resourceId,
+      `${numbering.filled} 行模型未给出卷面题号，已按页序补号（补在相邻印刷题号之间，全卷唯一），请核对题号`
+    )
+  }
   rows = deriveAutoTags(rows)
 
   if (!rows.length) {
     throw new Error('整份卷子没有识别出任何题目（可能是扫描质量过低，或页面不是题目页）')
   }
 
-  const { duplicated } = await replacePaperQuestions(resourceId, rows)
+  const { duplicated, renumbered, dropped, renumberedRows } = await replacePaperQuestions(resourceId, rows)
   if (duplicated > 0) {
-    await appendParseWarning(resourceId, `识别出 ${duplicated} 行重复题号（多为答题卡页重复识别），已保留首次识别`)
+    // 明细必须写出来：旧版只说「N 行重复题号（多为答题卡页重复识别）」，
+    // 恰恰是这句含糊的话把「真题目被吞掉」掩盖了 6 天。
+    const detail = dropped.slice(0, 8)
+      .map(d => `第${d.page}页题${d.no}${d.sub ? `(${d.sub})` : ''}≈第${d.keepPage}页同名题`)
+      .join('、')
+    await appendParseWarning(resourceId, `识别出 ${duplicated} 行重复题（同页重读或邻页复述，正文相似），已保留首次识别：${detail}`)
+  }
+  if (renumbered > 0) {
+    const detail = renumberedRows.slice(0, 8).map(d => `第${d.page}页题${d.from}→${d.to}`).join('、')
+    await appendParseWarning(resourceId, `${renumbered} 行题号与别页撞车但正文不同，已改号保留（未丢题）：${detail}，请核对该题题号`)
   }
   await setPaperParseStatus(resourceId, { status: 'done', donePages: pages.length })
+
+  // ── 落库后自动清点（2026-11-06）──
+  // 独立于 OCR 再问一次「每页印了哪几个题号」，与库里差集比对：漏题/串号必须在页面可见。
+  // 这是唯一能发现「整道题没入库」的环节 —— 逐字校对只覆盖已入库的行。
+  // 失败不阻塞：写入 coverageAudit.summary.pagesUnverified，界面显示「未核对」。
+  try {
+    const dbRows = (await query(
+      `SELECT page_no, question_no FROM resource_questions WHERE resource_id = $1`,
+      [resourceId]
+    )).rows
+    const audit = await auditPaperCoverage({
+      pageBuffers: pages.map((p, i) => hiPages?.[i] || p),
+      dbRows,
+      logger,
+    })
+    await query(
+      `UPDATE resources
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+               || jsonb_build_object('coverageAudit', $2::jsonb)
+        WHERE id = $1`,
+      [resourceId, JSON.stringify({ at: new Date().toISOString(), ...audit })]
+    ).catch(e => logger.warn?.(`[paperBank] 清点结果回填失败: ${e.message}`))
+
+    if (audit.summary.missingCount > 0) {
+      const detail = audit.summary.missing.slice(0, 10).map(m => `第${m.page}页题${m.no}`).join('、')
+      await appendParseWarning(resourceId, `卷面有 ${audit.summary.missingCount} 个题号没入库：${detail}，请重传该页或手工补录`)
+    }
+    if (audit.summary.extraCount > 0) {
+      const detail = audit.summary.extra.slice(0, 10).map(m => `第${m.page}页题${m.no}`).join('、')
+      await appendParseWarning(resourceId, `${audit.summary.extraCount} 个题号在卷面找不到对应：${detail}，请核对题号是否错位`)
+    }
+    // ⛔ shifted（题干跨页承接）**不写 parseWarnings**：它不是错误 —— 卷面第 4 页印「20.」、
+    //   正文续到第 5 页，库里按正文所在页记 page_no 是合理的。写进去只会训练老师忽略告警。
+    //   它只用于把「这一页少了个题号」从漏题里摘出来，避免误报（徐汇 20、杨浦 25 实测）。
+  } catch (e) {
+    logger.warn?.(`[paperBank] 落库后清点整体失败（不影响解析）: ${String(e?.message || e).slice(0, 200)}`)
+  }
 
   // 卷面标题回填到 metadata，方便列表识别是哪一套卷
   if (pageTitles.length) {

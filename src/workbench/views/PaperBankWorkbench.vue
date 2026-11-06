@@ -103,6 +103,28 @@
                   class="pb-review-warn"
                   :title="`有 ${p.ocr_review_summary.skippedPages} 页双模型复核没跑成，请重新上传或对照原卷核对`"
                 >⚠ {{ p.ocr_review_summary.skippedPages }} 页未复核</span>
+                <!-- 逐页题号清点：卷面印了、库里没有 = 漏题（比错字严重，必须显眼） -->
+                <button
+                  v-if="coverageIssueCount(p) > 0"
+                  type="button"
+                  class="pb-review-badge is-danger"
+                  :title="coverageTitle(p)"
+                  @click.stop="openCoverage(p)"
+                >⛔ {{ coverageIssueCount(p) }} 个题号不符</button>
+                <span
+                  v-else-if="p.coverage_summary?.pagesUnverified"
+                  class="pb-review-warn"
+                  :title="`有 ${p.coverage_summary.pagesUnverified} 页题号清点没跑成，无法确认这些页有没有漏题`"
+                >⚠ {{ p.coverage_summary.pagesUnverified }} 页未清点</span>
+                <!-- 干净的卷给一个「已核」正向确认：负责人要的是「能确认没漏题」，
+                     而不只是「没报错」。跨页承接不算问题，只在 title 里说明。 -->
+                <button
+                  v-else-if="p.coverage_summary"
+                  type="button"
+                  class="pb-checked"
+                  :title="coverageOkTitle(p)"
+                  @click.stop="openCoverage(p)"
+                >✓ 题号已核</button>
               </div>
               <div class="pb-paper__ops">
                 <button type="button" title="上传题目/照片" @click.stop="openUploadDialog(p.id, 'questions')">题目</button>
@@ -413,6 +435,51 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 题号清点：卷面有 / 库里没有 = 漏题；库里多出 = 串号。明细按页列，可直达原卷 -->
+    <el-dialog v-model="showCoverageDialog" :title="coverageDialog.title" width="680px">
+      <p class="pb-hint">
+        「漏题」= 卷面印了这个题号、库里没有对应题目（出卷时会整题缺失）；
+        「多出」= 库里该页有这个题号、卷面这页找不到（通常是题号串位）。
+        系统只报告差异、不自动补录——补录需要重新识别该页。
+      </p>
+      <p v-if="(coverageDialog.shifted || []).length" class="pb-hint">
+        <strong>题干跨页（不算漏题）</strong>：这几个题号印刷在上一页、正文承接到下一页，
+        库里按正文所在页记录，所以上一页看起来「少一个」。
+        {{ coverageDialog.shifted.map(s => `题${s.no} 印刷第${s.printedPage}页 / 正文第${s.dbPage}页`).join('；') }}
+      </p>
+      <div class="pb-review-list">
+        <div v-for="(row, i) in coverageDialog.rows" :key="i" class="pb-review-item">
+          <div class="pb-review-item__head">
+            <strong>第 {{ row.page }} 页</strong>
+            <span v-if="row.unverified" class="pb-review-item__reason">这一页清点没跑成，未核对</span>
+            <span v-else-if="row.continuation" class="pb-review-item__reason">续页（本页无大题号），跳过</span>
+            <a
+              v-else-if="questionSourceUrl({ resource_id: coverageDialog.paper?.id, page_no: row.page })"
+              :href="questionSourceUrl({ resource_id: coverageDialog.paper?.id, page_no: row.page })"
+              target="_blank"
+              rel="noopener"
+            >打开原卷 ↗</a>
+          </div>
+          <div v-if="!row.unverified && !row.continuation">
+            卷面：<code>{{ (row.printed || []).join('、') || '（无）' }}</code>
+            ｜ 库里：<code>{{ (row.db || []).join('、') || '（无）' }}</code>
+            <div v-if="(row.missing || []).length" class="pb-review-item__reason">
+              ⛔ 漏题：{{ row.missing.join('、') }}（卷面有、库里没有）
+            </div>
+            <div v-if="(row.extra || []).length" class="pb-review-item__reason">
+              ⚠ 多出：{{ row.extra.join('、') }}（库里这页有、卷面没有）
+            </div>
+            <div v-if="shiftedForPage(row.page).length" class="pb-review-item__reason">
+              {{ shiftedForPage(row.page).map(s => `题${s.no} 的正文承接到第${s.dbPage}页`).join('；') }}（不算漏题）
+            </div>
+            <div v-if="incomingForPage(row.page).length" class="pb-review-item__reason">
+              {{ incomingForPage(row.page).map(s => `题${s.no} 的题号印在第${s.printedPage}页`).join('；') }}（正文在本页，不算多出）
+            </div>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -483,6 +550,8 @@ const showFilesDialog = ref(false)
 const filesDialog = ref({ title: '', files: [] })
 const showReviewDialog = ref(false)
 const reviewDialog = ref({ title: '', paper: null, items: [] })
+const showCoverageDialog = ref(false)
+const coverageDialog = ref({ title: '', paper: null, rows: [], shifted: [] })
 
 // 右侧卷面（常驻，和题目列表同一页）
 const previewKind = ref('student')
@@ -637,6 +706,41 @@ const questionSourceUrl = (q) => {
 
 const loadPapers = async () => {
   papers.value = await getPaperBankPapers()
+}
+
+// ── 逐页题号清点（2026-11-06）：漏题/串号必须在卷列表上一眼可见 ──
+// ⛔ 徽标只读 coverage_summary（后端算好的计数），明细走 coverage_audit.pages；
+//    字段名与 routes/paperBank.js 的 withSourceFiles 逐字对齐。
+const coverageIssueCount = (p) => (p.coverage_summary?.missingCount || 0) + (p.coverage_summary?.extraCount || 0)
+const coverageTitle = (p) => {
+  const s = p.coverage_summary || {}
+  const bug = []
+  if (s.missingCount) bug.push(`卷面印了 ${s.missingCount} 个题号但库里没有（漏题）`)
+  if (s.extraCount) bug.push(`库里多出 ${s.extraCount} 个卷面找不到的题号（串号）`)
+  return `逐页题号清点：${bug.join('；')}。点开看明细`
+}
+// 干净卷的正向说明：说清「核了几页」，并解释跨页承接不算问题
+const coverageOkTitle = (p) => {
+  const s = p.coverage_summary || {}
+  const bits = [`已逐页清点 ${s.pagesChecked || 0} 页卷面题号，与库里全部对得上`]
+  if (s.pagesContinuation) bits.push(`${s.pagesContinuation} 页是续页（本页无题号）`)
+  if (s.shiftedCount) bits.push(`${s.shiftedCount} 题题干跨到下一页承接，不算漏题`)
+  if (s.at || p.coverage_audit?.at) bits.push('点开看明细')
+  return bits.join('；')
+}
+// 某页上「卷面印了题号、正文承接到下一页」的题（不算漏题）
+const shiftedForPage = (page) => (coverageDialog.value.shifted || []).filter(s => Number(s.printedPage) === Number(page))
+// 反向：题号印在上一页、正文在本页的题（所以本页「库里多一个」也不算出错）
+const incomingForPage = (page) => (coverageDialog.value.shifted || []).filter(s => Number(s.dbPage) === Number(page))
+
+const openCoverage = (p) => {
+  coverageDialog.value = {
+    paper: p,
+    title: `${p.name} · 题号清点`,
+    rows: p.coverage_audit?.pages || [],
+    shifted: p.coverage_summary?.shifted || [],
+  }
+  showCoverageDialog.value = true
 }
 
 const buildQuery = () => ({
@@ -1310,7 +1414,18 @@ onUnmounted(() => {
   border-radius: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer;
 }
 .pb-review-badge:hover { background: #ffefcc; }
+/* 漏题/串号比「读法不一致」严重：误读是错一个字符，漏题是整道题消失，必须用代价色 */
+.pb-review-badge.is-danger {
+  border-color: #e0a9a9; background: #fdeeee; color: #a32d2d;
+}
+.pb-review-badge.is-danger:hover { background: #f9dcdc; }
 .pb-review-warn { font-size: 10px; color: #a3731a; }
+/* 「✓ 题号已核」：正向确认，必须很轻，不能跟复核徽标抢注意力 */
+.pb-checked {
+  border: 0; background: transparent; padding: 0; font-size: 10px;
+  color: #8a9a86; cursor: pointer;
+}
+.pb-checked:hover { color: #557052; text-decoration: underline; }
 .pb-review-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow: auto; }
 .pb-review-item { border: 1px solid #eee9df; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.7; }
 .pb-review-item__head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
