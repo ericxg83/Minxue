@@ -578,7 +578,14 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
         const cropped = await cropQuestionImage(hiPage, box)
         if (cropped) {
           try {
-            rows[i].image_url = await uploadImage(cropped, `paper-p${pageNumber}-q${rows[i].question_no}.jpg`, 'paper-bank')
+            // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
+            //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
+            //      同页多道缺号题的裁片会互相覆盖，最后所有行都指向同一张图；
+            //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
+            //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
+            //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
+            rows[i].image_url = await uploadImage(
+              cropped, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}.jpg`, 'paper-bank')
           } catch (e) {
             logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题裁片上传失败: ${e.message}`)
           }

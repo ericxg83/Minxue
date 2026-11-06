@@ -218,3 +218,12 @@ test('重新解析必须清掉上一轮审计结论（否则旧告警永远挂�
   assert.ok(/'parseWarnings'/.test(s) && /'coverageAudit'/.test(s), '要清 parseWarnings 与 coverageAudit')
   assert.ok(/await resetParseAudit\(resourceId\)/.test(s), '解析开始时要调用')
 })
+
+test('裁片文件名必须逐行唯一（缺号行 / 同题多小问不许互相覆盖）', () => {
+  const s = read(SERVICE)
+  // 题号可能为 null（等全卷补号）⇒ 只用题号命名会得到多张 `-qnull.jpg`，同页互相覆盖
+  assert.ok(s.includes("`paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}.jpg`"),
+    '裁片文件名必须带行下标 r{i}，否则缺号行/多小问会覆盖成同一张图')
+  assert.ok(!s.includes('`paper-p${pageNumber}-q${rows[i].question_no}.jpg`'),
+    '⛔ 旧的「只用题号」命名必须移除')
+})
