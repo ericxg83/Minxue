@@ -26,7 +26,10 @@ import sharp from 'sharp'
 import { query, transaction } from '../config/neon.js'
 import { uploadImage } from './ossService.js'
 import { renderPdfToJpegs } from './pdfService.js'
-import { buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN } from '../config/ai.js'
+import {
+  buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN,
+  PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
+} from '../config/ai.js'
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
 import { planSubrowFigureAssignments, extractFigureBandFromCrop } from './paperFigureAssign.js'
 import { stripPageRulingLines } from './pageRulingClean.js'
@@ -203,6 +206,117 @@ export async function replacePaperQuestions(resourceId, rows) {
 
 // ── 单页 → 题目行 ──
 
+// ── 一模卷零错字闸：双模型交叉校验（2026-11-06）────────────────────────────
+// 事故：嘉定 23(2)「AC·DF」→「AC²-DE²」、24(2)②「△PDE」→「△PBE」，
+//   且三套一模卷全量复核又查出 80+ 处字母/数字误读。单模型转录不可信。
+// 流程：主模型转录 → 第二模型逐字挑错 → 最强模型**不看候选**独立抄回卷面字符，
+//   两个抄本一致才自动改；不一致 / 看不清只标记「待人工核对」，绝不猜。
+// ⛔ 任何一步失败都只降级（题目照存 + 标记未复核），绝不阻塞解析。
+const OCR_PROOFREAD_SYSTEM = [
+  '你是中考数学一模卷的 OCR 逐字校对员。给你一页试卷扫描图和这一页题目的 OCR 转录 JSON。',
+  '逐字对照卷面，找出**会改变题意或答案**的字符错误：字母（B/D/P、O/0）、三角形顶点顺序、',
+  '上下标与平方、数字、正负号、乘号与减号、三角函数名、向量符号、选项内容。',
+  '⛔ 忽略纯排版差异：空格、标点全半角、LaTeX 包装、公式写法、题号前缀、换行。',
+  '⛔ 不要用数学常识猜「应该是什么」，只读印刷字符；看不清就不要报。',
+  '只输出 JSON：{"differences":[{"idx":0,"field":"content","ocr_text":"△PBE","printed_text":"△PDE","reason":"..."}]}',
+  'idx 是转录数组下标，field 只能是 content / parent_stem / options。没有差异返回空数组。',
+].join('\n')
+
+const OCR_TRANSCRIBE_SYSTEM = [
+  '你是中考数学一模卷的逐字抄录员。给你一页试卷扫描图和若干「待抄录位置」。',
+  '每条给出题号、字段和库里 OCR 文本片段；请在卷面上找到该题，把**对应位置印的字符**原样抄回。',
+  '⛔ 不要参考任何候选答案，不要用数学关系推测，只看印刷字符。',
+  '看不清或卷面上找不到对应题目就写 uncertain:true，printed_text 留空。',
+  '只输出 JSON：{"transcripts":[{"j":0,"printed_text":"△PDE","uncertain":false}]}，j 必须覆盖全部条目。',
+].join('\n')
+
+/**
+ * 对一页主 OCR 结果做双模型交叉校验。
+ * @returns {{rows:object[], review:object[], checked:number, corrected:number, skipped:boolean}}
+ */
+export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger = console }) {
+  const empty = { rows, review: [], checked: 0, corrected: 0, skipped: false }
+  if (!rows.length) return empty
+  try {
+    const snapshot = rows.map((r, i) => ({
+      idx: i, question_no: r.question_no, sub_no: r.sub_no,
+      content: r.content, parent_stem: r.parent_stem ?? null, options: r.options || [],
+    }))
+    // ① 不同供应商的第二模型逐字挑错
+    const proof = await callVisionCompletion({
+      imageDataURL,
+      systemPrompt: OCR_PROOFREAD_SYSTEM,
+      userText: '这一页题目的 OCR 转录如下，请逐字对照卷面：\n' + JSON.stringify({ questions: snapshot }),
+      temperature: 0.05, maxTokens: 4096,
+      vendorChain: PAPER_BANK_OCR_VERIFY_CHAIN,
+      // ⛔ 闸是「字母级零错字」任务，配额打爆时绝不许静默降级到备份弱模型：
+      //    弱模型做逐字挑错会自己编差异，比不校对更坏。宁可本页标记「未复核」。
+      noBackup: true,
+    })
+    const diffs = (parseJsonLoose(proof.content)?.differences || [])
+      .filter(d => Number.isInteger(Number(d.idx)) && rows[Number(d.idx)] && d.printed_text && d.ocr_text && d.ocr_text !== d.printed_text)
+      .map(d => ({
+        idx: Number(d.idx),
+        field: ['content', 'parent_stem', 'options'].includes(d.field) ? d.field : 'content',
+        ocr_text: String(d.ocr_text), printed_text: String(d.printed_text), reason: String(d.reason || ''),
+      }))
+    if (!diffs.length) return { ...empty, checked: rows.length }
+
+    // ② 最强模型独立抄录（⛔ 不给候选 printed_text，避免被带偏）
+    const ask = diffs.map((d, j) => ({
+      j, question_no: rows[d.idx].question_no, sub_no: rows[d.idx].sub_no,
+      field: d.field, ocr_text: d.ocr_text,
+    }))
+    const arb = await callVisionCompletion({
+      imageDataURL,
+      systemPrompt: OCR_TRANSCRIBE_SYSTEM,
+      userText: '待抄录位置：\n' + JSON.stringify(ask),
+      temperature: 0.05, maxTokens: 4096,
+      vendorChain: PAPER_BANK_OCR_ARBITER_CHAIN,
+      noBackup: true, // 同上：终裁必须是最强视觉本尊，降级等于让弱模型替卷面作证
+    })
+    const transcripts = new Map(
+      (parseJsonLoose(arb.content)?.transcripts || []).map(t => [Number(t.j), t])
+    )
+    const norm = (s) => String(s ?? '').replace(/\s+/g, '')
+    const review = []
+    let corrected = 0
+    for (let j = 0; j < diffs.length; j++) {
+      const d = diffs[j]
+      const t = transcripts.get(j)
+      const agree = t && !t.uncertain && norm(t.printed_text) === norm(d.printed_text)
+      const row = rows[d.idx]
+      const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
+      const hit = Array.isArray(cur)
+        ? cur.some(x => String(x).includes(d.ocr_text))
+        : String(cur).includes(d.ocr_text)
+      if (!hit) continue // 锚点不在库里文本中 ⇒ 宁可不改，也不整段覆盖
+      if (agree) {
+        if (Array.isArray(cur)) {
+          let done = false
+          row.options = cur.map(x => {
+            if (!done && x.includes(d.ocr_text)) { done = true; return x.replace(d.ocr_text, d.printed_text) }
+            return x
+          })
+        } else {
+          row[d.field] = String(cur).replace(d.ocr_text, d.printed_text)
+        }
+        corrected += 1
+      } else {
+        review.push({
+          page_no: pageNumber, question_no: row.question_no, sub_no: row.sub_no,
+          field: d.field, ocr_text: d.ocr_text, suggested_text: d.printed_text,
+          arbiter_text: t?.printed_text ?? null, reason: d.reason,
+        })
+      }
+    }
+    return { rows, review, checked: rows.length, corrected, skipped: false }
+  } catch (e) {
+    logger.warn?.(`[paperBank] 第 ${pageNumber} 页双模型复核失败（题目照存、标记未复核）: ${e.message}`)
+    return { rows, review: [], checked: 0, corrected: 0, skipped: true, error: String(e?.message || e).slice(0, 200) }
+  }
+}
+
 /** 按归一化区间（0-1000）从整页图裁出该题区域。裁不动就返回 null（不编造图）。 */
 export async function cropQuestionImage(pageBuffer, box) {
   if (!box) return null
@@ -316,6 +430,10 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     }
   }).filter(r => r.content || r.options.length > 0)
 
+  // ⭐ 一模卷零错字闸（2026-11-06）：主 OCR 之后，两个不同供应商的强模型再独立看同一页。
+  // 两处抄本一致 ⇒ 自动修正；不一致 / 看不清 ⇒ 只标记待人工核对；调用失败 ⇒ 题目照存、标记未复核。
+  const cross = await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger })
+
   // 按题切段 → 裁片。切段失败不阻塞落库。
   try {
     const measured = await measurePageQuestionBoxes({
@@ -393,7 +511,15 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     logger.warn?.(`[paperBank] 第 ${pageNumber} 页切段异常（题目照存、无裁片）: ${e.message}`)
   }
 
-  return { rows, pageTitle: obj?.page_title || null, sectionTitle: obj?.section_title || null }
+  return {
+    rows,
+    pageTitle: obj?.page_title || null,
+    sectionTitle: obj?.section_title || null,
+    ocrReview: cross.review,
+    ocrChecked: cross.checked,
+    ocrCorrected: cross.corrected,
+    ocrSkipped: cross.skipped,
+  }
 }
 
 // ── 主流程 ──
@@ -466,10 +592,18 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   // 汇总 + 自动打标
   let rows = []
   const pageTitles = []
+  const ocrReview = []
+  let ocrChecked = 0
+  let ocrCorrected = 0
+  let ocrSkippedPages = 0
   for (const r of pageResults) {
     if (!r || r.__error || r.failed) continue
     rows = rows.concat(r.rows || [])
     if (r.pageTitle) pageTitles.push(r.pageTitle)
+    if (Array.isArray(r.ocrReview)) ocrReview.push(...r.ocrReview)
+    ocrChecked += Number(r.ocrChecked || 0)
+    ocrCorrected += Number(r.ocrCorrected || 0)
+    if (r.ocrSkipped) ocrSkippedPages += 1
   }
   rows = deriveAutoTags(rows)
 
@@ -492,6 +626,24 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
       [resourceId, pageTitles.slice(0, 5)]
     ).catch(() => {})
   }
+
+  // 双模型复核结果落 metadata：一致处已自动改，剩下的是「待老师对照原卷核对」的清单。
+  // 空数组也要写（表示已复核且无遗留）；复核失败的页单独记进 summary，界面会给提示。
+  await query(
+    `UPDATE resources
+        SET metadata = COALESCE(metadata, '{}'::jsonb)
+             || jsonb_build_object('ocrReview', $2::jsonb, 'ocrReviewSummary', $3::jsonb)
+      WHERE id = $1`,
+    [
+      resourceId,
+      JSON.stringify(ocrReview.slice(0, 200)),
+      JSON.stringify({
+        checked: ocrChecked, corrected: ocrCorrected,
+        skippedPages: ocrSkippedPages, reviewCount: ocrReview.length,
+        at: new Date().toISOString(),
+      }),
+    ]
+  ).catch(e => logger.warn?.(`[paperBank] 复核结果回填失败: ${e.message}`))
 
   return { pages: pages.length, questions: rows.length }
 }

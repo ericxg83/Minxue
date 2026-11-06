@@ -770,6 +770,24 @@ export const GENERAL_OCR_VENDOR_CHAIN = [
   { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },
 ]
 
+// ── 一模卷「零错字」双模型闸（2026-11-06 负责人拍板：一模卷不允许错，一次都不可以）──
+// 事故：嘉定 23(2) 把 AC·DF 读成 AC²-DE²；24(2)② 把 △PDE 读成 △PBE；
+//   全库双模型复核又在三套一模卷里查出 80+ 处字母/数字误读（单模型转录的固有缺陷）。
+// 三条独立通道，绝不静默相信任何一次转录：
+//   ① 主转录：GENERAL_OCR_VENDOR_CHAIN（不变，保证原有分段/题号口径）
+//   ② 逐字校对：Bailian qwen3.8-flash（不同供应商，看图挑出会改变题意的字符差异）
+//   ③ 独立抄录：HuihuiyunGemini gemini-3.8-flash（付费最强视觉，**不看候选答案**，
+//      只读卷面把该处字符抄一遍；与 ② 给出的印刷文本一致才允许自动修正）
+// ② 与 ③ 不一致 / 看不清 ⇒ 只标记「待人工核对」，⛔ 绝不猜、绝不静默采用其一。
+// 依据：2026-11-06 对三套一模卷 19 页的实测，两个模型同时报同一处 printed_text 的
+//   抽样 15 处逐张对照 4x 原卷全部属实；单模型报的则混有幻觉（故必须二次独立抄录）。
+export const PAPER_BANK_OCR_VERIFY_CHAIN = [
+  { vendor: 'Bailian', model: 'qwen3.8-flash', extraBody: { enable_thinking: false } },
+]
+export const PAPER_BANK_OCR_ARBITER_CHAIN = [
+  { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },
+]
+
 let _resolvedVendorsCache = null
 
 function getResolvedVendors() {

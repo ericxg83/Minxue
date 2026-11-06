@@ -106,6 +106,9 @@ const withSourceFiles = (r) => {
     ...r,
     question_files: normalizeSourceFiles(src.questions, r.pdf_url),
     answer_files: normalizeSourceFiles(src.answers, null),
+    // 双模型复核后「两处抄本不一致」的待人工核对清单（2026-11-06）
+    ocr_review: Array.isArray(meta.ocrReview) ? meta.ocrReview : [],
+    ocr_review_summary: meta.ocrReviewSummary && typeof meta.ocrReviewSummary === 'object' ? meta.ocrReviewSummary : null,
   }
 }
 

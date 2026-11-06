@@ -90,6 +90,19 @@
                   title="选择要打开的答案原件"
                   @click.stop="openSourceFiles(p, 'answers')"
                 >答案册 {{ p.answer_files.length }} 份 ↗</button>
+                <!-- 双模型复核：两处抄本不一致的地方，系统不猜，交给老师对照原卷核 -->
+                <button
+                  v-if="(p.ocr_review || []).length"
+                  type="button"
+                  class="pb-review-badge"
+                  :title="`双模型复核：${p.ocr_review.length} 处读法不一致，待对照原卷核对`"
+                  @click.stop="openOcrReview(p)"
+                >⚠ {{ p.ocr_review.length }} 处待核对</button>
+                <span
+                  v-else-if="p.ocr_review_summary?.skippedPages"
+                  class="pb-review-warn"
+                  :title="`有 ${p.ocr_review_summary.skippedPages} 页双模型复核没跑成，请重新上传或对照原卷核对`"
+                >⚠ {{ p.ocr_review_summary.skippedPages }} 页未复核</span>
               </div>
               <div class="pb-paper__ops">
                 <button type="button" title="上传题目/照片" @click.stop="openUploadDialog(p.id, 'questions')">题目</button>
@@ -376,6 +389,30 @@
         </a>
       </div>
     </el-dialog>
+
+    <!-- 双模型读法不一致：不自动改，列出来让老师点原卷核对后就地修正 -->
+    <el-dialog v-model="showReviewDialog" :title="reviewDialog.title" width="640px">
+      <p class="pb-hint">
+        两个模型对同一处卷面字符抄得不一样，系统没有替你猜。请点「打开原卷」对照卷面，
+        再在该题「改难度 / 标签」里用文本框就地改正。
+      </p>
+      <div class="pb-review-list">
+        <div v-for="(it, i) in reviewDialog.items" :key="i" class="pb-review-item">
+          <div class="pb-review-item__head">
+            <strong>第 {{ it.page_no }} 页 · 第 {{ it.question_no }} 题{{ it.sub_no ? '(' + it.sub_no + ')' : '' }} · {{ it.field }}</strong>
+            <a
+              v-if="questionSourceUrl({ resource_id: reviewDialog.paper?.id, page_no: it.page_no })"
+              :href="questionSourceUrl({ resource_id: reviewDialog.paper?.id, page_no: it.page_no })"
+              target="_blank"
+              rel="noopener"
+            >打开原卷 ↗</a>
+          </div>
+          <div>库里：<code>{{ it.ocr_text }}</code></div>
+          <div>候选：<code>{{ it.suggested_text }}</code><span v-if="it.arbiter_text"> ｜ 最强模型抄作 <code>{{ it.arbiter_text }}</code></span></div>
+          <div v-if="it.reason" class="pb-review-item__reason">{{ it.reason }}</div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -444,6 +481,8 @@ const editingId = ref('')
 const textDraft = ref({ parent_stem: '', content: '' })
 const showFilesDialog = ref(false)
 const filesDialog = ref({ title: '', files: [] })
+const showReviewDialog = ref(false)
+const reviewDialog = ref({ title: '', paper: null, items: [] })
 
 // 右侧卷面（常驻，和题目列表同一页）
 const previewKind = ref('student')
@@ -573,6 +612,15 @@ const openSourceFiles = (p, kind) => {
     files,
   }
   showFilesDialog.value = true
+}
+
+const openOcrReview = (p) => {
+  reviewDialog.value = {
+    title: `${p.name} · OCR 待核对（${p.ocr_review.length} 处）`,
+    paper: p,
+    items: p.ocr_review || [],
+  }
+  showReviewDialog.value = true
 }
 
 /** 题目行「看原卷」：单份 PDF 加 #page= 跳到本题所在页；多张照片按页码取对应那张。 */
@@ -1257,6 +1305,18 @@ onUnmounted(() => {
   color: #185fa5; cursor: pointer; text-decoration: none;
 }
 .pb-file-link:hover { text-decoration: underline; }
+.pb-review-badge {
+  border: 1px solid #e6c07b; background: #fff8e8; color: #8a5a12;
+  border-radius: 4px; padding: 1px 5px; font-size: 10px; cursor: pointer;
+}
+.pb-review-badge:hover { background: #ffefcc; }
+.pb-review-warn { font-size: 10px; color: #a3731a; }
+.pb-review-list { display: flex; flex-direction: column; gap: 8px; max-height: 52vh; overflow: auto; }
+.pb-review-item { border: 1px solid #eee9df; border-radius: 6px; padding: 8px 10px; font-size: 12px; line-height: 1.7; }
+.pb-review-item__head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 3px; }
+.pb-review-item__head a { color: #185fa5; text-decoration: none; flex-shrink: 0; }
+.pb-review-item code { background: #f6f5f1; border-radius: 3px; padding: 0 4px; }
+.pb-review-item__reason { color: #999; font-size: 11px; }
 .pb-file-list { display: flex; flex-direction: column; gap: 2px; max-height: 46vh; overflow: auto; }
 .pb-file-item {
   display: flex; justify-content: space-between; gap: 10px; align-items: center;
