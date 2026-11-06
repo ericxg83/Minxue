@@ -63,8 +63,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
   const retryBoundExamIdRef = useRef(null)
   const homeworkChoiceRef = useRef([])
   homeworkChoiceRef.current = homeworkChoiceFiles
-  // 多学生标注的单人分支：暂存区指定了唯一学生时经此 ref 传给练习册选择后的上传（消费后置 null）
-  const homeworkStudentIdRef = useRef(null)
 
   // HEIC 预览：Android WebView file.type 经常是空 → 退化靠扩展名判断。
   // 浏览器原 <img> 解不开 HEIC 会显示 broken image（onError 兜底），但不至于白屏。
@@ -77,8 +75,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       file: f,
       url: URL.createObjectURL(f),
       isHeic: isHeic(f),
-      name: f.name,
-      studentId: null
+      name: f.name
     }))
 
   const handleStagingSelectFiles = (e) => {
@@ -135,13 +132,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     })
   }
 
-  // B1 多学生标注（2026-10-29）：把暂存区图片（单张 idx 或多选 idx 数组）归给指定学生。
-  // studentId=null 表示清除标注。标注随 stagingFiles 走，提交时按它分组拆任务。
-  const assignStagingStudent = (indices, studentId) => {
-    const set = new Set(Array.isArray(indices) ? indices : [indices])
-    setStagingFiles((prev) => prev.map((p, i) => (set.has(i) ? { ...p, studentId } : p)))
-  }
-
   // 2026-09-15 暂存区裁剪：把用户框选后的 dataURL 换成新 File，原位替换该张预览。
   // 裁剪发生在 compressImagesForUpload 之前，后续压缩/上传/批改管道零改动。
   // 文件名必须唯一化：本地去重按 file.name 匹配，沿用原图名会把裁剪后的重传判成重复跳过。
@@ -151,7 +141,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       if (!old) return prev
       const file = dataURLtoFile(dataUrl, `crop_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`)
       const next = [...prev]
-      next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name, studentId: old.studentId ?? null }
+      next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name }
       if (old.url) URL.revokeObjectURL(old.url)
       return next
     })
@@ -169,7 +159,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       const file = dataURLtoFile(dataUrl, `rotate_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`)
       setStagingFiles((prev) => {
         const next = [...prev]
-        next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name, studentId: prev[idx]?.studentId ?? null }
+        next[idx] = { file, url: URL.createObjectURL(file), isHeic: false, name: file.name }
         if (prev[idx]?.url) URL.revokeObjectURL(prev[idx].url)
         return next
       })
@@ -221,32 +211,8 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       }
 
       if (stagingTypeRef.current === 'homework') {
-        const items = stagingRef.current
-        const assigned = items.filter(p => p.studentId)
-        const assignedIds = [...new Set(assigned.map(p => p.studentId))]
-        // 兜底：UI 已禁用「部分指定」的提交，这里再拦一次，防止半标注数据漏进单一归属
-        if (assigned.length > 0 && assigned.length < items.length) {
-          Toast.show({ message: `还有 ${items.length - assigned.length} 张未指定学生，请先标注完成`, type: 'error' })
-          return
-        }
         setShowStaging(false)
-        if (assignedIds.length >= 2) {
-          // 多人上传（2026-10-29 负责人裁决）：跳过练习册选择器，默认全部 AI 批改，
-          // 按学生逐组走完整上传管线——QR 检测/本地去重/失败兜底全部继承，仅学生归属每组显式指定。
-          clearPendingUploadFlow()
-          setHomeworkChoiceFiles([])
-          homeworkStudentIdRef.current = null
-          for (const sid of assignedIds) {
-            const groupFiles = items.filter(p => p.studentId === sid).map(p => p.file)
-            const dt = new DataTransfer()
-            groupFiles.forEach(f => dt.items.add(f))
-            await handleFileSelect({ target: { files: dt.files } }, { studentId: sid })
-          }
-          return
-        }
-        // 单人（全未指定 → currentStudent；指定唯一学生 → 该学生）：保留练习册选择器流程
-        setHomeworkChoiceFiles(items.map(p => p.file))
-        homeworkStudentIdRef.current = assignedIds[0] || null
+        setHomeworkChoiceFiles(files.map(p => p.file))
         setShowWorksheetPicker(true)
         return
       }
@@ -286,10 +252,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
-    // 暂存区单人标注指定的学生随行传入；未标注时传空对象沿用 currentStudent
-    const explicitStudentId = homeworkStudentIdRef.current
-    homeworkStudentIdRef.current = null
-    await handleFileSelect({ target: { files: dt.files } }, explicitStudentId ? { studentId: explicitStudentId } : {})
+    await handleFileSelect({ target: { files: dt.files } })
   }
 
   // 日常作业：未知来源→AI批改
@@ -304,9 +267,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     const dt = new DataTransfer()
     homeworkChoiceFiles.forEach(f => dt.items.add(f))
     setHomeworkChoiceFiles([])
-    const explicitStudentId = homeworkStudentIdRef.current
-    homeworkStudentIdRef.current = null
-    await handleFileSelect({ target: { files: dt.files } }, explicitStudentId ? { studentId: explicitStudentId } : {})
+    await handleFileSelect({ target: { files: dt.files } })
   }
 
   // 处理上传队列
@@ -350,8 +311,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
   }
 
   // Upload file handler with QR detection
-  // opts.studentId：显式指定归属学生（多学生拆组 / 暂存区单人标注）。未传时沿用 currentStudent（原行为）。
-  const handleFileSelect = async (e, opts = {}) => {
+  const handleFileSelect = async (e) => {
     // 2026-09-02：ref-based 并发锁，挡住"连点上传"导致的重复任务 + 重复错题。
     // setUploading 是 React state，连点时第二次读到的还是 false → 拦不住。
     if (uploadLockRef.current) {
@@ -368,8 +328,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       }
       if (e.target && 'value' in e.target) e.target.value = ''
 
-      const explicitStudentId = opts.studentId || null
-
       const duplicateFiles = []
       const newFiles = []
       const safeTasks = tasks || []
@@ -377,7 +335,7 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       for (const file of files) {
         // 任务名已改为练习册名/科目+时间，不再含文件名，去重按任务内的图片文件名匹配
         const localDuplicate = safeTasks.find(t =>
-          t.student_id === (explicitStudentId || currentStudent?.id) &&
+          t.student_id === currentStudent?.id &&
           (t.original_name === file.name ||
             (Array.isArray(t.images) && t.images.some(img => img.file_name === file.name)) ||
             (Array.isArray(t.pages) && t.pages.some(p => p.file_name === file.name)))
@@ -398,18 +356,18 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
       if (isInitializing) {
         Toast.show({ message: `正在初始化，已缓存 ${newFiles.length} 个文件，稍后自动上传...`, type: 'success', duration: 2000 })
         // 队列项绑定选文件那一刻的学生 id：初始化完成后按快照归属，不用"当时的" currentStudent
-        setUploadQueue(prev => [...prev, ...newFiles.map(f => ({ file: f, studentId: explicitStudentId || currentStudent?.id || null }))])
+        setUploadQueue(prev => [...prev, ...newFiles.map(f => ({ file: f, studentId: currentStudent?.id || null }))])
         return
       }
 
-      if (!(explicitStudentId || currentStudent?.id)) {
+      if (!currentStudent || !currentStudent?.id) {
         Toast.show({ message: '请先选择学生后再上传试卷', type: 'error', duration: 3000 })
         return
       }
 
       // 2026-09-10 修复：归属学生在「提交时」锁定为快照，后续压缩/网络等待期间
       // 即使 currentStudent 再变化（如后台刷新覆盖），这次上传仍归到提交时的学生。
-      const studentSnapshotId = explicitStudentId || currentStudent.id
+      const studentSnapshotId = currentStudent.id
 
       setUploading(true)
 
@@ -453,7 +411,8 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
   }
 
   // 错题重练卷（整批多页合并为一个重练批改任务，examId = 裸 generated_exam UUID）
-  // studentIdOverride：多学生拆组时每组显式传入；未传沿用 currentStudent（组卷历史入口的原行为）
+  // studentIdOverride：QR 命中分支传入「提交时锁定的学生快照」，避免拍照期间顶部学生
+  // 被切走后本地临时任务挂到错误学生名下；组卷历史入口（retry_bound）不传，沿用当前学生。
   const uploadRetryPaperGroup = async (files, examId, studentIdOverride = null) => {
     const retryToast = Toast.show({ message: `检测到错题重练卷，正在上传 ${files.length} 页...`, type: 'loading', duration: 0 })
 
@@ -772,7 +731,6 @@ const [stagingType, setStagingType] = useState(null) // 'homework'；重练卷�
     cameraInputRef, albumInputRef,
     openStaging, openStagingForRetry, clearStaging,
     handleStagingSelectFiles, removeStagingFile, applyStagingCrop, applyStagingRotate,
-    assignStagingStudent,
     onStagingCamera, onStagingAlbum, cameraBusy,
     handleSubmitStaging,
     homeworkChoiceFiles, homeworkChoiceRef,
