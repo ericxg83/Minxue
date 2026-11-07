@@ -25,9 +25,8 @@ import {
   listPaperQuestions,
   searchPaperQuestions,
   updatePaperQuestion,
-  // 截图入题库（2026-11-06）：同一批零件的第二条落库路径，见下方 /clips
+  // 截图加题（2026-11-06 加，11-07 改为「写进指定题集」）：同一批零件的第二条落库路径，见下方 /clips
   parseClipImages,
-  getOrCreateClipLibrary,
   deletePaperQuestion,
   CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
@@ -120,8 +119,8 @@ const withSourceFiles = (r) => {
     coverage_summary: meta.coverageAudit?.summary && typeof meta.coverageAudit.summary === 'object'
       ? meta.coverageAudit.summary
       : null,
-    // 卷的来源形态：'screenshot' = 老师随手截图收进来的「截图题库」卷（2026-11-06）。
-    // 前端据此加「截图」标识并置顶；⛔ 不新加列，只读 metadata，老卷一律为 null。
+    // 历史字段（2026-11-06 旧模型）：曾用来标记「截图题库」卷，让前端置顶并打「截图」标签。
+    // ⛔ 2026-11-07 起截图不再自成一类题集，前端已不消费此字段；保留只为兼容存量行。
     origin: meta.origin === 'screenshot' ? 'screenshot' : null,
   }
 }
@@ -303,6 +302,9 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
       return res.status(409).json({ error: '正在解析中', message: '这份卷子还在解析，请稍候' })
     }
 
+    // 2026-11-07 负责人定调：上传 PDF 默认**追加**到所选题集，绝不删掉老师已收的题。
+    // 只有上传弹窗里显式勾「重新解析」才走整卷重建。参数名与前端 FormData 逐字对齐：replace='1'。
+    const replaceExisting = String(req.body?.replace ?? '') === '1'
     const files = req.files || []
     if (!files.length) return res.status(400).json({ error: '请上传 PDF 或试卷照片' })
 
@@ -337,7 +339,7 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
       ? { fileBuffer: pdf.buffer, mimeType: 'application/pdf' }
       : { images: images.map(f => f.buffer) }
 
-    parsePaperResource({ resourceId, ...payload })
+    parsePaperResource({ resourceId, append: !replaceExisting, ...payload })
       .then(r => console.log(`[paperBank] 解析完成 ${resourceId}: ${r.pages} 页 / ${r.questions} 题`))
       .catch(async (e) => {
         console.error('[paperBank] 解析失败:', e)
@@ -355,11 +357,12 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
   }
 })
 
-// ── 截图入题库（2026-11-06）──
+// ── 截图加题（2026-11-06 加，2026-11-07 改模型）──
 //
-// 场景：老师看视频/网课看到一道好题，截图就想收进题库 —— 不该先建卷、再选卷、再上传。
-// 形态：所有截图统一进同一个「截图题库」卷（metadata.origin='screenshot'），题号自动接续，
-//       不覆盖已有的题。老师后期量大了再按这个卷筛出来整理分类。
+// 场景：老师看视频/网课看到一道好题，截图加进**自己选中的题集**。
+// ⛔ 已废弃：所有截图统一进固定「截图题库」卷（metadata.origin='screenshot'）——
+//    那等于把「录入渠道」当成「题目类别」，与 PDF 卷并列。负责人 2026-11-07 否决。
+// 现行：paperId 必填且必须是现存 exam 题集；PDF 与截图都是往题集里加题的动作。
 // 识别链路与「上传并解析」完全同一套零件（parsePageToQuestions），只有落库方式不同。
 //
 // ⛔ 进程内串行 + 409：识别在后台跑，这期间再提交会被挡住。
@@ -397,7 +400,19 @@ router.post('/clips', clipUpload, async (req, res) => {
       return res.status(400).json({ error: '图片太大', message: '单张截图请控制在 20MB 以内' })
     }
 
-    const library = await getOrCreateClipLibrary()
+    // ⛔ 目标题集必须显式指定且真实存在：截图没有专属容器，静默建卷就是旧模型复活。
+    const targetId = String(req.body?.paperId || '').trim()
+    if (!targetId) {
+      return res.status(400).json({ error: '没有指定题集', message: '先选一个题集，再把截图加进去' })
+    }
+    const { rows: target } = await query(
+      `SELECT id FROM resources WHERE id = $1 AND resource_type = 'exam'`,
+      [targetId]
+    )
+    if (!target.length) {
+      return res.status(404).json({ error: '题集不存在', message: '这个题集可能已被删除，刷新页面重新选一个' })
+    }
+
     // ⛔ 只认进程内的 clipJob，不认库里的 parsing 状态：
     //    服务重启后 DB 里可能残留 parsing（后台任务随进程一起没了），
     //    拿它当锁会让截图入口永久 409，而且老师完全看不出该怎么解。
@@ -411,37 +426,44 @@ router.post('/clips', clipUpload, async (req, res) => {
     // 解析前的题数快照：前端用它算「这一批入了多少题」
     const { rows: cnt } = await query(
       `SELECT COUNT(*)::int AS n FROM resource_questions WHERE resource_id = $1`,
-      [library.id]
+      [targetId]
     )
 
     res.json({
       success: true,
       parsing: true,
-      paperId: library.id,
+      paperId: targetId,
       beforeCount: cnt[0]?.n || 0,
       accepted: files.length,
       message: `${files.length} 张截图已收下，正在识别`,
     })
 
-    // 来源（2026-11-07）：前端把「每张截图一个来源」的数组 JSON 塞进一个表单字段，
-    // 与 files 按下标对齐。填错/解析失败不影响收题，只是不带来源。
-    const rawSources = Array.isArray(req.body?.sources) ? req.body.sources[0] : req.body?.sources
-    let clipSources = []
-    try {
-      const v = rawSources ? JSON.parse(rawSources) : []
-      if (Array.isArray(v)) clipSources = v
-    } catch { /* 忽略，收题优先 */ }
+    // 来源（2026-11-07）：前端把「每张截图一个值」的数组 JSON 塞进一个表单字段，
+    // 与 files 按下标对齐。sources = 链接/文字，notes = 视频时间点或备注。
+    // 填错/解析失败不影响收题，只是不带来源。
+    const asArray = (raw) => {
+      const v = Array.isArray(raw) ? raw[0] : raw
+      if (!v) return []
+      try { const a = JSON.parse(v); return Array.isArray(a) ? a : [] } catch { return [] }
+    }
+    const clipSources = asArray(req.body?.sources)
+    const clipNotes = asArray(req.body?.notes)
 
-    clipJob = parseClipImages({ images: files.map(f => f.buffer), sources: clipSources })
+    clipJob = parseClipImages({
+      images: files.map(f => f.buffer),
+      sources: clipSources,
+      notes: clipNotes,
+      resourceId: targetId,
+    })
       .then(r => console.log(`[paperBank] 截图入库完成 ${r.resourceId}: +${r.inserted} 题（含 ${r.emptyPages} 张仅存图）`))
       .catch(async (e) => {
         console.error('[paperBank] 截图入库失败:', e)
-        await setPaperParseStatus(library.id, { status: 'failed' }).catch(() => {})
+        await setPaperParseStatus(targetId, { status: 'failed' }).catch(() => {})
         await query(
           `UPDATE resources SET metadata = COALESCE(metadata, '{}'::jsonb)
              || jsonb_build_object('parseError', to_jsonb($2::text))
            WHERE id = $1`,
-          [library.id, String(e?.message || e).slice(0, 300)]
+          [targetId, String(e?.message || e).slice(0, 300)]
         ).catch(() => {})
       })
       .finally(() => { clipJob = null })
@@ -541,43 +563,46 @@ router.put('/questions/:id', async (req, res) => {
 })
 
 /**
- * 改截图来源（2026-11-07 负责人需求：截图后补一下图片来源，URL 或手写文字都行）。
+ * 改题目来源（2026-11-07 加；同日随「题集」模型放宽到所有题集）。
  *
- * 来源属于「这张截图」，不是某个题目行 —— 一张图拆成多道题时它们共享同一出处。
- * 因此按 page_no（本卷第几张截图）存在卷的 metadata.clipSources，改一处整页生效。
- * ⛔ 只对截图题库开放：普通卷的 page_no 是 PDF 页码，语义不同，别把两者混起来。
+ * 来源属于「这一页素材」，不是某个题目行 —— 一张图拆成多道题时它们共享同一出处。
+ * 因此按 page_no 存在题集的 metadata.clipSources，改一处整页生效。
+ * ⛔ 旧实现只允许 metadata.origin='screenshot' 的卷改来源。2026-11-07 起截图可进任意题集，
+ *    该卷级分类已废弃；且 PDF 追加与截图追加都做 page_no 全局接续（两条链的 basePage），
+ *    同一题集内页号不重复 ⇒ 来源索引不会串页。
  */
 router.put('/questions/:id/source', async (req, res) => {
   try {
     const source = String(req.body?.source ?? '').trim().slice(0, 500)
+    // 时间点/备注（2026-11-07 二轮）：「视频的第几分钟」单独一项。
+    // 旧调用只带 source 时保持原备注不清空，避免把已经记好的时间点抹掉。
+    const hasNote = Object.prototype.hasOwnProperty.call(req.body || {}, 'note')
     const { rows } = await query(
-      `SELECT rq.resource_id, rq.page_no, r.metadata->>'origin' AS origin
+      `SELECT rq.resource_id, rq.page_no,
+              r.metadata->'clipNotes'->>(rq.page_no::text) AS old_note
          FROM resource_questions rq
          JOIN resources r ON r.id = rq.resource_id
         WHERE rq.id = $1`,
       [req.params.id]
     )
     if (!rows.length) return res.status(404).json({ error: '题目不存在' })
-    if (rows[0].origin !== 'screenshot') {
-      return res.status(400).json({
-        error: '只有截图题库的题能改来源',
-        message: '整份上传的卷子请点「看原卷」查出处',
-      })
-    }
-    if (rows[0].page_no == null) return res.status(400).json({ error: '这道题没有截图页码' })
+    if (rows[0].page_no == null) return res.status(400).json({ error: '这道题没有素材页码' })
+    const note = hasNote
+      ? String(req.body.note ?? '').trim().slice(0, 500)
+      : String(rows[0].old_note || '')
     await query(
       `UPDATE resources
           SET metadata = jsonb_set(
-                COALESCE(metadata, '{}'::jsonb)
-                  || jsonb_build_object('clipSources',
-                       COALESCE(metadata->'clipSources', '{}'::jsonb)),
-                ARRAY['clipSources', $2::text],
-                to_jsonb($3::text),
-                true)
+                jsonb_set(
+                  COALESCE(metadata, '{}'::jsonb)
+                    || jsonb_build_object('clipSources', COALESCE(metadata->'clipSources', '{}'::jsonb),
+                                         'clipNotes',   COALESCE(metadata->'clipNotes', '{}'::jsonb)),
+                  ARRAY['clipSources', $2::text], to_jsonb($3::text), true),
+                ARRAY['clipNotes', $2::text], to_jsonb($4::text), true)
         WHERE id = $1`,
-      [rows[0].resource_id, String(rows[0].page_no), source]
+      [rows[0].resource_id, String(rows[0].page_no), source, note]
     )
-    res.json({ success: true, source })
+    res.json({ success: true, source, note })
   } catch (e) {
     res.status(500).json({ error: '来源保存失败', message: e.message })
   }

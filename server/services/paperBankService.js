@@ -864,7 +864,7 @@ async function resetParseAudit(resourceId) {
   }
 }
 
-export async function parsePaperResource({ resourceId, fileBuffer, mimeType, images, logger = console }) {
+export async function parsePaperResource({ resourceId, fileBuffer, mimeType, images, append = false, logger = console }) {
   let pages = []
   let hiPages = null // 4x 高清页：只喂裁片/整页图，不喂 OCR（2026-11-03「要高清」）
   if (Array.isArray(images) && images.length) {
@@ -895,12 +895,26 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   }
   if (!pages.length) throw new Error('没有可解析的页面')
 
-  await resetParseAudit(resourceId)
+  // 追加模式（2026-11-07 负责人定调：上传 PDF 默认追加到所选题集）。
+  // ⛔ 页号必须一起接续：page_no 同时是「看原卷」定位页、metadata.clipSources 的来源索引，
+  //    第二批再从 1 数会串到第一批的页上。
+  let basePage = 0
+  if (append) {
+    const { rows: mx } = await query(
+      `SELECT COALESCE(MAX(page_no), 0)::int AS max_page
+         FROM resource_questions WHERE resource_id = $1`,
+      [resourceId]
+    )
+    basePage = mx[0]?.max_page || 0
+  }
+  // ⛔ 追加批次绝不清空既有审计：coverageAudit / ocrReview 是首次整卷导入的产物，
+  //    清掉会让「✓题号已核」和双模型待核对清单凭空消失。
+  if (!append) await resetParseAudit(resourceId)
   await setPaperParseStatus(resourceId, { status: 'parsing', totalPages: pages.length, donePages: 0 })
 
   let done = 0
   const pageResults = await mapWithConcurrency(pages, PAPER_OCR_CONCURRENCY, async (buf, idx) => {
-    const pageNumber = idx + 1
+    const pageNumber = basePage + idx + 1
     try {
       const r = await parsePageToQuestions({
         pageBuffer: buf,
@@ -950,7 +964,17 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     throw new Error('整份卷子没有识别出任何题目（可能是扫描质量过低，或页面不是题目页）')
   }
 
-  const { duplicated, renumbered, dropped, renumberedRows } = await replacePaperQuestions(resourceId, rows)
+  // 2026-11-07：默认追加（题号整体平移到现有最大号之后，绝不删既有题，包括老师截图收的题）；
+  // 只有老师在上传弹窗显式勾「重新解析」才走整卷重建。两条路径都保留，写库口径只有一个入口。
+  const writeResult = append
+    ? await appendPaperQuestions(resourceId, rows)
+    : await replacePaperQuestions(resourceId, rows)
+  const {
+    duplicated = 0,
+    renumbered = 0,
+    dropped = [],
+    renumberedRows = [],
+  } = writeResult
   if (duplicated > 0) {
     // 明细必须写出来：旧版只说「N 行重复题号（多为答题卡页重复识别）」，
     // 恰恰是这句含糊的话把「真题目被吞掉」掩盖了 6 天。
@@ -969,7 +993,9 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   // 独立于 OCR 再问一次「每页印了哪几个题号」，与库里差集比对：漏题/串号必须在页面可见。
   // 这是唯一能发现「整道题没入库」的环节 —— 逐字校对只覆盖已入库的行。
   // 失败不阻塞：写入 coverageAudit.summary.pagesUnverified，界面显示「未核对」。
-  try {
+  // ⛔ 追加批次跳过整卷清点：追加进来的题号是「接续号」而非卷面印刷题号，
+  //    逐页差集必然全报「卷面有、库里没有」的假漏题；沿用首次整卷导入的清点结果。
+  if (!append) try {
     const dbRows = (await query(
       `SELECT page_no, question_no FROM resource_questions WHERE resource_id = $1`,
       [resourceId]
@@ -1002,18 +1028,37 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     logger.warn?.(`[paperBank] 落库后清点整体失败（不影响解析）: ${String(e?.message || e).slice(0, 200)}`)
   }
 
-  // 卷面标题回填到 metadata，方便列表识别是哪一套卷
+  // 卷面标题回填到 metadata，方便列表识别是哪一套卷。追加批次并进已有标题，不覆盖前几批。
   if (pageTitles.length) {
+    let titles = pageTitles.slice(0, 5)
+    if (append) {
+      const { rows: cur } = await query(
+        `SELECT COALESCE(metadata->'pageTitles', '[]'::jsonb) AS v FROM resources WHERE id = $1`,
+        [resourceId]
+      )
+      const prev = Array.isArray(cur[0]?.v) ? cur[0].v : []
+      titles = [...prev, ...pageTitles].slice(-5)
+    }
     await query(
       `UPDATE resources
          SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('pageTitles', to_jsonb($2::text[]))
        WHERE id = $1`,
-      [resourceId, pageTitles.slice(0, 5)]
+      [resourceId, titles]
     ).catch(() => {})
   }
 
   // 双模型复核结果落 metadata：一致处已自动改，剩下的是「待老师对照原卷核对」的清单。
   // 空数组也要写（表示已复核且无遗留）；复核失败的页单独记进 summary，界面会给提示。
+  // ⛔ 追加批次必须把本批清单并进已有清单：直接覆盖会把前几批的待核对项冲掉。
+  let reviewList = ocrReview.slice(0, 200)
+  if (append) {
+    const { rows: cur } = await query(
+      `SELECT COALESCE(metadata->'ocrReview', '[]'::jsonb) AS v FROM resources WHERE id = $1`,
+      [resourceId]
+    )
+    const prev = Array.isArray(cur[0]?.v) ? cur[0].v : []
+    reviewList = [...prev, ...ocrReview].slice(-200)
+  }
   await query(
     `UPDATE resources
         SET metadata = COALESCE(metadata, '{}'::jsonb)
@@ -1021,7 +1066,7 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
       WHERE id = $1`,
     [
       resourceId,
-      JSON.stringify(ocrReview.slice(0, 200)),
+      JSON.stringify(reviewList),
       JSON.stringify({
         checked: ocrChecked, corrected: ocrCorrected,
         skippedPages: ocrSkippedPages, reviewCount: ocrReview.length,
@@ -1164,7 +1209,12 @@ const RQ_READ_COLS = `rq.id, rq.resource_id, rq.question_no, rq.sub_no, rq.paren
   -- 一张截图拆出的多道题共享同一个来源。用相关子查询取，两个读取入口自动都带，
   -- 且不改 FROM / JOIN 结构（listPaperQuestions 没有 JOIN resources）。
   (SELECT r.metadata->'clipSources'->>(rq.page_no::text)
-     FROM resources r WHERE r.id = rq.resource_id) AS clip_source`
+     FROM resources r WHERE r.id = rq.resource_id) AS clip_source,
+  -- 时间点/备注（2026-11-07 二轮）：单独一个 clipNotes map，与 clipSources 同按 page_no 索引。
+  -- ⛔ 刻意不把来源改成对象：库里已有纯字符串来源，两种形状混进同一池子必踩口径不一致。
+  --    两个 map 都是字符串，旧数据零迁移、读取侧天然是单一形状。
+  (SELECT r.metadata->'clipNotes'->>(rq.page_no::text)
+     FROM resources r WHERE r.id = rq.resource_id) AS clip_source_note`
 
 /** 单份卷子的题目（按页码、题号、小问号排序）。 */
 export async function listPaperQuestions(resourceId) {
@@ -1254,58 +1304,25 @@ export async function countPaperQuestions(resourceId) {
   return rows[0]?.n || 0
 }
 
-// ── 截图入题库（2026-11-06）────────────────────────────────────────────────
+// ── 截图加题（2026-11-06 加，2026-11-07 改模型）─────────────────────────────
 //
-// 场景：老师看视频/网课时看到一道好题，截图就想收进题库。
-// 现有入口要求「先新建卷 → 选卷 → 上传 → 整卷替换」，这个前缀成本远大于收益，
-// 于是单独开一条「不建卷、直接截图入库」的路。
-//
-// 形态：所有截图统一进**同一个**「截图题库」卷（resources.metadata.origin='screenshot'），
-// 题号在本卷内接着往后排。老师后期量大了再从这个卷里筛出来整理分类。
+// 场景：老师看视频/网课看到一道好题，截图就想收进自己预设的那个题集。
+// ⛔ 已废弃的旧模型：所有截图统一进一个固定的「截图题库」卷（metadata.origin='screenshot'），
+//    与 PDF 解析出来的真卷并列 ⇒ 把「录入渠道」错当成「题目类别」。负责人 2026-11-07 否决。
+// 现行模型：题集（resources 一行）= 唯一归属；PDF 与截图都是往**选中的题集**加题的动作。
 //
 // ⛔ 三个不能复用（踩一个就会丢题或污染数据）：
-//   ① 不能走 parsePaperResource：它落库走 replacePaperQuestions（先删后插），
-//      对同一卷第二次截图会把第一批题全部删掉。
+//   ① 不能走 parsePaperResource 的整卷重建分支：它先删后插，会把同题集里先收的题全删掉。
 //   ② 不能把 assignGlobalQuestionNumbers 的补号结果直接落库：那套补号按「本批页序」从 1 数，
 //      每批都从 1 开始，跨批次必然撞唯一键 (resource_id, unit_id, question_no, sub_no)。
 //   ③ 不能跑 auditPaperCoverage（逐页题号清点）：截图里通常没有印刷题号，
 //      清点会得出「卷面一个题号都没有 / 库里多出 N 个」的假告警，只会训练老师忽略告警。
-
-export const CLIP_LIBRARY_NAME = '截图题库'
 
 // 一次最多收几张截图（老师一次贴十几张已经是极限；再多请分两批）
 export const CLIP_MAX_IMAGES = Number(process.env.PAPER_CLIP_MAX_IMAGES || 12)
 
 // 截图是单题小图，并发 2 足够（与主链路同一口径：绝不瞬时打满供应商额度）
 const CLIP_CONCURRENCY = 2
-
-/**
- * 取（或首次创建）截图容器卷。
- * ⚠️ 用 module 级 promise 做并发合并：老师连点两次「开始识别」时不能创建出两个容器卷。
- *    正常路径每次都重新查库（幂等），promise 只用于折叠同一瞬时的并发调用。
- */
-let clipLibraryPromise = null
-export async function getOrCreateClipLibrary() {
-  if (clipLibraryPromise) return clipLibraryPromise
-  clipLibraryPromise = (async () => {
-    const found = await query(
-      `SELECT id, name, question_parse_status
-         FROM resources
-        WHERE resource_type = 'exam' AND metadata->>'origin' = 'screenshot'
-        ORDER BY created_at ASC
-        LIMIT 1`
-    )
-    if (found.rows.length) return found.rows[0]
-    const created = await query(
-      `INSERT INTO resources (resource_type, name, subject, grade, status, answer_status, metadata)
-       VALUES ('exam', $1, NULL, NULL, 'draft', 'none', jsonb_build_object('origin', 'screenshot'))
-       RETURNING id, name, question_parse_status`,
-      [CLIP_LIBRARY_NAME]
-    )
-    return created.rows[0]
-  })().finally(() => { clipLibraryPromise = null })
-  return clipLibraryPromise
-}
 
 /**
  * 往某个卷**追加**题目（不删已有行）。
@@ -1383,13 +1400,14 @@ export async function deletePaperQuestion(id) {
  * 兜底：OCR 一个字都没读出来的截图**也要存**——老师要的是「把这道题留下来」，
  * 文字识别是加分项。此时补一行只有图、题干待补的题，老师在界面上手填即可。
  */
-export async function parseClipImages({ images, sources = [], logger = console }) {
+export async function parseClipImages({ images, sources = [], notes = [], resourceId, logger = console }) {
   if (!Array.isArray(images) || !images.length) throw new Error('没有收到截图')
+  // ⛔ 2026-11-07：截图不再是独立的一类题库，必须落进老师选中的题集。
+  //    目标缺失一律抛错，绝不回退到「自动建一个截图题库卷」——那正是被否掉的旧模型。
+  if (!resourceId) throw new Error('没有指定目标题集，请先选择或新建一个题集')
   const batch = images.slice(0, CLIP_MAX_IMAGES)
   const sourceList = (Array.isArray(sources) ? sources : [sources]).slice(0, batch.length)
-
-  const library = await getOrCreateClipLibrary()
-  const resourceId = library.id
+  const noteList = (Array.isArray(notes) ? notes : [notes]).slice(0, batch.length)
 
   // 页号接续：截图按「第几张」记 page_no，老师点「看原卷」时能在多批截图之间定位到那一张
   const { rows: mx } = await query(
@@ -1507,6 +1525,23 @@ export async function parseClipImages({ images, sources = [], logger = console }
         WHERE id = $1`,
       [resourceId, JSON.stringify(clipSources)]
     ).catch(e => logger.warn?.(`[paperBank] 截图来源回填失败: ${e.message}`))
+
+  // 时间点 / 备注（2026-11-07 二轮）：「视频的第几分钟」单独存，与链接按同一页号配对。
+  // 例：链接 https://www.bilibili.com/video/BVxxx + 备注「12:35 讲到梅涅劳斯」。
+  const clipNotes = {}
+  noteList.forEach((n, i) => {
+    const v = String(n ?? '').trim().slice(0, 500)
+    if (v) clipNotes[String(basePage + i + 1)] = v
+  })
+  if (Object.keys(clipNotes).length) {
+    await query(
+      `UPDATE resources
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+               || jsonb_build_object('clipNotes',
+                    COALESCE(metadata->'clipNotes', '{}'::jsonb) || $2::jsonb)
+        WHERE id = $1`,
+      [resourceId, JSON.stringify(clipNotes)]
+    ).catch(e => logger.warn?.(`[paperBank] 截图来源时间点回填失败: ${e.message}`))
   }
 
   return { resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length }

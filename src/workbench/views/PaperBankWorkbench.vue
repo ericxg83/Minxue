@@ -4,19 +4,18 @@
       <PageHeader
         eyebrow="教学资源 / 题库"
         title="试卷题库"
-        description="左边挑题，右边卷子实时长出来；不想要的题直接在卷面上叉掉"
+        description="先建好题集，再用 PDF 或截图往里加题；左边挑题，右边卷面实时长出来"
       >
         <template #actions>
-          <!-- 截图入题库（2026-11-06 负责人需求）：看视频/网课看到好题，截图就收进来，
-               不必先建卷。图片进固定的「截图题库」卷，题号自动接续。 -->
-          <ActionButton variant="secondary" @click="openClipDialog">
-            <el-icon><Camera /></el-icon>截图入题库
-          </ActionButton>
+          <!-- 2026-11-07：题集是唯一归属，PDF 与截图只是两种「加题」动作，不再各自成一类题库。 -->
           <ActionButton variant="secondary" @click="openCreateDialog">
-            <el-icon><Plus /></el-icon>新建试卷
+            <el-icon><Plus /></el-icon>新建题集
+          </ActionButton>
+          <ActionButton variant="secondary" :disabled="!papers.length" @click="openClipDialog">
+            <el-icon><Camera /></el-icon>截图加题
           </ActionButton>
           <ActionButton variant="primary" :disabled="!papers.length" @click="openUploadDialog(null, 'questions')">
-            <el-icon><UploadFilled /></el-icon>上传并解析
+            <el-icon><UploadFilled /></el-icon>PDF 加题
           </ActionButton>
         </template>
       </PageHeader>
@@ -28,20 +27,20 @@
           ...(narrow ? { paddingBottom: paperCollapsed ? '62px' : 'calc(46vh + 18px)' } : {}),
         }"
       >
-        <!-- 左：卷列表 -->
+        <!-- 左：题集列表（一套卷 / 一个预设合集 = 一个题集，PDF 与截图都往里加题） -->
         <aside class="pb-col pb-col--papers">
           <div class="pb-panel">
             <div class="pb-panel__head">
-              <strong>卷子</strong>
+              <strong>题集</strong>
               <span class="pb-panel__head-right">
-                <span>{{ papers.length }} 套 · {{ totalQuestionCount }} 题</span>
-                <!-- 清空全部（2026-11-01 负责人需求：重新上传解析前一键清空，一套套删太费劲） -->
+                <span>{{ papers.length }} 个 · {{ totalQuestionCount }} 题</span>
+                <!-- 清空全部（2026-11-01 负责人需求：重新上传解析前一键清空，一个个删太费劲） -->
                 <button
                   v-if="papers.length"
                   type="button"
                   class="pb-clear"
                   :disabled="clearing"
-                  title="删除题库里全部试卷及其题目（不碰练习册）"
+                  title="删除题库里全部题集及其题目（不碰练习册）"
                   @click="askClearPapers"
                 >{{ clearing ? '清空中…' : '清空全部' }}</button>
               </span>
@@ -53,16 +52,13 @@
               :class="{ 'is-active': filterPaper === 'all' }"
               @click="pickPaper('all')"
             >
-              <span class="pb-paper__name">全部卷子</span>
+              <span class="pb-paper__name">全部题集</span>
               <span class="pb-paper__meta">{{ totalQuestionCount }} 题</span>
             </button>
 
-            <div v-for="p in sortedPapers" :key="p.id" class="pb-paper-wrap" :class="{ 'is-active': filterPaper === p.id }">
+            <div v-for="p in papers" :key="p.id" class="pb-paper-wrap" :class="{ 'is-active': filterPaper === p.id }">
               <button type="button" class="pb-paper" @click="pickPaper(p.id)">
-                <span class="pb-paper__name" :title="p.name">
-                  {{ p.name }}
-                  <span v-if="p.origin === 'screenshot'" class="pb-paper__origin">截图</span>
-                </span>
+                <span class="pb-paper__name" :title="p.name">{{ p.name }}</span>
                 <span class="pb-paper__meta">{{ p.question_count || 0 }} 题</span>
                 <span v-if="isParsing(p)" class="pb-paper__parsing">解析中 {{ p.question_parse_done_pages || 0 }}/{{ p.question_parse_total_pages || '?' }}</span>
               </button>
@@ -142,14 +138,14 @@
             </div>
 
             <div v-if="!papers.length" class="pb-panel__empty">
-              还没有卷子。先「新建试卷」，再把卷子拍照或上传 PDF。
+              还没有题集。先「新建题集」，再用 PDF 或截图往里加题。
             </div>
           </div>
 
           <div class="pb-panel pb-panel--tip">
             <strong>怎么用</strong>
-            <p>① 左侧选卷 → ② 中间勾题 → ③ 右边卷子实时变；不满意在卷面上叉掉。</p>
-            <p>改分值：点卷面上的「4 分」。卷子太窄就拖右边框或点全屏。</p>
+            <p>① 建一个题集（一套卷 / 一个合集）→ ② 用「PDF 加题」或「截图加题」往里收题 → ③ 中间勾题，右边卷面实时变。</p>
+            <p>两种方式都追加到当前题集，不会覆盖已收的题。改分值：点卷面上的「4 分」。</p>
           </div>
         </aside>
 
@@ -175,12 +171,11 @@
           <EmptyState
             v-else-if="!papers.length"
             :icon="Tickets"
-            title="还没有试卷"
-            description="整份卷子拍照或上传 PDF，系统会自动拆成一道道题；只有一两道好题就直接截图收进来。"
+            title="还没有题集"
+            description="先建一个题集（一套卷或一个合集），再用 PDF 整份解析、或用截图逐道收题，都进同一个题集。"
           >
             <template #actions>
-              <ActionButton variant="primary" @click="openCreateDialog"><el-icon><Plus /></el-icon>新建试卷</ActionButton>
-              <ActionButton @click="openClipDialog"><el-icon><Camera /></el-icon>截图入题库</ActionButton>
+              <ActionButton variant="primary" @click="openCreateDialog"><el-icon><Plus /></el-icon>新建题集</ActionButton>
             </template>
           </EmptyState>
 
@@ -192,7 +187,7 @@
           >
             <template #actions>
               <ActionButton @click="resetFilters">重置筛选</ActionButton>
-              <ActionButton v-if="filterPaper !== 'all'" @click="pickPaper('all')">看全部卷子</ActionButton>
+              <ActionButton v-if="filterPaper !== 'all'" @click="pickPaper('all')">看全部题集</ActionButton>
             </template>
           </EmptyState>
 
@@ -241,9 +236,10 @@
                 </div>
                 <div v-else class="pb-row__answer is-empty">未录入参考答案</div>
 
-                <!-- 截图来源（2026-11-07）：URL 可点、文字直显，随时补/改。
-                     严格只认 http(s) 才渲染成链接，手写文字与危险协议一律纯文本。 -->
-                <div v-if="q.resource_id === clipPaperId" class="pb-row__source">
+                <!-- 来源（2026-11-07）：URL 可点、文字直显，随时补/改。
+                     任何题集的题都能补来源（截图可以加进任意题集）；没填的不占版面，
+                     用下方的「补来源」按钮唤起输入框。严格只认 http(s) 才渲染成链接。 -->
+                <div v-if="q.clip_source || sourceEditingId === q.id" class="pb-row__source">
                   <span class="pb-row__source-label">来源</span>
                   <template v-if="sourceEditingId !== q.id">
                     <a
@@ -288,10 +284,15 @@
                     target="_blank"
                     rel="noopener"
                   >看原卷{{ q.page_no ? `（第 ${q.page_no} 页）` : '' }} ↗</a>
-                  <!-- 截图题库的题允许单条删除：截错了、或一张图里多拆出一行，以前只能删整卷。
-                       普通卷不给这个入口 —— 那是老师上传的整卷，误删的代价太大。 -->
                   <button
-                    v-if="q.resource_id === clipPaperId"
+                    v-if="!q.clip_source && sourceEditingId !== q.id"
+                    type="button"
+                    class="pb-link"
+                    @click="startEditSource(q)"
+                  >补来源</button>
+                  <!-- 2026-11-07：题集是持续累积的（PDF 与截图都追加），所有题都允许单条删除，
+                       带二次确认。截错了、OCR 多拆一行、重传后重复，都能就地清掉。 -->
+                  <button
                     type="button"
                     class="pb-link is-danger"
                     @click="askDeleteQuestion(q)"
@@ -407,11 +408,11 @@
       </div>
     </div>
 
-    <!-- 新建试卷 -->
-    <el-dialog v-model="showCreateDialog" title="新建试卷" width="440px">
+    <!-- 新建题集：一套卷或一个预设合集，PDF 与截图都往它里面加题 -->
+    <el-dialog v-model="showCreateDialog" title="新建题集" width="440px">
       <el-form :model="createForm" label-width="72px">
         <el-form-item label="名称">
-          <WorkbenchInput v-model="createForm.name" placeholder="如：2026 黄浦一模·数学" aria-label="试卷名称" />
+          <WorkbenchInput v-model="createForm.name" placeholder="如：2026 黄浦一模·数学 / 马哥相似三角形" aria-label="题集名称" />
         </el-form-item>
         <el-form-item label="年级">
           <WorkbenchInput v-model="createForm.grade" placeholder="如：初三" aria-label="年级" />
@@ -425,22 +426,26 @@
       </el-form>
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="handleCreatePaper">创建并上传</el-button>
+        <el-button type="primary" :loading="creating" @click="handleCreatePaper">创建并加题</el-button>
       </template>
     </el-dialog>
 
-    <!-- 上传 -->
-    <el-dialog v-model="showUploadDialog" :title="uploadMode === 'answers' ? '上传官方答案' : '上传试卷题目'" width="520px">
+    <!-- PDF 加题：默认追加到所选题集，绝不覆盖已收的题 -->
+    <el-dialog v-model="showUploadDialog" :title="uploadMode === 'answers' ? '上传官方答案' : 'PDF 加题'" width="520px">
       <p v-if="uploadMode === 'answers'" class="pb-hint">
         上传这份卷子的<strong>官方答案</strong>（PDF 或答案页照片）。答案会存进答案库并标为「官方」，
         出教师卷时优先用它，<strong>不会用 AI 猜</strong>。答案按<strong>题号</strong>与题目自动对上。
       </p>
       <p v-else class="pb-hint">
         支持 <strong>PDF</strong>（推荐，无拍照变形）或 <strong>多张照片</strong>（JPEG / PNG / WebP）。
-        上传后系统在后台拆题，可以离开本页，解析完再回来。
-        你上传的文件会<strong>原样留档</strong>，之后在卷名下方点「原卷」就能打开。
+        题目会<strong>追加到所选的题集</strong>，题号自动往后接，不会覆盖之前用 PDF 或截图收的题。
+        你上传的文件会<strong>原样留档</strong>，之后在题集名下方点「原卷」就能打开。
       </p>
-      <WorkbenchSelect v-model="uploadPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择试卷" />
+      <WorkbenchSelect v-model="uploadPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择要加进的题集" />
+      <label v-if="uploadMode === 'questions'" class="pb-replace-opt">
+        <input v-model="replaceExisting" type="checkbox" />
+        <span>重新解析：先清空这个题集的全部题目再导入（默认不勾＝追加）</span>
+      </label>
       <input ref="fileInput" type="file" multiple accept=".pdf,image/jpeg,image/png,image/webp" style="display:none" @change="onFilesPicked" />
       <div class="pb-upload-actions">
         <el-button :disabled="!uploadPaperId" @click="fileInput?.click()">选择文件</el-button>
@@ -452,20 +457,21 @@
       </template>
     </el-dialog>
 
-    <!-- 截图入题库（2026-11-06 负责人需求）：看视频看到好题，截图就收进题库，不用先建卷 -->
+    <!-- 截图加题：与 PDF 加题并列，都写进老师选中的题集 -->
     <WorkbenchDialog
       v-model="showClipDialog"
-      title="截图入题库"
+      title="截图加题"
       width="560px"
       :loading="clipUploading"
       @closed="resetClipDialog"
     >
       <p class="pb-hint">
         看到好题直接截图，回到这里按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘进来（也可以拖图、或点下面选文件）。
-        识别后存进左侧的<strong>「截图题库」卷</strong>，题号自动往后接，不会覆盖之前收的题。
+        识别后<strong>追加到下面选中的题集</strong>，题号自动往后接，不会覆盖之前收的题。
         认不出文字的截图也会按图存下来，之后在题目里补字就行。
         每张图下面可以顺手填<strong>来源</strong>（网址或一句话都行），入库后在题目行也能补改。
       </p>
+      <WorkbenchSelect v-model="clipTargetPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择要加进的题集" style="margin-bottom:12px" />
       <div
         class="pb-clip-drop"
         :class="{ 'is-over': clipDragOver }"
@@ -496,10 +502,10 @@
           />
         </figure>
       </div>
-      <p v-if="clipFiles.length" class="pb-clip-count">已选 {{ clipFiles.length }} 张，识别完会自动切到「截图题库」卷</p>
+      <p v-if="clipFiles.length" class="pb-clip-count">已选 {{ clipFiles.length }} 张，识别完会自动切到刚加题的题集</p>
       <template #footer>
         <ActionButton variant="ghost" :disabled="clipUploading" @click="showClipDialog = false">取消</ActionButton>
-        <ActionButton variant="primary" :disabled="!clipFiles.length" :loading="clipUploading" @click="handleClipUpload">
+        <ActionButton variant="primary" :disabled="!clipFiles.length || !clipTargetPaperId" :loading="clipUploading" @click="handleClipUpload">
           开始识别
         </ActionButton>
       </template>
@@ -725,11 +731,14 @@ const createForm = ref({ name: '', grade: '', subject: '数学', examDate: null 
 const uploadPaperId = ref('')
 // 'questions' = 题目 PDF/照片（进 resource_questions）；'answers' = 官方答案（进答案库）
 const uploadMode = ref('questions')
+// 2026-11-07：默认追加；只有老师显式勾「重新解析」才整卷重建（后端据此选 append / replace）
+const replaceExisting = ref(false)
 const pickedFiles = ref([])
 const fileInput = ref(null)
 
-// ── 截图入题库（2026-11-06）──
-// 老师看视频/网课看到好题，截图直接收进题库：不需要先建卷，图片统一进「截图题库」卷。
+// ── 截图加题（2026-11-06 加，11-07 改模型）──
+// 题集是唯一归属：截图和 PDF 一样写进老师选中的那个题集，不再有固定「截图题库」卷。
+const clipTargetPaperId = ref('')
 const showClipDialog = ref(false)
 const clipFiles = ref([]) // { key, file, preview, source }（2026-11-07 每张截图可填来源）
 const clipInput = ref(null)
@@ -737,7 +746,7 @@ const clipDragOver = ref(false)
 const clipUploading = ref(false)
 const CLIP_MAX_FILES = 12 // 与服务端 CLIP_MAX_IMAGES 对齐，前端先挡一层
 
-// 来源行内编辑：来源属于「这张截图」，按 page_no 共享；只给截图题库的题这个入口。
+// 来源行内编辑：来源属于「这张截图」，按 page_no 共享；任何题集的题都能补/改。
 const sourceEditingId = ref('')
 const sourceDraft = ref('')
 // 严格只认 http(s)：老师手写的文字或 javascript: 之类一律当纯文本，不能变成可点链接
@@ -750,15 +759,11 @@ let repaintTimer = null
 let repaintToken = 0
 
 const totalQuestionCount = computed(() => papers.value.reduce((n, p) => n + (p.question_count || 0), 0))
-// 题目行要按所属卷找「原卷」入口；字段名与后端 /api/paper-bank/papers 逐字一致
+// 题目行要按所属题集找「原卷」入口；字段名与后端 /api/paper-bank/papers 逐字一致
 const papersById = computed(() => new Map(papers.value.map(p => [p.id, p])))
-// 截图题库常驻最上：它是老师随手收题的入口，被十几套一模卷压在下面等于藏起来了。
-// ⚠️ Array.sort 稳定（ES2019+），其余卷保持后端 created_at DESC 的顺序，不会被重排。
-const sortedPapers = computed(() => papers.value.slice().sort(
-  (a, b) => (b.origin === 'screenshot' ? 1 : 0) - (a.origin === 'screenshot' ? 1 : 0)
-))
-// 只有截图题库的题给「删除本题」入口（普通卷是整份上传，误删代价太大）
-const clipPaperId = computed(() => papers.value.find(p => p.origin === 'screenshot')?.id || '')
+// 2026-11-07：题集一律按后端 created_at DESC 展示，不再有「截图题库」置顶这一特殊分类。
+// 加题入口的默认目标：当前左侧选中的题集，没选就取最近建的那个。
+const defaultPaperId = () => (filterPaper.value !== 'all' ? filterPaper.value : (papers.value[0]?.id || ''))
 const blocks = computed(() => groupBasket(basket.value))
 const summary = computed(() => basketSummary(basket.value))
 const totals = computed(() => composePaperTotals(blocks.value))
@@ -785,13 +790,13 @@ const tagFilterOptions = computed(() => ([
 // 筛选后为空时给可行动提示（⛔ 不能只写「没有题目」）
 const emptyHint = computed(() => {
   const bits = []
-  if (filterPaper.value !== 'all') bits.push('只看当前这套卷')
+  if (filterPaper.value !== 'all') bits.push('只看当前这个题集')
   if (filterType.value !== 'all') bits.push('指定了题型')
   if (filterDifficulty.value !== 'all') bits.push('指定了难度')
   if (filterTag.value !== 'all') bits.push('指定了标签')
   if (filterQuestionNos.value) bits.push('填了题号')
   if (filterKeyword.value) bits.push('搜了题干关键字')
-  if (!bits.length) return '这套卷还没解析出题目，先上传题目文件并解析。'
+  if (!bits.length) return '这个题集还没有题目，用「PDF 加题」或「截图加题」往里收题。'
   return `当前条件（${bits.join('、')}）下没有题。题库里难度标签大多还没补，先把难度改成「全部难度」再看。`
 })
 
@@ -1065,14 +1070,14 @@ const openCreateDialog = () => {
 }
 
 const handleCreatePaper = async () => {
-  if (!createForm.value.name.trim()) return ElMessage.warning('请填写试卷名称')
+  if (!createForm.value.name.trim()) return ElMessage.warning('请填写题集名称')
   creating.value = true
   try {
     const paper = await createPaperBankPaper({ ...createForm.value })
-    ElMessage.success('已创建，接着上传卷子文件')
+    ElMessage.success('题集已建好，接着加题')
     showCreateDialog.value = false
     await loadPapers()
-    // 建完直接进上传：老师的下一个动作一定是传卷子，不要让他再点一次
+    // 建完直接进「PDF 加题」：老师的下一个动作一定是收题，不要让他再点一次
     if (paper?.id) openUploadDialog(paper.id, 'questions')
   } catch (e) {
     ElMessage.error(e?.payload?.message || e.message || '创建失败')
@@ -1082,8 +1087,10 @@ const handleCreatePaper = async () => {
 }
 
 const openUploadDialog = (paperId, mode = 'questions') => {
-  uploadPaperId.value = paperId || papers.value[0]?.id || ''
+  uploadPaperId.value = paperId || defaultPaperId()
   uploadMode.value = mode
+  // ⛔ 每次打开都重置：上一次勾过「重新解析」不能悄悄带到下一次上传，那会误删整集题目
+  replaceExisting.value = false
   pickedFiles.value = []
   showUploadDialog.value = true
 }
@@ -1100,8 +1107,19 @@ const handleUpload = async () => {
       await parsePaperBankAnswers(uploadPaperId.value, pickedFiles.value)
       ElMessage.success('答案已上传，正在后台解析')
     } else {
-      await parsePaperBankPaper(uploadPaperId.value, pickedFiles.value)
-      ElMessage.success('题目已上传，正在后台解析')
+      // 「重新解析」会先清空该集全部题目 ⇒ 必须二次确认，并把要删的题数说清楚
+      if (replaceExisting.value) {
+        const p = papersById.value.get(uploadPaperId.value)
+        try {
+          await ElMessageBox.confirm(
+            `将先删除「${p?.name || '这个题集'}」里已有的 ${p?.question_count || 0} 道题，再用本次文件重建。此操作不可恢复。`,
+            '重新解析会清空题集',
+            { confirmButtonText: '清空并重新解析', cancelButtonText: '取消', type: 'warning' }
+          )
+        } catch { return }
+      }
+      await parsePaperBankPaper(uploadPaperId.value, pickedFiles.value, { replace: replaceExisting.value })
+      ElMessage.success(replaceExisting.value ? '已开始重新解析' : '题目已上传，正在后台追加到题集')
     }
     showUploadDialog.value = false
     pickedFiles.value = []
@@ -1114,13 +1132,20 @@ const handleUpload = async () => {
   }
 }
 
-// ── 截图入题库（2026-11-06）──
+// ── 截图加题（2026-11-06 加，11-07 改模型）──
 //
 // 三条入口收在同一处：Ctrl+V 粘贴、拖图、点选文件。
 // ⛔ 粘贴监听必须挂 window：老师按 Ctrl+V 时焦点通常在 body 或某个按钮上，挂在弹窗元素上会漏。
 //    只在弹窗打开时消费，其余时候一律放行，不影响页面上其它粘贴行为。
+// ⛔ 截图必须带目标题集：没有题集时先让老师建一个，绝不自动建「截图题库」卷。
 
 const openClipDialog = () => {
+  if (!papers.value.length) {
+    ElMessage.warning('先建一个题集，再把截图加进去')
+    openCreateDialog()
+    return
+  }
+  clipTargetPaperId.value = defaultPaperId()
   showClipDialog.value = true
 }
 
@@ -1185,11 +1210,14 @@ const onGlobalPaste = (ev) => {
 
 const handleClipUpload = async () => {
   if (!clipFiles.value.length || clipUploading.value) return
+  // ⛔ 目标题集是写库前提：缺了就不能发请求，更不能让后端自动建一个「截图题库」卷
+  if (!clipTargetPaperId.value) return ElMessage.warning('请先选择要加进的题集')
   clipUploading.value = true
   try {
     const r = await uploadPaperClips(
       clipFiles.value.map(f => f.file),
       clipFiles.value.map(f => f.source || ''),
+      clipTargetPaperId.value,
     )
     showClipDialog.value = false
     ElMessage.success(r?.message || '截图已收下，正在识别')
@@ -1208,7 +1236,7 @@ const stopClipPolling = () => {
   if (clipPollTimer) { clearInterval(clipPollTimer); clipPollTimer = null }
 }
 
-/** 截图识别是后台跑的：轮询截图卷状态，结束后按「题数差」报实际入库了多少道。 */
+/** 截图识别是后台跑的：轮询目标题集状态，结束后按「题数差」报实际入库了多少道。 */
 const startClipPolling = (paperId, beforeCount) => {
   stopClipPolling()
   if (!paperId) return
@@ -1222,9 +1250,9 @@ const startClipPolling = (paperId, beforeCount) => {
         ElMessage.error('这批截图没识别成功，换更清晰的图再试一次')
       } else {
         const added = Math.max(0, (p.question_count || 0) - beforeCount)
-        ElMessage.success(added ? `已入库 ${added} 道题` : '没识别出文字，已按图片存进截图题库')
+        ElMessage.success(added ? `已入库 ${added} 道题` : '没识别出文字，已按图片存进题集')
       }
-      // 自动切到截图卷：老师刚收的题要立刻看见，不要让他再去左侧找
+      // 自动切到刚加题的题集：老师刚收的题要立刻看见，不要让他再去左侧找
       filterPaper.value = paperId
       limit.value = PAGE_SIZE
       await loadQuestions()
@@ -1235,7 +1263,7 @@ const startClipPolling = (paperId, beforeCount) => {
 const askDeleteQuestion = async (q) => {
   try {
     await ElMessageBox.confirm(
-      `删除「截图题库」里的这道题（${questionLabel(q)}）？只删这一道，不影响同卷其它题。`,
+      `从「${papersById.value.get(q.resource_id)?.name || '题集'}」里删除这道题（${questionLabel(q)}）？只删这一道，不影响题集里其它题。`,
       '删除题目',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
@@ -1256,8 +1284,8 @@ const askDeleteQuestion = async (q) => {
 const askDeletePaper = async (p) => {
   try {
     await ElMessageBox.confirm(
-      `确定删除「${p.name}」及它的 ${p.question_count || 0} 道题？卷面上的题也会一起消失。`,
-      '删除试卷',
+      `确定删除题集「${p.name}」及它的 ${p.question_count || 0} 道题？已勾选到卷面上的题也会一起消失。`,
+      '删除题集',
       { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
     )
   } catch {
@@ -1282,7 +1310,7 @@ const askClearPapers = async () => {
   if (!papers.value.length || clearing.value) return
   try {
     await ElMessageBox.confirm(
-      `将删除题库里全部 ${papers.value.length} 套卷和 ${totalQuestionCount.value} 道题（含答案），不可恢复。清空后重新上传试卷即可开始解析。`,
+      `将删除题库里全部 ${papers.value.length} 个题集和 ${totalQuestionCount.value} 道题（含答案），不可恢复。清空后新建题集即可重新收题。`,
       '清空题库',
       { confirmButtonText: '全部删除', cancelButtonText: '取消', type: 'warning' }
     )
@@ -1292,7 +1320,7 @@ const askClearPapers = async () => {
   clearing.value = true
   try {
     const r = await deletePaperBankPapers()
-    ElMessage.success(`已清空 ${r?.deleted ?? papers.value.length} 套卷`)
+    ElMessage.success(`已清空 ${r?.deleted ?? papers.value.length} 个题集`)
     filterPaper.value = 'all'
     basket.value = [] // 卷没了，篮子里的题全部失效，直接清空
     await loadPapers()
@@ -1914,13 +1942,13 @@ onUnmounted(() => {
 .pb-upload-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
 .pb-picked { font-size: 12px; color: #666; }
 
-/* ── 截图入题库（2026-11-06）── */
-/* 卷名旁的来源标识：截图题库不是真卷子，别让老师以为是哪套模拟卷 */
-.pb-paper__origin {
-  display: inline-block; margin-left: 4px; padding: 0 4px;
-  font-size: 9px; line-height: 14px; vertical-align: 1px;
-  color: #8b5cf6; background: #f3efff; border: 1px solid #ddd3fb; border-radius: 3px;
+/* ── 截图加题 / PDF 加题（2026-11-07 统一为「往题集里加题」）── */
+/* 「重新解析」会清空题集，用警示色提示；默认不勾就是追加 */
+.pb-replace-opt {
+  display: flex; align-items: flex-start; gap: 6px; margin-top: 10px;
+  font-size: 12px; line-height: 1.5; color: #8a5a20; cursor: pointer;
 }
+.pb-replace-opt input { margin: 2px 0 0; cursor: pointer; }
 .pb-link.is-danger { color: #a32d2d; }
 .pb-link.is-danger:hover { color: #7d2020; }
 .pb-hint kbd {

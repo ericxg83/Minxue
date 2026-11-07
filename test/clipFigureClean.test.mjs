@@ -157,7 +157,8 @@ test('来源：后端按 page_no 存/读 clipSources，字段名 clip_source 逐
   assert.match(serviceSrc, /COALESCE\(metadata->'clipSources', '\{\}'::jsonb\) \|\| \$2::jsonb/, '多批来源必须合并不覆盖')
   assert.match(routesSrc, /router\.put\('\/questions\/:id\/source'/)
   assert.match(routesSrc, /ARRAY\['clipSources', \$2::text\]/)
-  assert.match(routesSrc, /origin !== 'screenshot'/, '只准截图题库改来源')
+  assert.ok(!/origin !== 'screenshot'/.test(routesSrc), '来源不得再依赖卷级 origin 分类（截图已能进任意题集）')
+  assert.match(serviceSrc, /basePage \+ idx \+ 1/, '追加导入必须接续页号，保证 clipSources 索引不串页')
 })
 
 test('来源：上传时按图片顺序带上来源，改来源走同一条 API，URL 只认 http(s)', () => {
