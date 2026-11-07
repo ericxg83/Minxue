@@ -163,14 +163,13 @@ test('来源：后端按 page_no 存/读 clipSources，字段名 clip_source 逐
 
 test('来源：上传时按图片顺序带上来源，改来源走同一条 API，URL 只认 http(s)', () => {
   assert.match(apiSrc, /fd\.append\('sources', JSON\.stringify\(sources\)\)/)
-  assert.match(apiSrc, /updatePaperClipSource = \(id, source\)/)
+  assert.match(apiSrc, /updatePaperClipSource = \(id, source, note = ''\)/)
   assert.match(viewSrc, /uploadPaperClips\(/)
   assert.match(viewSrc, /clipFiles\.value\.map\(f => f\.source \|\| ''\)/)
-  assert.match(viewSrc, /updatePaperClipSource\(q\.id, val\)/)
-  assert.ok(
-    viewSrc.includes('const isSourceUrl = (s) => /^https?:\\/\\//i.test('),
-    'URL 判据必须严格只认 http(s)，javascript: 之类不得变成可点链接'
-  )
+  assert.match(viewSrc, /updatePaperClipSource\(q\.id, val, note\)/)
+  assert.match(viewSrc, /import \{ isSourceUrl, sourceHref \} from '\.\.\/utils\/clipSource\.js'/,
+    'URL 判据与跳转口径统一收敛到 workbench/utils，页面不另写一套')
+  assert.ok(!/const isSourceUrl = \(s\) =>/.test(viewSrc))
   // 危险协议不得渲染成链接：链接分支必须走 isSourceUrl
   assert.match(viewSrc, /v-if="isSourceUrl\(q\.clip_source\)"/)
 })

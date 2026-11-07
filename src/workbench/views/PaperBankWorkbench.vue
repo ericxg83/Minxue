@@ -236,35 +236,46 @@
                 </div>
                 <div v-else class="pb-row__answer is-empty">未录入参考答案</div>
 
-                <!-- 来源（2026-11-07）：URL 可点、文字直显，随时补/改。
-                     任何题集的题都能补来源（截图可以加进任意题集）；没填的不占版面，
-                     用下方的「补来源」按钮唤起输入框。严格只认 http(s) 才渲染成链接。 -->
-                <div v-if="q.clip_source || sourceEditingId === q.id" class="pb-row__source">
+                <!-- 来源（2026-11-07）：链接 + 时间点/说明两项。
+                     B站/YouTube 链接带时间点会自动跳到那一秒；严格只认 http(s) 才渲染成链接。
+                     任何题集的题都能补来源；没填的不占版面，用下方 foot 的「补来源」按钮唤起。 -->
+                <div v-if="q.clip_source || q.clip_source_note || sourceEditingId === q.id" class="pb-row__source">
                   <span class="pb-row__source-label">来源</span>
                   <template v-if="sourceEditingId !== q.id">
                     <a
                       v-if="isSourceUrl(q.clip_source)"
-                      :href="q.clip_source"
+                      :href="sourceHref(q.clip_source, q.clip_source_note)"
+                      :title="q.clip_source"
                       target="_blank"
                       rel="noopener"
                       class="pb-link pb-row__source-link"
-                    >{{ q.clip_source }} ↗</a>
+                    >打开链接 ↗</a>
                     <span v-else-if="q.clip_source" class="pb-row__source-text">{{ q.clip_source }}</span>
-                    <span v-else class="pb-row__source-empty">未填</span>
-                    <button type="button" class="pb-link" @click="startEditSource(q)">
-                      {{ q.clip_source ? '改来源' : '补来源' }}
-                    </button>
+                    <span v-if="q.clip_source_note" class="pb-row__source-note">{{ q.clip_source_note }}</span>
+                    <span v-if="!q.clip_source && !q.clip_source_note" class="pb-row__source-empty">未填</span>
+                    <button type="button" class="pb-link" @click="startEditSource(q)">改来源</button>
                   </template>
                   <template v-else>
-                    <input
-                      v-model="sourceDraft"
-                      class="pb-row__source-input"
-                      type="text"
-                      maxlength="500"
-                      placeholder="粘贴 URL 或输入文字，如「B站 · 某某老师 第3讲」"
-                      @keydown.enter.prevent="saveSource(q)"
-                      @keydown.esc.prevent="sourceEditingId = ''"
-                    />
+                    <div class="pb-row__source-edit">
+                      <input
+                        v-model="sourceDraftUrl"
+                        class="pb-row__source-input"
+                        type="text"
+                        maxlength="500"
+                        placeholder="来源链接 https://… 或一句话"
+                        @keydown.enter.prevent="saveSource(q)"
+                        @keydown.esc.prevent="sourceEditingId = ''"
+                      />
+                      <input
+                        v-model="sourceDraftNote"
+                        class="pb-row__source-input"
+                        type="text"
+                        maxlength="500"
+                        placeholder="时间点 / 说明，如 12:35 讲到辅助线"
+                        @keydown.enter.prevent="saveSource(q)"
+                        @keydown.esc.prevent="sourceEditingId = ''"
+                      />
+                    </div>
                     <button type="button" class="pb-link" @click="saveSource(q)">保存</button>
                     <button type="button" class="pb-link" @click="sourceEditingId = ''">取消</button>
                   </template>
@@ -285,7 +296,7 @@
                     rel="noopener"
                   >看原卷{{ q.page_no ? `（第 ${q.page_no} 页）` : '' }} ↗</a>
                   <button
-                    v-if="!q.clip_source && sourceEditingId !== q.id"
+                    v-if="!q.clip_source && !q.clip_source_note && sourceEditingId !== q.id"
                     type="button"
                     class="pb-link"
                     @click="startEditSource(q)"
@@ -469,7 +480,8 @@
         看到好题直接截图，回到这里按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘进来（也可以拖图、或点下面选文件）。
         识别后<strong>追加到下面选中的题集</strong>，题号自动往后接，不会覆盖之前收的题。
         认不出文字的截图也会按图存下来，之后在题目里补字就行。
-        每张图下面可以顺手填<strong>来源</strong>（网址或一句话都行），入库后在题目行也能补改。
+        每张图下面可以填<strong>来源链接</strong>和<strong>时间点 / 说明</strong>（如「12:35 讲到辅助线」）；
+        B站、YouTube 的链接填了时间点，点开会直接跳到那一秒。入库后在题目行也能补改。
       </p>
       <WorkbenchSelect v-model="clipTargetPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择要加进的题集" style="margin-bottom:12px" />
       <div
@@ -499,6 +511,13 @@
             type="text"
             maxlength="500"
             :placeholder="`第 ${i + 1} 张来源：URL 或文字（可不填）`"
+          />
+          <input
+            v-model="f.note"
+            class="pb-clip-item__src pb-clip-item__src--note"
+            type="text"
+            maxlength="500"
+            placeholder="时间点 / 说明，如 12:35 讲到辅助线"
           />
         </figure>
       </div>
@@ -641,6 +660,7 @@ import {
 import { renderCustomBodyToHTML, exportServerPDF, paintPreviewIntoIframe } from '../../utils/serverPdfExporter'
 import { ossThumbUrl } from '../../utils/ossThumb'
 import { showStem, bodyText, showFigure } from '../utils/paperRowDisplay.js'
+import { isSourceUrl, sourceHref } from '../utils/clipSource.js'
 
 const PAGE_SIZE = 200
 
@@ -746,11 +766,11 @@ const clipDragOver = ref(false)
 const clipUploading = ref(false)
 const CLIP_MAX_FILES = 12 // 与服务端 CLIP_MAX_IMAGES 对齐，前端先挡一层
 
-// 来源行内编辑：来源属于「这张截图」，按 page_no 共享；任何题集的题都能补/改。
+// 来源行内编辑：链接 + 时间点/备注两项，按 page_no 共享；任何题集的题都能补/改。
+// URL 安全判据与跳转链接生成统一在 workbench/utils/clipSource.js，页面不另写一套。
 const sourceEditingId = ref('')
-const sourceDraft = ref('')
-// 严格只认 http(s)：老师手写的文字或 javascript: 之类一律当纯文本，不能变成可点链接
-const isSourceUrl = (s) => /^https?:\/\//i.test(String(s || '').trim())
+const sourceDraftUrl = ref('')
+const sourceDraftNote = ref('')
 let clipSeq = 0
 let clipPollTimer = null
 
@@ -1013,30 +1033,34 @@ const applyQuestionPatch = async (q, patch, okMsg) => {
   }
 }
 
-// ── 截图来源（2026-11-07 负责人需求）──
-// 来源存在卷的 metadata.clipSources[page_no]，同一张截图拆出的多题共享一份。
+// ── 截图来源（2026-11-07 负责人需求；二轮拆成「链接 + 时间点/备注」）──
+// 存卷的 metadata.clipSources[page_no] / clipNotes[page_no]，同页拆出的多题共享。
 const startEditSource = (q) => {
   sourceEditingId.value = q.id
-  sourceDraft.value = q.clip_source || ''
+  sourceDraftUrl.value = q.clip_source || ''
+  sourceDraftNote.value = q.clip_source_note || ''
 }
 
 const saveSource = async (q) => {
-  const val = sourceDraft.value.trim().slice(0, 500)
+  const val = sourceDraftUrl.value.trim().slice(0, 500)
+  const note = sourceDraftNote.value.trim().slice(0, 500)
   try {
-    const r = await updatePaperClipSource(q.id, val)
+    const r = await updatePaperClipSource(q.id, val, note)
     const source = r?.source ?? val
+    const savedNote = r?.note ?? note
     // ⚠️ 后端按页码写，页面也要按页码同步全部行，否则同页的兄弟题还显示旧来源
     for (const x of questions.value) {
       if (x.resource_id === q.resource_id && q.page_no != null && x.page_no === q.page_no) {
         x.clip_source = source
+        x.clip_source_note = savedNote
       }
     }
     basket.value = basket.value.map(it => (
       it.resource_id === q.resource_id && q.page_no != null && it.page_no === q.page_no
-        ? { ...it, clip_source: source } : it
+        ? { ...it, clip_source: source, clip_source_note: savedNote } : it
     ))
     sourceEditingId.value = ''
-    ElMessage.success(source ? '来源已保存' : '来源已清空')
+    ElMessage.success(source || savedNote ? '来源已保存' : '来源已清空')
   } catch (e) {
     ElMessage.error(e?.payload?.message || e.message || '来源保存失败')
   }
@@ -1175,6 +1199,7 @@ const addClipFiles = (rawFiles) => {
     file: f,
     preview: URL.createObjectURL(f),
     source: '',
+    note: '',
   })))
   if (imgs.length > room) {
     ElMessage.warning(`只收下前 ${room} 张，剩下的下一批再贴`)
@@ -1218,6 +1243,7 @@ const handleClipUpload = async () => {
       clipFiles.value.map(f => f.file),
       clipFiles.value.map(f => f.source || ''),
       clipTargetPaperId.value,
+      clipFiles.value.map(f => f.note || ''),
     )
     showClipDialog.value = false
     ElMessage.success(r?.message || '截图已收下，正在识别')
@@ -1839,6 +1865,12 @@ onUnmounted(() => {
   flex: 1 1 260px; min-width: 160px; font-size: 11px; padding: 3px 6px;
   border: 1px solid #ddd; border-radius: 4px; background: #fff; font-family: inherit;
 }
+.pb-row__source-edit { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 5px; min-width: 240px; }
+.pb-row__source-edit .pb-row__source-input { flex: 1 1 220px; }
+.pb-row__source-note {
+  color: #6b5b3e; background: #faf5e9; border: 1px solid #ece0c4;
+  border-radius: 4px; padding: 1px 6px; word-break: break-all;
+}
 .pb-row__foot { display: flex; gap: 12px; margin-top: 6px; }
 .pb-link { border: 0; background: transparent; padding: 0; font-size: 11px; color: #8a8a8a; cursor: pointer; text-decoration: none; }
 .pb-link:hover { color: #185fa5; text-decoration: underline; }
@@ -1970,7 +2002,7 @@ onUnmounted(() => {
 .pb-clip-drop:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
 .pb-clip-grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px;
-  max-height: 320px; overflow: auto;
+  max-height: 380px; overflow: auto; /* 每张图两个输入框（链接 + 时间点） */
 }
 .pb-clip-item {
   margin: 0; border: 1px solid #e6e2d9; border-radius: 8px;
@@ -1991,5 +2023,7 @@ onUnmounted(() => {
 }
 .pb-clip-item__src:focus { outline: none; background: #fff; }
 .pb-clip-item__src::placeholder { color: #b3ada2; }
+/* 第二个输入框：时间点 / 说明 */
+.pb-clip-item__src--note { border-top: 1px dashed #eee9df; color: #6b5b3e; }
 .pb-clip-count { margin: 8px 0 0; font-size: 11px; color: #8a8a8a; }
 </style>
