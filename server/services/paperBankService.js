@@ -35,6 +35,7 @@ import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
 import { planSubrowFigureAssignments, analyzeCropFigure } from './paperFigureAssign.js'
 import { stripPageRulingLines } from './pageRulingClean.js'
 import { extractClipFigure } from './clipFigureClean.js'
+import { detectClipSource, mergeClipSources } from './clipSourceDetect.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
 // 瞬时并发打满会触发供应商限流（2026-09-09 全本错位事故的成因之一）。
@@ -1439,10 +1440,19 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
       } else {
         logger.info?.(`[paperBank] 截图第 ${idx + 1} 张未提取到干净配图（${clean.reason}），不挂配图`)
       }
-      return { ...parsed, figureUrl }
+      // ── 来源自动识别（2026-11-07 三轮）──
+      // 老师截图时故意带上浏览器地址栏和播放器进度条 ⇒ 直接读出 URL / 时间卡点填进来源。
+      // ⛔ 只在该张图「有空缺」时才调模型：手填全齐就一次额度都不烧；
+      //    且串行放在配图提取之后，不抬高瞬时并发（供应商 429 的老坑）。
+      //    合并规则在 mergeClipSources 里：识别结果只填空缺，绝不覆盖老师手填。
+      let detectedSource = null
+      const needUrl = !String(sourceList[idx] ?? '').trim()
+      const needNote = !String(noteList[idx] ?? '').trim()
+      if (needUrl || needNote) detectedSource = await detectClipSource(buf, { logger })
+      return { ...parsed, figureUrl, detectedSource }
     } catch (e) {
       logger.warn?.(`[paperBank] 截图第 ${idx + 1} 张识别失败: ${e?.message || e}`)
-      return { rows: [], figureUrl: null }
+      return { rows: [], figureUrl: null, detectedSource: null }
     } finally {
       done += 1
       await setPaperParseStatus(resourceId, { donePages: done }).catch(() => {})
@@ -1511,8 +1521,11 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
   // 来源（2026-11-07 负责人需求）：按「第几张截图」= page_no 存，一张图拆出的多题共享来源。
   // 放 resources.metadata.clipSources 是纯加法、零迁移；用 || 合并旧 map，不覆盖同卷其它
   // metadata 键，也不碰多批次已存的来源。
+  // ⭐ 自动识别结果在这里合并：老师手填的优先，识别只补空缺（2026-11-07 三轮）。
+  //    pageResults 与截图顺序一致，detectedSource 与 sources/notes 按下标对齐。
+  const mergedSources = mergeClipSources(sourceList, noteList, pageResults.map(r => r?.detectedSource || null))
   const clipSources = {}
-  sourceList.forEach((s, i) => {
+  mergedSources.sources.forEach((s, i) => {
     const v = String(s ?? '').trim().slice(0, 500)
     if (v) clipSources[String(basePage + i + 1)] = v
   })
@@ -1530,7 +1543,7 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
   // 时间点 / 备注（2026-11-07 二轮）：「视频的第几分钟」单独存，与链接按同一页号配对。
   // 例：链接 https://www.bilibili.com/video/BVxxx + 备注「12:35 讲到梅涅劳斯」。
   const clipNotes = {}
-  noteList.forEach((n, i) => {
+  mergedSources.notes.forEach((n, i) => {
     const v = String(n ?? '').trim().slice(0, 500)
     if (v) clipNotes[String(basePage + i + 1)] = v
   })
@@ -1545,5 +1558,8 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
     ).catch(e => logger.warn?.(`[paperBank] 截图来源时间点回填失败: ${e.message}`))
   }
 
-  return { resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length }
+  return {
+    resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length,
+    autoSources: mergedSources.autoFilled,
+  }
 }

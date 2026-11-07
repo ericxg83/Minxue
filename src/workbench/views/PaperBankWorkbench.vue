@@ -27,125 +27,93 @@
           ...(narrow ? { paddingBottom: paperCollapsed ? '62px' : 'calc(46vh + 18px)' } : {}),
         }"
       >
-        <!-- 左：题集列表（一套卷 / 一个预设合集 = 一个题集，PDF 与截图都往里加题） -->
+        <!-- 左：树形文件夹 + 当前题集详情（2026-11-07） -->
         <aside class="pb-col pb-col--papers">
-          <div class="pb-panel">
-            <div class="pb-panel__head">
-              <strong>题集</strong>
-              <span class="pb-panel__head-right">
-                <span>{{ papers.length }} 个 · {{ totalQuestionCount }} 题</span>
-                <!-- 清空全部（2026-11-01 负责人需求：重新上传解析前一键清空，一个个删太费劲） -->
-                <button
-                  v-if="papers.length"
-                  type="button"
-                  class="pb-clear"
-                  :disabled="clearing"
-                  title="删除题库里全部题集及其题目（不碰练习册）"
-                  @click="askClearPapers"
-                >{{ clearing ? '清空中…' : '清空全部' }}</button>
-              </span>
+          <PaperBankTree
+            :papers="papers"
+            :total-question-count="totalQuestionCount"
+            :active-paper-id="filterPaper"
+            @select="pickPaper"
+            @changed="loadPapers"
+            @create-paper="openCreateDialog"
+          />
+
+          <!-- 原卷 / 答案 / 复核状态跟着「当前选中」走，树本身保持笔记式的干净 -->
+          <div v-if="activePaper" class="pb-panel pb-panel--detail">
+            <div class="pb-detail__head">
+              <span class="pb-detail__label">当前题集</span>
+              <strong :title="activePaper.name">{{ activePaper.name }}</strong>
             </div>
-
-            <button
-              type="button"
-              class="pb-paper"
-              :class="{ 'is-active': filterPaper === 'all' }"
-              @click="pickPaper('all')"
-            >
-              <span class="pb-paper__name">全部题集</span>
-              <span class="pb-paper__meta">{{ totalQuestionCount }} 题</span>
-            </button>
-
-            <div v-for="p in papers" :key="p.id" class="pb-paper-wrap" :class="{ 'is-active': filterPaper === p.id }">
-              <button type="button" class="pb-paper" @click="pickPaper(p.id)">
-                <span class="pb-paper__name" :title="p.name">{{ p.name }}</span>
-                <span class="pb-paper__meta">{{ p.question_count || 0 }} 题</span>
-                <span v-if="isParsing(p)" class="pb-paper__parsing">解析中 {{ p.question_parse_done_pages || 0 }}/{{ p.question_parse_total_pages || '?' }}</span>
-              </button>
-              <!-- 上传的原件常驻入口（2026-11-06）：不用 hover、不用进菜单，点一下就打开老师自己传的那份文件 -->
-              <div class="pb-paper__files">
-                <a
-                  v-if="(p.question_files || []).length === 1"
-                  class="pb-file-link"
-                  :href="p.question_files[0].url"
-                  target="_blank"
-                  rel="noopener"
-                  title="打开上传的原卷文件"
-                >原卷 ↗</a>
-                <button
-                  v-else-if="(p.question_files || []).length > 1"
-                  type="button"
-                  class="pb-file-link"
-                  title="选择要打开的原卷文件"
-                  @click.stop="openSourceFiles(p, 'questions')"
-                >原卷 {{ p.question_files.length }} 份 ↗</button>
-                <a
-                  v-if="(p.answer_files || []).length === 1"
-                  class="pb-file-link"
-                  :href="p.answer_files[0].url"
-                  target="_blank"
-                  rel="noopener"
-                  title="打开上传的官方答案原件"
-                >答案册 ↗</a>
-                <button
-                  v-else-if="(p.answer_files || []).length > 1"
-                  type="button"
-                  class="pb-file-link"
-                  title="选择要打开的答案原件"
-                  @click.stop="openSourceFiles(p, 'answers')"
-                >答案册 {{ p.answer_files.length }} 份 ↗</button>
-                <!-- 双模型复核：两处抄本不一致的地方，系统不猜，交给老师对照原卷核 -->
-                <button
-                  v-if="(p.ocr_review || []).length"
-                  type="button"
-                  class="pb-review-badge"
-                  :title="`双模型复核：${p.ocr_review.length} 处读法不一致，待对照原卷核对`"
-                  @click.stop="openOcrReview(p)"
-                >⚠ {{ p.ocr_review.length }} 处待核对</button>
-                <span
-                  v-else-if="p.ocr_review_summary?.skippedPages"
-                  class="pb-review-warn"
-                  :title="`有 ${p.ocr_review_summary.skippedPages} 页双模型复核没跑成，请重新上传或对照原卷核对`"
-                >⚠ {{ p.ocr_review_summary.skippedPages }} 页未复核</span>
-                <!-- 逐页题号清点：卷面印了、库里没有 = 漏题（比错字严重，必须显眼） -->
-                <button
-                  v-if="coverageIssueCount(p) > 0"
-                  type="button"
-                  class="pb-review-badge is-danger"
-                  :title="coverageTitle(p)"
-                  @click.stop="openCoverage(p)"
-                >⛔ {{ coverageIssueCount(p) }} 个题号不符</button>
-                <span
-                  v-else-if="p.coverage_summary?.pagesUnverified"
-                  class="pb-review-warn"
-                  :title="`有 ${p.coverage_summary.pagesUnverified} 页题号清点没跑成，无法确认这些页有没有漏题`"
-                >⚠ {{ p.coverage_summary.pagesUnverified }} 页未清点</span>
-                <!-- 干净的卷给一个「已核」正向确认：负责人要的是「能确认没漏题」，
-                     而不只是「没报错」。跨页承接不算问题，只在 title 里说明。 -->
-                <button
-                  v-else-if="p.coverage_summary"
-                  type="button"
-                  class="pb-checked"
-                  :title="coverageOkTitle(p)"
-                  @click.stop="openCoverage(p)"
-                >✓ 题号已核</button>
-              </div>
-              <div class="pb-paper__ops">
-                <button type="button" title="上传题目/照片" @click.stop="openUploadDialog(p.id, 'questions')">题目</button>
-                <button type="button" title="上传官方答案" @click.stop="openUploadDialog(p.id, 'answers')">答案</button>
-                <button type="button" class="is-danger" title="删除这套卷及其题目" @click.stop="askDeletePaper(p)">删除</button>
-              </div>
-            </div>
-
-            <div v-if="!papers.length" class="pb-panel__empty">
-              还没有题集。先「新建题集」，再用 PDF 或截图往里加题。
+            <div class="pb-detail__links">
+              <a
+                v-if="(activePaper.question_files || []).length === 1"
+                class="pb-file-link"
+                :href="activePaper.question_files[0].url"
+                target="_blank"
+                rel="noopener"
+                title="打开上传的原卷文件"
+              >原卷 ↗</a>
+              <button
+                v-else-if="(activePaper.question_files || []).length > 1"
+                type="button"
+                class="pb-file-link"
+                title="选择要打开的原卷文件"
+                @click="openSourceFiles(activePaper, 'questions')"
+              >原卷 {{ activePaper.question_files.length }} 份 ↗</button>
+              <a
+                v-if="(activePaper.answer_files || []).length === 1"
+                class="pb-file-link"
+                :href="activePaper.answer_files[0].url"
+                target="_blank"
+                rel="noopener"
+                title="打开上传的官方答案原件"
+              >答案册 ↗</a>
+              <button
+                v-else-if="(activePaper.answer_files || []).length > 1"
+                type="button"
+                class="pb-file-link"
+                title="选择要打开的答案原件"
+                @click="openSourceFiles(activePaper, 'answers')"
+              >答案册 {{ activePaper.answer_files.length }} 份 ↗</button>
+              <button
+                v-if="(activePaper.ocr_review || []).length"
+                type="button"
+                class="pb-review-badge"
+                :title="`双模型复核：${activePaper.ocr_review.length} 处读法不一致，待对照原卷核对`"
+                @click="openOcrReview(activePaper)"
+              >⚠ {{ activePaper.ocr_review.length }} 处待核对</button>
+              <span
+                v-else-if="activePaper.ocr_review_summary?.skippedPages"
+                class="pb-review-warn"
+                :title="`有 ${activePaper.ocr_review_summary.skippedPages} 页双模型复核没跑成`"
+              >⚠ {{ activePaper.ocr_review_summary.skippedPages }} 页未复核</span>
+              <button
+                v-if="coverageIssueCount(activePaper) > 0"
+                type="button"
+                class="pb-review-badge is-danger"
+                :title="coverageTitle(activePaper)"
+                @click="openCoverage(activePaper)"
+              >⛔ {{ coverageIssueCount(activePaper) }} 个题号不符</button>
+              <span
+                v-else-if="activePaper.coverage_summary?.pagesUnverified"
+                class="pb-review-warn"
+                :title="`有 ${activePaper.coverage_summary.pagesUnverified} 页题号清点没跑成`"
+              >⚠ {{ activePaper.coverage_summary.pagesUnverified }} 页未清点</span>
+              <button
+                v-else-if="activePaper.coverage_summary"
+                type="button"
+                class="pb-checked"
+                :title="coverageOkTitle(activePaper)"
+                @click="openCoverage(activePaper)"
+              >✓ 题号已核</button>
+              <button type="button" class="pb-file-link" @click="openUploadDialog(activePaper.id, 'answers')">上传答案 ↗</button>
             </div>
           </div>
 
           <div class="pb-panel pb-panel--tip">
-            <strong>怎么用</strong>
-            <p>① 建一个题集（一套卷 / 一个合集）→ ② 用「PDF 加题」或「截图加题」往里收题 → ③ 中间勾题，右边卷面实时变。</p>
-            <p>两种方式都追加到当前题集，不会覆盖已收的题。改分值：点卷面上的「4 分」。</p>
+            <strong>小提示</strong>
+            <p>拖动题集或文件夹就能归类；点名字展开，右键或点「…」可重命名、建子文件夹。</p>
+            <p>两种加题方式都会追加到当前题集，不会覆盖已收的题。</p>
           </div>
         </aside>
 
@@ -481,7 +449,9 @@
         识别后<strong>追加到下面选中的题集</strong>，题号自动往后接，不会覆盖之前收的题。
         认不出文字的截图也会按图存下来，之后在题目里补字就行。
         每张图下面可以填<strong>来源链接</strong>和<strong>时间点 / 说明</strong>（如「12:35 讲到辅助线」）；
-        B站、YouTube 的链接填了时间点，点开会直接跳到那一秒。入库后在题目行也能补改。
+        B站、YouTube 的链接填了时间点，点开会直接跳到那一秒。
+        <strong>不想填也行</strong>：截图时把浏览器地址栏和播放器进度条一起截进来，
+        系统会自动读出网址和时间卡点填好；手填的不会被覆盖。入库后在题目行也能补改。
       </p>
       <WorkbenchSelect v-model="clipTargetPaperId" :options="uploadPaperOptions" width="100%" aria-label="选择要加进的题集" style="margin-bottom:12px" />
       <div
@@ -631,6 +601,7 @@ import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import MathRender from '../components/MathRender.vue'
+import PaperBankTree from '../components/paperBank/PaperBankTree.vue'
 import {
   getPaperBankPapers,
   createPaperBankPaper,
@@ -781,6 +752,10 @@ let repaintToken = 0
 const totalQuestionCount = computed(() => papers.value.reduce((n, p) => n + (p.question_count || 0), 0))
 // 题目行要按所属题集找「原卷」入口；字段名与后端 /api/paper-bank/papers 逐字一致
 const papersById = computed(() => new Map(papers.value.map(p => [p.id, p])))
+// 选中某个题集时，左侧底部展示它的原卷 / 答案 / 复核状态；树本身只负责导航。
+const activePaper = computed(() => (
+  filterPaper.value === 'all' ? null : (papersById.value.get(filterPaper.value) || null)
+))
 // 2026-11-07：题集一律按后端 created_at DESC 展示，不再有「截图题库」置顶这一特殊分类。
 // 加题入口的默认目标：当前左侧选中的题集，没选就取最近建的那个。
 const defaultPaperId = () => (filterPaper.value !== 'all' ? filterPaper.value : (papers.value[0]?.id || ''))
@@ -1756,6 +1731,20 @@ onUnmounted(() => {
 .pb-clear:hover { text-decoration: underline; }
 .pb-clear:disabled { color: #bbb; cursor: default; text-decoration: none; }
 .pb-panel__empty { font-size: 12px; color: #999; line-height: 1.7; padding: 6px 2px; }
+/* 当前题集详情：状态跟着选中项走，树本身保持干净（2026-11-07） */
+.pb-panel--detail { display: flex; flex-direction: column; gap: var(--wb-space-2, 8px); }
+.pb-detail__head {
+  display: flex; flex-direction: column; gap: 2px;
+  padding-bottom: var(--wb-space-2, 8px);
+  border-bottom: 1px solid var(--wb-border-light, #f1f5f9);
+}
+.pb-detail__label { font-size: var(--wb-fs-caption, 11px); color: var(--wb-text-tertiary, #94a3b8); }
+.pb-detail__head strong {
+  font-size: var(--wb-fs-body, 13px); font-weight: var(--wb-fw-semibold, 600);
+  color: var(--wb-text, #1e293b);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pb-detail__links { display: flex; flex-wrap: wrap; gap: var(--wb-space-1, 4px) var(--wb-space-2, 8px); }
 .pb-panel--tip { background: #faf9f6; }
 .pb-panel--tip strong { font-size: 12px; }
 .pb-panel--tip p { font-size: 11px; color: #777; line-height: 1.7; margin: 4px 0 0; }
