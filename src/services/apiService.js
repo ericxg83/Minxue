@@ -1188,11 +1188,20 @@ export const updatePaperBankQuestion = async (id, patch) => {
  * 与服务端后台解析同款：请求立即返回，前端轮询论文卷状态。
  * 返回值里 beforeCount 是解析前的题数快照，用来算「这一批入了多少题」。
  */
-export const uploadPaperClips = async (files) => {
+export const uploadPaperClips = async (files, sources = []) => {
   const fd = new FormData()
   for (const f of files) fd.append('files', f)
+  // 来源与 files 按下标对齐；一个 JSON 字段避免 multer 把同名文本字段合并成数组
+  fd.append('sources', JSON.stringify(sources))
   return apiRequest('/paper-bank/clips', { method: 'POST', body: fd }, 1)
 }
+
+// 改截图来源（URL 或手写文字）。按截图页码存在卷上，同页拆出的多题共享同一来源。
+export const updatePaperClipSource = (id, source) =>
+  apiRequest(`/paper-bank/questions/${id}/source`, {
+    method: 'PUT',
+    body: JSON.stringify({ source }),
+  })
 
 // 删单题（截图截错了 / 一张图多拆出一行时用）。只删这一行，不动卷。
 export const deletePaperBankQuestion = (id) => apiRequest(`/paper-bank/questions/${id}`, { method: 'DELETE' })

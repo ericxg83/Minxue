@@ -34,6 +34,7 @@ import {
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
 import { planSubrowFigureAssignments, analyzeCropFigure } from './paperFigureAssign.js'
 import { stripPageRulingLines } from './pageRulingClean.js'
+import { extractClipFigure } from './clipFigureClean.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
 // 瞬时并发打满会触发供应商限流（2026-09-09 全本错位事故的成因之一）。
@@ -1158,7 +1159,12 @@ const RQ_READ_COLS = `rq.id, rq.resource_id, rq.question_no, rq.sub_no, rq.paren
   rq.image_url, rq.page_image_url, rq.created_at,
   rq.answer AS own_answer, rq.answer_source AS own_answer_source,
   oa.answer AS official_answer, oa.answer_status AS official_answer_status,
-  oa.unit_title AS official_unit_title, oa.conflict_count AS answer_conflict_count`
+  oa.unit_title AS official_unit_title, oa.conflict_count AS answer_conflict_count,
+  -- 截图来源（2026-11-07）：按「第几张截图」= page_no 存在卷的 metadata.clipSources 里，
+  -- 一张截图拆出的多道题共享同一个来源。用相关子查询取，两个读取入口自动都带，
+  -- 且不改 FROM / JOIN 结构（listPaperQuestions 没有 JOIN resources）。
+  (SELECT r.metadata->'clipSources'->>(rq.page_no::text)
+     FROM resources r WHERE r.id = rq.resource_id) AS clip_source`
 
 /** 单份卷子的题目（按页码、题号、小问号排序）。 */
 export async function listPaperQuestions(resourceId) {
@@ -1377,9 +1383,10 @@ export async function deletePaperQuestion(id) {
  * 兜底：OCR 一个字都没读出来的截图**也要存**——老师要的是「把这道题留下来」，
  * 文字识别是加分项。此时补一行只有图、题干待补的题，老师在界面上手填即可。
  */
-export async function parseClipImages({ images, logger = console }) {
+export async function parseClipImages({ images, sources = [], logger = console }) {
   if (!Array.isArray(images) || !images.length) throw new Error('没有收到截图')
   const batch = images.slice(0, CLIP_MAX_IMAGES)
+  const sourceList = (Array.isArray(sources) ? sources : [sources]).slice(0, batch.length)
 
   const library = await getOrCreateClipLibrary()
   const resourceId = library.id
@@ -1398,10 +1405,26 @@ export async function parseClipImages({ images, logger = console }) {
   const pageResults = await mapWithConcurrency(batch, CLIP_CONCURRENCY, async (buf, idx) => {
     const pageNumber = basePage + idx + 1
     try {
-      return await parsePageToQuestions({ pageBuffer: buf, pageNumber, logger })
+      const parsed = await parsePageToQuestions({ pageBuffer: buf, pageNumber, logger })
+      // ── 截图专属配图提取（2026-11-07）──
+      // 主链路的「白底黑墨」判据在深底板书截图上必然失效（整页都是墨），
+      // 结果是 image_url 为空、旧代码拿整张截图顶上 ⇒ 老师看到人像 + 黑底 + 板书重影。
+      // 这里把同一张截图另跑一遍板书净化，拿到白底干净几何图后**覆盖**主链路的裁片。
+      let figureUrl = null
+      const clean = await extractClipFigure(buf, { logger })
+      if (clean.buffer) {
+        try {
+          figureUrl = await uploadImage(clean.buffer, `clip-p${pageNumber}-fig.jpg`, 'paper-bank')
+        } catch (e) {
+          logger.warn?.(`[paperBank] 截图第 ${idx + 1} 张配图上传失败: ${e?.message || e}`)
+        }
+      } else {
+        logger.info?.(`[paperBank] 截图第 ${idx + 1} 张未提取到干净配图（${clean.reason}），不挂配图`)
+      }
+      return { ...parsed, figureUrl }
     } catch (e) {
       logger.warn?.(`[paperBank] 截图第 ${idx + 1} 张识别失败: ${e?.message || e}`)
-      return { rows: [] }
+      return { rows: [], figureUrl: null }
     } finally {
       done += 1
       await setPaperParseStatus(resourceId, { donePages: done }).catch(() => {})
@@ -1409,7 +1432,12 @@ export async function parseClipImages({ images, logger = console }) {
   })
 
   let rows = []
-  for (const r of pageResults) if (Array.isArray(r?.rows) && r.rows.length) rows = rows.concat(r.rows)
+  for (const r of pageResults) {
+    if (!Array.isArray(r?.rows) || !r.rows.length) continue
+    // 一张截图拆出的多行（小问组）共用同一张干净配图；页面侧 showFigure 按 URL 只显示一次。
+    if (r.figureUrl) for (const row of r.rows) row.image_url = r.figureUrl
+    rows = rows.concat(r.rows)
+  }
 
   // OCR 没读出题的截图：整张图存进 OSS 当题，题干留空等老师补
   const emptyIdx = []
@@ -1432,7 +1460,9 @@ export async function parseClipImages({ images, logger = console }) {
         tags: [],
         page_no: pageNumber,
         bbox: null,
-        image_url: url,
+        // 一个字都没认出来时，整张原截图仍是老师唯一能补题干的线索 ⇒ page_image_url 必须是原图；
+        // 但行内配图优先用净化后的几何图（若有），不把人像/黑底铺在题目下面。
+        image_url: pageResults[idx]?.figureUrl || url,
         page_image_url: url,
       })
     } catch (e) {
@@ -1441,14 +1471,11 @@ export async function parseClipImages({ images, logger = console }) {
   }
   if (!rows.length) throw new Error('这批截图没能存下来（图片可能已损坏），请重新截图再传')
 
-  // 截图场景必须有图：主链路对「纯文字题」故意不挂裁片（整页 A4 糊满列表），
-  // 但截图本身就是「这道题的那张图」—— 没有图老师就只能看到一串 OCR 文字，等于没收进来。
-  // 所以裁片为空时用整张截图顶上（同页多题会共用同一张，页面侧 showFigure 按 URL 只显示一次）。
-  let imgFilled = 0
-  for (const r of rows) {
-    if (!r.image_url && r.page_image_url) { r.image_url = r.page_image_url; imgFilled += 1 }
-  }
-  if (imgFilled) logger.warn?.(`[paperBank] ${imgFilled} 行无裁片，已用整张截图顶上`)
+  // ⛔ 2026-11-07 撤掉「裁片为空就用整张截图顶上」的兜底（负责人报障的直接根因）。
+  // 那句话把带人像、黑背景、板书重影的原始截图当成配图铺在题目下面，与讲解版的
+  // 白底干净裁片差了整整一档。现在的口径：提不出干净几何图 ⇒ **不挂配图**，
+  // page_image_url 仍是原截图，老师点「看原截图」随时能回看；宁可不给图，不给脏图。
+  // （主链路对纯文字题不挂裁片的既有口径不变，此处只改截图这条新路径。）
 
   // 本批内先补号保证每行有唯一题号，再由 appendPaperQuestions 整体平移到已有题号之后
   assignGlobalQuestionNumbers(rows)
@@ -1462,6 +1489,25 @@ export async function parseClipImages({ images, logger = console }) {
       WHERE id = $1`,
     [resourceId, new Date().toISOString()]
   ).catch(e => logger.warn?.(`[paperBank] 截图时间戳回填失败: ${e.message}`))
+
+  // 来源（2026-11-07 负责人需求）：按「第几张截图」= page_no 存，一张图拆出的多题共享来源。
+  // 放 resources.metadata.clipSources 是纯加法、零迁移；用 || 合并旧 map，不覆盖同卷其它
+  // metadata 键，也不碰多批次已存的来源。
+  const clipSources = {}
+  sourceList.forEach((s, i) => {
+    const v = String(s ?? '').trim().slice(0, 500)
+    if (v) clipSources[String(basePage + i + 1)] = v
+  })
+  if (Object.keys(clipSources).length) {
+    await query(
+      `UPDATE resources
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+               || jsonb_build_object('clipSources',
+                    COALESCE(metadata->'clipSources', '{}'::jsonb) || $2::jsonb)
+        WHERE id = $1`,
+      [resourceId, JSON.stringify(clipSources)]
+    ).catch(e => logger.warn?.(`[paperBank] 截图来源回填失败: ${e.message}`))
+  }
 
   return { resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length }
 }

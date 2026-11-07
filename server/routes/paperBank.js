@@ -423,7 +423,16 @@ router.post('/clips', clipUpload, async (req, res) => {
       message: `${files.length} 张截图已收下，正在识别`,
     })
 
-    clipJob = parseClipImages({ images: files.map(f => f.buffer) })
+    // 来源（2026-11-07）：前端把「每张截图一个来源」的数组 JSON 塞进一个表单字段，
+    // 与 files 按下标对齐。填错/解析失败不影响收题，只是不带来源。
+    const rawSources = Array.isArray(req.body?.sources) ? req.body.sources[0] : req.body?.sources
+    let clipSources = []
+    try {
+      const v = rawSources ? JSON.parse(rawSources) : []
+      if (Array.isArray(v)) clipSources = v
+    } catch { /* 忽略，收题优先 */ }
+
+    clipJob = parseClipImages({ images: files.map(f => f.buffer), sources: clipSources })
       .then(r => console.log(`[paperBank] 截图入库完成 ${r.resourceId}: +${r.inserted} 题（含 ${r.emptyPages} 张仅存图）`))
       .catch(async (e) => {
         console.error('[paperBank] 截图入库失败:', e)
@@ -528,6 +537,49 @@ router.put('/questions/:id', async (req, res) => {
     res.json({ success: true, question: updated })
   } catch (e) {
     res.status(500).json({ error: '保存失败', message: e.message })
+  }
+})
+
+/**
+ * 改截图来源（2026-11-07 负责人需求：截图后补一下图片来源，URL 或手写文字都行）。
+ *
+ * 来源属于「这张截图」，不是某个题目行 —— 一张图拆成多道题时它们共享同一出处。
+ * 因此按 page_no（本卷第几张截图）存在卷的 metadata.clipSources，改一处整页生效。
+ * ⛔ 只对截图题库开放：普通卷的 page_no 是 PDF 页码，语义不同，别把两者混起来。
+ */
+router.put('/questions/:id/source', async (req, res) => {
+  try {
+    const source = String(req.body?.source ?? '').trim().slice(0, 500)
+    const { rows } = await query(
+      `SELECT rq.resource_id, rq.page_no, r.metadata->>'origin' AS origin
+         FROM resource_questions rq
+         JOIN resources r ON r.id = rq.resource_id
+        WHERE rq.id = $1`,
+      [req.params.id]
+    )
+    if (!rows.length) return res.status(404).json({ error: '题目不存在' })
+    if (rows[0].origin !== 'screenshot') {
+      return res.status(400).json({
+        error: '只有截图题库的题能改来源',
+        message: '整份上传的卷子请点「看原卷」查出处',
+      })
+    }
+    if (rows[0].page_no == null) return res.status(400).json({ error: '这道题没有截图页码' })
+    await query(
+      `UPDATE resources
+          SET metadata = jsonb_set(
+                COALESCE(metadata, '{}'::jsonb)
+                  || jsonb_build_object('clipSources',
+                       COALESCE(metadata->'clipSources', '{}'::jsonb)),
+                ARRAY['clipSources', $2::text],
+                to_jsonb($3::text),
+                true)
+        WHERE id = $1`,
+      [rows[0].resource_id, String(rows[0].page_no), source]
+    )
+    res.json({ success: true, source })
+  } catch (e) {
+    res.status(500).json({ error: '来源保存失败', message: e.message })
   }
 })
 

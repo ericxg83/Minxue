@@ -241,11 +241,45 @@
                 </div>
                 <div v-else class="pb-row__answer is-empty">未录入参考答案</div>
 
+                <!-- 截图来源（2026-11-07）：URL 可点、文字直显，随时补/改。
+                     严格只认 http(s) 才渲染成链接，手写文字与危险协议一律纯文本。 -->
+                <div v-if="q.resource_id === clipPaperId" class="pb-row__source">
+                  <span class="pb-row__source-label">来源</span>
+                  <template v-if="sourceEditingId !== q.id">
+                    <a
+                      v-if="isSourceUrl(q.clip_source)"
+                      :href="q.clip_source"
+                      target="_blank"
+                      rel="noopener"
+                      class="pb-link pb-row__source-link"
+                    >{{ q.clip_source }} ↗</a>
+                    <span v-else-if="q.clip_source" class="pb-row__source-text">{{ q.clip_source }}</span>
+                    <span v-else class="pb-row__source-empty">未填</span>
+                    <button type="button" class="pb-link" @click="startEditSource(q)">
+                      {{ q.clip_source ? '改来源' : '补来源' }}
+                    </button>
+                  </template>
+                  <template v-else>
+                    <input
+                      v-model="sourceDraft"
+                      class="pb-row__source-input"
+                      type="text"
+                      maxlength="500"
+                      placeholder="粘贴 URL 或输入文字，如「B站 · 某某老师 第3讲」"
+                      @keydown.enter.prevent="saveSource(q)"
+                      @keydown.esc.prevent="sourceEditingId = ''"
+                    />
+                    <button type="button" class="pb-link" @click="saveSource(q)">保存</button>
+                    <button type="button" class="pb-link" @click="sourceEditingId = ''">取消</button>
+                  </template>
+                </div>
+
                 <div class="pb-row__foot">
                   <button type="button" class="pb-link" @click="toggleEditor(q.id)">
                     {{ editingId === q.id ? '收起编辑' : '改难度 / 标签' }}
                   </button>
-                  <a v-if="q.image_url" class="pb-link" :href="q.image_url" target="_blank" rel="noopener">看原题图</a>
+                  <!-- 2026-11-07：配图提不出干净几何图时 image_url 为空，原截图仍必须能点开回看 -->
+                  <a v-if="q.image_url || q.page_image_url" class="pb-link" :href="q.image_url || q.page_image_url" target="_blank" rel="noopener">{{ q.image_url ? '看原题图' : '看原截图' }}</a>
                   <!-- 原卷是整份上传文件；PDF 直接跳到本题所在页，多张照片按页码选对应那张 -->
                   <a
                     v-if="questionSourceUrl(q)"
@@ -430,6 +464,7 @@
         看到好题直接截图，回到这里按 <kbd>Ctrl</kbd>+<kbd>V</kbd> 粘进来（也可以拖图、或点下面选文件）。
         识别后存进左侧的<strong>「截图题库」卷</strong>，题号自动往后接，不会覆盖之前收的题。
         认不出文字的截图也会按图存下来，之后在题目里补字就行。
+        每张图下面可以顺手填<strong>来源</strong>（网址或一句话都行），入库后在题目行也能补改。
       </p>
       <div
         class="pb-clip-drop"
@@ -448,8 +483,17 @@
       <input ref="clipInput" type="file" multiple accept="image/png,image/jpeg,image/webp" style="display:none" @change="onClipPicked" />
       <div v-if="clipFiles.length" class="pb-clip-grid">
         <figure v-for="(f, i) in clipFiles" :key="f.key" class="pb-clip-item">
-          <img :src="f.preview" :alt="`待识别截图 ${i + 1}`" />
-          <button type="button" class="pb-clip-item__del" title="移除这张" @click.stop="removeClipFile(i)">×</button>
+          <div class="pb-clip-item__img">
+            <img :src="f.preview" :alt="`待识别截图 ${i + 1}`" />
+            <button type="button" class="pb-clip-item__del" title="移除这张" @click.stop="removeClipFile(i)">×</button>
+          </div>
+          <input
+            v-model="f.source"
+            class="pb-clip-item__src"
+            type="text"
+            maxlength="500"
+            :placeholder="`第 ${i + 1} 张来源：URL 或文字（可不填）`"
+          />
         </figure>
       </div>
       <p v-if="clipFiles.length" class="pb-clip-count">已选 {{ clipFiles.length }} 张，识别完会自动切到「截图题库」卷</p>
@@ -573,6 +617,7 @@ import {
   deletePaperBankQuestion,
   searchPaperBankQuestions,
   updatePaperBankQuestion,
+  updatePaperClipSource,
 } from '../../services/apiService.js'
 import { buildHandoutBody, buildHandoutCSS, groupHandoutQuestions } from '../../utils/handoutPdf'
 import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/composePaperPdf'
@@ -686,11 +731,17 @@ const fileInput = ref(null)
 // ── 截图入题库（2026-11-06）──
 // 老师看视频/网课看到好题，截图直接收进题库：不需要先建卷，图片统一进「截图题库」卷。
 const showClipDialog = ref(false)
-const clipFiles = ref([]) // { key, file, preview }
+const clipFiles = ref([]) // { key, file, preview, source }（2026-11-07 每张截图可填来源）
 const clipInput = ref(null)
 const clipDragOver = ref(false)
 const clipUploading = ref(false)
 const CLIP_MAX_FILES = 12 // 与服务端 CLIP_MAX_IMAGES 对齐，前端先挡一层
+
+// 来源行内编辑：来源属于「这张截图」，按 page_no 共享；只给截图题库的题这个入口。
+const sourceEditingId = ref('')
+const sourceDraft = ref('')
+// 严格只认 http(s)：老师手写的文字或 javascript: 之类一律当纯文本，不能变成可点链接
+const isSourceUrl = (s) => /^https?:\/\//i.test(String(s || '').trim())
 let clipSeq = 0
 let clipPollTimer = null
 
@@ -957,6 +1008,35 @@ const applyQuestionPatch = async (q, patch, okMsg) => {
   }
 }
 
+// ── 截图来源（2026-11-07 负责人需求）──
+// 来源存在卷的 metadata.clipSources[page_no]，同一张截图拆出的多题共享一份。
+const startEditSource = (q) => {
+  sourceEditingId.value = q.id
+  sourceDraft.value = q.clip_source || ''
+}
+
+const saveSource = async (q) => {
+  const val = sourceDraft.value.trim().slice(0, 500)
+  try {
+    const r = await updatePaperClipSource(q.id, val)
+    const source = r?.source ?? val
+    // ⚠️ 后端按页码写，页面也要按页码同步全部行，否则同页的兄弟题还显示旧来源
+    for (const x of questions.value) {
+      if (x.resource_id === q.resource_id && q.page_no != null && x.page_no === q.page_no) {
+        x.clip_source = source
+      }
+    }
+    basket.value = basket.value.map(it => (
+      it.resource_id === q.resource_id && q.page_no != null && it.page_no === q.page_no
+        ? { ...it, clip_source: source } : it
+    ))
+    sourceEditingId.value = ''
+    ElMessage.success(source ? '来源已保存' : '来源已清空')
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '来源保存失败')
+  }
+}
+
 const saveText = (q) => {
   const patch = { content: textDraft.value.content }
   if (q.parent_stem != null) patch.parent_stem = textDraft.value.parent_stem
@@ -1069,6 +1149,7 @@ const addClipFiles = (rawFiles) => {
     key: `clip-${++clipSeq}`,
     file: f,
     preview: URL.createObjectURL(f),
+    source: '',
   })))
   if (imgs.length > room) {
     ElMessage.warning(`只收下前 ${room} 张，剩下的下一批再贴`)
@@ -1106,7 +1187,10 @@ const handleClipUpload = async () => {
   if (!clipFiles.value.length || clipUploading.value) return
   clipUploading.value = true
   try {
-    const r = await uploadPaperClips(clipFiles.value.map(f => f.file))
+    const r = await uploadPaperClips(
+      clipFiles.value.map(f => f.file),
+      clipFiles.value.map(f => f.source || ''),
+    )
     showClipDialog.value = false
     ElMessage.success(r?.message || '截图已收下，正在识别')
     await loadPapers()
@@ -1717,6 +1801,16 @@ onUnmounted(() => {
 .pb-row__answer em { color: #993c1d; font-style: normal; }
 .pb-row__answer em.is-warn { color: #a32d2d; font-weight: 500; }
 .pb-row__answer.is-empty { color: #bbb; }
+/* 截图来源（2026-11-07） */
+.pb-row__source { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 11px; margin-top: 5px; color: #6b7280; }
+.pb-row__source-label { color: #999; }
+.pb-row__source-text { color: #555; word-break: break-all; }
+.pb-row__source-empty { color: #bbb; }
+.pb-row__source-link { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-row__source-input {
+  flex: 1 1 260px; min-width: 160px; font-size: 11px; padding: 3px 6px;
+  border: 1px solid #ddd; border-radius: 4px; background: #fff; font-family: inherit;
+}
 .pb-row__foot { display: flex; gap: 12px; margin-top: 6px; }
 .pb-link { border: 0; background: transparent; padding: 0; font-size: 11px; color: #8a8a8a; cursor: pointer; text-decoration: none; }
 .pb-link:hover { color: #185fa5; text-decoration: underline; }
@@ -1847,13 +1941,14 @@ onUnmounted(() => {
 .pb-clip-drop span { font-size: 11px; color: #999; }
 .pb-clip-drop:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
 .pb-clip-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px;
-  max-height: 240px; overflow: auto;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px;
+  max-height: 320px; overflow: auto;
 }
 .pb-clip-item {
-  position: relative; margin: 0; border: 1px solid #e6e2d9; border-radius: 8px;
-  overflow: hidden; background: #fff; aspect-ratio: 4 / 3;
+  margin: 0; border: 1px solid #e6e2d9; border-radius: 8px;
+  overflow: hidden; background: #fff; display: flex; flex-direction: column;
 }
+.pb-clip-item__img { position: relative; aspect-ratio: 4 / 3; background: #f6f5f1; }
 .pb-clip-item img { width: 100%; height: 100%; object-fit: contain; background: #f6f5f1; }
 .pb-clip-item__del {
   position: absolute; right: 3px; top: 3px; width: 18px; height: 18px;
@@ -1861,5 +1956,12 @@ onUnmounted(() => {
   background: rgba(255, 255, 255, .94); color: #b4436c; font-size: 12px; cursor: pointer;
 }
 .pb-clip-item__del:hover { background: #fdecef; border-color: #d4537e; }
+/* 每张截图的来源输入框（2026-11-07） */
+.pb-clip-item__src {
+  width: 100%; box-sizing: border-box; border: 0; border-top: 1px solid #eee9df;
+  padding: 5px 6px; font-size: 10px; color: #444; background: #fcfbf8; font-family: inherit;
+}
+.pb-clip-item__src:focus { outline: none; background: #fff; }
+.pb-clip-item__src::placeholder { color: #b3ada2; }
 .pb-clip-count { margin: 8px 0 0; font-size: 11px; color: #8a8a8a; }
 </style>
