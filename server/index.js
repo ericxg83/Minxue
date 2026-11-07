@@ -72,6 +72,7 @@ import { migrateKpRelations } from './migrations/062_kp_relations.js'
 import { migratePaperBankQuestions } from './migrations/063_paper_bank_questions.js'
 import { migrateSimilarQuestionGroups } from './migrations/064_similar_question_groups.js'
 import { migrateQuestionOptionImages } from './migrations/065_add_question_option_images.js'
+import { migratePaperBankFolders } from './migrations/066_paper_bank_folders.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -5574,7 +5575,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateKpRelations', migrateKpRelations],
         ['migratePaperBankQuestions', migratePaperBankQuestions],
         ['migrateSimilarQuestionGroups', migrateSimilarQuestionGroups],
-        ['migrateQuestionOptionImages', migrateQuestionOptionImages]
+        ['migrateQuestionOptionImages', migrateQuestionOptionImages],
+        ['migratePaperBankFolders', migratePaperBankFolders]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

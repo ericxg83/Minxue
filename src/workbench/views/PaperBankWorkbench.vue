@@ -4,7 +4,7 @@
       <PageHeader
         eyebrow="教学资源 / 题库"
         title="试卷题库"
-        description="先建好题集，再用 PDF 或截图往里加题；左边挑题，右边卷面实时长出来"
+        description="先建好题集，再用 PDF 或截图往里加题；拖动题集归类，右边卷面实时长出来"
       >
         <template #actions>
           <!-- 2026-11-07：题集是唯一归属，PDF 与截图只是两种「加题」动作，不再各自成一类题库。 -->
@@ -108,12 +108,6 @@
               >✓ 题号已核</button>
               <button type="button" class="pb-file-link" @click="openUploadDialog(activePaper.id, 'answers')">上传答案 ↗</button>
             </div>
-          </div>
-
-          <div class="pb-panel pb-panel--tip">
-            <strong>小提示</strong>
-            <p>拖动题集或文件夹就能归类；点名字展开，右键或点「…」可重命名、建子文件夹。</p>
-            <p>两种加题方式都会追加到当前题集，不会覆盖已收的题。</p>
           </div>
         </aside>
 
@@ -270,10 +264,10 @@
                     @click="startEditSource(q)"
                   >补来源</button>
                   <!-- 2026-11-07：题集是持续累积的（PDF 与截图都追加），所有题都允许单条删除，
-                       带二次确认。截错了、OCR 多拆一行、重传后重复，都能就地清掉。 -->
+                       带二次确认。默认不显现，鼠标移到题目行才出现。 -->
                   <button
                     type="button"
-                    class="pb-link is-danger"
+                    class="pb-link is-danger pb-link--quiet"
                     @click="askDeleteQuestion(q)"
                   >删除本题</button>
                 </div>
@@ -1691,7 +1685,9 @@ onUnmounted(() => {
     row-gap: 10px;
     padding-bottom: 8px;
   }
-  .pb-col--papers { grid-area: papers; }
+  /* 底部常驻卷面（is-fixed, z-index 1200）会压住左栏下半部 ⇒ 当前题集详情看不见。
+     左栏只有 150px 宽，提到 1300 只盖住卷面最左一条，不影响卷面阅读。 */
+  .pb-col--papers { grid-area: papers; z-index: 1300; }
   .pb-col--questions { grid-area: questions; }
   .pb-col--paper {
     grid-area: paper;
@@ -1972,6 +1968,9 @@ onUnmounted(() => {
 .pb-replace-opt input { margin: 2px 0 0; cursor: pointer; }
 .pb-link.is-danger { color: #a32d2d; }
 .pb-link.is-danger:hover { color: #7d2020; }
+/* 删除类操作默认不显现，hover 到题目行才出现（2026-11-07 负责人要求） */
+.pb-row__foot .pb-link--quiet { opacity: 0; transition: opacity var(--wb-motion-fast, 120ms) ease; }
+.pb-row:hover .pb-link--quiet, .pb-row:focus-within .pb-link--quiet { opacity: 1; }
 .pb-hint kbd {
   display: inline-block; padding: 0 4px; border: 1px solid #d9d5cc;
   border-bottom-width: 2px; border-radius: 3px; background: #faf9f6;

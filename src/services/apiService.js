@@ -1135,6 +1135,39 @@ export const deletePaperBankPaper = (id) => apiRequest(`/paper-bank/papers/${id}
 // 清空全部试卷（级联删题目/答案/章节，只动 exam 类型）。重新上传解析前用。
 export const deletePaperBankPapers = () => apiRequest('/paper-bank/papers', { method: 'DELETE' })
 
+// ── 树形文件夹（2026-11-07）：文件夹可无限嵌套，题集是挂在文件夹下的叶子 ──
+// 字段名与后端逐字对齐：folder_id / parent_id / sort_order / folderId。
+export const getPaperBankFolders = async () => {
+  const data = await apiRequest('/paper-bank/folders')
+  return data.folders || []
+}
+
+export const createPaperBankFolder = async ({ name, parentId = null }) => {
+  const data = await apiRequest('/paper-bank/folders', {
+    method: 'POST',
+    body: JSON.stringify({ name, parentId }),
+  })
+  return data.folder
+}
+
+export const updatePaperBankFolder = async (id, patch) => {
+  const data = await apiRequest(`/paper-bank/folders/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })
+  return data.folder
+}
+
+export const deletePaperBankFolder = (id) =>
+  apiRequest(`/paper-bank/folders/${id}`, { method: 'DELETE' })
+
+/** 把题集移进某个文件夹；folderId 传空 = 移回未归类。 */
+export const movePaperBankPaper = (id, folderId) =>
+  apiRequest(`/paper-bank/papers/${id}/folder`, {
+    method: 'PUT',
+    body: JSON.stringify({ folderId: folderId || null }),
+  })
+
 // 上传 PDF 或试卷照片触发解析。解析在服务端后台跑，本请求立即返回 ⇒ 不需要长超时。
 // 2026-11-07：默认**追加**到所选题集；只有 replace=true（老师显式勾「重新解析」）才整卷重建。
 export const parsePaperBankPaper = async (id, files, { replace = false } = {}) => {

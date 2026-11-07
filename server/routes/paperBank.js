@@ -15,7 +15,7 @@
  */
 import { Router } from 'express'
 import multer from 'multer'
-import { query } from '../config/neon.js'
+import { query, transaction } from '../config/neon.js'
 import { uploadPDF, uploadImage, headObjectExists } from '../services/ossService.js'
 import { getCDNUrl } from '../config/oss.js'
 import {
@@ -119,11 +119,161 @@ const withSourceFiles = (r) => {
     coverage_summary: meta.coverageAudit?.summary && typeof meta.coverageAudit.summary === 'object'
       ? meta.coverageAudit.summary
       : null,
+    // 题集归属（2026-11-07 文件夹树）：挂在哪一层文件夹下，null = 未归类。
+    // 不新加列，只读 metadata；字段名与前端逐字对齐：folder_id。
+    folder_id: meta.folderId == null ? null : String(meta.folderId),
     // 历史字段（2026-11-06 旧模型）：曾用来标记「截图题库」卷，让前端置顶并打「截图」标签。
     // ⛔ 2026-11-07 起截图不再自成一类题集，前端已不消费此字段；保留只为兼容存量行。
     origin: meta.origin === 'screenshot' ? 'screenshot' : null,
   }
 }
+
+// ── 树形文件夹（2026-11-07）─────────────────────────────────────────────────
+//
+// 文件夹本体在 paper_bank_folders 表（迁移 066 纯加法，不碰任何既有表/列）。
+// 题集归属挂在 resources.metadata.folderId（jsonb 单键，零加列）。
+// ⛔ 删除文件夹绝不连带删题目：子文件夹上移一层、题集回到「未归类」。
+// ⛔ parentId 校验 + 防环：树成环会让前端展平死循环。
+
+const folderInputError = (e) => /不存在|不能把|层级异常|缺少名称/.test(String(e?.message || ''))
+
+/** 空 / null = 根目录；给了就必须指向一个真实存在的文件夹。 */
+async function resolveParentId(parentId) {
+  if (parentId == null || parentId === '') return null
+  const { rows } = await query(
+    `SELECT id FROM paper_bank_folders WHERE id = $1::uuid`, [parentId]
+  )
+  if (!rows.length) throw new Error('目标文件夹不存在，请刷新后重试')
+  return parentId
+}
+
+/** 沿 parent_id 往上走，确认新父节点不是自己或自己的后代。 */
+async function assertNoCycle(id, parentId) {
+  if (!parentId) return
+  if (parentId === id) throw new Error('不能把文件夹放进它自己')
+  let cursor = parentId
+  const seen = new Set()
+  while (cursor) {
+    if (cursor === id) throw new Error('不能把文件夹放进它的子文件夹里')
+    if (seen.has(cursor)) throw new Error('文件夹层级异常，请刷新后重试')
+    seen.add(cursor)
+    const { rows } = await query(
+      `SELECT parent_id FROM paper_bank_folders WHERE id = $1`, [cursor]
+    )
+    cursor = rows[0]?.parent_id || null
+  }
+}
+
+router.get('/folders', async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT id, name, parent_id, sort_order, created_at
+         FROM paper_bank_folders
+        ORDER BY sort_order ASC, created_at ASC`
+    )
+    res.json({ success: true, folders: rows })
+  } catch (e) {
+    res.status(500).json({ error: '文件夹加载失败', message: e.message })
+  }
+})
+
+router.post('/folders', async (req, res) => {
+  try {
+    const name = String(req.body?.name ?? '').trim().slice(0, 80)
+    if (!name) throw new Error('缺少名称：给文件夹起个名字')
+    const parentId = await resolveParentId(req.body?.parentId)
+    const { rows: mx } = await query(
+      `SELECT COALESCE(MAX(sort_order), 0)::int AS n
+         FROM paper_bank_folders
+        WHERE parent_id IS NOT DISTINCT FROM $1::uuid`,
+      [parentId]
+    )
+    const { rows } = await query(
+      `INSERT INTO paper_bank_folders (name, parent_id, sort_order)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, parent_id, sort_order, created_at`,
+      [name, parentId, (mx[0]?.n || 0) + 1]
+    )
+    res.json({ success: true, folder: rows[0] })
+  } catch (e) {
+    res.status(folderInputError(e) ? 400 : 500).json({ error: '新建文件夹失败', message: e.message })
+  }
+})
+
+router.put('/folders/:id', async (req, res) => {
+  try {
+    const id = req.params.id
+    const { rows: cur } = await query(
+      `SELECT id, name, parent_id FROM paper_bank_folders WHERE id = $1`, [id]
+    )
+    if (!cur.length) return res.status(404).json({ error: '文件夹不存在' })
+    const name = req.body?.name == null
+      ? cur[0].name
+      : String(req.body.name).trim().slice(0, 80)
+    if (!name) throw new Error('缺少名称：给文件夹起个名字')
+    let parentId = cur[0].parent_id
+    if (Object.prototype.hasOwnProperty.call(req.body || {}, 'parentId')) {
+      parentId = await resolveParentId(req.body.parentId)
+      await assertNoCycle(id, parentId)
+    }
+    const { rows } = await query(
+      `UPDATE paper_bank_folders SET name = $2, parent_id = $3
+        WHERE id = $1
+        RETURNING id, name, parent_id, sort_order, created_at`,
+      [id, name, parentId]
+    )
+    res.json({ success: true, folder: rows[0] })
+  } catch (e) {
+    res.status(folderInputError(e) ? 400 : 500).json({ error: '保存文件夹失败', message: e.message })
+  }
+})
+
+router.delete('/folders/:id', async (req, res) => {
+  try {
+    const id = req.params.id
+    const { rows: cur } = await query(
+      `SELECT parent_id FROM paper_bank_folders WHERE id = $1`, [id]
+    )
+    if (!cur.length) return res.status(404).json({ error: '文件夹不存在' })
+    const upper = cur[0].parent_id
+    await transaction(async (client) => {
+      // 子文件夹上移一层，不递归删；题目一行都不动。
+      await client.query(
+        `UPDATE paper_bank_folders SET parent_id = $2 WHERE parent_id = $1`,
+        [id, upper]
+      )
+      // ⛔ text 比较，不写裸 jsonb 与 '' 比较（PG 会抛 invalid input syntax for type json）。
+      await client.query(
+        `UPDATE resources
+            SET metadata = COALESCE(metadata, '{}'::jsonb) - 'folderId'
+          WHERE resource_type = 'exam' AND metadata->>'folderId' = $1::text`,
+        [id]
+      )
+      await client.query(`DELETE FROM paper_bank_folders WHERE id = $1`, [id])
+    })
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: '删除文件夹失败', message: e.message })
+  }
+})
+
+/** 把题集移进 / 移出文件夹。folderId 传空 = 未归类。 */
+router.put('/papers/:id/folder', async (req, res) => {
+  try {
+    const folderId = await resolveParentId(req.body?.folderId)
+    const { rowCount } = await query(
+      `UPDATE resources
+          SET metadata = COALESCE(metadata, '{}'::jsonb)
+               || jsonb_build_object('folderId', $2::text)
+        WHERE id = $1 AND resource_type = 'exam'`,
+      [req.params.id, folderId]
+    )
+    if (!rowCount) return res.status(404).json({ error: '题集不存在' })
+    res.json({ success: true, folderId })
+  } catch (e) {
+    res.status(folderInputError(e) ? 400 : 500).json({ error: '移动题集失败', message: e.message })
+  }
+})
 
 // ── 卷列表 ──
 
@@ -536,8 +686,17 @@ router.get('/questions', async (req, res) => {
       const l = splitList(v)
       return l ? l.map(Number).filter(Number.isFinite) : undefined
     }
+    // ⛔ resource_id 是 uuid 列：脏参数（前端缓存里的旧 id、手工拼的 query）直接进
+    //    会让 PG 抛 invalid input syntax for type uuid ⇒ 整条 SQL 500、题目区全空。
+    //    先过滤，一个合法 id 都不剩就返回空结果，别让坏参数打成 500。
+    const rawIds = splitList(req.query.resourceIds)
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const resourceIds = rawIds ? rawIds.filter(x => UUID_RE.test(x)) : undefined
+    if (rawIds && !resourceIds.length) {
+      return res.json({ success: true, questions: [] })
+    }
     const questions = await searchPaperQuestions({
-      resourceIds: splitList(req.query.resourceIds),
+      resourceIds,
       questionNos: nums(req.query.questionNos),
       questionTypes: splitList(req.query.questionTypes),
       difficulties: nums(req.query.difficulties),

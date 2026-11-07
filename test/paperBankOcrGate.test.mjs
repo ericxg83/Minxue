@@ -85,9 +85,10 @@ function checkContract(routesSrc, viewSrc) {
   for (const f of ['ocr_review', 'ocr_review_summary']) {
     if (!r.includes(`${f}:`)) bad.push(`后端 papers 接口须返回 ${f}`)
     // ⛔ 不能用 includes('p.ocr_review')：p.ocr_review_summary 会把它混过去（字段名漏改也不报错）
-    if (!new RegExp(`\\bp\\.${f}\\b`).test(v)) bad.push(`前端须读 p.${f}`)
+    // 2026-11-07：左侧改成文件夹树后，选中项变量叫 activePaper；字段名口径不变。
+    if (!new RegExp(`\\b(?:p|activePaper)\\.${f}\\b`).test(v)) bad.push(`前端须读 ${f}`)
   }
-  if (!/openOcrReview\(p\)/.test(v)) bad.push('缺少待核对清单入口')
+  if (!/openOcrReview\((?:p|activePaper)\)/.test(v)) bad.push('缺少待核对清单入口')
   if (!/showReviewDialog/.test(v)) bad.push('缺少待核对弹窗')
   if (!/questionSourceUrl\(\{ resource_id: reviewDialog\.paper\?\.id, page_no: it\.page_no \}\)/.test(v)) {
     bad.push('待核对项必须能按页码打开原卷')
@@ -131,7 +132,11 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
   assert.ok(checkService(svc.replace(/noBackup: true/g, 'noBackup: false')).length > 0,
     '允许闸静默降级到弱模型必须判红')
 
-  const renamedView = view.replace(/\bp\.ocr_review\b/g, 'p.ocrReview')
+  // 2026-11-07：树改版后页面里同时存在旧的 p.ocr_review（弹窗函数内）和
+  // activePaper.ocr_review（详情面板），两处都写坏才能真正验证检查函数敏感。
+  const renamedView = view
+    .replace(/\bp\.ocr_review\b/g, 'p.ocrReview')
+    .replace(/\bactivePaper\.ocr_review\b/g, 'activePaper.ocrReview')
   assert.ok(checkContract(routes, renamedView).length > 0, '字段名不一致必须判红')
   assert.ok(checkContract(routes.replace('ocr_review:', 'ocrReview:'), view).length > 0, '后端改名必须判红')
 })

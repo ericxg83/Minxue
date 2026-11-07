@@ -401,13 +401,16 @@ test('★ 清空全部路由：只删 exam 类型，解析中必须 409 拒绝�
   assert.deepEqual(checkNoWriteToQuestions(s), [])
 })
 
-test('★ 前端清空入口：必须带确认框、清试题篮、成功后重载卷子与题目', () => {
+test('★ 前端清空能力保留，但删除入口不常驻主界面（2026-11-07 负责人要求）', () => {
   const s = stripComments(read('src/workbench/views/PaperBankWorkbench.vue'))
-  assert.match(s, /askClearPapers/, '必须有清空入口函数')
+  assert.match(s, /askClearPapers/, '清空能力仍保留在代码里，只是不再常驻')
   assert.match(s, /deletePaperBankPapers\(\)/, '必须走 API 层的清空接口')
   assert.match(s, /ElMessageBox\.confirm/, '危险操作必须有确认框')
   assert.match(s, /basket\.value = \[\]/, '清空后试题篮必须清空（里面全是被删卷子的题）')
   assert.match(s, /await loadPapers\(\)[\s\S]{0,80}await loadQuestions\(\)/, '清空后必须重载卷子和题目')
+  assert.match(s, /<PaperBankTree/, '左侧导航改由文件夹树组件承担')
+  assert.ok(!/class="pb-clear"/.test(s), '主界面不得再有「清空全部」按钮')
+  assert.ok(!/>删除<\/button>/.test(s), '题集行不得常驻「删除」按钮')
 })
 
 test('★ API 层：清空接口与单卷删除接口并存，路径不得混淆', () => {

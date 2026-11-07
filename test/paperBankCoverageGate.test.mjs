@@ -207,8 +207,8 @@ test('前后端字段名逐字对齐：coverage_audit / coverage_summary', () =>
     assert.ok(r.includes(`${f}:`), `后端 papers 接口须返回 ${f}`)
     assert.ok(v.includes(`p.${f}`), `前端须读 p.${f}`)
   }
-  // 徽标必须能点开看明细
-  assert.ok(/openCoverage\(p\)/.test(v), '页面必须有清点明细入口')
+  // 徽标必须能点开看明细（2026-11-07：列表改由文件夹树承担，选中项变量叫 activePaper）
+  assert.ok(/openCoverage\((?:p|activePaper)\)/.test(v), '页面必须有清点明细入口')
   assert.ok(/coverage_summary\?\.missingCount/.test(v), '徽标要读漏题数')
 })
 
