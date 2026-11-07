@@ -127,11 +127,12 @@ test('★ 讲解版不得重编号（不得使用组卷的 sub_label 口径）',
 })
 
 // ─────────────────────────────────────────────────────────────
-// ③ 题组排版（2026-11-04 负责人定稿：题号写在公共题干前面，小问只写（1）（2），
-//    公共题干不再逐页重复 —— 推翻旧版「每页重复」的怪排版）
+// ③ 题组排版（2026-11-04 定稿：题号写在公共题干前面，小问只写（1）（2）；
+//    2026-11-07 负责人改口径：讲解版一小问一页，公共题干**每页都要有**，
+//    否则讲第 (2) 问时得翻回第一页看已知条件 —— 推翻 11-04「只印一次」）
 // ─────────────────────────────────────────────────────────────
 
-test('★ 题组：首小问页「19. 公共题干」（题号在前），续页只写（2），题干只印一次', () => {
+test('★ 题组：每小问页都印「19. 公共题干」，续页不许缺条件', () => {
   const stem = '已知二次函数 y=ax²+2x+c 的图象经过点 (1, 4)'
   const body = buildLectureBody({
     items: [
@@ -140,15 +141,33 @@ test('★ 题组：首小问页「19. 公共题干」（题号在前），续页
     ],
   })
   assert.equal(count(body, '<section class="lec-page"'), 2, '一小问一页粒度不变：两问仍各占一页')
-  assert.equal(count(body, 'lec-stem-text'), 1, '公共题干只印一次（不再逐页重复）')
-  assert.ok(body.includes('<span class="lec-stem-no">19.</span>'), '题号必须写在公共题干前面')
+  assert.equal(count(body, 'lec-stem-text'), 2, '公共题干必须逐页重复（一页一小题）')
+  assert.equal(count(body, '<span class="lec-stem-no">19.</span>'), 2, '每页题号都写在公共题干前面')
   assert.ok(body.includes('<span class="lec-q-no">（1）</span>'), '首小问行内写（1）')
   assert.ok(body.includes('<span class="lec-q-no">（2）</span>'), '续页行内只写（2）')
   assert.ok(!body.includes('<span class="lec-q-no">19('), '行内题号不得再拼 19(1)/19(2)（角标原卷号不算）')
-  const iStem = body.indexOf('lec-stem-no')
-  const iQ1 = body.indexOf('（1）')
-  const iQ2 = body.indexOf('（2）')
-  assert.ok(iStem !== -1 && iStem < iQ1 && iQ1 < iQ2, '版式顺序：题号+公共题干 → （1） → （2）')
+  const pages = body.split('<section class="lec-page"').slice(1)
+  pages.forEach((page, i) => {
+    const iStem = page.indexOf('lec-stem-text')
+    const iQ = page.indexOf('lec-q-text')
+    assert.ok(iStem !== -1 && iQ !== -1 && iStem < iQ, `第 ${i + 1} 页版式顺序必须是 公共题干 → 小问`)
+  })
+})
+
+test('★ 续页行本身没存 parent_stem，也要继承题组起点的公共题干', () => {
+  const stem = '如图，在三角形ABC中，点D在边BC上'
+  const body = buildLectureBody({
+    items: [
+      createBasketItem(q({ id: 'a', question_no: 25, sub_no: '1', parent_stem: stem })),
+      createBasketItem(q({ id: 'b', question_no: 25, sub_no: '2', parent_stem: null })),
+    ],
+  })
+  const pages = body.split('<section class="lec-page"').slice(1)
+  assert.equal(pages.length, 2)
+  // ⚠ 数学渲染会把拉丁字母包成 $ABC$，断言取纯中文片段，别拿整句逐字比
+  pages.forEach((page, i) => {
+    assert.ok(page.includes('如图，在三角形'), `第 ${i + 1} 页必须带题组公共题干（含续页）`)
+  })
 })
 
 test('★ 独立行不误收组：单勾一道小问（无同号兄弟行）保持原版式 19(2)', () => {

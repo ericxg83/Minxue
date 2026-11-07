@@ -291,7 +291,12 @@ test('★ 预览必须是「页面里看卷子」（HTML 画进 iframe），不�
   const s = stripComments(read(PAGE))
   assert.ok(/paintPreviewIntoIframe/.test(s), '预览必须走 paintPreviewIntoIframe')
   assert.ok(/ref="previewFrame"/.test(s), '预览容器必须是 iframe')
-  assert.ok(!/URL\.createObjectURL/.test(s), '不得再用 PDF blob 当预览（那是浏览器阅读器，不是学科网那种看法）')
+  // 2026-11-07 收窄口径：「截图直接入库」的本地缩略图也用 createObjectURL，
+  // 与卷面预览无关。只锁「不许拿 PDF/blob 当卷面预览」——
+  // blob 用法必须长在 clipFiles 的 preview 字段上，且 iframe 不得挂 blob 地址。
+  const blobLines = s.split('\n').filter(l => l.includes('URL.createObjectURL'))
+  assert.ok(blobLines.every(l => /preview:\s*URL\.createObjectURL\([^)]*\)/.test(l)),
+    'createObjectURL 只能给截图入库的本地缩略图用，不得拿 PDF blob 当卷面预览')
   assert.ok(!/<iframe[^>]*:src="previewUrl"/.test(s), 'iframe 不得指向 PDF 地址')
 })
 

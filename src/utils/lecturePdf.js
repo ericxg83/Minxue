@@ -7,7 +7,10 @@
  *   ② **一小问一页是唯一拆页粒度**（无切换开关）：每个篮子项（小问行）恰好一页，
  *      无小问的题自然一题一页；
  *   ③ 答案 + 解析要点印**页脚小字**——讲解时不用切出去查答案库；
- *   ④ 题面默认重排文字（大字号 KaTeX），「印原题图」开关切原题扫描图（几何含图题用）。
+ *   ④ 题面默认重排文字（大字号 KaTeX），「印原题图」开关切原题扫描图（几何含图题用）；
+ *   ⑤ 题组内**每页都印公共题干**（2026-11-07 负责人定稿）——一小问一页，续页若只印
+ *      「（2）」老师得翻回第一页才看得到已知条件。这与讲义 A4 密排「组头印一次」
+ *      是有意不同，⛔ 别把讲义口径套回来。
  *
  * 版式参照（2026-11-02 负责人给的中西书局讲解稿样张）：无任何底纹底色（角标素字、
  * 题干素排无灰盒）、配图放题干下方靠左、一小题一页照旧。
@@ -106,9 +109,10 @@ function renderLectureFooter(it) {
  * 单页（一个小问 / 一道无小问的题）。题号一律用**原卷题号**，绝不重编号。
  * @param {object} o
  *   - showImage {boolean} 是否印原题裁片图（几何含图题用）
- *   - groupCtx  {object|null} 题组上下文 { bigNum, stem, subSeq, isFirst }；null = 独立页。
- *     题组首小问页印「19. 公共题干」（题号写在题干前面），行内小问写「（1）」；
- *     续页只写「（2）」，公共题干不重复（2026-11-04 负责人定稿，同讲义口径）。
+ *   - groupCtx  {object|null} 题组上下文 { bigNum, stem, subSeq }；null = 独立页。
+ *     题组每小问页都印「19. 公共题干」（题号写在题干前面），行内小问写「（1）」「（2）」。
+ *     ⚠ 讲解版一页一小题 ⇒ 公共题干必须逐页重复，否则续页没有已知条件
+ *     （2026-11-07 负责人定稿，推翻 11-04「只印一次」的口径）。
  *     ⛔ 拆页粒度不变：题组内每个小问仍各占一页（一小问一页是唯一模式）。
  *     角标是**原卷定位器**，恒用原卷小问号（「第 25 题(2-1)」），不随组内序号变。
  */
@@ -124,8 +128,9 @@ function renderLecturePage(it, idx, total, { showImage = false, groupCtx = null 
   html += `<span class="lec-pageno">${idx + 1} / ${total}</span></div>`
 
   if (groupCtx) {
-    // 题组：公共题干只在首小问页印一次，且题号写在题干前面（「19. 规定：…」）
-    if (groupCtx.isFirst && groupCtx.stem) {
+    // 题组：一页一小题 ⇒ 每页自带公共题干（含题号），续页也不用翻回第一页看已知条件。
+    // stem 取题组起点行的 parent_stem：续页行即使没存 parent_stem 也能带上公共条件。
+    if (groupCtx.stem) {
       html += `<div class="lec-stem"><div class="lec-stem-text">`
       html += `<span class="lec-stem-no">${escapeHtml(groupCtx.bigNum)}.</span>${renderContent(groupCtx.stem)}</div></div>`
     }
@@ -191,9 +196,10 @@ export function buildLectureBody({ items = [], showImage = false } = {}) {
 }
 
 /**
- * 把「同卷同题号、带公共题干」的连续行收成题组（2026-11-04 负责人定稿）：
- *   首小问页印「19. 公共题干」（题号写在题干前面），后续小问页只写「（2）」，
- *   公共题干不再逐页重复。独立行（无同号兄弟行，含英语语篇单勾一问）原样返回。
+ * 把「同卷同题号、带公共题干」的连续行收成题组（2026-11-04 定稿，11-07 改题干口径）：
+ *   每小问页都印「19. 公共题干」（题号写在题干前面），行内小问只写「（1）」「（2）」。
+ *   ⛔ 讲解版一页一小题，公共题干逐页重复（2026-11-07 定稿），与讲义 A4 密排
+ *   「组头只印一次」有意不同。独立行（无同号兄弟行，含英语语篇单勾一问）原样返回。
  * 收组判据与讲义 consolidateHandoutRows 同口径：**连续** + 同 (resource_id, question_no)
  * + 起点带 parent_stem —— 必须带 resource_id：讲解版排序不比卷，跨卷同号题会相邻，
  * 不比卷就会把两份卷的第 25 题错并成一个题组。
@@ -217,7 +223,7 @@ function groupLectureItems(list) {
         for (let k = 0; k < size; k++) {
           out.push({
             it: list[i + k],
-            groupCtx: { bigNum: String(no), stem, subSeq: k + 1, isFirst: k === 0 },
+            groupCtx: { bigNum: String(no), stem, subSeq: k + 1 },
           })
         }
         i = j
