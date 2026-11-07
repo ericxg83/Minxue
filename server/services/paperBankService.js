@@ -1392,7 +1392,7 @@ export async function deletePaperQuestion(id) {
 }
 
 /**
- * 把一批截图解析成题目，追加进「截图题库」卷。
+ * 把一批截图解析成题目，追加进老师选中的题集。
  *
  * 与主链路唯一的分歧在「落库」和「清点」两步，识别/切段/裁片/双模型复核完全同一套零件：
  * parsePageToQuestions 是逐页识别的唯一实现，这里绝不另写一份 OCR。
@@ -1525,6 +1525,7 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
         WHERE id = $1`,
       [resourceId, JSON.stringify(clipSources)]
     ).catch(e => logger.warn?.(`[paperBank] 截图来源回填失败: ${e.message}`))
+  }
 
   // 时间点 / 备注（2026-11-07 二轮）：「视频的第几分钟」单独存，与链接按同一页号配对。
   // 例：链接 https://www.bilibili.com/video/BVxxx + 备注「12:35 讲到梅涅劳斯」。
