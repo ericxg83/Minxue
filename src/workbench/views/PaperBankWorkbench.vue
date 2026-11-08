@@ -114,11 +114,79 @@
 
         <!-- 中：题目区 -->
         <main class="pb-col pb-col--questions">
+          <!-- 批量操作工具栏（2026-11-08 P0）：选中 ≥1 题时显示在筛选条上方 -->
+          <Transition name="pb-bulk-fade">
+            <div v-if="selectionCount > 0" class="pb-bulk">
+              <div class="pb-bulk__info">
+                <el-checkbox
+                  :model-value="selectionCount === questions.length && questions.length > 0"
+                  :indeterminate="selectionCount > 0 && selectionCount < questions.length"
+                  @change="(v) => v ? selectAll() : clearSelection()"
+                />
+                <strong>已选 {{ selectionCount }} 题</strong>
+                <button type="button" class="pb-link" @click="clearSelection">取消选择</button>
+              </div>
+              <div class="pb-bulk__ops">
+                <!-- 改难度 -->
+                <div class="pb-bulk__dropdown">
+                  <button
+                    type="button" class="pb-bulk__btn"
+                    :disabled="bulkBusy"
+                    @click="showBulkDifficulty = !showBulkDifficulty; showBulkTags = false"
+                  >改难度</button>
+                  <div v-if="showBulkDifficulty" class="pb-bulk__popover">
+                    <button type="button" @click="bulkSetDifficulty('')">未判定</button>
+                    <button type="button" @click="bulkSetDifficulty(1)">★ 基础</button>
+                    <button type="button" @click="bulkSetDifficulty(3)">★★ 中等</button>
+                    <button type="button" @click="bulkSetDifficulty(5)">★★★ 较难</button>
+                  </div>
+                </div>
+                <!-- 改标签 -->
+                <div class="pb-bulk__dropdown">
+                  <button
+                    type="button" class="pb-bulk__btn"
+                    :disabled="bulkBusy"
+                    @click="showBulkTags = !showBulkTags; showBulkDifficulty = false"
+                  >改标签</button>
+                  <div v-if="showBulkTags" class="pb-bulk__popover pb-bulk__popover--tags">
+                    <input
+                      v-model="bulkTagsDraft"
+                      class="pb-bulk__input"
+                      placeholder="逗号分隔，如 压轴题,易错"
+                      @keydown.enter.prevent="bulkSetTags"
+                      @keydown.esc.prevent="showBulkTags = false"
+                    />
+                    <button type="button" class="pb-bulk__apply" :disabled="bulkBusy" @click="bulkSetTags">确定</button>
+                  </div>
+                </div>
+                <!-- 移到题集 -->
+                <button
+                  type="button" class="pb-bulk__btn"
+                  :disabled="bulkBusy || !papers.length"
+                  @click="openBulkMovePicker($event)"
+                >移到题集…</button>
+                <!-- 删除 -->
+                <button
+                  type="button" class="pb-bulk__btn is-danger"
+                  :disabled="bulkBusy"
+                  @click="bulkDelete"
+                >删除</button>
+              </div>
+            </div>
+          </Transition>
+
           <FilterBar class="pb-filter">
             <template #leading>
               <div class="pb-summary">
+                <el-checkbox
+                  class="pb-summary__sel"
+                  :model-value="selectionCount === questions.length && questions.length > 0"
+                  :indeterminate="selectionCount > 0 && selectionCount < questions.length"
+                  @change="(v) => v ? selectAll() : clearSelection()"
+                  title="全选 / 取消全选（Ctrl+A）"
+                />
                 <strong>{{ questions.length }}{{ truncated ? '+' : '' }} 道题</strong>
-                <span>已选 {{ summary.count }} 题</span>
+                <span>已勾 {{ summary.count }} 题</span>
               </div>
             </template>
             <WorkbenchSelect v-model="filterType" :options="typeFilterOptions" width="100px" aria-label="按题型筛选" />
@@ -155,8 +223,17 @@
           </EmptyState>
 
           <div v-else class="pb-rows">
-            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id), 'is-dragging-q': draggingQuestionId === q.id }">
-              <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" />
+            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id), 'is-checked': selection.has(q.id), 'is-dragging-q': draggingQuestionId === q.id }">
+              <div class="pb-row__checks">
+                <!-- 多选复选框（2026-11-08 P0）：Ctrl+Click 逐个选、Shift+Click 范围选 -->
+                <el-checkbox
+                  class="pb-row__sel"
+                  :model-value="selection.has(q.id)"
+                  @click.stop="toggleSelection(q, qi, $event)"
+                />
+                <!-- 勾题进卷面（原有） -->
+                <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" title="勾进卷面" />
+              </div>
 
               <div class="pb-row__body">
                 <div class="pb-row__head">
@@ -613,6 +690,16 @@
       @close="closeMovePicker"
     />
 
+    <!-- 批量移到题集（2026-11-08 P0）-->
+    <MoveQuestionPicker
+      :open="bulkMovePicker.open"
+      :papers="papers"
+      current-paper-id=""
+      :anchor="bulkMovePicker.anchor"
+      @pick="bulkMoveToTarget"
+      @close="closeBulkMovePicker"
+    />
+
     <!-- 移动后可撤销：比弹二次确认更不打断，且真点错了能一步退回 -->
     <div v-if="undoMove" class="pb-undo" role="status">
       <span class="pb-undo__text">
@@ -653,6 +740,8 @@ import {
   searchPaperBankQuestions,
   updatePaperBankQuestion,
   updatePaperClipSource,
+  bulkUpdatePaperBankQuestions,
+  bulkDeletePaperBankQuestions,
 } from '../../services/apiService.js'
 import { buildHandoutBody, buildHandoutCSS, groupHandoutQuestions } from '../../utils/handoutPdf'
 import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/composePaperPdf'
@@ -698,6 +787,17 @@ const composeTitle = ref('')
 const composeWithImage = ref(true)
 const editingId = ref('')
 const textDraft = ref({ parent_stem: '', content: '' })
+
+// ── 批量操作（2026-11-08 P0）──
+// 多选模式：Ctrl+Click 逐个、Shift+Click 范围选、Ctrl+A 全选。
+// 选中 ≥1 题时顶部出现批量操作工具栏，遮住筛选条。
+const selection = ref(new Set())
+const lastClickedIndex = ref(-1)
+const bulkBusy = ref(false)
+const showBulkDifficulty = ref(false)
+const showBulkTags = ref(false)
+const showBulkMove = ref(false)
+const bulkTagsDraft = ref('')
 const showFilesDialog = ref(false)
 const filesDialog = ref({ title: '', files: [] })
 const showReviewDialog = ref(false)
@@ -1101,6 +1201,161 @@ const saveTags = (q, ev) => {
     .map(s => s.trim())
     .filter(Boolean)
   applyQuestionPatch(q, { tags: list }, '标签已保存')
+}
+
+// ── 批量操作（2026-11-08 P0）──────────────────────────────────────────────
+//
+// 设计原则：
+// ① Ctrl+Click 逐个选 / Shift+Click 范围选 / Ctrl+A 全选 —— 对标笔记 App 标准操作
+// ② 选中 ≥1 题时筛选条上方出现批量操作工具栏（不遮住题目列表）
+// ③ 操作完成后自动清除选中状态并刷新列表
+// ④ Escape 清除选中
+
+const selectionCount = computed(() => selection.value.size)
+
+const toggleSelection = (q, index, ev) => {
+  const next = new Set(selection.value)
+  if (ev?.shiftKey && lastClickedIndex.value >= 0) {
+    // Shift+Click：范围选
+    const from = Math.min(lastClickedIndex.value, index)
+    const to = Math.max(lastClickedIndex.value, index)
+    for (let i = from; i <= to; i++) {
+      if (questions.value[i]) next.add(questions.value[i].id)
+    }
+  } else if (ev?.ctrlKey || ev?.metaKey) {
+    // Ctrl+Click：逐个切换
+    if (next.has(q.id)) next.delete(q.id)
+    else next.add(q.id)
+  } else {
+    // 普通点击：单选（清除其它 → 只选这一个）
+    next.clear()
+    next.add(q.id)
+  }
+  selection.value = next
+  lastClickedIndex.value = index
+}
+
+const selectAll = () => {
+  selection.value = new Set(questions.value.map(q => q.id))
+}
+
+const clearSelection = () => {
+  selection.value = new Set()
+  lastClickedIndex.value = -1
+}
+
+// 批量改难度
+const bulkSetDifficulty = async (val) => {
+  const ids = Array.from(selection.value)
+  if (!ids.length) return
+  bulkBusy.value = true
+  try {
+    const difficulty = val === '' ? null : Number(val)
+    await bulkUpdatePaperBankQuestions(ids, { difficulty })
+    // 本地同步：避免刷新闪烁
+    for (const q of questions.value) {
+      if (selection.value.has(q.id)) q.difficulty = difficulty
+    }
+    basket.value = basket.value.map(it => selection.value.has(it.id) ? { ...it, difficulty } : it)
+    showBulkDifficulty.value = false
+    ElMessage.success(`已修改 ${ids.length} 道题的难度`)
+    clearSelection()
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '批量修改失败')
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+// 批量改标签
+const bulkSetTags = async () => {
+  const ids = Array.from(selection.value)
+  if (!ids.length) return
+  const tags = String(bulkTagsDraft.value || '')
+    .split(/[,，\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+  bulkBusy.value = true
+  try {
+    await bulkUpdatePaperBankQuestions(ids, { tags })
+    for (const q of questions.value) {
+      if (selection.value.has(q.id)) q.tags = tags
+    }
+    basket.value = basket.value.map(it => selection.value.has(it.id) ? { ...it, tags } : it)
+    // 刷新标签候选
+    const set = new Set(tagOptions.value)
+    for (const t of tags) set.add(t)
+    tagOptions.value = Array.from(set).filter(Boolean).sort()
+    showBulkTags.value = false
+    bulkTagsDraft.value = ''
+    ElMessage.success(`已修改 ${ids.length} 道题的标签`)
+    clearSelection()
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '批量修改失败')
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+// 批量移到题集
+const bulkMovePicker = ref({ open: false, anchor: null })
+const openBulkMovePicker = (ev) => {
+  const rect = ev?.currentTarget?.getBoundingClientRect?.()
+  bulkMovePicker.value = {
+    open: true,
+    anchor: rect
+      ? { x: rect.left, y: rect.bottom }
+      : { x: Math.max(8, window.innerWidth / 2 - 150), y: 120 },
+  }
+}
+const closeBulkMovePicker = () => { bulkMovePicker.value = { ...bulkMovePicker.value, open: false } }
+
+const bulkMoveToTarget = async (paper) => {
+  closeBulkMovePicker()
+  const ids = Array.from(selection.value)
+  if (!ids.length || !paper) return
+  bulkBusy.value = true
+  try {
+    const r = await movePaperBankQuestions(ids, paper.id)
+    if (r?.alreadyInTarget) { ElMessage.info('这些题已经在这个题集里了'); return }
+    basket.value = basket.value.map(it => (
+      selection.value.has(it.id) ? { ...it, resource_id: paper.id, resource_name: paper.name } : it
+    ))
+    ElMessage.success(`已将 ${r?.movedQuestions || ids.length} 道题移到「${paper.name}」`)
+    clearSelection()
+    await loadPapers()
+    await loadQuestions()
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '批量移动失败')
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
+// 批量删除
+const bulkDelete = async () => {
+  const ids = Array.from(selection.value)
+  if (!ids.length) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${ids.length} 道题？此操作不可恢复。`,
+      '批量删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch { return }
+  bulkBusy.value = true
+  try {
+    const r = await bulkDeletePaperBankQuestions(ids)
+    basket.value = basket.value.filter(it => !selection.value.has(it.id))
+    ElMessage.success(`已删除 ${r?.deleted || ids.length} 道题`)
+    clearSelection()
+    await loadPapers()
+    await loadQuestions()
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '批量删除失败')
+  } finally {
+    bulkBusy.value = false
+  }
 }
 
 // ── 新建 / 上传 / 删除 ──
@@ -1768,11 +2023,26 @@ watch(basket, () => { scheduleRepaint() }, { deep: true })
 watch([composeTitle, composeWithImage], () => { scheduleRepaint(300) })
 watch(paperFull, async () => { await nextTick(); fitZoom(true) })
 
-watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; loadQuestions() })
-watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; loadQuestions() })
+watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; clearSelection(); loadQuestions() })
+watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; clearSelection(); loadQuestions() })
 
 const onKeydown = (e) => {
   if (e.key === 'Escape' && paperFull.value) paperFull.value = false
+  // Escape 清除多选（卷面不在全屏时）
+  if (e.key === 'Escape' && !paperFull.value && selectionCount.value > 0) {
+    clearSelection()
+    e.preventDefault()
+    return
+  }
+  // Ctrl+A 全选题目（仅在不聚焦输入框时）
+  if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+    const tag = (e.target?.tagName || '').toLowerCase()
+    if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+    if (questions.value.length) {
+      e.preventDefault()
+      selectAll()
+    }
+  }
 }
 
 onMounted(async () => {
@@ -1946,9 +2216,67 @@ onUnmounted(() => {
 
 /* 中：题目区 */
 .pb-col--questions { min-width: 0; }
-.pb-summary { display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.pb-summary { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pb-summary__sel { flex: none; }
 .pb-summary strong { font-size: 13px; }
 .pb-summary span { font-size: 11px; color: #888; }
+
+/* ── 批量操作工具栏（2026-11-08 P0）── */
+.pb-bulk {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  gap: 8px; padding: 8px 12px; margin-bottom: 8px;
+  background: var(--wb-primary-mist, #eef2ff);
+  border: 1px solid var(--wb-primary-soft, #c7d2fe);
+  border-radius: var(--wb-radius-sm, 8px);
+}
+.pb-bulk__info { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.pb-bulk__info strong { color: var(--wb-primary, #6366f1); }
+.pb-bulk__ops { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.pb-bulk__btn {
+  border: 1px solid var(--wb-border, #e2e8f0); background: var(--wb-bg-card, #fff);
+  color: var(--wb-text, #1e293b); font-size: 12px; padding: 4px 10px;
+  border-radius: var(--wb-radius-xs, 6px); cursor: pointer;
+  transition: border-color var(--wb-motion-fast, 120ms) ease,
+              background var(--wb-motion-fast, 120ms) ease;
+}
+.pb-bulk__btn:hover { border-color: var(--wb-primary, #6366f1); background: #fff; }
+.pb-bulk__btn:disabled { opacity: .5; cursor: default; }
+.pb-bulk__btn.is-danger { color: var(--wb-status-danger, #dc2626); border-color: #fca5a5; }
+.pb-bulk__btn.is-danger:hover { background: #fee2e2; border-color: #dc2626; }
+.pb-bulk__dropdown { position: relative; }
+.pb-bulk__popover {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 2000;
+  min-width: 120px; padding: 4px;
+  background: var(--wb-bg-card, #fff);
+  border: 1px solid var(--wb-border, #e2e8f0);
+  border-radius: var(--wb-radius-sm, 8px);
+  box-shadow: var(--wb-elev-overlay, 0 8px 24px rgba(15,23,42,.10));
+}
+.pb-bulk__popover button {
+  display: block; width: 100%; text-align: left;
+  padding: 6px 10px; border: 0; border-radius: var(--wb-radius-xs, 6px);
+  background: transparent; color: var(--wb-text, #1e293b);
+  font-size: 12px; cursor: pointer;
+}
+.pb-bulk__popover button:hover { background: var(--wb-border-subtle, #f8fafc); }
+.pb-bulk__popover--tags { min-width: 240px; display: flex; gap: 6px; padding: 8px; align-items: center; }
+.pb-bulk__input {
+  flex: 1; min-width: 0; height: 28px;
+  border: 1px solid var(--wb-border, #e2e8f0); border-radius: var(--wb-radius-xs, 6px);
+  padding: 0 8px; font-size: 12px; color: var(--wb-text, #1e293b);
+  background: var(--wb-bg-card, #fff); outline: none;
+}
+.pb-bulk__input:focus { border-color: var(--wb-primary, #6366f1); }
+.pb-bulk__apply {
+  flex: none; height: 28px; padding: 0 12px;
+  border: 0; border-radius: var(--wb-radius-xs, 6px);
+  background: var(--wb-primary, #6366f1); color: #fff;
+  font-size: 12px; cursor: pointer;
+}
+.pb-bulk__apply:hover { opacity: .9; }
+.pb-bulk__apply:disabled { opacity: .5; cursor: default; }
+.pb-bulk-fade-enter-active, .pb-bulk-fade-leave-active { transition: all .2s ease; }
+.pb-bulk-fade-enter-from, .pb-bulk-fade-leave-to { opacity: 0; transform: translateY(-6px); }
 .pb-loading { padding: 12px 0; display: grid; gap: 12px; }
 .pb-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .pb-row {
@@ -1958,7 +2286,10 @@ onUnmounted(() => {
 }
 .pb-row:hover { border-color: #d9d5cc; }
 .pb-row.is-selected { border-color: #a9b4f0; background: #fbfbff; }
-.pb-row__check { margin-top: 2px; flex-shrink: 0; }
+.pb-row.is-checked { border-color: var(--wb-primary, #6366f1); background: var(--wb-primary-mist, #eef2ff); }
+.pb-row__checks { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; margin-top: 2px; }
+.pb-row__sel { flex: none; }
+.pb-row__check { flex: none; }
 .pb-row__body { flex: 1; min-width: 0; }
 .pb-row__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
 .pb-row__num { font-weight: 500; font-size: 13px; white-space: nowrap; }

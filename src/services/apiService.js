@@ -1246,6 +1246,27 @@ export const updatePaperClipSource = (id, source, note = '') =>
 export const deletePaperBankQuestion = (id) => apiRequest(`/paper-bank/questions/${id}`, { method: 'DELETE' })
 
 /**
+ * 批量更新题目（2026-11-08 批量操作 P0）：多选 → 一次改难度/标签。
+ * @param {string[]} ids  题目行 id
+ * @param {{difficulty?:number|null, tags?:string[]}} patch
+ */
+export const bulkUpdatePaperBankQuestions = (ids, patch) =>
+  apiRequest('/paper-bank/questions/bulk', {
+    method: 'PUT',
+    body: JSON.stringify({ ids, patch }),
+  })
+
+/**
+ * 批量删除题目（2026-11-08 批量操作 P0）。
+ * @param {string[]} ids  题目行 id
+ */
+export const bulkDeletePaperBankQuestions = (ids) =>
+  apiRequest('/paper-bank/questions/bulk', {
+    method: 'DELETE',
+    body: JSON.stringify({ ids }),
+  })
+
+/**
  * 单题改归属（2026-11-08）：把题目移到另一个题集。
  * 后端按「题号 = 一道题」整组搬（含各小问），题号接续到目标末尾，来源随题走。
  * 返回 { movedRows, movedQuestions, targetPaperName, undo }，undo 原样喂给下面的还原接口。

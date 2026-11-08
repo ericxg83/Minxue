@@ -1406,6 +1406,48 @@ export async function deletePaperQuestion(id) {
   return rowCount > 0
 }
 
+/**
+ * 批量更新题目（2026-11-08 批量操作 P0）：多选 → 一次改难度 / 标签。
+ * 只允许改 difficulty 和 tags —— 其它字段（题干、答案、来源）各题不同，不适合批量覆盖。
+ * @param {string[]} ids   resource_questions 行 id
+ * @param {{difficulty?:number|null, tags?:string[]}} patch
+ * @returns {{updated:number}}
+ */
+export async function bulkUpdatePaperQuestions(ids, patch = {}) {
+  if (!Array.isArray(ids) || !ids.length) return { updated: 0 }
+  const sets = []
+  const params = []
+  if ('difficulty' in patch) {
+    params.push(patch.difficulty == null ? null : Number(patch.difficulty))
+    sets.push(`difficulty = $${params.length}`)
+  }
+  if ('tags' in patch) {
+    params.push(Array.isArray(patch.tags) ? patch.tags : [])
+    sets.push(`tags = $${params.length}::text[]`)
+  }
+  if (!sets.length) return { updated: 0 }
+  params.push(ids)
+  const { rowCount } = await query(
+    `UPDATE resource_questions SET ${sets.join(', ')} WHERE id = ANY($${params.length}::uuid[])`,
+    params
+  )
+  return { updated: rowCount || 0 }
+}
+
+/**
+ * 批量删除题目（2026-11-08 批量操作 P0）。
+ * @param {string[]} ids  resource_questions 行 id
+ * @returns {{deleted:number}}
+ */
+export async function bulkDeletePaperQuestions(ids) {
+  if (!Array.isArray(ids) || !ids.length) return { deleted: 0 }
+  const { rowCount } = await query(
+    'DELETE FROM resource_questions WHERE id = ANY($1::uuid[])',
+    [ids]
+  )
+  return { deleted: rowCount || 0 }
+}
+
 // ── 单题改归属（2026-11-08 负责人需求）──────────────────────────────────────
 //
 // 场景：截图收题时点错了题集，「这道题本该在『平行+角平分线』」。此前只能删了重收，

@@ -30,6 +30,8 @@ import {
   deletePaperQuestion,
   movePaperQuestions,
   restoreQuestionPlacements,
+  bulkUpdatePaperQuestions,
+  bulkDeletePaperQuestions,
   CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
 } from '../services/paperBankService.js'
@@ -746,6 +748,39 @@ router.post('/questions/restore', async (req, res) => {
     res.json({ success: true, ...r })
   } catch (e) {
     res.status(500).json({ error: '还原失败', message: e.message })
+  }
+})
+
+/**
+ * 批量更新题目（2026-11-08 批量操作 P0）：多选 → 一次改难度/标签。
+ * body: { ids: string[], patch: { difficulty?: number|null, tags?: string[] } }
+ */
+router.put('/questions/bulk', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : []
+    if (!ids.length) return res.status(400).json({ error: '没有选要修改的题目' })
+    if (ids.length > 500) return res.status(400).json({ error: '一次最多修改 500 道题' })
+    const patch = req.body?.patch || {}
+    const r = await bulkUpdatePaperQuestions(ids, patch)
+    res.json({ success: true, ...r })
+  } catch (e) {
+    res.status(500).json({ error: '批量修改失败', message: e.message })
+  }
+})
+
+/**
+ * 批量删除题目（2026-11-08 批量操作 P0）。
+ * body: { ids: string[] }
+ */
+router.delete('/questions/bulk', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : []
+    if (!ids.length) return res.status(400).json({ error: '没有选要删除的题目' })
+    if (ids.length > 500) return res.status(400).json({ error: '一次最多删除 500 道题' })
+    const r = await bulkDeletePaperQuestions(ids)
+    res.json({ success: true, ...r })
+  } catch (e) {
+    res.status(500).json({ error: '批量删除失败', message: e.message })
   }
 })
 
