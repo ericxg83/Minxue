@@ -131,8 +131,11 @@ export async function buildHandout(opts) {
     chapter = '',
     // 考点（知识点）筛选：kpIds 为空数组 = 不限；非空时自动展开「选中节点 + 全部子孙」
     kpIds = [],
-    // 组织轴：date=按日期分节（默认，保持既有口径）；kp=按考点/方法分节（学一个会一类）
+    // 组织轴：date=按日期分节；kp=按考点/方法分节（学一个会一类，前端默认）
     groupBy = 'date',
+    // kp 模式下每节最少题数：不足的薄节并入「其他考点」。默认 2 —— 一道题不成「一类」，
+    // 实测不设门槛时初三首屏 10 题会被切成 6 节（3 节各 1 题）。传 0/1 关闭合并。
+    minPerSection = 2,
     withAnswer = true,
     taught = '',
     logger = () => {},
@@ -1190,7 +1193,9 @@ export async function buildHandout(opts) {
   // ── 组织轴重组 ──
   // ⛔ 默认 groupBy='date' 时 grouped=null，slides/sections/overview 原样返回，
   //    既有预览、白板、applySelection 的编号与字段完全不动。
-  const grouped = byKnowledge ? regroupSlidesByKp(slideList, knowledgeMeta) : null
+  const grouped = byKnowledge
+    ? regroupSlidesByKp(slideList, knowledgeMeta, { minPerSection })
+    : null
   const outSlides = grouped ? grouped.slides : slideList
   const outSections = grouped ? grouped.sections : sections
 
@@ -1222,6 +1227,8 @@ export async function buildHandout(opts) {
       chapterSummary,
       kpFilter,
       groupBy: byKnowledge ? 'kp' : 'date',
+      // 让前端/探针能看出「其他考点」这一节是怎么来的（0 = 未合并薄节）
+      minPerSection: byKnowledge ? Math.max(0, Number(minPerSection) || 0) : null,
     },
     overview: grouped ? grouped.overview : sections.map(d => ({
       label: d.mergedDays.length ? `${d.dayFrom} ~ ${d.day}` : d.day,

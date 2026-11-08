@@ -17,6 +17,10 @@ import { getMethodCard, hasMethodCard } from './methodCardLibrary.js'
 
 export const UNLINKED_KEY = '__unlinked__'
 export const UNLINKED_LABEL = '待归类（未挂考点）'
+// 「一类」的字面要求：同一方法至少要能凑出两道题。只有 1 题的节单独占一页
+// 既讲不出共性、又让首屏全是碎节（实测初三首屏 10 题被切成 6 节，3 节各 1 题）。
+export const OTHERS_KEY = '__others__'
+export const OTHERS_LABEL = '其他考点（题量不足）'
 
 const TIER_ORDER = { basic: 0, medium: 1, hard: 2, unknown: 3 }
 
@@ -148,9 +152,15 @@ function collectSectionContent(kpIds, groupKey, meta, label) {
  * 把按日期生成的 slides 重组为按考点/方法分节（纯函数，可测）。
  * @param {Array} slides buildHandout 产出的 slides（section + question）
  * @param {object} meta loadKnowledgeMeta 的结果
+ * @param {object} [options]
+ * @param {number} [options.minPerSection=0] 每节最少题数。>1 时题数不足的节并入
+ *   「其他考点（题量不足）」，避免「一类」只有一道题、首屏全是碎节。
+ *   ⚠️ 只在**至少两个**薄节时才合并——单独一个薄节保留原名信息量更大，
+ *   不值得为它造一个含糊的「其他」节。
  * @returns {{slides:Array, sections:Array, overview:Array}}
  */
-export function regroupSlidesByKp(slides, meta = {}) {
+export function regroupSlidesByKp(slides, meta = {}, options = {}) {
+  const minPerSection = Math.max(0, Number(options?.minPerSection) || 0)
   const questions = (slides || []).filter(s => s.kind === 'question')
   const buckets = new Map()
   for (const q of questions) {
@@ -162,6 +172,7 @@ export function regroupSlidesByKp(slides, meta = {}) {
         kpIds: new Set(),
         questions: [],
         unlinked: key === UNLINKED_KEY,
+        others: false,
       })
     }
     const b = buckets.get(key)
@@ -169,9 +180,33 @@ export function regroupSlidesByKp(slides, meta = {}) {
     if (q.kpId) b.kpIds.add(q.kpId)
   }
 
-  // 节排序：题多的在前（先讲错的多的「一类」），待归类永远垫底
+  // 薄节合并：只并非待归类的节，且至少两个才并（见 options.minPerSection 注释）
+  if (minPerSection > 1) {
+    const thin = [...buckets.values()].filter(b => !b.unlinked && b.questions.length < minPerSection)
+    if (thin.length >= 2) {
+      const merged = {
+        key: OTHERS_KEY,
+        label: OTHERS_LABEL,
+        kpIds: new Set(),
+        questions: [],
+        unlinked: false,
+        others: true,
+      }
+      for (const b of thin) {
+        buckets.delete(b.key)
+        merged.questions.push(...b.questions)
+        for (const id of b.kpIds) merged.kpIds.add(id)
+      }
+      // 按原 index 排序，保持「同一批题的整体顺读性」；节内稍后还会按难度重排
+      merged.questions.sort((a, c) => a.index - c.index)
+      buckets.set(OTHERS_KEY, merged)
+    }
+  }
+
+  // 节排序：题多的在前（先讲错的多的「一类」），其他/待归类依次垫底
+  const rank = (b) => (b.unlinked ? 2 : b.others ? 1 : 0)
   const ordered = [...buckets.values()].sort((a, b) =>
-    (a.unlinked ? 1 : 0) - (b.unlinked ? 1 : 0)
+    rank(a) - rank(b)
     || b.questions.length - a.questions.length
     || a.label.localeCompare(b.label, 'zh'))
 
@@ -197,7 +232,8 @@ export function regroupSlidesByKp(slides, meta = {}) {
     const tiers = { basic: 0, medium: 0, hard: 0, unknown: 0 }
     for (const q of qs) tiers[q.tier] = (tiers[q.tier] || 0) + 1
 
-    const content = b.unlinked
+    const isMixed = b.unlinked || b.others
+    const content = isMixed
       ? { methodCard: { title: b.label, signals: '', steps: '', pitfalls: '', source: 'none' }, knowledgeChain: { prerequisites: [], successors: [] } }
       : collectSectionContent([...b.kpIds], b.key, meta, b.label)
 
@@ -213,6 +249,7 @@ export function regroupSlidesByKp(slides, meta = {}) {
       tiers,
       groupBy: 'kp',
       unlinked: b.unlinked,
+      others: !!b.others,
       kpGroupKey: b.key,
       methodCard: content.methodCard,
       knowledgeChain: content.knowledgeChain,
@@ -233,8 +270,9 @@ export function regroupSlidesByKp(slides, meta = {}) {
         index: seq,
         sectionLabel: b.label,
         kpGroupKey: q.kpGroupKey || null,
-        // 白板讲题现场用：这一题属于哪一类、这套动作怎么走
-        methodKind: b.unlinked ? '' : b.label,
+        // 白板讲题现场用：这一题属于哪一类、这套动作怎么走。
+        // 「其他考点」是多方法混合，不能给单一方法名，留空由白板降级显示。
+        methodKind: isMixed ? '' : b.label,
         methodSteps: hasMethodCard(content.methodCard) ? content.methodCard.steps : '',
       })
     }

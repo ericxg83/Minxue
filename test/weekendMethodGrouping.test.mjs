@@ -10,6 +10,7 @@ import {
   loadKnowledgeMeta,
   regroupSlidesByKp,
   UNLINKED_LABEL,
+  OTHERS_LABEL,
 } from '../server/lib/weekendMethodGroup.js'
 import {
   getMethodCard,
@@ -204,4 +205,88 @@ test('真库实测坑②：考法库按 (学科,名称) 补命中，同名不同
   const { sections } = regroupSlidesByKp(slides, meta)
   assert.equal(sections[0].methodCard.source, 'kaofa')
   assert.match(sections[0].methodCard.steps, /约分/)
+})
+
+// ── 薄节门槛（2026-11-08 默认轴改 kp 时补）────────────────────────────
+// 真库实测：不设门槛时初三首屏 10 题被切成 6 节（3 节各 1 题），
+// 一道题撑不起「一类」，反而比日期轴更碎。
+
+test('每节最少题数：>=2 个薄节并入「其他考点」，题数守恒且编号连续', () => {
+  const slides = [
+    sec('11/03'),
+    q(1, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(2, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(3, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(4, { kpGroupKey: '数学::一元二次方程', kpName: '一元二次方程', kpId: 'k2' }),
+    q(5, { kpGroupKey: '数学::三角形外角', kpName: '三角形外角', kpId: 'k3' }),
+    q(6, { kpGroupKey: '数学::函数模型', kpName: '函数模型', kpId: 'k4' }),
+  ]
+  const { slides: out, sections } = regroupSlidesByKp(slides, emptyMeta(), { minPerSection: 2 })
+  assert.equal(sections.length, 2, '3 个 1 题节合并成一节')
+  assert.equal(sections[0].label, '二次根式')
+  assert.equal(sections[0].topicCount, 3)
+  assert.equal(sections[1].label, OTHERS_LABEL)
+  assert.equal(sections[1].topicCount, 3)
+  assert.equal(sections[1].others, true)
+  assert.equal(sections[1].unlinked, false, '「其他考点」不等于「待归类」')
+  assert.equal(sections[1].methodCard.source, 'none', '多方法混合不给单一方法卡')
+  const qs = out.filter(s => s.kind === 'question')
+  assert.equal(qs.length, 6, '题数守恒，合并不能丢题')
+  assert.deepEqual(qs.map(s => s.index), [1, 2, 3, 4, 5, 6])
+  // 「其他考点」里的题不能带方法名，否则白板会把混合节说成某一个方法
+  for (const x of qs.filter(s => s.sectionLabel === OTHERS_LABEL)) {
+    assert.equal(x.methodKind, '')
+    assert.equal(x.methodSteps, '')
+  }
+})
+
+test('每节最少题数：只有一个薄节时保留原名，不造含糊的「其他」节', () => {
+  const slides = [
+    sec('11/03'),
+    q(1, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(2, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(3, { kpGroupKey: '数学::函数模型', kpName: '函数模型', kpId: 'k2' }),
+  ]
+  const { sections } = regroupSlidesByKp(slides, emptyMeta(), { minPerSection: 2 })
+  assert.equal(sections.length, 2)
+  assert.equal(sections[0].label, '二次根式')
+  assert.equal(sections[1].label, '函数模型', '单独一个薄节信息量更大，不该被并')
+  assert.equal(sections.some(s => s.label === OTHERS_LABEL), false)
+})
+
+test('每节最少题数：「待归类」永不并入「其他考点」，且仍垫底', () => {
+  const slides = [
+    sec('11/03'),
+    q(1),
+    q(2),
+    // 二次根式凑够 2 题才算「一类」；下面两个各 1 题才会被并进「其他考点」
+    q(3, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(6, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(4, { kpGroupKey: '数学::函数模型', kpName: '函数模型', kpId: 'k2' }),
+    q(5, { kpGroupKey: '数学::三角形外角', kpName: '三角形外角', kpId: 'k3' }),
+  ]
+  const { sections } = regroupSlidesByKp(slides, emptyMeta(), { minPerSection: 2 })
+  const unlinked = sections.filter(s => s.unlinked)
+  assert.equal(unlinked.length, 1, '待归类只允许一节')
+  assert.equal(unlinked[0].label, UNLINKED_LABEL)
+  assert.equal(unlinked[0].topicCount, 2, '待归类的题不能被并入其他考点')
+  assert.equal(sections.at(-1).unlinked, true, '待归类永远垫底')
+  assert.equal(sections[0].label, '二次根式')
+  assert.equal(sections[0].topicCount, 2)
+  const others = sections.find(s => s.label === OTHERS_LABEL)
+  assert.equal(others.topicCount, 2, '只有真正成不了类的题进其他考点')
+})
+
+test('每节最少题数：0/1 等于关闭合并（既有调用方不传时行为不变）', () => {
+  const slides = [
+    sec('11/03'),
+    q(1, { kpGroupKey: '数学::二次根式', kpName: '二次根式', kpId: 'k1' }),
+    q(2, { kpGroupKey: '数学::函数模型', kpName: '函数模型', kpId: 'k2' }),
+    q(3, { kpGroupKey: '数学::三角形外角', kpName: '三角形外角', kpId: 'k3' }),
+  ]
+  for (const v of [undefined, 0, 1]) {
+    const { sections } = regroupSlidesByKp(slides, emptyMeta(), v === undefined ? undefined : { minPerSection: v })
+    assert.equal(sections.length, 3, `minPerSection=${v} 不应合并`)
+    assert.equal(sections.some(s => s.label === OTHERS_LABEL), false)
+  }
 })

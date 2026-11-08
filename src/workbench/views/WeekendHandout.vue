@@ -262,7 +262,12 @@
             class="deck-section"
           >
             <header class="section-head">
-              <h3>{{ sec.label }}</h3>
+              <h3>
+                {{ sec.label }}
+                <!-- 「其他考点」「待归类」不是真的方法，必须说清来由，否则老师会当成一个考点 -->
+                <span v-if="sec.others" class="section-flag">各不足 2 题，合并成一节</span>
+                <span v-else-if="sec.unlinked" class="section-flag section-flag--warn">这些题没挂上考点</span>
+              </h3>
               <span class="section-meta">
                 {{ sec.topicCount }} 题 · {{ sec.studentCount }} 名学生
                 <template v-if="sectionTierText(sec)"> · {{ sectionTierText(sec) }}</template>
@@ -461,8 +466,8 @@ const params = ref({
   difficulty: 'medium',
   chapter: '',
   taught: '',
-  // 组织轴：date=按日期分节（默认，既有口径）；kp=按考点/方法分节（学一个会一类）
-  groupBy: 'date',
+  // 组织轴：kp=按考点/方法分节（默认，「学一个会一类」）；date=按日期分节（既有口径）
+  groupBy: 'kp',
   // 考点（知识点 id 数组）：与「章节」是两套维度——章节来自静态教材目录，
   // 考点来自 question_knowledge（题目实际关联的知识点）。两个可叠加使用。
   kpIds: [],
@@ -516,10 +521,10 @@ const taughtOptions = [
   { label: '只看已讲（复习用）', value: 'taught' },
 ]
 
-// 组织轴：默认 date，切到 kp 后目录/分节都按「一类方法」组织（后端 groupBy=kp）
+// 组织轴：默认按方法（负责人 2026-11-08 拍板），日期轴保留可切
 const groupByOptions = [
-  { label: '按日期（既有口径）', value: 'date' },
   { label: '按考点与方法（学一个会一类）', value: 'kp' },
+  { label: '按日期（旧口径）', value: 'date' },
 ]
 
 // 八年级试点专题：上海五四制「第22章 二次根式」。
@@ -687,8 +692,10 @@ function applyKpIdsFromQuery() {
     const ids = String(Array.isArray(q) ? q.join(',') : q).split(',').map(s => s.trim()).filter(Boolean)
     params.value.kpIds = ids
   }
-  // 组织轴同样支持 URL 带入（?groupBy=kp），与 kpIds 一起双路生效
-  if (route.query?.groupBy === 'kp') params.value.groupBy = 'kp'
+  // 组织轴支持 URL 带入。默认已是 kp，所以只有显式 `?groupBy=date` 才需要切回去；
+  // 「考法库 → 按考点讲题」跳转不带 groupBy 时保持 kp，正是期望行为。
+  if (route.query?.groupBy === 'date') params.value.groupBy = 'date'
+  else if (route.query?.groupBy === 'kp') params.value.groupBy = 'kp'
 }
 
 // 同一路由内 query 变化（考法库 → 周末班页）也要生效
@@ -1130,6 +1137,24 @@ function openBoard() {
 .section-meta {
   font-size: 12.5px;
   color: var(--wb-text-secondary, #64748b);
+}
+/* 「其他考点/待归类」的来由说明：贴在节标题后，避免被当成真考点 */
+.section-flag {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--wb-border, #cbd5e1);
+  background: var(--wb-bg-soft, #f1f5f9);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--wb-text-secondary, #64748b);
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+.section-flag--warn {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
 }
 .method-card {
   margin: 10px 0 4px;

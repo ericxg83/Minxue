@@ -686,8 +686,9 @@ onMounted(async () => {
         chapter: q.chapter ? String(q.chapter) : undefined,
         taught: q.taught ? String(q.taught) : undefined,
         // 组织轴与考点筛选必须一起还原，否则回退拉到的题单与选题页不是同一批
-        // （序号过滤会静默命中别的题）。date 模式不传，保持既有口径。
-        groupBy: q.groupBy === 'kp' ? 'kp' : 'date',
+        // （序号过滤会静默命中别的题）。缺省与选题页默认一致走 kp，
+        // 只有显式 ?groupBy=date 的旧书签才回到日期轴。
+        groupBy: q.groupBy === 'date' ? 'date' : 'kp',
         kpIds: q.kpIds ? String(q.kpIds).split(',').filter(Boolean) : undefined,
         withAnswer: true,
       }
