@@ -3,7 +3,8 @@
  * ================================================================
  * POST /api/weekend-ppt/preview
  *   Body: { grade?, from?, to?, days?, students?: string[], subject?,
- *           maxPerDay?, limit?, mergeThin?, withAnswer?, taught? }
+ *           maxPerDay?, limit?, mergeThin?, withAnswer?, taught?, groupBy? }
+ *   groupBy: 'date' 按日期分节（默认）/ 'kp' 按考点与方法分节（学一个会一类）
  *   taught: '' 全部（默认）/ 'untaught' 排除已讲 / 'taught' 只看已讲（按 teaching_marks）
  *   → 题单预览（按天分组、每题含题干/小问/答案/难度/共错人数/配图URL/缺小问标记）
  *
@@ -131,6 +132,8 @@ function sanitizeParams(body = {}) {
     kpIds: arr(body.kpIds),
     // 讲过的题过滤：'' 全部（默认）/ 'untaught' 排除已讲 / 'taught' 只看已讲
     taught: ['untaught', 'taught'].includes(str(body.taught)) ? str(body.taught) : '',
+    // 组织轴：默认 date（严格保持既有口径），只认白名单值，非法值不静默生效
+    groupBy: str(body.groupBy) === 'kp' ? 'kp' : 'date',
     withAnswer: body.withAnswer !== false,
   }
   return params

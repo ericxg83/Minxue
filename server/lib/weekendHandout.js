@@ -24,6 +24,7 @@ import { ocrStemKey } from '../utils/ocrStemKey.js'
 // 课件题图改为「配图（A）优先 → 回退整页原卷图」，不再消费裁片 → 护栏也一并移除。
 // 判据本体保留在 utils/blockBoxTrust.js（写入侧 / 其它读取侧仍可能引用）。
 import { getCatalogForGrade, resolveChapter } from '../config/textbookCatalog.js'
+import { loadKnowledgeMeta, regroupSlidesByKp } from './weekendMethodGroup.js'
 
 // ── 常量（渲染端共用，勿改）──
 export const TIERS = [
@@ -99,6 +100,7 @@ function chapterNodeIds(catalog, nodeId) {
  * @param {boolean} [opts.withAnswer=true]
  * @param {string} [opts.chapter=''] 标准教材章节 id（空=不限）
  * @param {string} [opts.taught='']  讲题状态过滤：'' 全部 / 'untaught' 排除已讲 / 'taught' 只看已讲
+ * @param {string} [opts.groupBy='date'] 组织轴：'date' 按日期（默认，既有口径）/ 'kp' 按考点与方法分节
  * @param {(msg:string)=>void} [opts.logger]
  */
 /**
@@ -129,6 +131,8 @@ export async function buildHandout(opts) {
     chapter = '',
     // 考点（知识点）筛选：kpIds 为空数组 = 不限；非空时自动展开「选中节点 + 全部子孙」
     kpIds = [],
+    // 组织轴：date=按日期分节（默认，保持既有口径）；kp=按考点/方法分节（学一个会一类）
+    groupBy = 'date',
     withAnswer = true,
     taught = '',
     logger = () => {},
@@ -306,6 +310,18 @@ export async function buildHandout(opts) {
       kpFilter.emptyDiagnosis = diag
       log(`[0] ⚠️ 考点筛选命中 0，给出诊断：${diag.hints.join(' | ')}`)
     }
+  }
+
+  // ── 组织轴：按考点/方法分节（2026-11-08 P0，八年级二次根式试点）──────────
+  // ⛔ 默认 groupBy='date' 时这里一次库都不查，既有流程零影响。
+  //    元数据只读（question_knowledge / knowledge_points / teaching_question_types /
+  //    kp_relations），不写错题、不写掌握度；挂不上考点的题后面进「待归类」节如实展示。
+  const byKnowledge = String(groupBy) === 'kp'
+  let knowledgeMeta = null
+  if (byKnowledge) {
+    const qIdsForMeta = [...new Set(rows.map(r => r.q_id).filter(Boolean))]
+    knowledgeMeta = await loadKnowledgeMeta(pool, qIdsForMeta)
+    log(`[0] 组织轴=kp: ${knowledgeMeta.kpByQuestion.size}/${qIdsForMeta.length} 道题挂到考点`)
   }
 
   const tasksById = new Map()
@@ -1098,6 +1114,11 @@ export async function buildHandout(opts) {
       // anchorKeyAlt 是完整题干合并键，仅作 OCR 题面微差时的兜底匹配，可为空串。
       const anchorKey = t.key
       const anchorKeyAlt = mergeKeyOf(t) || ''
+      // 组织轴=kp 时给这道题打上「属于哪一类」的标签；date 模式下恒为 null。
+      // 多小问完整题的 questionId 可能落在 wholeQuestionId / subParts 上，逐个兜底。
+      const kpQid = t.questionId || t.wholeQuestionId
+        || (t.subParts || []).find(p => p.questionId)?.questionId || null
+      const kpInfo = byKnowledge && kpQid ? knowledgeMeta.kpByQuestion.get(kpQid) : null
       const mark = markByAnchor.get(anchorKey)
         || (anchorKeyAlt ? markByAnchor.get(anchorKeyAlt) : null)
         || null
@@ -1120,6 +1141,9 @@ export async function buildHandout(opts) {
           : null,
         reworkDue,
         sectionLabel: secLabel,
+        kpId: kpInfo?.kpId || null,
+        kpName: kpInfo?.kpName || '',
+        kpGroupKey: kpInfo?.groupKey || null,
         day: sec.day,
         dayLabel: t.dayLabel || sec.day,
         tier: tier.key,
@@ -1159,10 +1183,18 @@ export async function buildHandout(opts) {
     }
   }
 
+  // ── 组织轴重组 ──
+  // ⛔ 默认 groupBy='date' 时 grouped=null，slides/sections/overview 原样返回，
+  //    既有预览、白板、applySelection 的编号与字段完全不动。
+  const grouped = byKnowledge ? regroupSlidesByKp(slideList, knowledgeMeta) : null
+  const outSlides = grouped ? grouped.slides : slideList
+  const outSections = grouped ? grouped.sections : sections
+
   return {
     title: `${grade}${subject ? ' · ' + subject : ''} 周末班错题课件`,
     grade,
     subject: subject || null,
+    groupBy: byKnowledge ? 'kp' : 'date',
     periodLabel,
     period: { start: toYmd(periodStart), end: toYmd(new Date(periodEnd.getTime() - 1)) },
     withAnswer,
@@ -1175,17 +1207,19 @@ export async function buildHandout(opts) {
       taught: taught || null,
       kpIds: kpFilter ? kpFilter.ids : null,
       kpNames: kpFilter ? kpFilter.names : null,
+      groupBy: byKnowledge ? 'kp' : 'date',
     },
     stats: {
       rawRows: totalRows, topics: totalTopics, questionSlides: seq,
-      days: daysOut.length, sections: sections.length,
+      days: daysOut.length, sections: outSections.length,
       students: allStudents.length, studentNames: allStudents,
       limitDropped,
       unknownSubject,
       chapterSummary,
       kpFilter,
+      groupBy: byKnowledge ? 'kp' : 'date',
     },
-    overview: sections.map(d => ({
+    overview: grouped ? grouped.overview : sections.map(d => ({
       label: d.mergedDays.length ? `${d.dayFrom} ~ ${d.day}` : d.day,
       topics: d.topics.length,
       students: d.studentCount,
@@ -1194,8 +1228,8 @@ export async function buildHandout(opts) {
       hard: d.topics.filter(t => t.difficulty !== null && t.difficulty >= 4).length,
       unknown: d.topics.filter(t => t.difficulty === null).length,
     })),
-    sections,
-    slides: slideList,
+    sections: outSections,
+    slides: outSlides,
     allStudents,
     studentRows,
   }
