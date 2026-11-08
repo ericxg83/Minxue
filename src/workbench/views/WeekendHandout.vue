@@ -979,6 +979,13 @@ function openBoard() {
   }
   if (body.from) query.from = body.from
   if (body.to) query.to = body.to
+  // 组织轴必须一起带进 URL：白板优先读 sessionStorage，但隐私模式/书签进入会
+  // 回退到二次拉取（WeekendBoard 的 fallback 分支）。只带 selected 不带 kpIds 时
+  // 回退拉的是整个年级的题单，再用序号过滤 ⇒ 会拿到**另一批题**（铁律 12 同型）。
+  if (body.groupBy === 'kp') {
+    query.groupBy = 'kp'
+    if (body.kpIds?.length) query.kpIds = body.kpIds.join(',')
+  }
   const { href } = router.resolve({ path: '/weekend-ppt/board', query })
   const win = window.open(href, '_blank')
   // 弹窗被浏览器拦截时退回当前页跳转，保证入口始终可用

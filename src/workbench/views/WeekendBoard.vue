@@ -685,6 +685,10 @@ onMounted(async () => {
         difficulty: q.difficulty ? String(q.difficulty) : undefined,
         chapter: q.chapter ? String(q.chapter) : undefined,
         taught: q.taught ? String(q.taught) : undefined,
+        // 组织轴与考点筛选必须一起还原，否则回退拉到的题单与选题页不是同一批
+        // （序号过滤会静默命中别的题）。date 模式不传，保持既有口径。
+        groupBy: q.groupBy === 'kp' ? 'kp' : 'date',
+        kpIds: q.kpIds ? String(q.kpIds).split(',').filter(Boolean) : undefined,
         withAnswer: true,
       }
       const res = await apiRequest('/weekend-ppt/preview', { method: 'POST', body: JSON.stringify(body) })
