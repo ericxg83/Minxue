@@ -1,6 +1,8 @@
 <template>
   <!-- 试卷题库 · 文件夹树（2026-11-07）
-       文件夹可无限嵌套，题集是叶子；拖拽移动，右键或「…」出菜单，危险操作默认不显现。 -->
+       文件夹可无限嵌套，题集是叶子；拖拽移动，右键或「…」出菜单，危险操作默认不显现。
+       2026-11-08：除了拖文件夹/题集，还接收**题目行**拖进来的「改归属」——
+       老师的心智就是「把这张纸放进那个文件夹」，拖比开菜单选两次更直接。 -->
   <div class="pbt">
     <div class="pbt__head">
       <div class="pbt__head-title">
@@ -132,7 +134,10 @@ const props = defineProps({
   totalQuestionCount: { type: Number, default: 0 },
   activePaperId: { type: String, default: 'all' },
 })
-const emit = defineEmits(['select', 'changed', 'create-paper'])
+const emit = defineEmits(['select', 'changed', 'create-paper', 'drop-question'])
+
+// 题目行拖拽的类型标签（与 PaperBankWorkbench 的 onQuestionDragStart 逐字一致）
+const Q_DRAG_TYPE = 'application/x-mnx-question'
 
 const EXPANDED_KEY = 'paperBankTreeExpanded'
 const folders = ref([])
@@ -285,7 +290,19 @@ const canDrop = (row) => {
   return !!d && row.type === 'folder' && !(d.type === 'folder' && d.id === row.id)
 }
 
+/** 外面拖进来的是「一道题」：只有题集（叶子）能接，拖到文件夹上不算数。 */
+const isQuestionDrag = (e) => {
+  const types = e.dataTransfer?.types
+  return !!types && typeof types.includes === 'function' && types.includes(Q_DRAG_TYPE)
+}
+
 const onDragOver = (e, row) => {
+  if (isQuestionDrag(e)) {
+    if (row.type !== 'paper') return
+    e.dataTransfer.dropEffect = 'move'
+    dropKey.value = row.key
+    return
+  }
   if (!canDrop(row)) return
   e.dataTransfer.dropEffect = 'move'
   dropKey.value = row.key
@@ -320,6 +337,13 @@ const moveRow = async (row, folderId) => {
 }
 
 const onDrop = async (e, row) => {
+  // 题目行拖过来：直接交给页面去调改归属接口（树不管数据，只管「落点是谁」）
+  if (isQuestionDrag(e)) {
+    dropKey.value = ''
+    const qid = e.dataTransfer.getData(Q_DRAG_TYPE) || ''
+    if (row.type === 'paper' && qid) emit('drop-question', { questionId: qid, paperId: row.id })
+    return
+  }
   const d = dragging.value
   onDragEnd()
   if (!d || row.type !== 'folder') return

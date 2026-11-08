@@ -28,6 +28,8 @@ import {
   // 截图加题（2026-11-06 加，11-07 改为「写进指定题集」）：同一批零件的第二条落库路径，见下方 /clips
   parseClipImages,
   deletePaperQuestion,
+  movePaperQuestions,
+  restoreQuestionPlacements,
   CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
 } from '../services/paperBankService.js'
@@ -711,6 +713,42 @@ router.get('/questions', async (req, res) => {
   }
 })
 
+/**
+ * 单题改归属（2026-11-08 负责人需求）：截图收题时点错题集，本该在另一个文件夹里。
+ * 此前只能删了重收 —— 等于拿已校对好的题干/难度/标签去换一次 OCR 风险。
+ *
+ * body: { ids: string[], targetPaperId: string }
+ * 语义：`ids` 里如果含「同一题号的多个小问行」，服务端按整题搬（见 planQuestionMove）。
+ * 返回 undo 快照，前端据此给「撤销」。
+ */
+router.post('/questions/move', async (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [req.body?.id].filter(Boolean)
+    const targetPaperId = req.body?.targetPaperId || req.body?.paperId
+    if (!ids.length) return res.status(400).json({ error: '没有选要移动的题目', message: '先选择要移动的题目' })
+    if (!targetPaperId) return res.status(400).json({ error: '没有选目标题集', message: '先选择要移到哪个题集' })
+    const r = await movePaperQuestions({ ids, targetResourceId: targetPaperId })
+    res.json({ success: true, ...r })
+  } catch (e) {
+    // 目标题集不存在 / 题目已被删 这类是「可解释失败」，用 400 把原文透给老师
+    const msg = String(e?.message || '移动失败')
+    const status = /不存在|没有选|没有目标/.test(msg) ? 400 : 500
+    res.status(status).json({ error: '移动失败', message: msg })
+  }
+})
+
+/** 撤销上面的移动：前端把 undo 快照原样带回来。原位置被占用时跳过并如实报数。 */
+router.post('/questions/restore', async (req, res) => {
+  try {
+    const items = Array.isArray(req.body?.items) ? req.body.items : []
+    if (!items.length) return res.status(400).json({ error: '没有要还原的题目' })
+    const r = await restoreQuestionPlacements(items)
+    res.json({ success: true, ...r })
+  } catch (e) {
+    res.status(500).json({ error: '还原失败', message: e.message })
+  }
+})
+
 router.put('/questions/:id', async (req, res) => {
   try {
     const updated = await updatePaperQuestion(req.params.id, req.body || {})
@@ -738,14 +776,37 @@ router.put('/questions/:id/source', async (req, res) => {
     const hasNote = Object.prototype.hasOwnProperty.call(req.body || {}, 'note')
     const { rows } = await query(
       `SELECT rq.resource_id, rq.page_no,
-              r.metadata->'clipNotes'->>(rq.page_no::text) AS old_note
+              r.metadata->'clipNotes'->>(rq.page_no::text) AS old_note,
+              r.metadata->'movedSources'->(rq.id::text) AS moved
          FROM resource_questions rq
          JOIN resources r ON r.id = rq.resource_id
         WHERE rq.id = $1`,
       [req.params.id]
     )
     if (!rows.length) return res.status(404).json({ error: '题目不存在' })
-    if (rows[0].page_no == null) return res.status(400).json({ error: '这道题没有素材页码' })
+    // 2026-11-08：从别的题集搬过来的题没有 page_no（原页码已清，避免跳到目标卷错页），
+    // 它的来源按**题目 id** 存在 metadata.movedSources ⇒ 这条链路也要能改，否则老师
+    // 一改来源就吃 400「这道题没有素材页码」。
+    if (rows[0].page_no == null) {
+      const oldNote = rows[0].moved?.note || ''
+      const note = hasNote ? String(req.body.note ?? '').trim().slice(0, 500) : String(oldNote)
+      await query(
+        `UPDATE resources
+            SET metadata = jsonb_set(
+                  COALESCE(metadata, '{}'::jsonb),
+                  '{movedSources}',
+                  jsonb_set(
+                    COALESCE(metadata->'movedSources', '{}'::jsonb),
+                    ARRAY[$2::text],
+                    COALESCE(metadata->'movedSources'->($2::text), '{}'::jsonb)
+                      || jsonb_build_object('source', $3::text, 'note', $4::text),
+                    true),
+                  true)
+          WHERE id = $1`,
+        [rows[0].resource_id, String(req.params.id), source, note]
+      )
+      return res.json({ success: true, source, note })
+    }
     const note = hasNote
       ? String(req.body.note ?? '').trim().slice(0, 500)
       : String(rows[0].old_note || '')

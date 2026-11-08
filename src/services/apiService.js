@@ -1245,6 +1245,24 @@ export const updatePaperClipSource = (id, source, note = '') =>
 // 删单题（截图截错了 / 一张图多拆出一行时用）。只删这一行，不动卷。
 export const deletePaperBankQuestion = (id) => apiRequest(`/paper-bank/questions/${id}`, { method: 'DELETE' })
 
+/**
+ * 单题改归属（2026-11-08）：把题目移到另一个题集。
+ * 后端按「题号 = 一道题」整组搬（含各小问），题号接续到目标末尾，来源随题走。
+ * 返回 { movedRows, movedQuestions, targetPaperName, undo }，undo 原样喂给下面的还原接口。
+ */
+export const movePaperBankQuestions = (ids, targetPaperId) =>
+  apiRequest('/paper-bank/questions/move', {
+    method: 'POST',
+    body: JSON.stringify({ ids: Array.isArray(ids) ? ids : [ids], targetPaperId }),
+  })
+
+/** 撤销移动：把 move 返回的 undo 快照原样送回。原位置被占用时后端跳过并报数。 */
+export const restorePaperBankQuestions = (items) =>
+  apiRequest('/paper-bank/questions/restore', {
+    method: 'POST',
+    body: JSON.stringify({ items: items || [] }),
+  })
+
 export const clearAllCache = () => {
   try {
     localStorage.removeItem('cache_version')

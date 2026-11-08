@@ -1209,13 +1209,27 @@ const RQ_READ_COLS = `rq.id, rq.resource_id, rq.question_no, rq.sub_no, rq.paren
   -- 截图来源（2026-11-07）：按「第几张截图」= page_no 存在卷的 metadata.clipSources 里，
   -- 一张截图拆出的多道题共享同一个来源。用相关子查询取，两个读取入口自动都带，
   -- 且不改 FROM / JOIN 结构（listPaperQuestions 没有 JOIN resources）。
-  (SELECT r.metadata->'clipSources'->>(rq.page_no::text)
-     FROM resources r WHERE r.id = rq.resource_id) AS clip_source,
+  -- 2026-11-08 加 movedSources 兜底：单题改归属后 page_no 会被清掉（它指向原题集的原卷页），
+  -- 来源改按**题目 id** 存进目标题集的 metadata.movedSources，不随页码走、不会串到别人那页。
+  COALESCE(
+    (SELECT r.metadata->'clipSources'->>(rq.page_no::text)
+       FROM resources r WHERE r.id = rq.resource_id),
+    (SELECT r.metadata->'movedSources'->(rq.id::text)->>'source'
+       FROM resources r WHERE r.id = rq.resource_id)
+  ) AS clip_source,
   -- 时间点/备注（2026-11-07 二轮）：单独一个 clipNotes map，与 clipSources 同按 page_no 索引。
   -- ⛔ 刻意不把来源改成对象：库里已有纯字符串来源，两种形状混进同一池子必踩口径不一致。
   --    两个 map 都是字符串，旧数据零迁移、读取侧天然是单一形状。
-  (SELECT r.metadata->'clipNotes'->>(rq.page_no::text)
-     FROM resources r WHERE r.id = rq.resource_id) AS clip_source_note`
+  COALESCE(
+    (SELECT r.metadata->'clipNotes'->>(rq.page_no::text)
+       FROM resources r WHERE r.id = rq.resource_id),
+    (SELECT r.metadata->'movedSources'->(rq.id::text)->>'note'
+       FROM resources r WHERE r.id = rq.resource_id)
+  ) AS clip_source_note,
+  -- 「这题是从别的题集搬过来的」——页面据此不显示「看原卷（第 N 页）」：
+  -- 原卷文件挂在原题集，跟着新 resource_id 找只会指错卷。
+  COALESCE((SELECT jsonb_exists(r.metadata->'movedSources', rq.id::text)
+              FROM resources r WHERE r.id = rq.resource_id), false) AS moved_in`
 
 /** 单份卷子的题目（按页码、题号、小问号排序）。 */
 export async function listPaperQuestions(resourceId) {
@@ -1390,6 +1404,222 @@ export async function appendPaperQuestions(resourceId, rows) {
 export async function deletePaperQuestion(id) {
   const { rowCount } = await query('DELETE FROM resource_questions WHERE id = $1', [id])
   return rowCount > 0
+}
+
+// ── 单题改归属（2026-11-08 负责人需求）──────────────────────────────────────
+//
+// 场景：截图收题时点错了题集，「这道题本该在『平行+角平分线』」。此前只能删了重收，
+// 而重收要重新识别一遍，等于拿已校对好的题干/难度/标签去换一次 OCR 风险。
+//
+// ⛔ 四条不能省的约束：
+//   ① 「一道题」= 同一 (原题集, 题号) 的所有小问行，必须整组搬；只搬一行会把 (1)(2)(3) 拆散。
+//   ② 目标题号接续到**末尾**，绝不沿用原题号：官方答案按 (resource_id, question_no) 关联，
+//      沿用旧号会挂上目标题集里同号题的答案 —— 张冠李戴比没答案更坏。
+//   ③ page_no 必须清空：它指向**原题集**上传文件里的第几页，跟着走会让「看原卷（第 N 页）」
+//      跳到目标卷的错页。整页图 URL（page_image_url）保留，图片本身还在 OSS 上。
+//   ④ 来源不能跟着 page_no 走，否则会串到目标题集同页的其它素材上。改为按**题目 id**
+//      存进目标题集的 metadata.movedSources（见 RQ_READ_COLS 的读取兜底）。
+
+/**
+ * 分配目标题号（纯函数，便于回归锁）：整组小问共用一个新题号。
+ * @param {Array<{id:string, resource_id:string, question_no:number|null, sub_no:string}>} rows
+ * @param {number} maxQuestionNo 目标题集当前最大题号
+ */
+export function planQuestionMove(rows, maxQuestionNo) {
+  const groups = new Map()
+  for (const r of rows) {
+    const key = `${r.resource_id}|${r.question_no == null ? 'null' : r.question_no}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(r)
+  }
+  // 按原题号升序搬，老师看到的目标顺序与来源顺序一致
+  const ordered = [...groups.values()].sort((a, b) => {
+    const na = a[0].question_no == null ? Number.MAX_SAFE_INTEGER : a[0].question_no
+    const nb = b[0].question_no == null ? Number.MAX_SAFE_INTEGER : b[0].question_no
+    return na - nb
+  })
+  let cursor = Number(maxQuestionNo) || 0
+  const assignments = []
+  for (const list of ordered) {
+    cursor += 1
+    for (const r of list) assignments.push({ id: r.id, questionNo: cursor, subNo: r.sub_no || '' })
+  }
+  return { assignments, lastNo: cursor, groupCount: ordered.length }
+}
+
+/**
+ * 把题目移到另一个题集（整题连同小问）。
+ * @returns {{movedRows:number, movedQuestions:number, targetPaperId:string, targetPaperName:string,
+ *            alreadyInTarget:boolean, undo:Array}}
+ */
+export async function movePaperQuestions({ ids = [], targetResourceId } = {}) {
+  const idList = Array.from(new Set((Array.isArray(ids) ? ids : []).filter(Boolean)))
+  if (!idList.length) throw new Error('没有选要移动的题目')
+  if (!targetResourceId) throw new Error('没有选目标题集')
+
+  const tgt = await query(
+    `SELECT id, name FROM resources WHERE id = $1 AND resource_type = 'exam'`,
+    [targetResourceId]
+  )
+  if (!tgt.rows.length) throw new Error('目标题集不存在')
+  const targetPaperName = tgt.rows[0].name
+
+  const { rows } = await query(
+    `SELECT id, resource_id, question_no, sub_no, page_no
+       FROM resource_questions WHERE id = ANY($1::uuid[])`,
+    [idList]
+  )
+  if (!rows.length) throw new Error('题目不存在，可能已被删除')
+  if (rows.every(r => r.resource_id === targetResourceId)) {
+    return { movedRows: 0, movedQuestions: 0, targetPaperId: targetResourceId, targetPaperName, alreadyInTarget: true, undo: [] }
+  }
+
+  // 整题搬运：把同题号的小问兄弟行一起带上（老师点的是「这道题」，不是「这一小问」）
+  const seedKeys = new Set(rows.map(r => `${r.resource_id}|${r.question_no == null ? 'null' : r.question_no}`))
+  const allRows = new Map(rows.map(r => [r.id, r]))
+  {
+    const { rows: siblings } = await query(
+      `SELECT id, resource_id, question_no, sub_no, page_no
+         FROM resource_questions
+        WHERE (resource_id, question_no) IN (
+                SELECT * FROM UNNEST($1::uuid[], $2::int[])
+              )`,
+      [rows.map(r => r.resource_id), rows.map(r => r.question_no)]
+    )
+    for (const s of siblings) {
+      const key = `${s.resource_id}|${s.question_no == null ? 'null' : s.question_no}`
+      if (seedKeys.has(key)) allRows.set(s.id, s)
+    }
+  }
+  // 只搬还不在目标题集里的行（跨两个题集各选一题时，已在目标的那些不能重复搬）
+  const moving = [...allRows.values()].filter(r => r.resource_id !== targetResourceId)
+
+  const sourceIds = Array.from(new Set(moving.map(r => r.resource_id)))
+  const { rows: metas } = await query(
+    `SELECT id, metadata->'clipSources' AS sources, metadata->'clipNotes' AS notes
+       FROM resources WHERE id = ANY($1::uuid[])`,
+    [sourceIds]
+  )
+  const metaById = new Map(metas.map(m => [m.id, m]))
+
+  const result = await transaction(async (client) => {
+    // 同一目标题集的「取 max 题号 → 插入」必须串行：两个标签页同时往一个题集搬题时，
+    // 各自算到同一个 max，第二笔就会撞 (resource_id, unit_id, question_no, sub_no)。
+    // 事务级 advisory lock 只在这一笔事务内生效，不需要额外的表/列。
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [targetResourceId])
+    const mx = await client.query(
+      `SELECT COALESCE(MAX(question_no), 0)::int AS max_no
+         FROM resource_questions WHERE resource_id = $1`,
+      [targetResourceId]
+    )
+    const plan = planQuestionMove(moving, mx.rows[0]?.max_no || 0)
+    const byId = new Map(moving.map(r => [r.id, r]))
+    const movedSources = {}
+    const undo = []
+
+    for (const a of plan.assignments) {
+      const row = byId.get(a.id)
+      if (!row) continue
+      // 来源按「当时这一页登记的出处」取，随题目 id 搬到目标题集
+      const meta = metaById.get(row.resource_id)
+      const pageKey = row.page_no == null ? '' : String(row.page_no)
+      const source = (pageKey && meta?.sources ? meta.sources[pageKey] : '') || ''
+      const note = (pageKey && meta?.notes ? meta.notes[pageKey] : '') || ''
+      // ⛔ 哪怕没有来源也要写这条：moved_in 靠这个 key 判定，漏写会让「看原卷（第 N 页）」
+      //    在目标题集有原卷时跳到**别人的**那一页。
+      movedSources[a.id] = { source, note, from: row.resource_id, at: new Date().toISOString() }
+      await client.query(
+        `UPDATE resource_questions
+            SET resource_id = $2, question_no = $3, unit_id = NULL, page_no = NULL
+          WHERE id = $1`,
+        [a.id, targetResourceId, a.questionNo]
+      )
+      undo.push({
+        id: a.id,
+        resourceId: row.resource_id,
+        questionNo: row.question_no,
+        pageNo: row.page_no,
+        subNo: row.sub_no || '',
+      })
+    }
+
+    if (Object.keys(movedSources).length) {
+      await client.query(
+        `UPDATE resources
+            SET metadata = jsonb_set(
+                  COALESCE(metadata, '{}'::jsonb),
+                  '{movedSources}',
+                  COALESCE(metadata->'movedSources', '{}'::jsonb) || $2::jsonb,
+                  true)
+          WHERE id = $1`,
+        [targetResourceId, JSON.stringify(movedSources)]
+      )
+    }
+    return { undo, movedRows: plan.assignments.length, movedQuestions: plan.groupCount }
+  })
+
+  return {
+    ...result,
+    targetPaperId: targetResourceId,
+    targetPaperName,
+    alreadyInTarget: false,
+  }
+}
+
+/**
+ * 撤销移动：按前端带回来的快照把题目放回原题集/原题号/原页码。
+ * 原位置已被别的题占用（老师在原题集又收了题）时跳过该行并如实报数，绝不覆盖。
+ */
+export async function restoreQuestionPlacements(items = []) {
+  const list = (Array.isArray(items) ? items : []).filter(it => it && it.id && it.resourceId)
+  if (!list.length) throw new Error('没有要还原的题目')
+  let restored = 0
+  const skipped = []
+  await transaction(async (client) => {
+    for (const it of list) {
+      const cur = await client.query(
+        `SELECT resource_id FROM resource_questions WHERE id = $1`,
+        [it.id]
+      )
+      if (!cur.rows.length) { skipped.push(it.id); continue }
+      const nowPaper = cur.rows[0].resource_id
+      // 先摘掉「移入题来源」标记（按题目 id 存，还原后这条不再属于目标题集）
+      if (nowPaper !== it.resourceId) {
+        // 减完变空对象就连 movedSources 这个 key 一起摘掉，别在卷的 metadata 里留一堆 {}
+        await client.query(
+          `UPDATE resources
+              SET metadata = CASE
+                    WHEN (COALESCE(metadata->'movedSources', '{}'::jsonb) - $2) = '{}'::jsonb
+                      THEN COALESCE(metadata, '{}'::jsonb) - 'movedSources'
+                    ELSE jsonb_set(COALESCE(metadata, '{}'::jsonb), '{movedSources}',
+                                   COALESCE(metadata->'movedSources', '{}'::jsonb) - $2, true)
+                  END
+            WHERE id = $1`,
+          [nowPaper, String(it.id)]
+        )
+      }
+      // ⛔ 不能靠 catch 唯一键冲突来跳过：PG 事务里一条语句失败会整体 abort（25P02），
+      //    后面的行全部失效。先显式查占用，再决定要不要更新。
+      const conflict = await client.query(
+        `SELECT 1 FROM resource_questions
+          WHERE resource_id = $1 AND question_no = $2 AND sub_no = $3
+            AND unit_id IS NULL AND id <> $4
+          LIMIT 1`,
+        [it.resourceId, it.questionNo ?? null, it.subNo || '', it.id]
+      )
+      if (conflict.rows.length) { skipped.push(it.id); continue }
+      // 走到这里还失败，说明不是「撞位」而是别的问题：让它抛出去整体回滚，
+      // 绝不留「还原了一半」的中间态。
+      const r = await client.query(
+        `UPDATE resource_questions
+            SET resource_id = $2, question_no = $3, page_no = $4
+          WHERE id = $1`,
+        [it.id, it.resourceId, it.questionNo ?? null, it.pageNo ?? null]
+      )
+      restored += r.rowCount || 0
+    }
+  })
+  return { restored, skipped: skipped.length, requested: list.length }
 }
 
 /**

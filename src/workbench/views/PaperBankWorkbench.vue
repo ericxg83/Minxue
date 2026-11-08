@@ -36,6 +36,7 @@
             @select="pickPaper"
             @changed="loadPapers"
             @create-paper="openCreateDialog"
+            @drop-question="onQuestionDropped"
           />
 
           <!-- 原卷 / 答案 / 复核状态跟着「当前选中」走，树本身保持笔记式的干净 -->
@@ -154,16 +155,29 @@
           </EmptyState>
 
           <div v-else class="pb-rows">
-            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id) }">
+            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id), 'is-dragging-q': draggingQuestionId === q.id }">
               <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" />
 
               <div class="pb-row__body">
                 <div class="pb-row__head">
-                  <span class="pb-row__num">{{ questionLabel(q) }}</span>
+                  <span
+                    class="pb-row__num pb-row__num--grip"
+                    draggable="true"
+                    title="按住拖到左边的题集上，就能改这道题的归属"
+                    @dragstart="onQuestionDragStart($event, q)"
+                    @dragend="onQuestionDragEnd"
+                  >{{ questionLabel(q) }}</span>
                   <span class="pb-row__type">{{ typeLabel(q.question_type) }}</span>
                   <span v-if="q.difficulty" class="pb-row__diff">{{ stars(q.difficulty) }}</span>
                   <span v-for="t in (q.tags || [])" :key="t" class="pb-tag">{{ t }}</span>
-                  <span class="pb-row__paper">{{ q.resource_name }}</span>
+                  <!-- 归属（2026-11-08）：题集名就是这道题的「文件夹」，点它就能换 ——
+                       收题点错题集时不用删了重收（重收要再识别一次，白丢已校对的题干）。 -->
+                  <button
+                    type="button"
+                    class="pb-row__paper pb-row__paper--btn"
+                    title="点这里换题集（这道题现在在哪个文件夹）"
+                    @click="openMovePicker(q, $event)"
+                  >{{ q.resource_name }}<span class="pb-row__paper-swap" aria-hidden="true">⇄</span></button>
                 </div>
 
                 <!-- 题干在**同一道题的小问之间只显示一次**（2026-11-06）。
@@ -247,6 +261,14 @@
                   <button type="button" class="pb-link" @click="toggleEditor(q.id)">
                     {{ editingId === q.id ? '收起编辑' : '改难度 / 标签' }}
                   </button>
+                  <!-- 归属修正入口（2026-11-08）：常显不隐藏 —— 这是老师「收错了要返工」的唯一出路，
+                       藏进 hover 只会让人继续删了重收。 -->
+                  <button
+                    type="button"
+                    class="pb-link"
+                    title="把这道题移到另一个题集"
+                    @click="openMovePicker(q, $event)"
+                  >移到题集…</button>
                   <!-- 2026-11-07：配图提不出干净几何图时 image_url 为空，原截图仍必须能点开回看 -->
                   <a v-if="q.image_url || q.page_image_url" class="pb-link" :href="q.image_url || q.page_image_url" target="_blank" rel="noopener">{{ q.image_url ? '看原题图' : '看原截图' }}</a>
                   <!-- 原卷是整份上传文件；PDF 直接跳到本题所在页，多张照片按页码选对应那张 -->
@@ -580,6 +602,26 @@
         </div>
       </div>
     </el-dialog>
+
+    <!-- 单题改归属（2026-11-08）：选择器只负责「选哪个题集」，写库在 doMoveQuestion -->
+    <MoveQuestionPicker
+      :open="movePicker.open"
+      :papers="papers"
+      :current-paper-id="movePicker.q ? movePicker.q.resource_id : ''"
+      :anchor="movePicker.anchor"
+      @pick="doMoveQuestion"
+      @close="closeMovePicker"
+    />
+
+    <!-- 移动后可撤销：比弹二次确认更不打断，且真点错了能一步退回 -->
+    <div v-if="undoMove" class="pb-undo" role="status">
+      <span class="pb-undo__text">
+        已移到「{{ undoMove.paperName }}」<em v-if="undoMove.hidden">，本页不再显示</em>
+        <em v-if="undoMove.count > 1">（整题 {{ undoMove.count }} 个小问一起搬）</em>
+      </span>
+      <button type="button" class="pb-undo__btn" @click="undoLastMove">撤销</button>
+      <button type="button" class="pb-undo__close" title="关闭" aria-label="关闭" @click="undoMove = null">×</button>
+    </div>
   </div>
 </template>
 
@@ -596,6 +638,7 @@ import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import MathRender from '../components/MathRender.vue'
 import PaperBankTree from '../components/paperBank/PaperBankTree.vue'
+import MoveQuestionPicker from '../components/paperBank/MoveQuestionPicker.vue'
 import {
   getPaperBankPapers,
   createPaperBankPaper,
@@ -605,6 +648,8 @@ import {
   parsePaperBankAnswers,
   uploadPaperClips,
   deletePaperBankQuestion,
+  movePaperBankQuestions,
+  restorePaperBankQuestions,
   searchPaperBankQuestions,
   updatePaperBankQuestion,
   updatePaperClipSource,
@@ -833,6 +878,9 @@ const openOcrReview = (p) => {
 
 /** 题目行「看原卷」：单份 PDF 加 #page= 跳到本题所在页；多张照片按页码取对应那张。 */
 const questionSourceUrl = (q) => {
+  // 从别的题集搬过来的题（2026-11-08）：page_no 已清空、原卷文件挂在**原题集**上，
+  // 跟着新 resource_id 去找只会指向目标题集的原卷 —— 宁可不出这个入口，也不给错页。
+  if (q.moved_in) return ''
   const files = papersById.value.get(q.resource_id)?.question_files || []
   if (!files.length) return ''
   if (files.length === 1) {
@@ -1255,6 +1303,96 @@ const startClipPolling = (paperId, beforeCount) => {
   }, 3000)
 }
 
+// ── 单题改归属（2026-11-08 负责人需求）──
+// 截图收题点错题集后，此前只能删了重收；现在点题集名（或行内「移到题集…」）选一个新题集即可。
+// ⛔ 移动/撤销都以服务端返回的 undo 快照为准，前端不自己拼「原题号」——
+//    题号是唯一键的一部分，猜错一次就会把两道题挤在一起。
+const movePicker = ref({ open: false, q: null, anchor: null })
+const undoMove = ref(null)
+let undoTimer = null
+
+const openMovePicker = (q, ev) => {
+  if (!papers.value.length) return
+  const rect = ev?.currentTarget?.getBoundingClientRect?.()
+  movePicker.value = {
+    open: true,
+    q,
+    anchor: rect
+      ? { x: rect.left, y: rect.bottom }
+      : { x: Math.max(8, window.innerWidth / 2 - 150), y: 120 },
+  }
+}
+
+const closeMovePicker = () => { movePicker.value = { ...movePicker.value, open: false } }
+
+// 拖拽改归属（2026-11-08 第二条路径）：题号当抓手，拖到左栏题集上即移动。
+// 与「移到题集…」走同一个 doMoveQuestion，两条入口不会长出两套口径。
+const Q_DRAG_TYPE = 'application/x-mnx-question'
+const draggingQuestionId = ref('')
+const onQuestionDragStart = (e, q) => {
+  draggingQuestionId.value = q.id
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData(Q_DRAG_TYPE, q.id)
+  e.dataTransfer.setData('text/plain', questionLabel(q))
+}
+const onQuestionDragEnd = () => { draggingQuestionId.value = '' }
+
+const onQuestionDropped = async ({ questionId, paperId }) => {
+  const q = questions.value.find(x => x.id === questionId)
+  const paper = papers.value.find(p => p.id === paperId)
+  if (!q || !paper) return
+  if (q.resource_id === paperId) { ElMessage.info(`这道题已经在「${paper.name}」里了`); return }
+  await doMoveQuestion(paper, q)
+}
+
+const doMoveQuestion = async (paper, targetQ) => {
+  const q = targetQ || movePicker.value.q
+  if (!q || !paper) return
+  closeMovePicker()
+  try {
+    const r = await movePaperBankQuestions([q.id], paper.id)
+    if (r?.alreadyInTarget) { ElMessage.info('这道题已经在这个题集里了') ; return }
+    // 卷面（试题篮）里的同一题跟着换归属，否则出卷还按旧题集分大题
+    basket.value = basket.value.map(it => (
+      it.id === q.id ? { ...it, resource_id: paper.id, resource_name: paper.name } : it
+    ))
+    const staysVisible = filterPaper.value === 'all' || filterPaper.value === paper.id
+    undoMove.value = {
+      paperName: paper.name,
+      // 正看着原题集时，这一条会从列表里消失 —— 必须在提示里说清「消失≠被删」
+      hidden: !staysVisible,
+      count: r?.movedQuestions || 1,
+      items: r?.undo || [],
+      fromPaperId: q.resource_id,
+    }
+    if (undoTimer) clearTimeout(undoTimer)
+    undoTimer = setTimeout(() => { undoMove.value = null }, 8000)
+    await loadPapers()
+    await loadQuestions()
+    // ⛔ 不再另弹 ElMessage：成功提示与撤销条说的是同一件事，两条并列只会互相抢注意力。
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '移动失败')
+  }
+}
+
+const undoLastMove = async () => {
+  const u = undoMove.value
+  if (!u?.items?.length) { undoMove.value = null; return }
+  undoMove.value = null
+  if (undoTimer) { clearTimeout(undoTimer); undoTimer = null }
+  try {
+    const r = await restorePaperBankQuestions(u.items)
+    const back = new Map(u.items.map(it => [it.id, it]))
+    basket.value = basket.value.map(it => (back.has(it.id) ? { ...it, resource_id: back.get(it.id).resourceId } : it))
+    await loadPapers()
+    await loadQuestions()
+    if (r?.skipped) ElMessage.warning(`已还原 ${r.restored} 道；${r.skipped} 道原位置已被占用，没动它`)
+    else ElMessage.success('已撤销，题回到原来的题集')
+  } catch (e) {
+    ElMessage.error(e?.payload?.message || e.message || '撤销失败')
+  }
+}
+
 const askDeleteQuestion = async (q) => {
   try {
     await ElMessageBox.confirm(
@@ -1660,6 +1798,7 @@ onUnmounted(() => {
   stopClipPolling()
   resetClipDialog()
   clearTimeout(repaintTimer)
+  if (undoTimer) clearTimeout(undoTimer)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('paste', onGlobalPaste)
@@ -1823,7 +1962,44 @@ onUnmounted(() => {
 .pb-row__body { flex: 1; min-width: 0; }
 .pb-row__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
 .pb-row__num { font-weight: 500; font-size: 13px; white-space: nowrap; }
+/* 题号＝拖拽抓手：光标要能提示「这东西能拖」，但平时仍是安静的题号 */
+.pb-row__num--grip { cursor: grab; user-select: none; border-radius: 4px; padding: 0 3px; margin-left: -3px; }
+.pb-row__num--grip:hover { background: #f2f1ec; }
+.pb-row__num--grip:active { cursor: grabbing; }
+.pb-row.is-dragging-q { opacity: .45; }
 .pb-row__paper { font-size: 11px; color: #999; margin-left: auto; }
+/* 题集名＝这道题的归属，做成可点：hover 才亮出「⇄」，平时仍是安静的一行出处 */
+.pb-row__paper--btn {
+  border: 0; background: transparent; padding: 1px 4px; border-radius: 4px;
+  font-size: 11px; color: #999; cursor: pointer; max-width: 46%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.pb-row__paper--btn:hover { background: #f2f1ec; color: #185fa5; }
+.pb-row__paper-swap { font-size: 10px; opacity: 0; transition: opacity var(--wb-motion-fast, 120ms) ease; }
+.pb-row__paper--btn:hover .pb-row__paper-swap { opacity: 1; }
+/* 移动后的撤销条：贴着视口底部，8 秒后自动消失 */
+.pb-undo {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 3000; display: flex; align-items: center; gap: 10px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 9px 12px; border-radius: 999px;
+  background: rgba(30, 41, 59, .94); color: #fff;
+  font-size: 12px; line-height: 1.4;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, .28);
+}
+.pb-undo__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-undo__text em { font-style: normal; opacity: .8; font-size: 11px; }
+.pb-undo__btn {
+  flex: none; border: 1px solid rgba(255, 255, 255, .5); background: transparent;
+  color: #fff; font-size: 12px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+}
+.pb-undo__btn:hover { background: rgba(255, 255, 255, .16); }
+.pb-undo__close {
+  flex: none; border: 0; background: transparent; color: rgba(255, 255, 255, .7);
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px;
+}
+.pb-undo__close:hover { color: #fff; }
 .pb-row__type { font-size: 11px; color: #555; background: #f1efe8; border-radius: 4px; padding: 0 5px; }
 .pb-tag { font-size: 11px; color: #993c1d; background: #faece7; border: 1px solid #f0997b; border-radius: 4px; padding: 0 5px; }
 .pb-row__diff { color: #f59e0b; font-size: 11px; letter-spacing: 1px; }
