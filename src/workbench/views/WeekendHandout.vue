@@ -106,6 +106,15 @@
             />
           </div>
           <div class="param-field">
+            <label title="组织轴：按日期（既有口径）或按考点与方法分节（学一个会一类）">组织轴</label>
+            <WorkbenchSelect
+              v-model="params.groupBy"
+              :options="groupByOptions"
+              width="220px"
+              aria-label="选择组织轴"
+            />
+          </div>
+          <div class="param-field">
             <label title="按「考点」筛选：只保留挂在这些知识点（含子考点）下的错题。与「章节」是两套维度，可叠加">
               考点
             </label>
@@ -163,6 +172,7 @@
             <el-icon v-if="!previewing"><Search /></el-icon>
             {{ previewing ? '正在聚合错题…' : '预览题单' }}
           </ActionButton>
+          <el-button size="small" @click="applyPilotPreset">八年级试点 · 二次根式</el-button>
           <span v-if="previewMeta" class="preview-meta">
             {{ previewMeta }}
           </span>
@@ -224,7 +234,9 @@
           >
             全选
           </el-checkbox>
-          <span class="toolbar-hint">每节按「日期倒序 → 节内由易到难」排列；蓝色编号为本节序号（每节从 1 起）</span>
+          <span class="toolbar-hint">{{ params.groupBy === 'kp'
+            ? '按「一类方法」分节：每节先看方法卡，再讲同模型的题；蓝色编号为本节序号'
+            : '每节按「日期倒序 → 节内由易到难」排列；蓝色编号为本节序号（每节从 1 起）' }}</span>
         </div>
 
         <div v-if="previewing" class="preview-loading" aria-label="正在加载题单">
@@ -256,6 +268,24 @@
                 <template v-if="sectionTierText(sec)"> · {{ sectionTierText(sec) }}</template>
               </span>
             </header>
+
+            <!-- 方法卡：一节 = 一类方法。识别信号 → 通用动作 → 易错点，
+                 底部只显示已确认的前后知识链（查不到就不编，见 weekendMethodGroup.js）。 -->
+            <div v-if="sec.methodCard && sec.methodCard.source !== 'none'" class="method-card">
+              <div v-if="sec.methodCard.signals" class="method-card__row">
+                <span class="method-card__label">识别信号</span>
+                <p>{{ sec.methodCard.signals }}</p>
+              </div>
+              <div v-if="sec.methodCard.steps" class="method-card__row method-card__row--key">
+                <span class="method-card__label">通用动作</span>
+                <p>{{ sec.methodCard.steps }}</p>
+              </div>
+              <div v-if="sec.methodCard.pitfalls" class="method-card__row">
+                <span class="method-card__label">易错点</span>
+                <p>{{ sec.methodCard.pitfalls }}</p>
+              </div>
+              <div v-if="chainText(sec)" class="method-card__chain">{{ chainText(sec) }}</div>
+            </div>
 
             <article
               v-for="q in questionsOf(sec.label)"
@@ -391,7 +421,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Reading, Search, WarningFilled } from '@element-plus/icons-vue'
@@ -431,6 +461,8 @@ const params = ref({
   difficulty: 'medium',
   chapter: '',
   taught: '',
+  // 组织轴：date=按日期分节（默认，既有口径）；kp=按考点/方法分节（学一个会一类）
+  groupBy: 'date',
   // 考点（知识点 id 数组）：与「章节」是两套维度——章节来自静态教材目录，
   // 考点来自 question_knowledge（题目实际关联的知识点）。两个可叠加使用。
   kpIds: [],
@@ -483,6 +515,56 @@ const taughtOptions = [
   { label: '排除已讲（只看未讲）', value: 'untaught' },
   { label: '只看已讲（复习用）', value: 'taught' },
 ]
+
+// 组织轴：默认 date，切到 kp 后目录/分节都按「一类方法」组织（后端 groupBy=kp）
+const groupByOptions = [
+  { label: '按日期（既有口径）', value: 'date' },
+  { label: '按考点与方法（学一个会一类）', value: 'kp' },
+]
+
+// 八年级试点专题：上海五四制「第22章 二次根式」。
+// 按考点名取 id，不硬编码 uuid（换库/重新导树仍可用）；只筛初二，绝不碰九年级内容。
+const PILOT_KP_PATTERN = /二次根式|根式运算|分母有理化/
+function collectPilotKpIds(nodes, out = []) {
+  for (const n of nodes || []) {
+    if (n?.value && PILOT_KP_PATTERN.test(String(n.label || ''))) out.push(n.value)
+    if (n.children) collectPilotKpIds(n.children, out)
+  }
+  return out
+}
+
+/** 一键跑八年级试点：选中二次根式相关考点 → 初二 → 按方法分节 → 直接出预览 */
+async function applyPilotPreset() {
+  params.value.subject = '数学'
+  await loadKpTree()
+  // ⚠️ subject 的 watch 会清空 kpIds；等它跑完再赋值，否则刚选的考点会被抹掉
+  await nextTick()
+  const ids = [...new Set(collectPilotKpIds(kpTreeOptions.value))]
+  if (!ids.length) {
+    ElMessage.warning('没在考点树里找到「二次根式」相关考点，请手动在考点筛选里选择')
+    return
+  }
+  params.value.grade = '初二'
+  params.value.kpIds = ids
+  params.value.groupBy = 'kp'
+  params.value.difficulty = ''
+  params.value.limit = 24
+  params.value.days = 20
+  params.value.chapter = ''
+  params.value.students = []
+  periodPreset.value = 'days20'
+  await runPreview()
+}
+
+/** 知识链文案：只显示后端确认过的前后关系，查不到就不渲染 */
+function chainText(sec) {
+  const c = sec?.knowledgeChain
+  if (!c) return ''
+  const pre = (c.prerequisites || []).length ? c.prerequisites.join('、') : ''
+  const suc = (c.successors || []).length ? c.successors.join('、') : ''
+  if (!pre && !suc) return ''
+  return `知识链：${pre || '—'} → ${sec.label} → ${suc || '—'}`
+}
 
 const chapterTreeOptions = ref([])
 const chapterOptionsLoading = ref(false)
@@ -601,13 +683,19 @@ onMounted(async () => {
  */
 function applyKpIdsFromQuery() {
   const q = route.query?.kpIds
-  if (!q) return
-  const ids = String(Array.isArray(q) ? q.join(',') : q).split(',').map(s => s.trim()).filter(Boolean)
-  params.value.kpIds = ids
+  if (q) {
+    const ids = String(Array.isArray(q) ? q.join(',') : q).split(',').map(s => s.trim()).filter(Boolean)
+    params.value.kpIds = ids
+  }
+  // 组织轴同样支持 URL 带入（?groupBy=kp），与 kpIds 一起双路生效
+  if (route.query?.groupBy === 'kp') params.value.groupBy = 'kp'
 }
 
 // 同一路由内 query 变化（考法库 → 周末班页）也要生效
 watch(() => route.query?.kpIds, () => {
+  applyKpIdsFromQuery()
+})
+watch(() => route.query?.groupBy, () => {
   applyKpIdsFromQuery()
 })
 
@@ -834,6 +922,7 @@ function buildParamsBody(extra = {}) {
     chapter: params.value.chapter || undefined,
     taught: params.value.taught || undefined,
     kpIds: (params.value.kpIds || []).length ? params.value.kpIds : undefined,
+    groupBy: params.value.groupBy === 'kp' ? 'kp' : 'date',
     withAnswer: true,
     ...extra,
   }
@@ -1033,6 +1122,43 @@ function openBoard() {
 }
 .section-meta {
   font-size: 12.5px;
+  color: var(--wb-text-secondary, #64748b);
+}
+.method-card {
+  margin: 10px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--wb-border, #e2e8f0);
+  border-left: 3px solid var(--wb-primary, #6366f1);
+  border-radius: 10px;
+  background: var(--wb-bg-soft, #f8fafc);
+}
+.method-card__row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+}
+.method-card__label {
+  flex: 0 0 60px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--wb-text-secondary, #64748b);
+}
+.method-card__row p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--wb-text, #1e293b);
+}
+.method-card__row--key p {
+  font-weight: 600;
+  color: var(--wb-primary, #6366f1);
+}
+.method-card__chain {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--wb-border, #e2e8f0);
+  font-size: 12px;
   color: var(--wb-text-secondary, #64748b);
 }
 .deck-item {

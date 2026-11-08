@@ -223,6 +223,9 @@ export async function buildHandout(opts) {
   //    数量单独计数回传（kpFilter.unlinkedRows），前端要如实告知老师，不能静默丢失。
   let rows = rawRows
   let kpFilter = null
+  // 选中考点（含递归展开的子孙）：按方法分节时用它把「主考点」优先收敛在老师选的专题内，
+  // 否则一题多考点会按名称字典序挑到无关考点，试点专题里混进别的章节。
+  let selectedKpIdSet = null
   if (Array.isArray(kpIds) && kpIds.length) {
     const { rows: subRows } = await pool.query(
       `WITH RECURSIVE sub AS (
@@ -231,6 +234,7 @@ export async function buildHandout(opts) {
          SELECT k.id, k.name FROM knowledge_points k JOIN sub ON k.parent_id = sub.id
        ) SELECT DISTINCT id, name FROM sub`, [kpIds])
     const kpIdSet = new Set(subRows.map(r => r.id))
+    selectedKpIdSet = kpIdSet
     const qIds = [...new Set(rawRows.map(r => r.q_id).filter(Boolean))]
     const kpsByQuestion = new Map()
     if (qIds.length) {
@@ -320,7 +324,7 @@ export async function buildHandout(opts) {
   let knowledgeMeta = null
   if (byKnowledge) {
     const qIdsForMeta = [...new Set(rows.map(r => r.q_id).filter(Boolean))]
-    knowledgeMeta = await loadKnowledgeMeta(pool, qIdsForMeta)
+    knowledgeMeta = await loadKnowledgeMeta(pool, qIdsForMeta, selectedKpIdSet)
     log(`[0] 组织轴=kp: ${knowledgeMeta.kpByQuestion.size}/${qIdsForMeta.length} 道题挂到考点`)
   }
 

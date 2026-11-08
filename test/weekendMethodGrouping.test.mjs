@@ -7,6 +7,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   normalizeKpGroupKey,
+  loadKnowledgeMeta,
   regroupSlidesByKp,
   UNLINKED_LABEL,
 } from '../server/lib/weekendMethodGroup.js'
@@ -36,7 +37,18 @@ const emptyMeta = () => ({
   kpByQuestion: new Map(),
   kpNamesById: new Map(),
   kaofaByKpId: new Map(),
+  kaofaByKpKey: new Map(),
   chainByKpId: new Map(),
+})
+
+/** 假 pool：按 SQL 特征返回固定行，用来锁住「主考点收敛」这类纯取数逻辑（不连真库） */
+const mockPool = ({ qk = [], kaofa = [], rel = [] }) => ({
+  query: async (sql) => {
+    if (sql.includes('FROM question_knowledge qk')) return { rows: qk }
+    if (sql.includes('FROM teaching_question_types t')) return { rows: kaofa }
+    if (sql.includes('FROM kp_relations r')) return { rows: rel }
+    return { rows: [] }
+  },
 })
 
 test('同名不同 id 的考点归一到同一节（实测库里「一元二次方程」有两个节点）', () => {
@@ -164,4 +176,32 @@ test('方法卡：静态库命中 / 考法库回退 / 无内容不编', () => {
   assert.equal(none.source, 'none')
   assert.equal(hasMethodCard(none), false)
   assert.deepEqual(parseKaofaNotes(''), { action: '', steps: '' })
+})
+
+test('真库实测坑①：主考点收敛在老师选的专题内，不从一题多考点里串到别的章节', async () => {
+  // 按 zh 拼音排序「代数式」(dai) 在「二次根式」(er) 前面，方向明确
+  const qk = [
+    { question_id: 'q1', kp_id: 'kA', role: 'secondary', name: '二次根式', subject: '数学' },
+    { question_id: 'q1', kp_id: 'kB', role: 'secondary', name: '代数式', subject: '数学' },
+  ]
+  const scoped = await loadKnowledgeMeta(mockPool({ qk }), ['q1'], new Set(['kA']))
+  assert.equal(scoped.kpByQuestion.get('q1').kpName, '二次根式', '收敛后必须落在老师选的专题内')
+  // 不传 preferred 时会按名称排序挑中「代数式」 ⇒ 试点专题里凭空多一节
+  const unscoped = await loadKnowledgeMeta(mockPool({ qk }), ['q1'])
+  assert.equal(unscoped.kpByQuestion.get('q1').kpName, '代数式')
+})
+
+test('真库实测坑②：考法库按 (学科,名称) 补命中，同名不同 id 也能出方法卡', () => {
+  const meta = emptyMeta()
+  meta.kaofaByKpKey.set('数学::分式化简', [{
+    teaching_notes: '考法动作：分式化简。\n关键步骤：先约分 → 再通分',
+    common_mistakes: '漏掉负号',
+  }])
+  const slides = [
+    sec('11/03'),
+    q(1, { kpGroupKey: '数学::分式化简', kpName: '分式化简', kpId: 'another-id' }),
+  ]
+  const { sections } = regroupSlidesByKp(slides, meta)
+  assert.equal(sections[0].methodCard.source, 'kaofa')
+  assert.match(sections[0].methodCard.steps, /约分/)
 })

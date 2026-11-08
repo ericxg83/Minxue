@@ -27,7 +27,7 @@
         </button>
         <div class="tb-title">
           <strong>{{ handout?.grade || '初三' }}{{ handout?.subject ? ' · ' + handout.subject : '' }} · 周末讲题白板</strong>
-          <span>第 {{ currentIndex + 1 }} / {{ viewQuestions.length }} 题 · {{ current?.day || '' }}</span>
+          <span>第 {{ currentIndex + 1 }} / {{ viewQuestions.length }} 题 · {{ current?.day || '' }}<template v-if="current?.methodKind"> · 这一类：{{ current.methodKind }}</template></span>
         </div>
       </div>
       <div class="tb-right">
@@ -102,6 +102,8 @@
             <div class="q-head">
               <span class="q-badge">第 {{ currentIndex + 1 }} 题</span>
               <span class="q-meta">{{ current.day }} · {{ current.typeLabel || '未标题型' }}</span>
+              <!-- 按方法分节时：讲题现场始终显示「这一题属于哪一类」，date 模式下字段为空不渲染 -->
+              <span v-if="current.methodKind" class="q-method-kind">这一类 · {{ current.methodKind }}</span>
               <!-- 难度：星级展示，与错题再测卷/周末班讲义同一口径 difficultyStars（1-2★ / 3★★ / 4-5★★★）。
                    不写「基础/中等/较难」这类中文标签 —— 老师在白板上讲题，星级能一眼读出量级，
                    中文标签既占位置又得先读字才能判断。 -->
@@ -122,6 +124,11 @@
                 <span v-if="currentMarkBadge.reworkDue" class="q-mark__due">建议回炉</span>
               </span>
               <span v-if="currentTaughtLabel" class="q-meta q-taught">{{ currentTaughtLabel }}</span>
+            </div>
+            <!-- 「学一个会一类」：这套动作的通用步骤常驻在题目上方，讲的时候不用回备课页翻 -->
+            <div v-if="current.methodSteps" class="q-method-bar">
+              <span class="q-method-bar__label">通用动作</span>
+              <span>{{ current.methodSteps }}</span>
             </div>
             <MathRender v-if="current.parentStem" class="q-parent" :content="current.parentStem" auto-detect />
             <div v-if="(current.subParts || []).length > 1" class="q-subparts">
@@ -1662,6 +1669,34 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 .q-meta { font-size: calc(13px * var(--s)); color: var(--wb-text-secondary, #64748b); }
+.q-method-kind {
+  font-size: calc(12px * var(--s));
+  font-weight: 600;
+  color: var(--wb-primary, #6366f1);
+  background: var(--wb-primary-soft, #eef2ff);
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.q-method-bar {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--wb-primary, #6366f1);
+  background: var(--wb-bg-soft, #f8fafc);
+  border-radius: 6px;
+  font-size: calc(13px * var(--s));
+  color: var(--wb-text, #1e293b);
+  line-height: 1.5;
+}
+.q-method-bar__label {
+  flex: 0 0 auto;
+  font-size: calc(11px * var(--s));
+  color: var(--wb-primary, #6366f1);
+  font-weight: 600;
+}
 /* 难度星级：字号略大于 meta，琥珀色，字距拉开让三格固定宽好横向对比（同讲义列表/重练卷预览） */
 .q-diff {
   font-size: calc(14px * var(--s));

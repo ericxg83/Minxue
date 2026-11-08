@@ -30,12 +30,19 @@ export function normalizeKpGroupKey(subject, name) {
  * @param {pg.Pool} pool
  * @param {string[]} questionIds 当前课件实际用到的 question_id
  */
-export async function loadKnowledgeMeta(pool, questionIds) {
+export async function loadKnowledgeMeta(pool, questionIds, preferredKpIds = null) {
   const ids = [...new Set((questionIds || []).filter(Boolean))]
+  // 老师显式选了考点（含递归展开的子孙）时，主考点优先从这个集合里挑。
+  // 实测：不收敛的话，挂了 3 个考点的二次根式题会按字典序挑中「一元二次方程」，
+  // 试点专题里凭空多出无关分节。
+  const preferred = preferredKpIds instanceof Set
+    ? preferredKpIds
+    : new Set((preferredKpIds || []).filter(Boolean))
   const meta = {
     kpByQuestion: new Map(),
     kpNamesById: new Map(),
     kaofaByKpId: new Map(),
+    kaofaByKpKey: new Map(),
     chainByKpId: new Map(),
   }
   if (!ids.length) return meta
@@ -53,8 +60,10 @@ export async function loadKnowledgeMeta(pool, questionIds) {
     meta.kpNamesById.set(r.kp_id, r.name)
   }
   for (const [qid, list] of byQuestion) {
-    const primary = list.find(x => x.role === 'primary')
-      || [...list].sort((a, b) =>
+    const scoped = preferred.size ? list.filter(x => preferred.has(x.kp_id)) : list
+    const candidates = scoped.length ? scoped : list
+    const primary = candidates.find(x => x.role === 'primary')
+      || [...candidates].sort((a, b) =>
         String(a.name).localeCompare(String(b.name), 'zh')
         || String(a.kp_id).localeCompare(String(b.kp_id)))[0]
     meta.kpByQuestion.set(qid, {
@@ -69,14 +78,22 @@ export async function loadKnowledgeMeta(pool, questionIds) {
   if (!kpIds.length) return meta
 
   // ② 考法库已有的方法要点（未命中静态方法卡时的回退内容）
+  // ⚠️ 考点树存在同名不同 id（实测「有理数」等有多个节点），只按 kp_id 精确查会漏掉
+  //    挂在另一个同名节点下的考法 ⇒ 方法卡显示「无」。故同时按 (学科,名称) 归一补命中。
+  const kpNames = [...new Set(meta.kpNamesById.values())].filter(Boolean)
   const { rows: kaofa } = await pool.query(
-    `SELECT kp_id, name, teaching_notes, common_mistakes
-       FROM teaching_question_types
-      WHERE kp_id = ANY($1::uuid[])
-      ORDER BY created_at`, [kpIds])
+    `SELECT t.kp_id, t.name, t.teaching_notes, t.common_mistakes,
+            kp.name AS kp_name, kp.subject AS kp_subject
+       FROM teaching_question_types t
+       JOIN knowledge_points kp ON kp.id = t.kp_id
+      WHERE t.kp_id = ANY($1::uuid[]) OR kp.name = ANY($2::text[])
+      ORDER BY t.created_at`, [kpIds, kpNames])
   for (const r of kaofa) {
     if (!meta.kaofaByKpId.has(r.kp_id)) meta.kaofaByKpId.set(r.kp_id, [])
     meta.kaofaByKpId.get(r.kp_id).push(r)
+    const key = normalizeKpGroupKey(r.kp_subject, r.kp_name)
+    if (!meta.kaofaByKpKey.has(key)) meta.kaofaByKpKey.set(key, [])
+    meta.kaofaByKpKey.get(key).push(r)
   }
 
   // ③ 知识链：只认 confirmed，候选里约 1/3 讲不通（kpRelationService 口径）
@@ -99,9 +116,17 @@ export async function loadKnowledgeMeta(pool, questionIds) {
 }
 
 /** 汇总一节的考法行 / 知识链（同名节点合并后要去重） */
-function collectSectionContent(kpIds, meta, label) {
+function collectSectionContent(kpIds, groupKey, meta, label) {
+  const seen = new Set()
   const kaofaRows = []
-  for (const id of kpIds) kaofaRows.push(...(meta.kaofaByKpId?.get(id) || []))
+  const push = (rows) => {
+    for (const r of rows || []) {
+      if (!seen.has(r)) { seen.add(r); kaofaRows.push(r) }
+    }
+  }
+  for (const id of kpIds) push(meta.kaofaByKpId?.get(id))
+  // 同名不同 id 的补命中：按 (学科,名称) 归一后的 key 再取一次
+  push(meta.kaofaByKpKey?.get(groupKey))
   const pre = new Set()
   const suc = new Set()
   for (const id of kpIds) {
@@ -174,7 +199,7 @@ export function regroupSlidesByKp(slides, meta = {}) {
 
     const content = b.unlinked
       ? { methodCard: { title: b.label, signals: '', steps: '', pitfalls: '', source: 'none' }, knowledgeChain: { prerequisites: [], successors: [] } }
-      : collectSectionContent([...b.kpIds], meta, b.label)
+      : collectSectionContent([...b.kpIds], b.key, meta, b.label)
 
     const section = {
       kind: 'section',

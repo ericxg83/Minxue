@@ -157,20 +157,25 @@ function buildCover(pptx, handout) {
     addText(s, x + 0.35, 3.72, kw - 0.5, 0.55, String(value), { size: 30, bold: true })
     addText(s, x + 0.35, 4.28, kw - 0.5, 0.3, label, { size: 13, color: C_TEXT_2 })
   })
+  const byMethod = handout?.scope?.groupBy === 'kp'
   addText(s, MARGIN, 6.7, PAGE_W - 1, 0.4,
-    '放映时单击一次浮现参考答案 · 日期倒序 · 每天内部由易到难', { size: 12, color: C_TEXT_3 })
+    `放映时单击一次浮现参考答案 · ${byMethod ? '按一类方法分节 · 节内由易到难' : '日期倒序 · 每天内部由易到难'}`,
+    { size: 12, color: C_TEXT_3 })
 }
 
-function buildToc(pptx, slides) {
+function buildToc(pptx, slides, groupBy = 'date') {
+  const byMethod = groupBy === 'kp'
   const s = pptx.addSlide()
   addBox(s, 0, 0, PAGE_W, 0.1, { fill: C_PRIMARY })
   addText(s, MARGIN, 0.5, 6, 0.6, '本份课件目录', { size: 26, bold: true })
-  addText(s, 9.5, 0.6, 3.3, 0.4, '按日期倒序 · 每天内部由易到难', { size: 12, color: C_TEXT_3 })
+  addText(s, 9.5, 0.6, 3.3, 0.4,
+    byMethod ? '按一类方法分节 · 节内由易到难' : '按日期倒序 · 每天内部由易到难',
+    { size: 12, color: C_TEXT_3 })
   const secs = slides.filter(sl => sl.kind === 'section')
   const tw = PAGE_W - 2 * MARGIN
   const th = 0.62
   const ty = 1.35
-  const headers = ['日期', '题数', '学生', '基础', '中等', '较难', '未判定']
+  const headers = [byMethod ? '方法 / 考点' : '日期', '题数', '学生', '基础', '中等', '较难', '未判定']
   const widths = [0.3 * tw, 0.1 * tw, 0.12 * tw, 0.12 * tw, 0.12 * tw, 0.12 * tw, 0.12 * tw]
   headers.forEach((hdr, j) => {
     const x = MARGIN + widths.slice(0, j).reduce((a, b) => a + b, 0)
@@ -208,6 +213,30 @@ function buildSection(pptx, sec, secIdx, secTotal) {
     .filter(k => tiers[k])
     .map(k => `${TIER_LABEL[k]} ${tiers[k]}`)
   if (parts.length) addText(s, MARGIN + 0.25, 3.7, 11, 0.4, parts.join(' · '), { size: 14, color: C_TEXT_2 })
+
+  // 方法卡：按考点/方法分节时，分节页直接给出「识别信号 → 通用动作 → 易错点」+ 已确认的知识链。
+  // date 模式下 sec.methodCard 不存在，这里整块不渲染，既有版式零变化。
+  const mc = sec.methodCard
+  if (mc && mc.source !== 'none' && (mc.signals || mc.steps || mc.pitfalls)) {
+    addBox(s, MARGIN, 4.15, PAGE_W - 2 * MARGIN, 2.35, { fill: C_PRIMARY_MIST, line: C_BORDER, radius: 0.08 })
+    const cardRows = [
+      ['识别信号', mc.signals],
+      ['通用动作', mc.steps],
+      ['易错点', mc.pitfalls],
+    ].filter(([, v]) => v)
+    cardRows.forEach(([label, val], i) => {
+      const y = 4.35 + i * 0.52
+      addText(s, MARGIN + 0.25, y, 1.4, 0.35, label, { size: 12, bold: true, color: C_PRIMARY })
+      addText(s, MARGIN + 1.7, y, PAGE_W - 2 * MARGIN - 2.0, 0.45, String(val), { size: 13, color: C_TEXT })
+    })
+    const ch = sec.knowledgeChain
+    const pre = ch?.prerequisites?.length ? ch.prerequisites.join('、') : ''
+    const suc = ch?.successors?.length ? ch.successors.join('、') : ''
+    if (pre || suc) {
+      addText(s, MARGIN + 0.25, 6.05, PAGE_W - 2 * MARGIN - 0.5, 0.3,
+        `知识链：${pre || '—'} → ${sec.label} → ${suc || '—'}`, { size: 11, color: C_TEXT_2 })
+    }
+  }
 }
 
 function buildQuestion(pptx, q, seq, figMap) {
@@ -221,7 +250,8 @@ function buildQuestion(pptx, q, seq, figMap) {
   // 页眉：题号徽章 + 日期 + 难度 + 人数
   addBox(s, MARGIN, 0.42, 0.62, 0.62, { fill: fg, radius: 0.25 })
   addText(s, MARGIN, 0.5, 0.62, 0.5, String(seq), { size: 22, bold: true, color: C_WHITE, align: 'center' })
-  addText(s, MARGIN + 0.85, 0.52, 5.5, 0.4, `${day} · ${qtype}`, { size: 14, color: C_TEXT_2 })
+  addText(s, MARGIN + 0.85, 0.52, 5.5, 0.4,
+    `${day} · ${q.kpName ? q.kpName + ' · ' : ''}${qtype}`, { size: 14, color: C_TEXT_2 })
   const d = q.difficulty
   const dlabel = d === null || d === undefined ? tierLabel : `难度 ${d} · ${tierLabel}`
   const tagW = 0.28 + dlabel.length * 0.13
@@ -371,7 +401,7 @@ export async function renderWeekendPptx(handout, { logger = () => {} } = {}) {
   const figMap = await fetchFigures(slides, { logger })
 
   buildCover(pptx, handout)
-  buildToc(pptx, slides)
+  buildToc(pptx, slides, handout?.scope?.groupBy || 'date')
 
   const secs = slides.filter(sl => sl.kind === 'section')
   const secTotal = secs.length
