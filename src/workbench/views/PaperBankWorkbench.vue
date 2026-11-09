@@ -296,17 +296,14 @@
           </EmptyState>
 
           <div v-else class="pb-rows">
-            <article v-for="(q, qi) in questions" :key="q.id" class="pb-row" :class="{ 'is-selected': isInBasket(basket, q.id), 'is-checked': selection.has(q.id), 'is-dragging-q': draggingQuestionId === q.id }">
-              <div class="pb-row__checks">
-                <!-- 多选复选框（2026-11-08 P0）：Ctrl+Click 逐个选、Shift+Click 范围选 -->
-                <el-checkbox
-                  class="pb-row__sel"
-                  :model-value="selection.has(q.id)"
-                  @click.stop="toggleSelection(q, qi, $event)"
-                />
-                <!-- 勾题进卷面（原有） -->
-                <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" title="勾进卷面" />
-              </div>
+            <article
+              v-for="(q, qi) in questions" :key="q.id"
+              class="pb-row"
+              :class="{ 'is-selected': isInBasket(basket, q.id), 'is-checked': selection.has(q.id), 'is-dragging-q': draggingQuestionId === q.id }"
+              @click="onQuestionRowClick(q, qi, $event)"
+            >
+              <!-- 勾题进卷面（原有），批量选中状态由行高亮表示 -->
+              <el-checkbox class="pb-row__check" :model-value="isInBasket(basket, q.id)" @change="toggle(q)" @click.stop title="勾进卷面" />
 
               <div class="pb-row__body">
                 <div class="pb-row__head">
@@ -1412,6 +1409,15 @@ const saveTags = (q, ev) => {
 // ④ Escape 清除选中
 
 const selectionCount = computed(() => selection.value.size)
+
+/** 题目行点击：Ctrl/Shift+Click 进入批量选中，普通点击不拦（让内部元素处理） */
+const onQuestionRowClick = (q, index, ev) => {
+  if (ev.ctrlKey || ev.metaKey || ev.shiftKey || selection.value.size > 0) {
+    ev.preventDefault()
+    toggleSelection(q, index, ev)
+  }
+  // 普通点击：不处理，让 checkbox / 按钮等内部元素自然响应
+}
 
 const toggleSelection = (q, index, ev) => {
   const next = new Set(selection.value)
@@ -2615,9 +2621,7 @@ onUnmounted(() => {
 .pb-row:hover { border-color: #d9d5cc; }
 .pb-row.is-selected { border-color: #a9b4f0; background: #fbfbff; }
 .pb-row.is-checked { border-color: var(--wb-primary, #6366f1); background: var(--wb-primary-mist, #eef2ff); }
-.pb-row__checks { display: flex; flex-direction: column; gap: 2px; flex-shrink: 0; margin-top: 2px; }
-.pb-row__sel { flex: none; }
-.pb-row__check { flex: none; }
+.pb-row__check { flex: none; margin-top: 2px; flex-shrink: 0; }
 .pb-row__body { flex: 1; min-width: 0; }
 .pb-row__head { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; }
 .pb-row__num { font-weight: 500; font-size: 13px; white-space: nowrap; }
