@@ -190,3 +190,6 @@ deliverables/
 # 巡检排查目录：构建快照与外带 agent 技能库，不入库（2026-09-30 提案4）
 dist_gatefix/
 external/
+
+# 零错字审计的临时缓存/备份/报告（scripts/ops/zero_typo_audit.mjs）
+.audit_tmp/

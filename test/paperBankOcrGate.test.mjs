@@ -50,6 +50,12 @@ function checkChains(src) {
   if (arbiter && !/vendor:\s*'HuihuiyunGemini'[\s\S]*model:\s*'gemini-3\.8-flash'/.test(arbiter)) {
     bad.push('终裁通道必须是最强视觉 HuihuiyunGemini gemini-3.8-flash')
   }
+  // 2026-11-09 松江事故：终裁只写一家，gemini-3.8-flash 整日 502 ⇒ 整卷退化成「未复核」，
+  // 第一步查出的差异清单全部作废。终裁必须有兜底级，且兜底也必须是强视觉。
+  const arbSteps = (arbiter.match(/\bvendor:\s*'/g) || []).length
+  if (arbiter && arbSteps < 2) {
+    bad.push('终裁通道必须至少两级（单点供应商 502 会让整卷退化成待人工核对）')
+  }
   for (const [name, body] of [['verify', verify], ['arbiter', arbiter]]) {
     for (const weak of ['sensenova-6.8-flash-lite', 'agnes-2.0-flash', 'glm-4.6v-flash-free', 'gemini-3.1-flash-lite']) {
       if (body.includes(weak)) bad.push(`${name} 混入弱模型 ${weak}`)
@@ -126,6 +132,13 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
   assert.ok(checkChains(weakAi).length > 0, '终裁换成弱模型必须判红')
   assert.ok(checkChains(ai.replace('export const PAPER_BANK_OCR_ARBITER_CHAIN = [', '// removed\nconst X = [')).length > 0,
     '删掉终裁通道必须判红')
+  // 终裁退化回单点（只剩 gemini-3.8 一级）必须判红 —— 2026-11-09 松江整日 502 的根因
+  const singleArbiter = ai.replace(
+    /export const PAPER_BANK_OCR_ARBITER_CHAIN = \[[\s\S]*?\n\]/,
+    "export const PAPER_BANK_OCR_ARBITER_CHAIN = [\n  { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },\n]"
+  )
+  assert.notEqual(singleArbiter, ai, '反向自检必须真的把终裁改回单点')
+  assert.ok(checkChains(singleArbiter).length > 0, '终裁只剩一级（无兜底）必须判红')
 
   // 把候选答案泄露给终裁 = 让犯错的人批卷
   assert.ok(checkService(svc.replace("userText: '待抄录位置：\\n' + JSON.stringify(ask)", "userText: JSON.stringify(diffs)")).length > 0)

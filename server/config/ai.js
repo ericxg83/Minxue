@@ -786,6 +786,19 @@ export const PAPER_BANK_OCR_VERIFY_CHAIN = [
 ]
 export const PAPER_BANK_OCR_ARBITER_CHAIN = [
   { vendor: 'HuihuiyunGemini', model: 'gemini-3.8-flash' },
+  // 2026-11-09 松江一模事故：终裁只写死 gemini-3.8-flash 一家，当日该模型**整日 502**
+  //   （同一分组里 3.1-pro-preview 也是 502，属于上游不可用，不是限流）。
+  //   后果不是「复核失败」这么简单：第一步已经查出的 15 处可疑差异全部作废，
+  //   整卷退化成「5 页未复核」，老师连哪一处可疑都看不到。
+  //   终裁的职责是「不看候选、独立把卷面字符抄回来」，只要模型够强、且与校对通道
+  //   不同源即可履行；把它做成单点，等于让卷子押在一家供应商当天是否健康上。
+  //   故补两级兜底（仍然都是强视觉模型，绝不降到 6.8-lite / glm-4.6v 那种弱模型）：
+  //   ② gemini-3.5-flash —— 同厂商次强，同一分组内实测可用（2026-11-09 2.3s 返回正确抄录）
+  //   ③ Bailian qwen3.8-max —— 跨厂商最强兜底（同日实测 2.8s，逐字抄录与另两家一致）
+  //   ⚠️ 链中后续步骤成功时 callVisionCompletion 会置 usedBackup=true，上层照常记
+  //   parse_warning 提示「终裁降级」，不会静默。
+  { vendor: 'HuihuiyunGemini', model: 'gemini-3.5-flash' },
+  { vendor: 'Bailian', model: 'qwen3.8-max', extraBody: { enable_thinking: false } },
 ]
 
 let _resolvedVendorsCache = null
