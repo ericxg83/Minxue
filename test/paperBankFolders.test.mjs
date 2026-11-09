@@ -87,7 +87,10 @@ test('删除类操作默认不显现：只在右键/「…」菜单里，且带�
   assert.match(treeSrc, /openMenu\(/, '必须有更多操作菜单')
   assert.match(treeSrc, /ElMessageBox\.confirm/, '删除必须二次确认')
   assert.ok(!/class="pb-clear"/.test(viewSrc), '主界面不再常驻「清空全部」')
-  assert.ok(!/>删除<\/button>/.test(viewSrc), '题集行不再常驻「删除」按钮')
+  // 2026-11-08 批量操作：视图里的「删除」只许是批量工具栏按钮（多选才出现）；
+  // 树行仍严格禁止常驻删除。旧判据把合法批量按钮误判成回归。
+  const viewDelButtons = [...viewSrc.matchAll(/<button[\s\S]{0,160}?>删除<\/button>/g)].map(m => m[0])
+  assert.ok(viewDelButtons.every(b => /pb-bulk__btn/.test(b)), '题集行不再常驻「删除」按钮')
   assert.ok(!/>删除<\/button>/.test(treeSrc), '树行不再常驻「删除」按钮')
 })
 

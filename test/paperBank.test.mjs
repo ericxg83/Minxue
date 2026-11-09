@@ -410,7 +410,11 @@ test('★ 前端清空能力保留，但删除入口不常驻主界面（2026-11
   assert.match(s, /await loadPapers\(\)[\s\S]{0,80}await loadQuestions\(\)/, '清空后必须重载卷子和题目')
   assert.match(s, /<PaperBankTree/, '左侧导航改由文件夹树组件承担')
   assert.ok(!/class="pb-clear"/.test(s), '主界面不得再有「清空全部」按钮')
-  assert.ok(!/>删除<\/button>/.test(s), '题集行不得常驻「删除」按钮')
+  // 2026-11-08 批量操作上线后，「删除」只许出现在批量工具栏（class=pb-bulk__btn，
+  // 被 <Transition> 包着、勾选多题才出现）；题集行常驻删除按钮仍然禁止。
+  // 旧判据 !/>删除<\/button>/ 会把合法的批量按钮一起判红（静态锁假阳性）。
+  const delButtons = [...s.matchAll(/<button[\s\S]{0,160}?>删除<\/button>/g)].map(m => m[0])
+  assert.ok(delButtons.every(b => /pb-bulk__btn/.test(b)), '除批量工具栏外不得常驻「删除」按钮')
 })
 
 test('★ API 层：清空接口与单卷删除接口并存，路径不得混淆', () => {

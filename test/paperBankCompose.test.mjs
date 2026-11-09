@@ -294,9 +294,21 @@ test('★ 预览必须是「页面里看卷子」（HTML 画进 iframe），不�
   // 2026-11-07 收窄口径：「截图直接入库」的本地缩略图也用 createObjectURL，
   // 与卷面预览无关。只锁「不许拿 PDF/blob 当卷面预览」——
   // blob 用法必须长在 clipFiles 的 preview 字段上，且 iframe 不得挂 blob 地址。
-  const blobLines = s.split('\n').filter(l => l.includes('URL.createObjectURL'))
-  assert.ok(blobLines.every(l => /preview:\s*URL\.createObjectURL\([^)]*\)/.test(l)),
-    'createObjectURL 只能给截图入库的本地缩略图用，不得拿 PDF blob 当卷面预览')
+  // 2026-11-08 新增 CSV / Markdown 导出（new Blob -> createObjectURL -> a.download），
+  // 与「PDF blob 当卷面预览」是两回事。旧判据要求每个 blob 用法都长成 preview: 字段，
+  // 把合法文本导出误判成回归 ⇒ 改成带上下文判据：只许截图缩略图 / 文本下载，
+  // 出现 iframe / previewUrl / PDF 预览字样一律判红（原红线不放宽）。
+  const lines = s.split('\n')
+  const badBlob = []
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].includes('URL.createObjectURL')) continue
+    const ctx = lines.slice(Math.max(0, i - 3), i + 5).join('\n')
+    const isClipPreview = /preview:\s*URL\.createObjectURL\(/.test(ctx)
+    const isTextExport = /type: 'text\/(csv|markdown)|new Blob\(\[(csv|md)\]/.test(ctx)
+    const isPdfPreview = /previewUrl|previewFrame|<iframe|\.pdf/i.test(ctx)
+    if (isPdfPreview || !(isClipPreview || isTextExport)) badBlob.push(lines[i].trim())
+  }
+  assert.deepEqual(badBlob, [], 'createObjectURL 只许给截图缩略图 / CSV·Markdown 下载用，不得拿 PDF blob 当卷面预览')
   assert.ok(!/<iframe[^>]*:src="previewUrl"/.test(s), 'iframe 不得指向 PDF 地址')
 })
 
