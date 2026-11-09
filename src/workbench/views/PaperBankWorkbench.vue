@@ -508,9 +508,16 @@
               </label>
               <label class="pb-check"><input v-model="composeWithImage" type="checkbox" />印原题图</label>
               <button type="button" class="pb-link" :disabled="!summary.count" @click="clearBasket">清空</button>
-              <el-button type="primary" size="small" :loading="downloading" :disabled="!summary.count" @click="downloadPdf">
+              <el-dropdown split-button type="primary" size="small" :loading="downloading" :disabled="!summary.count" @click="downloadPdf" @command="handleExportCommand">
                 下载 PDF
-              </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="pdf" :icon="downloading ? undefined : undefined">PDF 卷面</el-dropdown-item>
+                    <el-dropdown-item command="csv" divided>CSV 题号表（Excel 可打开）</el-dropdown-item>
+                    <el-dropdown-item command="markdown">Markdown 表格</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
 
             <div ref="stageRef" class="pb-paper-panel__stage">
@@ -2100,6 +2107,86 @@ const downloadPdf = async () => {
   } finally {
     downloading.value = false
   }
+}
+
+// ---- 导出 CSV / Markdown ----
+const exportingFormat = ref('')  // '', 'csv', 'markdown'
+
+/** 把当前已选题（basket）导出为 CSV，浏览器直接下载 */
+const downloadCsv = () => {
+  const list = basket.value
+  if (!list.length) return
+  exportingFormat.value = 'csv'
+  try {
+    const esc = (v) => {
+      const s = String(v == null ? '' : v)
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const header = ['序号', '题号', '题型', '难度', '标签', '来源', '来源备注', '所属题集']
+    const rows = list.map((q, i) => [
+      i + 1,
+      q.question_no != null ? `${q.question_no}${q.sub_no ? `(${q.sub_no})` : ''}` : '',
+      typeLabel(q.question_type),
+      q.difficulty ? stars(q.difficulty) : '',
+      (q.tags || []).join(', '),
+      q.clip_source || '',
+      q.clip_source_note || '',
+      q.resource_name || '',
+    ])
+    // BOM + UTF-8 确保 Excel 正确识别中文
+    const bom = '\uFEFF'
+    const csv = bom + [header, ...rows].map(r => r.map(esc).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${composeTitle.value || '题目列表'}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出 ${list.length} 题 → CSV`)
+  } finally {
+    exportingFormat.value = ''
+  }
+}
+
+/** 把当前已选题（basket）导出为 Markdown 表格文件 */
+const downloadMarkdown = () => {
+  const list = basket.value
+  if (!list.length) return
+  exportingFormat.value = 'markdown'
+  try {
+    const title = composeTitle.value || '题目列表'
+    const lines = [`# ${title}`, '', `> 共 ${list.length} 题`, '']
+    // 表头
+    lines.push('| 序号 | 题号 | 题型 | 难度 | 标签 | 来源 | 所属题集 |')
+    lines.push('|---:|:---:|:---:|:---:|:---|:---|:---|')
+    list.forEach((q, i) => {
+      const no = q.question_no != null ? `${q.question_no}${q.sub_no ? `(${q.sub_no})` : ''}` : '-'
+      const src = q.clip_source
+        ? (q.clip_source_note ? `${q.clip_source} (${q.clip_source_note})` : q.clip_source)
+        : (q.clip_source_note || '')
+      lines.push(`| ${i + 1} | ${no} | ${typeLabel(q.question_type)} | ${q.difficulty ? stars(q.difficulty) : '-'} | ${(q.tags || []).join(', ') || '-'} | ${src || '-'} | ${q.resource_name || '-'} |`)
+    })
+    lines.push('')
+    const md = lines.join('\n')
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${title}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出 ${list.length} 题 → Markdown`)
+  } finally {
+    exportingFormat.value = ''
+  }
+}
+
+/** 下拉菜单导出分发 */
+const handleExportCommand = (cmd) => {
+  if (cmd === 'pdf') downloadPdf()
+  else if (cmd === 'csv') downloadCsv()
+  else if (cmd === 'markdown') downloadMarkdown()
 }
 
 const paperMeta = computed(() => {
