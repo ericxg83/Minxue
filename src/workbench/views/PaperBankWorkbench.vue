@@ -129,6 +129,23 @@
                 <button type="button" class="pb-link" @click="clearSelection">取消选择</button>
               </div>
               <div class="pb-bulk__ops">
+                <!-- 全选之后一步进卷面 / 直接下载（2026-11-09）：
+                     selection 是批量编辑用的选中，basket 才是卷面与下载的数据源，
+                     这里把两者桥接起来，避免「全选了却下载不了」。 -->
+                <button type="button" class="pb-bulk__btn is-primary" @click="addSelectionToBasket()">✓ 勾进卷面</button>
+                <el-dropdown
+                  split-button size="small" type="primary" trigger="click"
+                  @click="downloadSelected('pdf')" @command="downloadSelected"
+                >
+                  下载所选
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="pdf">PDF 卷面</el-dropdown-item>
+                      <el-dropdown-item command="csv" divided>CSV 题号表（Excel）</el-dropdown-item>
+                      <el-dropdown-item command="markdown">Markdown 表格</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
                 <!-- 改难度 -->
                 <div class="pb-bulk__dropdown">
                   <button
@@ -2339,6 +2356,43 @@ const handleExportCommand = (cmd) => {
   else if (cmd === 'markdown') downloadMarkdown()
 }
 
+/**
+ * 把批量选中的题勾进卷面：只加不减、按列表顺序、去重。
+ * ⚠️ selection（批量编辑用）与 basket（卷面/下载用）是两套独立状态，
+ *    全选后必须经这一步，每行勾选框才会亮、右边「下载 PDF」才可用。
+ */
+const addSelectionToBasket = (silent = false) => {
+  const chosen = questions.value.filter(q => selection.value.has(q.id))
+  if (!chosen.length) return 0
+  const existing = new Set(basket.value.map(it => it.id))
+  let next = basket.value
+  let added = 0
+  for (const q of chosen) {
+    if (existing.has(q.id)) continue
+    next = addBasketItem(next, q)
+    existing.add(q.id)
+    added++
+  }
+  basket.value = next
+  if (!composeTitle.value.trim()) composeTitle.value = defaultTitle()
+  if (truncated.value) {
+    // 分页没加载完时「全选」只覆盖已加载的题，必须说清楚，别让老师以为下了整份
+    ElMessage.warning(`还有题没加载完，本次只处理已加载的 ${questions.value.length} 题；要下全部请先点「加载更多」再全选`)
+  } else if (!silent) {
+    ElMessage.success(added ? `已把 ${added} 题勾进卷面` : `选中的 ${chosen.length} 题已在卷面里`)
+  }
+  return added
+}
+
+/** 下载所选：先把选中题勾进卷面（卷面与勾选状态同步），再按格式导出 */
+const downloadSelected = (format) => {
+  if (!selectionCount.value) return
+  addSelectionToBasket(true)
+  if (format === 'pdf') downloadPdf()
+  else if (format === 'csv') downloadCsv()
+  else if (format === 'markdown') downloadMarkdown()
+}
+
 const paperMeta = computed(() => {
   if (repainting.value) return '重排中…'
   if (!summary.value.count) return '还没有题'
@@ -2582,6 +2636,11 @@ onUnmounted(() => {
               background var(--wb-motion-fast, 120ms) ease;
 }
 .pb-bulk__btn:hover { border-color: var(--wb-primary, #6366f1); background: #fff; }
+.pb-bulk__btn.is-primary {
+  color: #fff; background: var(--wb-primary, #6366f1);
+  border-color: var(--wb-primary, #6366f1); font-weight: 600;
+}
+.pb-bulk__btn.is-primary:hover { color: #fff; background: #4f46e5; border-color: #4f46e5; }
 .pb-bulk__btn:disabled { opacity: .5; cursor: default; }
 .pb-bulk__btn.is-danger { color: var(--wb-status-danger, #dc2626); border-color: #fca5a5; }
 .pb-bulk__btn.is-danger:hover { background: #fee2e2; border-color: #dc2626; }
