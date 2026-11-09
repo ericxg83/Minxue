@@ -361,7 +361,11 @@
                 <!-- 原题裁片图行内展示（2026-11-01 负责人反馈：小拇指缩略图看不清几何图形，等于没图）。
                      数据里 64/64 题都有裁片图，此前只是展示位置太隐蔽。
                      同一道题的多个小问常常共用**同一张**图（字节相同、URL 相同）⇒ 只显示一次（rowShowFigure）。 -->
-                <img v-if="rowShowFigure(qi)" class="pb-row__figure" :src="q.vec_url || thumbUrl(q.image_url)" alt="原题图" loading="lazy" />
+                <!-- ⛔ 配图必须走原图，不经 ossThumbUrl（2026-11-09 负责人报障「配图相当模糊」）：
+                     裁片原图只有 10~20KB（松江 25(1) 893×321 = 18KB），而显示盒 340px 在 2x 屏上
+                     需要 680px 源；走 w_480 缩略会被放大 1.4x ⇒ 线条发灰、字母发虚（已用像素比对复现）。
+                     缩略图只适合批改中心那种 42×56 的小方图，配图不能复用。 -->
+                <img v-if="rowShowFigure(qi)" class="pb-row__figure" :src="q.vec_url || q.image_url" alt="原题图" loading="lazy" />
 
                 <div v-if="(q.options || []).length" class="pb-row__opts">
                   <span v-for="(o, i) in q.options" :key="i" class="pb-opt">
@@ -855,7 +859,6 @@ import {
   composePaperFilename,
 } from '../../utils/paperBasket'
 import { renderCustomBodyToHTML, exportServerPDF, paintPreviewIntoIframe } from '../../utils/serverPdfExporter'
-import { ossThumbUrl } from '../../utils/ossThumb'
 import { showStem, bodyText, showFigure } from '../utils/paperRowDisplay.js'
 import { isSourceUrl, sourceHref } from '../utils/clipSource.js'
 
@@ -1138,8 +1141,6 @@ const rowShowStem = (i) => showStem(questions.value, i)
 const rowShowFigure = (i) => showFigure(questions.value, i)
 const typeLabel = (t) => ({ choice: '选择题', fill: '填空题', judge: '判断题', answer: '解答题' }[t] || '解答题')
 const stars = (d) => '★'.repeat(Math.max(1, Math.min(3, d <= 2 ? 1 : d === 3 ? 2 : 3)))
-// 列表缩略图走统一入口（OSS 追加 resize 参数），⛔ 不直接引原图
-const thumbUrl = (url) => ossThumbUrl(url, 480) || url
 
 // 答案来源四态：官方答案库 / 卷面印刷 / 老师手填 / AI 解出。
 // ⛔ 必须在界面上区分 —— 「答案一定要对，不要去猜」，老师要能一眼看出这条答案是谁给的。
