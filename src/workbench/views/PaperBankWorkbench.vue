@@ -195,8 +195,26 @@
             <WorkbenchSelect v-model="filterSort" :options="sortOptions" width="110px" aria-label="排序" />
             <WorkbenchInput v-model="filterQuestionNos" clearable placeholder="题号 19,24" width="112px" aria-label="按题号筛选" />
             <WorkbenchInput v-model="filterKeyword" clearable placeholder="搜题干 / 公共题干" width="140px" aria-label="搜索题干" />
-            <template #actions><el-button text @click="resetFilters">重置</el-button></template>
+            <template #actions>
+              <el-button v-if="hasActiveFilter" text type="primary" @click="saveCurrentFilter">★ 保存筛选</el-button>
+              <el-button text @click="resetFilters">重置</el-button>
+            </template>
           </FilterBar>
+
+          <!-- 智能文件夹：已保存的筛选条件快捷入口 -->
+          <div v-if="savedFilters.length" class="pb-smart-filters">
+            <span class="pb-smart-filters__label">智能筛选</span>
+            <button
+              v-for="sf in savedFilters" :key="sf.id"
+              type="button"
+              class="pb-smart-chip"
+              :title="filterSummary(sf.filters)"
+              @click="applySavedFilter(sf)"
+            >
+              <span class="pb-smart-chip__name">{{ sf.name }}</span>
+              <span class="pb-smart-chip__x" title="删除" @click.stop="removeSavedFilter(sf)">×</span>
+            </button>
+          </div>
 
           <!-- 统计面板（2026-11-09 P0-3）：可折叠，点击按钮展开 -->
           <div class="pb-stats-toggle">
@@ -842,6 +860,81 @@ const filterTag = ref('all')
 const filterKeyword = ref('')
 const filterSort = ref('default')
 const tagOptions = ref([])
+
+// ── 智能文件夹（保存筛选条件，localStorage 持久化）──
+const SAVED_FILTERS_KEY = 'pb_saved_filters'
+const savedFilters = ref(JSON.parse(localStorage.getItem(SAVED_FILTERS_KEY) || '[]'))
+const persistFilters = () => localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify(savedFilters.value))
+
+/** 当前筛选是否处于「非默认」状态 */
+const hasActiveFilter = computed(() =>
+  filterType.value !== 'all' ||
+  filterDifficulty.value !== 'all' ||
+  filterTag.value !== 'all' ||
+  filterQuestionNos.value !== '' ||
+  filterKeyword.value !== '' ||
+  filterSort.value !== 'default'
+)
+
+/** 把当前筛选条件打包成一个可序列化对象 */
+const snapshotFilters = () => ({
+  type: filterType.value,
+  difficulty: filterDifficulty.value,
+  tag: filterTag.value,
+  questionNos: filterQuestionNos.value,
+  keyword: filterKeyword.value,
+  sort: filterSort.value,
+})
+
+/** 生成人类可读的筛选摘要 */
+const filterSummary = (f) => {
+  const bits = []
+  if (f.type !== 'all') bits.push(({ choice: '选择', fill: '填空', judge: '判断', answer: '解答' })[f.type] || f.type)
+  if (f.difficulty !== 'all') bits.push(`难度${f.difficulty}`)
+  if (f.tag !== 'all') bits.push(f.tag)
+  if (f.questionNos) bits.push(`题号${f.questionNos}`)
+  if (f.keyword) bits.push(`"${f.keyword}"`)
+  if (f.sort && f.sort !== 'default') bits.push({ question_no: '按题号', difficulty_asc: '难度↑', difficulty_desc: '难度↓', newest: '最新' }[f.sort] || f.sort)
+  return bits.join(' · ') || '全部'
+}
+
+/** 保存当前筛选 */
+const saveCurrentFilter = async () => {
+  if (!hasActiveFilter.value) return
+  const defaultName = filterSummary(snapshotFilters())
+  try {
+    const { value: name } = await ElMessageBox.prompt('给这组筛选起个名字', '保存智能筛选', {
+      inputValue: defaultName,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (v) => v && v.trim() ? true : '名字不能为空',
+    })
+    savedFilters.value.push({ name: name.trim(), filters: snapshotFilters(), id: Date.now() })
+    persistFilters()
+    ElMessage.success(`已保存「${name.trim()}」`)
+  } catch { /* 取消 */ }
+}
+
+/** 应用一个已保存的筛选 */
+const applySavedFilter = (sf) => {
+  const f = sf.filters
+  filterType.value = f.type || 'all'
+  filterDifficulty.value = f.difficulty || 'all'
+  filterTag.value = f.tag || 'all'
+  filterQuestionNos.value = f.questionNos || ''
+  filterKeyword.value = f.keyword || ''
+  filterSort.value = f.sort || 'default'
+  // 不改 filterPaper —— 智能筛选是跨题集的条件
+  limit.value = PAGE_SIZE
+  clearSelection()
+  loadQuestions()
+}
+
+/** 删除一个已保存的筛选 */
+const removeSavedFilter = (sf) => {
+  savedFilters.value = savedFilters.value.filter(x => x.id !== sf.id)
+  persistFilters()
+}
 
 // 试题篮（前端状态，不落库）。卷面就是篮子 —— 不再有单独的篮子面板。
 const basket = ref([])
@@ -2467,6 +2560,24 @@ onUnmounted(() => {
 
 /* ── 统计面板（2026-11-09 P0-3）── */
 .pb-stats-toggle { display: flex; justify-content: flex-end; margin-top: 6px; }
+
+/* 智能文件夹 chips */
+.pb-smart-filters { display: flex; align-items: center; gap: 6px; padding: 4px 0 2px; flex-wrap: wrap; }
+.pb-smart-filters__label { font-size: 11px; color: #999; white-space: nowrap; margin-right: 2px; }
+.pb-smart-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 2px 8px; border-radius: 12px;
+  background: #f0f3ff; border: 1px solid #d4daef; color: #4a5a8a;
+  font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.pb-smart-chip:hover { background: #e0e6ff; border-color: #a9b4f0; }
+.pb-smart-chip__name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-smart-chip__x {
+  font-size: 14px; line-height: 1; color: #aab; cursor: pointer;
+  margin-left: 2px; border-radius: 50%; width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center;
+}
+.pb-smart-chip__x:hover { background: #d0d4e8; color: #e44; }
 .pb-stats {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px; margin-top: 6px; margin-bottom: 4px;
