@@ -76,3 +76,29 @@ test('反向自检：删掉配图 img 标签必须判红（防止锚点静默消
   const violations = figureClarityViolations(view, '', '')
   assert.ok(violations.some(v => v.includes('找不到')), '锚点丢失必须 fail-closed')
 })
+
+/** @returns {string[]} 高清化脚本的违规列表，空数组 = 通过 */
+function enhanceGuardViolations(src) {
+  const bad = []
+  // 浅灰印刷的刻度/顶点字母灰度 180~215；白底化阈值低于 225 会把它们洗白
+  if (!/arr - 225\.0/.test(src)) bad.push('白底化下界必须是 225（浅灰印刷内容不得被洗白）')
+  if (/150\.0 \/ 35\.0|arr - 150\.0/.test(src)) bad.push('禁止回退到 11-06 深墨卷的 150/185 阈值')
+  if (!/0\.85 <= keep <= 1\.25/.test(src)) bad.push('必须保留 <220 灰度像素内容保留硬闸')
+  if (!/corr > 0\.98/.test(src) || !/np\.corrcoef/.test(src)) bad.push('必须保留连续墨量相关校验')
+  return bad
+}
+
+const ENHANCER = 'scripts/ops/enhance_paper_figures.py'
+
+test('★ 高清化工具：白底化阈值与内容保留硬闸不得放宽', () => {
+  assert.deepEqual(enhanceGuardViolations(read(ENHANCER)), [])
+})
+
+test('反向自检：把阈值改回 150 或删掉内容闸必须判红', () => {
+  const src = read(ENHANCER)
+  const aggressive = src.replace('arr - 225.0', 'arr - 150.0')
+  assert.notEqual(aggressive, src, '替换点必须命中')
+  assert.ok(enhanceGuardViolations(aggressive).length > 0, '激进阈值必须判红')
+  const noKeep = src.replace('0.85 <= keep <= 1.25', 'True')
+  assert.ok(enhanceGuardViolations(noKeep).length > 0, '删掉内容保留闸必须判红')
+})
