@@ -1335,6 +1335,48 @@ export async function countPaperQuestions(resourceId) {
   return rows[0]?.n || 0
 }
 
+/**
+ * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
+ * 可选 resourceId 限定某个题集，不传则全库。
+ */
+export async function paperBankStatistics(resourceId) {
+  const cond = resourceId ? 'WHERE rq.resource_id = $1' : ''
+  const params = resourceId ? [resourceId] : []
+
+  const [totalR, byDiffR, byTypeR, byTagR] = await Promise.all([
+    query(`SELECT COUNT(*)::int AS total FROM resource_questions rq ${cond}`, params),
+    query(
+      `SELECT rq.difficulty, COUNT(*)::int AS count
+         FROM resource_questions rq ${cond}
+        GROUP BY rq.difficulty
+        ORDER BY rq.difficulty NULLS LAST`,
+      params
+    ),
+    query(
+      `SELECT rq.question_type, COUNT(*)::int AS count
+         FROM resource_questions rq ${cond}
+        GROUP BY rq.question_type
+        ORDER BY count DESC`,
+      params
+    ),
+    query(
+      `SELECT tag, COUNT(*)::int AS count
+         FROM resource_questions rq ${cond}, UNNEST(COALESCE(rq.tags, ARRAY[]::text[])) AS tag
+        GROUP BY tag
+        ORDER BY count DESC
+        LIMIT 20`,
+      params
+    ),
+  ])
+
+  return {
+    total: totalR.rows[0]?.total || 0,
+    byDifficulty: byDiffR.rows,
+    byType: byTypeR.rows,
+    byTag: byTagR.rows,
+  }
+}
+
 // ── 截图加题（2026-11-06 加，2026-11-07 改模型）─────────────────────────────
 //
 // 场景：老师看视频/网课看到一道好题，截图就想收进自己预设的那个题集。

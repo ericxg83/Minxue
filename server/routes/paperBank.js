@@ -32,6 +32,7 @@ import {
   restoreQuestionPlacements,
   bulkUpdatePaperQuestions,
   bulkDeletePaperQuestions,
+  paperBankStatistics,
   CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
 } from '../services/paperBankService.js'
@@ -668,6 +669,20 @@ async function attachVecUrls(questions) {
   }
   return questions
 }
+
+/**
+ * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
+ * query: resourceId（可选，限定某个题集）
+ */
+router.get('/statistics', async (req, res) => {
+  try {
+    const resourceId = req.query.resourceId || undefined
+    const stats = await paperBankStatistics(resourceId)
+    res.json({ success: true, ...stats })
+  } catch (e) {
+    res.status(500).json({ error: '统计加载失败', message: e.message })
+  }
+})
 
 router.get('/papers/:id/questions', async (req, res) => {
   try {

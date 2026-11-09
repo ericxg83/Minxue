@@ -198,6 +198,60 @@
             <template #actions><el-button text @click="resetFilters">重置</el-button></template>
           </FilterBar>
 
+          <!-- 统计面板（2026-11-09 P0-3）：可折叠，点击按钮展开 -->
+          <div class="pb-stats-toggle">
+            <button type="button" class="pb-link" @click="toggleStats">
+              {{ showStats ? '收起统计' : '查看统计' }}
+            </button>
+          </div>
+          <Transition name="pb-bulk-fade">
+            <div v-if="showStats" class="pb-stats">
+              <div v-if="statsLoading" class="pb-stats__loading">加载中…</div>
+              <template v-else>
+                <div class="pb-stats__card">
+                  <span class="pb-stats__card-title">总题数</span>
+                  <strong class="pb-stats__card-value">{{ stats.total }}</strong>
+                </div>
+                <div class="pb-stats__card">
+                  <span class="pb-stats__card-title">难度分布</span>
+                  <div class="pb-stats__bars">
+                    <div v-for="d in stats.byDifficulty" :key="d.difficulty" class="pb-stats__bar-row">
+                      <span class="pb-stats__bar-label">{{ difficultyLabel(d.difficulty) }}</span>
+                      <div class="pb-stats__bar-track">
+                        <div
+                          class="pb-stats__bar-fill"
+                          :class="{ 'is-easy': d.difficulty === 1, 'is-mid': d.difficulty === 3, 'is-hard': d.difficulty === 5 }"
+                          :style="{ width: stats.total ? Math.max(4, d.count / stats.total * 100) + '%' : '0' }"
+                        />
+                      </div>
+                      <span class="pb-stats__bar-count">{{ d.count }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="pb-stats__card">
+                  <span class="pb-stats__card-title">题型分布</span>
+                  <div class="pb-stats__bars">
+                    <div v-for="t in stats.byType" :key="t.question_type" class="pb-stats__bar-row">
+                      <span class="pb-stats__bar-label">{{ typeStatLabel(t.question_type) }}</span>
+                      <div class="pb-stats__bar-track">
+                        <div class="pb-stats__bar-fill is-type" :style="{ width: stats.total ? Math.max(4, t.count / stats.total * 100) + '%' : '0' }" />
+                      </div>
+                      <span class="pb-stats__bar-count">{{ t.count }}</span>
+                    </div>
+                  </div>
+                </div>
+                <div v-if="stats.byTag.length" class="pb-stats__card">
+                  <span class="pb-stats__card-title">标签 TOP {{ Math.min(stats.byTag.length, 10) }}</span>
+                  <div class="pb-stats__tags">
+                    <span v-for="tg in stats.byTag.slice(0, 10)" :key="tg.tag" class="pb-stats__tag">
+                      {{ tg.tag }} <em>{{ tg.count }}</em>
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </Transition>
+
           <div v-if="loading" class="pb-loading"><el-skeleton v-for="i in 5" :key="i" :rows="2" animated /></div>
 
           <EmptyState
@@ -743,6 +797,7 @@ import {
   updatePaperClipSource,
   bulkUpdatePaperBankQuestions,
   bulkDeletePaperBankQuestions,
+  getPaperBankStatistics,
 } from '../../services/apiService.js'
 import { buildHandoutBody, buildHandoutCSS, groupHandoutQuestions } from '../../utils/handoutPdf'
 import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/composePaperPdf'
@@ -806,6 +861,11 @@ const showReviewDialog = ref(false)
 const reviewDialog = ref({ title: '', paper: null, items: [] })
 const showCoverageDialog = ref(false)
 const coverageDialog = ref({ title: '', paper: null, rows: [], shifted: [] })
+
+// ── 统计面板（2026-11-09 P0-3）──
+const showStats = ref(false)
+const stats = ref({ total: 0, byDifficulty: [], byType: [], byTag: [] })
+const statsLoading = ref(false)
 
 // 右侧卷面（常驻，和题目列表同一页）
 const previewKind = ref('student')
@@ -1077,6 +1137,34 @@ const loadMore = () => {
   limit.value += PAGE_SIZE
   loadQuestions()
 }
+
+const loadStats = async () => {
+  statsLoading.value = true
+  try {
+    const resourceId = filterPaper.value === 'all' ? undefined : filterPaper.value
+    const r = await getPaperBankStatistics(resourceId)
+    stats.value = {
+      total: r.total || 0,
+      byDifficulty: r.byDifficulty || [],
+      byType: r.byType || [],
+      byTag: r.byTag || [],
+    }
+  } catch { /* 统计失败不打扰老师 */ }
+  finally { statsLoading.value = false }
+}
+
+const toggleStats = () => {
+  showStats.value = !showStats.value
+  if (showStats.value) loadStats()
+}
+
+const difficultyLabel = (d) => ({
+  1: '★ 基础', 3: '★★ 中等', 5: '★★★ 较难',
+}[d] || '未判定')
+
+const typeStatLabel = (t) => ({
+  choice: '选择题', fill: '填空题', judge: '判断题', answer: '解答题',
+}[t] || '其它')
 
 const pickPaper = (id) => {
   filterPaper.value = id
@@ -2289,6 +2377,36 @@ onUnmounted(() => {
 .pb-bulk__apply:disabled { opacity: .5; cursor: default; }
 .pb-bulk-fade-enter-active, .pb-bulk-fade-leave-active { transition: all .2s ease; }
 .pb-bulk-fade-enter-from, .pb-bulk-fade-leave-to { opacity: 0; transform: translateY(-6px); }
+
+/* ── 统计面板（2026-11-09 P0-3）── */
+.pb-stats-toggle { display: flex; justify-content: flex-end; margin-top: 6px; }
+.pb-stats {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px; margin-top: 6px; margin-bottom: 4px;
+}
+.pb-stats__loading { grid-column: 1 / -1; font-size: 12px; color: #999; padding: 10px 0; }
+.pb-stats__card {
+  background: var(--wb-bg-card, #fff); border: 1px solid var(--wb-border, #e2e8f0);
+  border-radius: var(--wb-radius-sm, 8px); padding: 10px 12px;
+}
+.pb-stats__card-title { display: block; font-size: 11px; color: var(--wb-text-tertiary, #94a3b8); margin-bottom: 6px; }
+.pb-stats__card-value { font-size: 22px; font-weight: 600; color: var(--wb-primary, #6366f1); font-variant-numeric: tabular-nums; }
+.pb-stats__bars { display: flex; flex-direction: column; gap: 5px; }
+.pb-stats__bar-row { display: flex; align-items: center; gap: 6px; }
+.pb-stats__bar-label { flex: none; width: 56px; font-size: 11px; color: var(--wb-text-secondary, #64748b); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pb-stats__bar-track { flex: 1; height: 14px; background: var(--wb-border-subtle, #f1f5f9); border-radius: 3px; overflow: hidden; }
+.pb-stats__bar-fill { height: 100%; border-radius: 3px; transition: width .3s ease; background: var(--wb-primary-soft, #c7d2fe); }
+.pb-stats__bar-fill.is-easy { background: #86efac; }
+.pb-stats__bar-fill.is-mid { background: #fcd34d; }
+.pb-stats__bar-fill.is-hard { background: #fca5a5; }
+.pb-stats__bar-fill.is-type { background: var(--wb-primary-soft, #c7d2fe); }
+.pb-stats__bar-count { flex: none; font-size: 11px; color: var(--wb-text-secondary, #64748b); font-variant-numeric: tabular-nums; min-width: 22px; }
+.pb-stats__tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pb-stats__tag {
+  font-size: 11px; padding: 2px 7px; border-radius: 4px;
+  background: #faece7; color: #993c1d; border: 1px solid #f0997b;
+}
+.pb-stats__tag em { font-style: normal; color: #b45a30; margin-left: 3px; }
 .pb-loading { padding: 12px 0; display: grid; gap: 12px; }
 .pb-rows { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .pb-row {

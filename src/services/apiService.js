@@ -1220,6 +1220,15 @@ export const updatePaperBankQuestion = async (id, patch) => {
 }
 
 /**
+ * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
+ * @param {string} [resourceId] 限定某个题集，不传则全库
+ */
+export const getPaperBankStatistics = async (resourceId) => {
+  const qs = resourceId ? `?resourceId=${resourceId}` : ''
+  return apiRequest(`/paper-bank/statistics${qs}`)
+}
+
+/**
  * 截图加题（2026-11-06 加，11-07 改模型）：图片进**老师选中的题集**，不再有固定「截图题库」卷。
  * 与服务端后台解析同款：请求立即返回，前端轮询该题集状态。
  * 返回值里 beforeCount 是解析前的题数快照，用来算「这一批入了多少题」。
