@@ -1204,6 +1204,7 @@ export const searchPaperBankQuestions = async (f = {}) => {
   put('difficulties', f.difficulties)
   put('tags', f.tags)
   if (f.keyword) qs.set('keyword', f.keyword)
+  if (f.sort) qs.set('sort', f.sort)
   if (f.limit) qs.set('limit', String(f.limit))
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
   const data = await apiRequest(`/paper-bank/questions${suffix}`)

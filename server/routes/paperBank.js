@@ -706,6 +706,7 @@ router.get('/questions', async (req, res) => {
       difficulties: nums(req.query.difficulties),
       tags: splitList(req.query.tags),
       keyword: req.query.keyword ? String(req.query.keyword) : undefined,
+      sort: req.query.sort ? String(req.query.sort) : undefined,
       limit: req.query.limit,
     })
     await attachVecUrls(questions)

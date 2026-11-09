@@ -1266,7 +1266,23 @@ export async function searchPaperQuestions(f = {}) {
   if (Array.isArray(f.questionTypes) && f.questionTypes.length) add('rq.question_type = ANY(?::text[])', f.questionTypes)
   if (Array.isArray(f.difficulties) && f.difficulties.length) add('rq.difficulty = ANY(?::int[])', f.difficulties)
   if (Array.isArray(f.tags) && f.tags.length) add('rq.tags && ?::text[]', f.tags)
-  if (f.keyword) add('rq.content ILIKE ?', `%${f.keyword}%`)
+  // 全文搜索（2026-11-09 增强）：同时搜 parent_stem + content，只要任一命中即匹配。
+  // 之前只搜 content，老师搜「表格」「阅读材料」等公共题干里的内容会漏。
+  if (f.keyword) {
+    params.push(`%${f.keyword}%`)
+    where.push(`(rq.content ILIKE $${params.length} OR rq.parent_stem ILIKE $${params.length})`)
+  }
+
+  // 排序（2026-11-09 P0-2）：前端可选，默认按卷+题号。
+  // 合法值白名单，防注入 —— 不在白名单里的直接落回默认。
+  const SORT_MAP = {
+    default: 'r.exam_date NULLS LAST, r.name, rq.page_no NULLS LAST, rq.question_no NULLS LAST, rq.sub_no',
+    question_no: 'rq.question_no NULLS LAST, rq.sub_no, r.name',
+    difficulty_asc: 'rq.difficulty NULLS LAST, rq.question_no NULLS LAST',
+    difficulty_desc: 'rq.difficulty DESC NULLS LAST, rq.question_no NULLS LAST',
+    newest: 'rq.created_at DESC, rq.question_no NULLS LAST',
+  }
+  const orderBy = SORT_MAP[f.sort] || SORT_MAP.default
 
   const limit = Math.max(1, Math.min(Number(f.limit) || 500, 2000))
   params.push(limit)
@@ -1277,7 +1293,7 @@ export async function searchPaperQuestions(f = {}) {
        JOIN resources r ON r.id = rq.resource_id
        ${OFFICIAL_ANSWER_LATERAL}
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-      ORDER BY r.exam_date NULLS LAST, r.name, rq.page_no NULLS LAST, rq.question_no NULLS LAST, rq.sub_no
+      ORDER BY ${orderBy}
       LIMIT $${params.length}`,
     params
   )

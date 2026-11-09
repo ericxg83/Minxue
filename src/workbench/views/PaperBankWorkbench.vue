@@ -192,8 +192,9 @@
             <WorkbenchSelect v-model="filterType" :options="typeFilterOptions" width="100px" aria-label="按题型筛选" />
             <WorkbenchSelect v-model="filterDifficulty" :options="difficultyFilterOptions" width="100px" aria-label="按难度筛选" />
             <WorkbenchSelect v-model="filterTag" :options="tagFilterOptions" width="96px" aria-label="按标签筛选" />
+            <WorkbenchSelect v-model="filterSort" :options="sortOptions" width="110px" aria-label="排序" />
             <WorkbenchInput v-model="filterQuestionNos" clearable placeholder="题号 19,24" width="112px" aria-label="按题号筛选" />
-            <WorkbenchInput v-model="filterKeyword" clearable placeholder="搜索题干" width="124px" aria-label="搜索题干" />
+            <WorkbenchInput v-model="filterKeyword" clearable placeholder="搜题干 / 公共题干" width="140px" aria-label="搜索题干" />
             <template #actions><el-button text @click="resetFilters">重置</el-button></template>
           </FilterBar>
 
@@ -777,6 +778,7 @@ const filterType = ref('all')
 const filterDifficulty = ref('all')
 const filterTag = ref('all')
 const filterKeyword = ref('')
+const filterSort = ref('default')
 const tagOptions = ref([])
 
 // 试题篮（前端状态，不落库）。卷面就是篮子 —— 不再有单独的篮子面板。
@@ -920,6 +922,13 @@ const tagFilterOptions = computed(() => ([
   { label: '全部标签', value: 'all' },
   ...tagOptions.value.map(t => ({ label: t, value: t })),
 ]))
+const sortOptions = [
+  { label: '默认排序', value: 'default' },
+  { label: '按题号', value: 'question_no' },
+  { label: '难度↑', value: 'difficulty_asc' },
+  { label: '难度↓', value: 'difficulty_desc' },
+  { label: '最新添加', value: 'newest' },
+]
 
 // 筛选后为空时给可行动提示（⛔ 不能只写「没有题目」）
 const emptyHint = computed(() => {
@@ -1039,6 +1048,7 @@ const buildQuery = () => ({
   difficulties: filterDifficulty.value === 'all' ? undefined : [Number(filterDifficulty.value)],
   tags: filterTag.value === 'all' ? undefined : [filterTag.value],
   keyword: filterKeyword.value || undefined,
+  sort: filterSort.value !== 'default' ? filterSort.value : undefined,
   // 多取一条用来判断「还有更多」
   limit: limit.value + 1,
 })
@@ -1080,7 +1090,9 @@ const resetFilters = () => {
   filterTag.value = 'all'
   filterQuestionNos.value = ''
   filterKeyword.value = ''
+  filterSort.value = 'default'
   limit.value = PAGE_SIZE
+  clearSelection()
   loadQuestions()
 }
 
@@ -2023,7 +2035,7 @@ watch(basket, () => { scheduleRepaint() }, { deep: true })
 watch([composeTitle, composeWithImage], () => { scheduleRepaint(300) })
 watch(paperFull, async () => { await nextTick(); fitZoom(true) })
 
-watch([filterType, filterDifficulty, filterTag], () => { limit.value = PAGE_SIZE; clearSelection(); loadQuestions() })
+watch([filterType, filterDifficulty, filterTag, filterSort], () => { limit.value = PAGE_SIZE; clearSelection(); loadQuestions() })
 watch([filterQuestionNos, filterKeyword], () => { limit.value = PAGE_SIZE; clearSelection(); loadQuestions() })
 
 const onKeydown = (e) => {
