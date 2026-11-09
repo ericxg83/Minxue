@@ -80,25 +80,37 @@ test('反向自检：删掉配图 img 标签必须判红（防止锚点静默消
 /** @returns {string[]} 高清化脚本的违规列表，空数组 = 通过 */
 function enhanceGuardViolations(src) {
   const bad = []
-  // 浅灰印刷的刻度/顶点字母灰度 180~215；白底化阈值低于 225 会把它们洗白
-  if (!/arr - 225\.0/.test(src)) bad.push('白底化下界必须是 225（浅灰印刷内容不得被洗白）')
-  if (/150\.0 \/ 35\.0|arr - 150\.0/.test(src)) bad.push('禁止回退到 11-06 深墨卷的 150/185 阈值')
-  if (!/0\.85 <= keep <= 1\.25/.test(src)) bad.push('必须保留 <220 灰度像素内容保留硬闸')
+  // ① 以白为锚压黑墨迹：纯白不动、浅灰内容变深，绝不往白推（不会洗白浅灰印刷）
+  if (!/1\.5 \* arr - 121\.5/.test(src)) bad.push('必须保留白锚压黑公式 1.5*a-121.5')
+  // ② 11-10 振铃事故：任何锐化都会在细线/字母周围造双影，禁止回潮
+  if (/ImageFilter\.UnsharpMask|\.sharpen\(|UnsharpMask\(/.test(src)) bad.push('禁止任何锐化（11-10 振铃/双影事故）')
+  // ③ 11-06 深墨卷白底化阈值会洗白浅灰刻度与顶点字母
+  if (/150\.0 \/ 35\.0|arr - 150\.0|arr - 225\.0/.test(src)) bad.push('禁止回退到白底化阈值方案')
+  // ④ 内容保留与形状判据
+  if (!/keep >= 0\.98/.test(src)) bad.push('必须保留 <220 灰度像素内容保留硬闸')
+  if (!/0\.95 <= gain <= 2\.2/.test(src)) bad.push('必须保留墨量增益范围')
   if (!/corr > 0\.98/.test(src) || !/np\.corrcoef/.test(src)) bad.push('必须保留连续墨量相关校验')
   return bad
 }
 
 const ENHANCER = 'scripts/ops/enhance_paper_figures.py'
 
-test('★ 高清化工具：白底化阈值与内容保留硬闸不得放宽', () => {
+test('★ 高清化工具：禁锐化、白锚压黑、内容保留硬闸不得放宽', () => {
   assert.deepEqual(enhanceGuardViolations(read(ENHANCER)), [])
 })
 
-test('反向自检：把阈值改回 150 或删掉内容闸必须判红', () => {
+test('反向自检：加回锐化 / 改回白底化 / 删内容闸，三种都判红', () => {
   const src = read(ENHANCER)
-  const aggressive = src.replace('arr - 225.0', 'arr - 150.0')
-  assert.notEqual(aggressive, src, '替换点必须命中')
-  assert.ok(enhanceGuardViolations(aggressive).length > 0, '激进阈值必须判红')
-  const noKeep = src.replace('0.85 <= keep <= 1.25', 'True')
+  const sharpened = src.replace(
+    '# ⛔ 这里不许加任何 sharpen：11-09 振铃事故见文件头',
+    '# ⛔ 这里不许加任何 sharpen：11-09 振铃事故见文件头\n    big = big.filter(ImageFilter.UnsharpMask(radius=1.1, percent=70, threshold=2))')
+  assert.notEqual(sharpened, src, '锐化替换点必须命中')
+  assert.ok(enhanceGuardViolations(sharpened).some(v => v.includes('锐化')), '加锐化必须判红')
+
+  const whitened = src.replace('1.5 * arr - 121.5', 'arr - 150.0')
+  assert.notEqual(whitened, src, '白底化替换点必须命中')
+  assert.ok(enhanceGuardViolations(whitened).length > 0, '改回白底化必须判红')
+
+  const noKeep = src.replace('keep >= 0.98', 'True')
   assert.ok(enhanceGuardViolations(noKeep).length > 0, '删掉内容保留闸必须判红')
 })

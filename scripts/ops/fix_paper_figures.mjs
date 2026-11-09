@@ -7,8 +7,10 @@
  *
  * ⛔ 不用生成式超分 / AI 重绘：这些图是判题依据（交点、字母、线段位置），
  *    模型会「顺手」把线条画平滑、补粗甚至挪位 = 悄悄改题。
- * ⛔ 白底化阈值必须 >=225（见 enhance_paper_figures.py）：松江卷是浅灰印刷，
- *    照抄 11-06 深墨卷的 150/185 会把坐标轴刻度与顶点字母整片洗白。
+ * ⛔ **禁用任何锐化**（2026-11-10 三次报障）：11-09 版 3x 插值 + 强锐化在细线/字母
+ *    周围产生振铃双影（松江 q12 的 A/E/F、q17 的 B/C/D），反而比原裁片更糊。
+ * ⛔ 现行算法以白为锚压黑墨迹（见 enhance_paper_figures.py）：纯白不动、浅灰内容变深，
+ *    **不往白推** ⇒ 不会洗白浅灰印刷的刻度/顶点字母（11-06 深墨卷阈值会洗白）。
  *
  * 用法（三步，工作目录 `_work_figures/<tag>/` 自动创建、被 .gitignore 的 `_*` 规则忽略）：
  *   1) node scripts/ops/fix_paper_figures.mjs --resource=<uuid> --prepare
@@ -68,24 +70,27 @@ for (const r of rows) {
 }
 console.log('unique figure URLs:', groups.size)
 
-// 幂等守卫：已处理过的卷子（产物名带 -hi）不许无声地做第二次 3x（会变 9x 且洗白）
-const looksEnhanced = (u) => /-hi\d{3,}|-hi-|-enh-/i.test(u.split('/').pop() || '')
+// 幂等守卫：⛔ 靠文件名判「已处理」不可靠——OSS 上传会把文件重命名为纯 UUID
+//（2026-11-10 实测）。改看像素：整卷配图全是 >=800px 的 PNG ⇒ 已是高清产物，
+// 再跑一次会放大到 9 倍，必须 --force 才放行。
 if (PREPARE) {
-  const done = [...groups.keys()].filter(looksEnhanced)
-  if (done.length && !FORCE) {
-    console.error(`⛔ 该卷已有 ${done.length} 张高清产物，重复跑会把图放大到 9 倍。确需重做请加 --force（并先回滚 ${BACKUP}）`)
-    await pool.end()
-    process.exit(1)
-  }
   await fs.mkdir(SRC, { recursive: true })
   const manifest = []
   let i = 0
+  let allHiPng = groups.size > 0
   for (const [url, rs] of groups) {
     const base = url.split('?')[0].split('/').pop()
     const buf = Buffer.from(await (await fetch(url)).arrayBuffer())
     await fs.writeFile(`${SRC}/${base}`, buf)
+    const m = await sharp(buf).metadata()
+    if (!(m.width >= 800 && m.format === 'png')) allHiPng = false
     manifest.push({ base, url, rows: rs, srcBytes: buf.length })
-    console.log(`  [src] ${String(i++).padStart(2, '0')} ${base} ${buf.length}B rows=${rs.length}`)
+    console.log(`  [src] ${String(i++).padStart(2, '0')} ${base} ${buf.length}B ${m.width}x${m.height} ${m.format} rows=${rs.length}`)
+  }
+  if (allHiPng && !FORCE) {
+    console.error(`⛔ 该卷 ${groups.size} 张配图全为 >=800px 的 PNG，看起来已是高清产物；重复跑会放大到 9 倍。确需重做请加 --force（并先回滚 ${BACKUP}）`)
+    await pool.end()
+    process.exit(1)
   }
   await fs.writeFile(MANIFEST, JSON.stringify({ resourceId: RES_ID, tag: TAG, manifest }, null, 2))
   console.log(`manifest -> ${MANIFEST}；下一步: python scripts/ops/enhance_paper_figures.py --tag=${TAG}`)
