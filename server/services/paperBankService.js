@@ -56,6 +56,15 @@ const CROP_RENDER_SCALE = 4
 const CROP_RENDER_MAX_EDGE = 4096
 const CROP_RENDER_QUALITY = 0.92 // canvas.toBuffer 的 jpeg 质量是 0~1（不是 sharp 的 0~100）
 
+// 双模型复核失败页的串行补跑（2026-11-09 松江一模事故沉淀）。
+// 现象：6 页里 5 页被标「未复核」——校对链是**单步** Bailian，一次 429 就把整页判 skipped，
+//   且 vendorChain 随即进入 60s 冷却，同批后续页全部被跳过。
+// 做法：整卷解析结束、落库前，把所有失败页串行补跑一次（默认等 65s 越过冷却）。
+//   补跑成功则用新结果继续落库（该页不再计入 skippedPages）；仍失败才如实标「未复核」，
+//   并把具体错误写进 parseWarnings（原来只 logger.warn，本地后端无日志落盘 ⇒ 库里查不到原因）。
+// 设 0 关闭补跑（测试/诊断用），设小值只用于本地验证。
+const PAPER_OCR_RETRY_DELAY_MS = Number(process.env.PAPER_OCR_RETRY_DELAY_MS ?? 65000)
+
 // ── 配图上传去重（2026-11-06）──
 // 同一道题的多个小问各自裁图时，裁出来常常是**字节完全相同**的一张图
 // （小问行自己没有图，整组都落在题干那张图上）。逐行上传会给同一幅图造出 N 个 URL，
@@ -416,14 +425,51 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
       j, question_no: rows[d.idx].question_no, sub_no: rows[d.idx].sub_no,
       field: d.field, ocr_text: d.ocr_text,
     }))
-    const arb = await callVisionCompletion({
-      imageDataURL,
-      systemPrompt: OCR_TRANSCRIBE_SYSTEM,
-      userText: '待抄录位置：\n' + JSON.stringify(ask),
-      temperature: 0.05, maxTokens: 4096,
-      vendorChain: PAPER_BANK_OCR_ARBITER_CHAIN,
-      noBackup: true, // 同上：终裁必须是最强视觉本尊，降级等于让弱模型替卷面作证
-    })
+    // ⭐ 终裁失败不能把整页判「未复核」（2026-11-09 松江 p6 实测 502）：
+    //   第一步校对已经跑出差异，整页丢掉会让老师连「哪几处可疑」都看不到。
+    //   口径：终裁重试 1 次；仍失败 ⇒ 全部差异转「待人工核对」（arbiter_text=null），
+    //   **绝不自动改字**，也绝不把这页从清单里丢掉。
+    let arb = null
+    let arbError = null
+    for (let attempt = 0; attempt < 2 && !arb; attempt++) {
+      try {
+        arb = await callVisionCompletion({
+          imageDataURL,
+          systemPrompt: OCR_TRANSCRIBE_SYSTEM,
+          userText: '待抄录位置：\n' + JSON.stringify(ask),
+          temperature: 0.05, maxTokens: 4096,
+          vendorChain: PAPER_BANK_OCR_ARBITER_CHAIN,
+          noBackup: true, // 同上：终裁必须是最强视觉本尊，降级等于让弱模型替卷面作证
+        })
+      } catch (e) {
+        arbError = String(e?.message || e).slice(0, 160)
+        if (attempt === 0) await new Promise(r => setTimeout(r, 1500))
+      }
+    }
+    if (!arb) {
+      logger.warn?.(
+        `[paperBank] 第 ${pageNumber} 页终裁模型调用失败（差异转人工核对、不自动改字）: ${arbError}`
+      )
+      const reviewOnArbiterFail = []
+      for (const d of diffs) {
+        const row = rows[d.idx]
+        const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
+        const hit = Array.isArray(cur)
+          ? cur.some(x => String(x).includes(d.ocr_text))
+          : String(cur).includes(d.ocr_text)
+        if (!hit) continue
+        reviewOnArbiterFail.push({
+          page_no: pageNumber, question_no: row.question_no, sub_no: row.sub_no,
+          field: d.field, ocr_text: d.ocr_text, suggested_text: d.printed_text,
+          arbiter_text: null,
+          reason: `终裁模型调用失败（${arbError}），未经独立抄录确认；${d.reason}`,
+        })
+      }
+      return {
+        rows, review: reviewOnArbiterFail, checked: rows.length, corrected: 0,
+        skipped: false, arbiterError: arbError,
+      }
+    }
     const transcripts = new Map(
       (parseJsonLoose(arb.content)?.transcripts || []).map(t => [Number(t.j), t])
     )
@@ -692,6 +738,9 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
 
   return {
     rows,
+    pageNumber,
+    pageImageUrl,          // 复核失败时用它补跑（整页 4x 图，不必重下原 PDF）
+    ocrError: cross.error || null,
     pageTitle: obj?.page_title || null,
     sectionTitle: obj?.section_title || null,
     ocrReview: cross.review,
@@ -947,7 +996,61 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     if (Array.isArray(r.ocrReview)) ocrReview.push(...r.ocrReview)
     ocrChecked += Number(r.ocrChecked || 0)
     ocrCorrected += Number(r.ocrCorrected || 0)
-    if (r.ocrSkipped) ocrSkippedPages += 1
+  }
+
+  // ── 复核失败页串行补跑（2026-11-09 松江事故）──
+  // ⛔ 必须在 assignGlobalQuestionNumbers / 落库之前：补跑修正的是 rows 里的题面文本，
+  //   落库之后再改就得写第二遍库，且会与题号/标签派生脱节。
+  // 补跑只重做「双模型校对」，不重跑主 OCR —— 分段、题号、裁片全部照旧。
+  const skippedForRetry = pageResults.filter(r => r && !r.__error && !r.failed && r.ocrSkipped)
+  let ocrRetried = 0
+  let ocrRetrySucceeded = 0
+  if (skippedForRetry.length && PAPER_OCR_RETRY_DELAY_MS > 0) {
+    logger.warn?.(
+      `[paperBank] ${skippedForRetry.length} 页双模型复核失败，` +
+      `${Math.round(PAPER_OCR_RETRY_DELAY_MS / 1000)}s 后串行补跑一次（越过 vendorChain 429 冷却）`
+    )
+    await new Promise(resolve => setTimeout(resolve, PAPER_OCR_RETRY_DELAY_MS))
+    for (const r of skippedForRetry) {
+      ocrRetried += 1
+      try {
+        if (!r.pageImageUrl) throw new Error('无整页图，无法补跑')
+        const resp = await fetch(r.pageImageUrl)
+        if (!resp.ok) throw new Error(`整页图下载失败 HTTP ${resp.status}`)
+        const imageDataURL = 'data:image/jpeg;base64,'
+          + Buffer.from(await resp.arrayBuffer()).toString('base64')
+        const again = await crossCheckPageOcr({
+          imageDataURL, rows: r.rows || [], pageNumber: r.pageNumber, logger,
+        })
+        if (again.skipped) {
+          r.ocrError = again.error || r.ocrError
+          logger.warn?.(`[paperBank] 第 ${r.pageNumber} 页复核补跑仍失败：${r.ocrError}`)
+          continue
+        }
+        r.ocrSkipped = false
+        ocrRetrySucceeded += 1
+        ocrChecked += Number(again.checked || 0)
+        ocrCorrected += Number(again.corrected || 0)
+        if (Array.isArray(again.review)) ocrReview.push(...again.review)
+        logger.log?.(
+          `[paperBank] 第 ${r.pageNumber} 页复核补跑成功：` +
+          `自动修正 ${again.corrected} 处、待人工核对 ${again.review.length} 处`
+        )
+      } catch (e) {
+        r.ocrError = String(e?.message || e).slice(0, 200)
+        logger.warn?.(`[paperBank] 第 ${r.pageNumber} 页复核补跑异常：${r.ocrError}`)
+      }
+    }
+  }
+  // 复跑结束仍失败的页：如实计入未复核，并把**具体原因**写进 parseWarnings。
+  // ⛔ 别只为「界面好看」把 skippedPages 清零 —— 那等于把质量缺口藏起来（铁律：静默降级最坏）。
+  for (const r of pageResults) {
+    if (!r || r.__error || r.failed || !r.ocrSkipped) continue
+    ocrSkippedPages += 1
+    await appendParseWarning(
+      resourceId,
+      `第 ${r.pageNumber} 页双模型复核失败（题目照存、未复核）：${String(r.ocrError || 'unknown').slice(0, 160)}`
+    )
   }
   // ── 全卷题号唯一化（2026-11-06 漏题事故）──
   // 必须在 deriveAutoTags / 落库之前：缺号行要拿到全卷唯一的题号，
@@ -1071,6 +1174,8 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
       JSON.stringify({
         checked: ocrChecked, corrected: ocrCorrected,
         skippedPages: ocrSkippedPages, reviewCount: ocrReview.length,
+        // 补跑痕迹（2026-11-09）：失败过几页、救回几页，避免「skippedPages 变小」无从解释
+        retriedPages: ocrRetried, retrySucceeded: ocrRetrySucceeded,
         at: new Date().toISOString(),
       }),
     ]

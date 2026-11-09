@@ -68,6 +68,9 @@ function checkService(src) {
   if (!/norm\(t\.printed_text\) === norm\(d\.printed_text\)/.test(s)) bad.push('两份抄本一致才允许自动改')
   if (!/if \(!hit\) continue/.test(s)) bad.push('锚点不在原文时必须跳过（禁止整段覆盖）')
   if (!/skipped: true/.test(s)) bad.push('复核失败必须只降级、不阻塞解析')
+  // 2026-11-09 松江 p6 事故：终裁 Gemini 502 时旧逻辑整页判「未复核」，
+  // 连第一步已经查出的差异清单一并丢掉。终裁失败只允许降级成「待人工核对」。
+  if (!/arbiterError: arbError/.test(s)) bad.push('终裁失败必须降级为待人工核对（skipped:false），不能整页判未复核')
   if (!/jsonb_build_object\('ocrReview', \$2::jsonb, 'ocrReviewSummary', \$3::jsonb\)/.test(s)) bad.push('复核结果未落到 resources.metadata')
   if (!/ocrReview: cross\.review/.test(s)) bad.push('单页复核结果未回传 parsePaperResource')
   // ⛔ 闸是质量敏感路径：两条链必须 noBackup: true。
@@ -131,6 +134,8 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
   assert.ok(checkService(svc.replace('await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger })', 'const cross = { review: [], checked: 0, corrected: 0, skipped: false }')).length > 0)
   assert.ok(checkService(svc.replace(/noBackup: true/g, 'noBackup: false')).length > 0,
     '允许闸静默降级到弱模型必须判红')
+  assert.ok(checkService(svc.replace('skipped: false, arbiterError: arbError', 'skipped: true')).length > 0,
+    '终裁失败退回整页未复核（丢掉差异清单）必须判红')
 
   // 2026-11-07：树改版后页面里同时存在旧的 p.ocr_review（弹窗函数内）和
   // activePaper.ocr_review（详情面板），两处都写坏才能真正验证检查函数敏感。
