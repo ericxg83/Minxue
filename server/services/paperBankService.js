@@ -1181,7 +1181,14 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     ]
   ).catch(e => logger.warn?.(`[paperBank] 复核结果回填失败: ${e.message}`))
 
-  return { pages: pages.length, questions: rows.length }
+  // pageFrom/pageTo：零错字审计只审本批新增的页（追加批次不重烧前面几页的钱），
+  // 调用方（routes/paperBank.js）拿到区间就能精确入队。
+  return {
+    pages: pages.length,
+    questions: rows.length,
+    pageFrom: basePage + 1,
+    pageTo: basePage + pages.length,
+  }
 }
 
 // ── 官方答案（复用练习册「预埋答案」那条链）──

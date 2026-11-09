@@ -5513,6 +5513,16 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
       console.error('Pending 任务恢复扫描器启动失败:', err.message)
     }
 
+    // 零错字审计断点续跑（2026-11-09）：审计是几分钟的后台长任务，
+    // 进程重启会把「running」永远留在卷子上（界面一直转圈、实际没人跑）。
+    // 只接回 12 小时内未完成的，老卷不重烧钱。
+    try {
+      const { resumeInterruptedAudits } = await import('./services/zeroTypoAuditService.js')
+      await resumeInterruptedAudits()
+    } catch (err) {
+      console.error('零错字审计恢复失败（不影响服务）:', err.message)
+    }
+
     // 运行数据库迁移
     // 经台账（schema_migrations）判定，已应用的迁移不再重复执行。
     // 背景：本回调每次冷启动都会跑一遍，48 个迁移每个 2 次 DB 往返，

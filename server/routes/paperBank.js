@@ -36,6 +36,7 @@ import {
   CLIP_MAX_IMAGES,
   PAPER_MAX_PAGES,
 } from '../services/paperBankService.js'
+import { queueZeroTypoAudit } from '../services/zeroTypoAuditService.js'
 
 const router = Router()
 
@@ -118,6 +119,9 @@ const withSourceFiles = (r) => {
     // 双模型复核后「两处抄本不一致」的待人工核对清单（2026-11-06）
     ocr_review: Array.isArray(meta.ocrReview) ? meta.ocrReview : [],
     ocr_review_summary: meta.ocrReviewSummary && typeof meta.ocrReviewSummary === 'object' ? meta.ocrReviewSummary : null,
+    // 零错字审计状态（2026-11-09）：解析完自动跑三厂商盲抄，字段名与前端 zero_typo 逐字对齐。
+    // status: queued / running / passed / needs_review / checked / failed
+    zero_typo: meta.zeroTypoAudit && typeof meta.zeroTypoAudit === 'object' ? meta.zeroTypoAudit : null,
     // 落库后逐页题号清点（2026-11-06）：卷面有、库里没有 = 漏题；库里多出 = 串号。
     // 字段名与前端逐字对齐：coverage_audit（原始明细）/ coverage_summary（列表徽标只读这个）。
     coverage_audit: meta.coverageAudit && typeof meta.coverageAudit === 'object' ? meta.coverageAudit : null,
@@ -495,7 +499,18 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
       : { images: images.map(f => f.buffer) }
 
     parsePaperResource({ resourceId, append: !replaceExisting, ...payload })
-      .then(r => console.log(`[paperBank] 解析完成 ${resourceId}: ${r.pages} 页 / ${r.questions} 题`))
+      .then(r => {
+        console.log(`[paperBank] 解析完成 ${resourceId}: ${r.pages} 页 / ${r.questions} 题`)
+        // 零错字审计自动入队（2026-11-09 负责人死规定：一模卷零错字，且不许依赖人手动跑）。
+        // 只审本批新增页：追加批次不重烧前面几页的钱；整卷重建才审全卷。
+        // ⛔ 后台排队跑，不 await —— 不能让 200+ 次视觉调用卡住上传响应。
+        const pages = replaceExisting
+          ? null
+          : Array.from({ length: Math.max(0, (r.pageTo || 0) - (r.pageFrom || 0) + 1) }, (_, i) => (r.pageFrom || 0) + i)
+        try { queueZeroTypoAudit({ resourceId, pages, reason: 'auto' }) } catch (e) {
+          console.warn('[paperBank] 零错字审计入队失败（不影响解析）:', e.message)
+        }
+      })
       .catch(async (e) => {
         console.error('[paperBank] 解析失败:', e)
         await setPaperParseStatus(resourceId, { status: 'failed' }).catch(() => {})
@@ -509,6 +524,38 @@ router.post('/papers/:id/parse', upload.array('files', 40), async (req, res) => 
   } catch (e) {
     console.error('[paperBank] 上传失败:', e)
     res.status(500).json({ error: '上传失败', message: e.message })
+  }
+})
+
+// ── 零错字审计：手动重跑入口（自动跑不了的补救：老卷、或上次通道抖动失败）──
+//
+// 正常路径是解析完成自动入队（见 /papers/:id/parse）。这个端点只做「重新排一次队」，
+// ⛔ 不在这里同步跑：一次审计 200+ 次视觉调用、几分钟，HTTP 会先超时。
+router.post('/papers/:id/zero-typo-audit', async (req, res) => {
+  try {
+    const { id } = req.params
+    const { rows } = await query(
+      `SELECT id, name, metadata->'zeroTypoAudit'->>'status' AS audit_status
+         FROM resources WHERE id = $1 AND resource_type = 'exam'`, [id]
+    )
+    if (!rows.length) return res.status(404).json({ error: '试卷不存在' })
+    const pagesArg = Array.isArray(req.body?.pages)
+      ? req.body.pages.map(Number).filter(n => Number.isFinite(n) && n > 0)
+      : null
+    const out = queueZeroTypoAudit({ resourceId: id, pages: pagesArg && pagesArg.length ? pagesArg : null, reason: 'manual' })
+    if (!out.queued && out.reason === 'disabled') {
+      return res.status(409).json({ error: '零错字审计已关闭', message: '服务端 ZERO_TYPO_AUDIT=0，需开启后才能跑' })
+    }
+    res.json({
+      success: true,
+      queued: out.queued,
+      deduped: !!out.deduped,
+      status: rows[0].audit_status || null,
+      message: out.queued ? '已排入审计队列，完成后卷子头上会显示结果' : '这份卷子正在审计中',
+    })
+  } catch (e) {
+    console.error('[paperBank] 零错字审计入队失败:', e)
+    res.status(500).json({ error: '排入审计队列失败', message: e.message })
   }
 })
 

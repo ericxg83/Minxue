@@ -86,6 +86,15 @@
                 @click="openOcrReview(activePaper)"
               >⚠ {{ activePaper.ocr_review.length }} 处待核对</button>
               <span
+                v-else-if="zeroTypoBadge(activePaper)"
+                class="pb-audit-state"
+                :class="{
+                  'is-busy': zeroTypoBadge(activePaper).kind === 'busy',
+                  'is-failed': zeroTypoBadge(activePaper).kind === 'warn',
+                }"
+                :title="zeroTypoBadge(activePaper).title"
+              >{{ zeroTypoBadge(activePaper).text }}</span>
+              <span
                 v-else-if="activePaper.ocr_review_summary?.skippedPages"
                 class="pb-review-warn"
                 :title="`有 ${activePaper.ocr_review_summary.skippedPages} 页双模型复核没跑成`"
@@ -715,8 +724,8 @@
     <!-- 双模型读法不一致：不自动改，列出来让老师点原卷核对后就地修正 -->
     <el-dialog v-model="showReviewDialog" :title="reviewDialog.title" width="640px">
       <p class="pb-hint">
-        两个模型对同一处卷面字符抄得不一样，系统没有替你猜。请点「打开原卷」对照卷面，
-        再在该题「改难度 / 标签」里用文本框就地改正。
+        同一处卷面字符各模型抄得不一样（双模型整页复核 / 三模型裁片盲抄），系统没有替你猜。
+        请点「打开原卷」对照卷面，再在该题「改难度 / 标签」里用文本框就地改正。
       </p>
       <div class="pb-review-list">
         <div v-for="(it, i) in reviewDialog.items" :key="i" class="pb-review-item">
@@ -1169,6 +1178,49 @@ const openOcrReview = (p) => {
     items: p.ocr_review || [],
   }
   showReviewDialog.value = true
+}
+
+// ── 零错字审计状态（2026-11-09）：解析完自动跑，字段名与 routes/paperBank.js 的 zero_typo 逐字对齐 ──
+// ⛔ needs_review 不单独出徽标：它的问题条目已并入 ocr_review，由上面那个「N 处待核对」按钮承载，
+//    一处问题只准有一个入口（否则同一处会在两个清单里各出现一次，老师要核两遍）。
+const zeroTypoBadge = (p) => {
+  const z = p.zero_typo
+  if (!z) return null
+  if (!z.status) {
+    // 自动审计上线前（2026-11-09 之前）手工跑的凭据：没有 status 字段但有逐字校对结论。
+    // 只认「二次复核 0 残余」的那份，其余一律不冒充已校。
+    if (z.by === 'zero-typo-audit' && (z.verifiedResiduals ?? 0) === 0) {
+      return {
+        kind: 'ok',
+        text: '✓ 零错字已校',
+        title: `三模型 ${z.passes || 2} 轮盲抄、共 ${z.readings || 0} 次读图，二次复核 0 处残余（${z.corrections || 0} 处修正已对原图核对）`,
+      }
+    }
+    return null
+  }
+  if (z.status === 'queued' || z.status === 'running') {
+    return {
+      kind: 'busy',
+      text: '⟳ 零错字校验中',
+      title: '三厂商视觉模型正在逐题盲抄原卷 4x 裁片，几分钟后自动出结果（不用手动跑）',
+    }
+  }
+  if (z.status === 'passed') {
+    const at = z.finishedAt ? new Date(z.finishedAt).toLocaleString('zh-CN') : ''
+    return {
+      kind: 'ok',
+      text: '✓ 零错字已校',
+      title: `三模型 ${z.rounds || 2} 轮盲抄、共 ${z.channelCalls || 0} 次读图，待核对 0 处${at ? `（${at}）` : ''}`,
+    }
+  }
+  if (z.status === 'failed') {
+    return {
+      kind: 'warn',
+      text: '⚠ 零错字校验失败',
+      title: `自动审计没跑成：${z.error || '未知原因'}。通道抖动会自动重试一次；仍失败可离线重跑 scripts/ops/zero_typo_audit.mjs。`,
+    }
+  }
+  return null
 }
 
 /** 题目行「看原卷」：单份 PDF 加 #page= 跳到本题所在页；多张照片按页码取对应那张。 */
@@ -2000,13 +2052,20 @@ const askClearPapers = async () => {
 // 老师可以离开本页 —— 重新进来时 onMounted 会重新拉一次，状态不会丢。
 // 题目解析与答案解析是两条独立的链，任一条在跑都要继续轮询。
 const anyParsing = () => papers.value.some(isParsing)
+// 零错字审计在解析**之后**才跑（几分钟），所以「解析完成」不等于「可以停轮询」：
+// 审计期间要继续拉状态；审计结束还要再拉一次题目 —— 它可能已自动改过题面文字。
+const anyAuditing = () => papers.value.some(p => ['queued', 'running'].includes(p.zero_typo?.status))
 const startPolling = () => {
   stopPolling()
+  // 进页面时解析可能早就完成了（只是审计还在跑）：别补弹一次「解析完成」
+  let parseDoneHandled = !anyParsing()
+  let auditWasRunning = false
   pollTimer = setInterval(async () => {
     try {
       await loadPapers()
-      if (!anyParsing()) {
-        stopPolling()
+      if (anyParsing()) return
+      if (!parseDoneHandled) {
+        parseDoneHandled = true
         await loadQuestions()
         // ⚠️ 解析失败的卷也会让 anyParsing 变 false —— 不能无脑弹「解析完成」
         //（2026-11-01 老师困惑「说成功却一道题都没有」的直接来源：failed 被报成成功）。
@@ -2019,6 +2078,17 @@ const startPolling = () => {
           ElMessage.success('解析完成')
         }
       }
+      const auditing = anyAuditing()
+      if (auditing) {
+        auditWasRunning = true
+        return
+      }
+      if (auditWasRunning) {
+        // 审计跑完：题面可能被自动修正，必须重拉一次，不能停在旧文本
+        auditWasRunning = false
+        await loadQuestions()
+      }
+      stopPolling()
     } catch { /* 轮询失败不打扰老师，下个 tick 再试 */ }
   }, 4000)
 }
@@ -2444,7 +2514,7 @@ onMounted(async () => {
     await loadPapers()
     await loadQuestions()
     if (!composeTitle.value.trim()) composeTitle.value = '组卷练习'
-    if (anyParsing()) startPolling()
+    if (anyParsing() || anyAuditing()) startPolling()
   } finally {
     loading.value = false
   }
@@ -2578,6 +2648,10 @@ onUnmounted(() => {
 }
 .pb-review-badge.is-danger:hover { background: #f9dcdc; }
 .pb-review-warn { font-size: 10px; color: #a3731a; }
+/* 零错字审计状态（2026-11-09）：通过 = 正向确认，必须很轻；
+   跑一半 / 失败才用琥珀色，且不跟「N 处待核对」的黄色徽标抢注意力 */
+.pb-audit-state { font-size: 10px; color: #8a9a86; }
+.pb-audit-state.is-busy, .pb-audit-state.is-failed { color: #a3731a; }
 /* 「✓ 题号已核」：正向确认，必须很轻，不能跟复核徽标抢注意力 */
 .pb-checked {
   border: 0; background: transparent; padding: 0; font-size: 10px;
