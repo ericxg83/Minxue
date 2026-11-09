@@ -1223,8 +1223,9 @@ export const updatePaperBankQuestion = async (id, patch) => {
  * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
  * @param {string} [resourceId] 限定某个题集，不传则全库
  */
-export const getPaperBankStatistics = async (resourceId) => {
-  const qs = resourceId ? `?resourceId=${resourceId}` : ''
+export const getPaperBankStatistics = async (resourceIds) => {
+  const ids = Array.isArray(resourceIds) ? resourceIds.filter(Boolean) : (resourceIds ? [resourceIds] : [])
+  const qs = ids.length ? `?resourceIds=${ids.join(',')}` : ''
   return apiRequest(`/paper-bank/statistics${qs}`)
 }
 

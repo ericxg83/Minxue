@@ -22,7 +22,7 @@
     <button
       type="button"
       class="pbt__row pbt__row--all"
-      :class="{ 'is-active': activePaperId === 'all' }"
+      :class="{ 'is-active': activePaperId === 'all' && !activeFolderId }"
       @click="emit('select', 'all')"
     >
       <span class="pbt__twisty"></span>
@@ -55,7 +55,7 @@
           v-else
           class="pbt__row"
           :class="{
-            'is-active': row.type === 'paper' && activePaperId === row.id,
+            'is-active': (row.type === 'paper' && activePaperId === row.id) || (row.type === 'folder' && activeFolderId === row.id),
             'is-drop': dropKey === row.key,
             'is-dragging': dragKey === row.key,
             'is-folder': row.type === 'folder',
@@ -133,8 +133,10 @@ const props = defineProps({
   papers: { type: Array, default: () => [] },
   totalQuestionCount: { type: Number, default: 0 },
   activePaperId: { type: String, default: 'all' },
+  // 当前按哪个文件夹筛题（点文件夹行时高亮，而不是只展开）
+  activeFolderId: { type: String, default: '' },
 })
-const emit = defineEmits(['select', 'changed', 'create-paper', 'drop-question'])
+const emit = defineEmits(['select', 'select-folder', 'changed', 'create-paper', 'drop-question'])
 
 // 题目行拖拽的类型标签（与 PaperBankWorkbench 的 onQuestionDragStart 逐字一致）
 const Q_DRAG_TYPE = 'application/x-mnx-question'
@@ -185,6 +187,14 @@ const countIn = (folderId) => {
   let n = papersIn(folderId).reduce((sum, p) => sum + (p.question_count || 0), 0)
   for (const f of childFolders(folderId)) n += countIn(f.id)
   return n
+}
+
+/** 递归收集一个文件夹下所有题集的 ID（包括子文件夹）—— 点文件夹时按整棵子树筛题 */
+const collectPaperIds = (folderId) => {
+  const ids = []
+  for (const p of papersIn(folderId)) ids.push(p.id)
+  for (const f of childFolders(folderId)) ids.push(...collectPaperIds(f.id))
+  return ids
 }
 
 /** 把树展平成行数组：一个 v-for 渲染完，拖拽/缩进/展开状态都好控。 */
@@ -271,8 +281,13 @@ const onDraftBlur = () => { if (draft.value) commitDraft() }
 
 const onRowClick = (row) => {
   menu.value = null
-  if (row.type === 'folder') toggleFolder(row.id)
-  else emit('select', row.id)
+  if (row.type === 'folder') {
+    toggleFolder(row.id)
+    // 文件夹也可以作为筛选入口，emit 选择事件（带上该文件夹下所有题集 ID）
+    emit('select-folder', { folderId: row.id, name: row.name, paperIds: collectPaperIds(row.id) })
+  } else {
+    emit('select', row.id)
+  }
 }
 
 // ── 拖拽移动 ──

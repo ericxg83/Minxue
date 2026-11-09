@@ -1337,11 +1337,12 @@ export async function countPaperQuestions(resourceId) {
 
 /**
  * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
- * 可选 resourceId 限定某个题集，不传则全库。
+ * 可选 resourceIds 限定某几个题集（点文件夹时是整棵子树），不传则全库。
  */
-export async function paperBankStatistics(resourceId) {
-  const cond = resourceId ? 'WHERE rq.resource_id = $1' : ''
-  const params = resourceId ? [resourceId] : []
+export async function paperBankStatistics(resourceIds) {
+  const ids = Array.isArray(resourceIds) ? resourceIds.filter(Boolean) : (resourceIds ? [resourceIds] : [])
+  const cond = ids.length ? 'WHERE rq.resource_id = ANY($1::uuid[])' : ''
+  const params = ids.length ? [ids] : []
 
   const [totalR, byDiffR, byTypeR, byTagR] = await Promise.all([
     query(`SELECT COUNT(*)::int AS total FROM resource_questions rq ${cond}`, params),
@@ -1361,7 +1362,8 @@ export async function paperBankStatistics(resourceId) {
     ),
     query(
       `SELECT tag, COUNT(*)::int AS count
-         FROM resource_questions rq ${cond}, UNNEST(COALESCE(rq.tags, ARRAY[]::text[])) AS tag
+         FROM resource_questions rq, UNNEST(COALESCE(rq.tags, ARRAY[]::text[])) AS tag
+        ${cond}
         GROUP BY tag
         ORDER BY count DESC
         LIMIT 20`,

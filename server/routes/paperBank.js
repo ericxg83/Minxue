@@ -672,12 +672,19 @@ async function attachVecUrls(questions) {
 
 /**
  * 题库统计（2026-11-09 P0-3）：按难度 / 题型 / 标签聚合。
- * query: resourceId（可选，限定某个题集）
+ * query: resourceIds（逗号分隔，可选，限定某几个题集；兼容旧的单数 resourceId）
  */
 router.get('/statistics', async (req, res) => {
   try {
-    const resourceId = req.query.resourceId || undefined
-    const stats = await paperBankStatistics(resourceId)
+    const idsParam = req.query.resourceIds ?? req.query.resourceId
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    const resourceIds = idsParam
+      ? String(idsParam).split(',').map(s => s.trim()).filter(x => UUID_RE.test(x))
+      : undefined
+    if (idsParam && !resourceIds.length) {
+      return res.json({ success: true, total: 0, byDifficulty: [], byType: [], byTag: [] })
+    }
+    const stats = await paperBankStatistics(resourceIds)
     res.json({ success: true, ...stats })
   } catch (e) {
     res.status(500).json({ error: '统计加载失败', message: e.message })

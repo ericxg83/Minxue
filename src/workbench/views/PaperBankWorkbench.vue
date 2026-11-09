@@ -33,7 +33,9 @@
             :papers="papers"
             :total-question-count="totalQuestionCount"
             :active-paper-id="filterPaper"
+            :active-folder-id="filterFolder ? filterFolder.id : ''"
             @select="pickPaper"
+            @select-folder="pickFolder"
             @changed="loadPapers"
             @create-paper="openCreateDialog"
             @drop-question="onQuestionDropped"
@@ -186,6 +188,7 @@
                   title="全选 / 取消全选（Ctrl+A）"
                 />
                 <strong>{{ questions.length }}{{ truncated ? '+' : '' }} 道题</strong>
+                <span v-if="filterFolder" class="pb-summary__scope" :title="`文件夹下 ${filterFolder.paperIds.length} 个题集`">📁 {{ filterFolder.name }}</span>
                 <span>已勾 {{ summary.count }} 题</span>
               </div>
             </template>
@@ -291,7 +294,7 @@
           >
             <template #actions>
               <ActionButton @click="resetFilters">重置筛选</ActionButton>
-              <ActionButton v-if="filterPaper !== 'all'" @click="pickPaper('all')">看全部题集</ActionButton>
+              <ActionButton v-if="filterPaper !== 'all' || filterFolder" @click="pickPaper('all')">看全部题集</ActionButton>
             </template>
           </EmptyState>
 
@@ -850,6 +853,8 @@ const truncated = ref(false)
 const limit = ref(PAGE_SIZE)
 
 const filterPaper = ref('all')
+// 2026-11-09：点文件夹行 = 按整棵子树筛题（含子文件夹里的题集），不必逐个点题集
+const filterFolder = ref(null) // { id, name, paperIds } | null
 const filterQuestionNos = ref('')
 const filterType = ref('all')
 const filterDifficulty = ref('all')
@@ -1056,7 +1061,9 @@ const activePaper = computed(() => (
 ))
 // 2026-11-07：题集一律按后端 created_at DESC 展示，不再有「截图题库」置顶这一特殊分类。
 // 加题入口的默认目标：当前左侧选中的题集，没选就取最近建的那个。
-const defaultPaperId = () => (filterPaper.value !== 'all' ? filterPaper.value : (papers.value[0]?.id || ''))
+const defaultPaperId = () => (filterFolder.value
+  ? (filterFolder.value.paperIds[0] || papers.value[0]?.id || '')
+  : (filterPaper.value !== 'all' ? filterPaper.value : (papers.value[0]?.id || '')))
 const blocks = computed(() => groupBasket(basket.value))
 const summary = computed(() => basketSummary(basket.value))
 const totals = computed(() => composePaperTotals(blocks.value))
@@ -1090,6 +1097,10 @@ const sortOptions = [
 // 筛选后为空时给可行动提示（⛔ 不能只写「没有题目」）
 const emptyHint = computed(() => {
   const bits = []
+  if (filterFolder.value && !filterFolder.value.paperIds.length) {
+    return `「${filterFolder.value.name}」文件夹里还没有题集，先新建题集，或把题集拖进来。`
+  }
+  if (filterFolder.value) bits.push(`只看「${filterFolder.value.name}」文件夹`)
   if (filterPaper.value !== 'all') bits.push('只看当前这个题集')
   if (filterType.value !== 'all') bits.push('指定了题型')
   if (filterDifficulty.value !== 'all') bits.push('指定了难度')
@@ -1197,7 +1208,9 @@ const openCoverage = (p) => {
 }
 
 const buildQuery = () => ({
-  resourceIds: filterPaper.value === 'all' ? undefined : [filterPaper.value],
+  resourceIds: filterFolder.value
+    ? filterFolder.value.paperIds
+    : (filterPaper.value === 'all' ? undefined : [filterPaper.value]),
   questionNos: filterQuestionNos.value
     ? String(filterQuestionNos.value).split(/[,，\s]+/).map(Number).filter(Number.isFinite)
     : undefined,
@@ -1211,6 +1224,14 @@ const buildQuery = () => ({
 })
 
 const loadQuestions = async () => {
+  // 空文件夹没有题集可查：直接给空结果。⛔ 不能把空数组传给后端，
+  //    后端会当成「不限题集」而返回全库，老师会看到一堆不属于这个文件夹的题。
+  if (filterFolder.value && !filterFolder.value.paperIds.length) {
+    questions.value = []
+    truncated.value = false
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     const rows = await searchPaperBankQuestions(buildQuery())
@@ -1238,8 +1259,14 @@ const loadMore = () => {
 const loadStats = async () => {
   statsLoading.value = true
   try {
-    const resourceId = filterPaper.value === 'all' ? undefined : filterPaper.value
-    const r = await getPaperBankStatistics(resourceId)
+    const resourceIds = filterFolder.value
+      ? filterFolder.value.paperIds
+      : (filterPaper.value === 'all' ? undefined : [filterPaper.value])
+    if (filterFolder.value && !resourceIds.length) {
+      stats.value = { total: 0, byDifficulty: [], byType: [], byTag: [] }
+      return
+    }
+    const r = await getPaperBankStatistics(resourceIds)
     stats.value = {
       total: r.total || 0,
       byDifficulty: r.byDifficulty || [],
@@ -1264,9 +1291,22 @@ const typeStatLabel = (t) => ({
 }[t] || '其它')
 
 const pickPaper = (id) => {
+  filterFolder.value = null
   filterPaper.value = id
   limit.value = PAGE_SIZE
+  clearSelection()
   loadQuestions()
+  if (showStats.value) loadStats()
+}
+
+/** 点文件夹行：按整棵子树（含子文件夹）筛题，不必逐个点最底下的题集 */
+const pickFolder = ({ folderId, name, paperIds }) => {
+  filterFolder.value = { id: folderId, name: name || '文件夹', paperIds: paperIds || [] }
+  filterPaper.value = 'all'
+  limit.value = PAGE_SIZE
+  clearSelection()
+  loadQuestions()
+  if (showStats.value) loadStats()
 }
 
 const resetFilters = () => {
@@ -1757,6 +1797,7 @@ const startClipPolling = (paperId, beforeCount) => {
         ElMessage.success(added ? `已入库 ${added} 道题` : '没识别出文字，已按图片存进题集')
       }
       // 自动切到刚加题的题集：老师刚收的题要立刻看见，不要让他再去左侧找
+      filterFolder.value = null
       filterPaper.value = paperId
       limit.value = PAGE_SIZE
       await loadQuestions()
@@ -1817,7 +1858,9 @@ const doMoveQuestion = async (paper, targetQ) => {
     basket.value = basket.value.map(it => (
       it.id === q.id ? { ...it, resource_id: paper.id, resource_name: paper.name } : it
     ))
-    const staysVisible = filterPaper.value === 'all' || filterPaper.value === paper.id
+    const staysVisible = filterFolder.value
+      ? filterFolder.value.paperIds.includes(paper.id)
+      : (filterPaper.value === 'all' || filterPaper.value === paper.id)
     undoMove.value = {
       paperName: paper.name,
       // 正看着原题集时，这一条会从列表里消失 —— 必须在提示里说清「消失≠被删」
@@ -1889,6 +1932,13 @@ const askDeletePaper = async (p) => {
     await deletePaperBankPaper(p.id)
     ElMessage.success('已删除')
     if (filterPaper.value === p.id) filterPaper.value = 'all'
+    // 文件夹视图里删掉了某个题集：把它的 id 从筛选范围里摘掉，否则会查到已不存在的题集
+    if (filterFolder.value) {
+      filterFolder.value = {
+        ...filterFolder.value,
+        paperIds: filterFolder.value.paperIds.filter(id => id !== p.id),
+      }
+    }
     basket.value = basket.value.filter(it => it.resource_id !== p.id)
     await loadPapers()
     await loadQuestions()
@@ -1915,6 +1965,7 @@ const askClearPapers = async () => {
   try {
     const r = await deletePaperBankPapers()
     ElMessage.success(`已清空 ${r?.deleted ?? papers.value.length} 个题集`)
+    filterFolder.value = null
     filterPaper.value = 'all'
     basket.value = [] // 卷没了，篮子里的题全部失效，直接清空
     await loadPapers()
@@ -2506,6 +2557,11 @@ onUnmounted(() => {
 .pb-summary__sel { flex: none; }
 .pb-summary strong { font-size: 13px; }
 .pb-summary span { font-size: 11px; color: #888; }
+.pb-summary span.pb-summary__scope {
+  color: #4a5a8a; background: #eef1fb; border: 1px solid #d4daef;
+  border-radius: 9px; padding: 1px 7px; max-width: 130px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 
 /* ── 批量操作工具栏（2026-11-08 P0）── */
 .pb-bulk {
