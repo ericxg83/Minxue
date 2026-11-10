@@ -6,6 +6,11 @@
 //   1. 解析时双档渲染：OCR 用 2x（省 token），裁片/整页图用 4x（≈288dpi）+ JPEG q92；
 //   2. 裁片走唯一出口 cropQuestionImage（裁前剥装订线），全仓没有第二处 re-encode；
 //   3. vec_url 附着停用——列表/讲解版/组篮全部回退高清裁片（历史 SVG 仅归档）。
+// ⛔ 2026-11-10 更正：11-03 记的「canvas.toBuffer jpeg 质量是 0~1」是**错的**。
+//    实测同一份松江 PDF 4x 渲染：quality=0.92/0.85/1 都只有 84KB（被当成最低质量），
+//    quality=92 → 579KB；其他三套一模卷 11-03 存量重渲染页图 432~558KB 正是 92 的产物。
+//    11-09 导入的松江卷传了 0.92 ⇒ 整卷配图从源头压糊，负责人四次报障。
+//    ⇒ 两处 92（canvas 渲染 / sharp 裁片）口径都是 0~100 整数，本文件锁死。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -18,7 +23,8 @@ test('解析页 2x 只喂 OCR，裁片/整页图必须走 4x 高清页', () => {
   const src = read('server/services/paperBankService.js')
   assert.ok(/const CROP_RENDER_SCALE = 4/.test(src), '裁片渲染倍率必须是 4x')
   assert.ok(/CROP_RENDER_MAX_EDGE = 4096/.test(src), 'maxEdge 必须抬到 4096，否则 4x 被 2048 压回 2.4x')
-  assert.ok(/CROP_RENDER_QUALITY = 0\.92/.test(src), '高清页 JPEG 质量 0.92（canvas 口径 0~1）')
+  assert.ok(/CROP_RENDER_QUALITY = 92\b/.test(src), '高清页 JPEG 质量必须是整数 92（canvas 口径 0~100）')
+  assert.ok(!/CROP_RENDER_QUALITY = 0\./.test(src), '⛔ 禁止 0~1 小数：0.92 会把整卷页图压成 84KB（松江一模事故）')
   assert.ok(/cropPageBuffer = null/.test(src), 'parsePageToQuestions 必须接受独立的高清页参数')
   assert.ok(/const hiPage = cropPageBuffer \|\| pageBuffer/.test(src), '高清页缺失时允许退回解析页（降级不阻塞）')
   // 消费点必须全部用 hiPage：整页图上传 / 题目裁片。

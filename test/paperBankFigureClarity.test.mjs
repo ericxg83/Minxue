@@ -77,40 +77,44 @@ test('反向自检：删掉配图 img 标签必须判红（防止锚点静默消
   assert.ok(violations.some(v => v.includes('找不到')), '锚点丢失必须 fail-closed')
 })
 
-/** @returns {string[]} 高清化脚本的违规列表，空数组 = 通过 */
-function enhanceGuardViolations(src) {
+/**
+ * ⛔ 2026-11-10 四次报障的真因：canvas.toBuffer('image/jpeg', quality) 用 0~100 整数，
+ * 生产管线曾写 CROP_RENDER_QUALITY = 0.92 ⇒ 4x 整页图只有 84KB（其他卷 432~558KB），
+ * 从源头把整卷所有裁片压糊。前三轮都在给一张压坏的图做后期增强，全错。
+ * 这里把参数口径锁死，任何回退都必须判红。
+ * @returns {string[]} 违规列表，空数组 = 通过
+ */
+function renderQualityViolations(src) {
   const bad = []
-  // ① 以白为锚压黑墨迹：纯白不动、浅灰内容变深，绝不往白推（不会洗白浅灰印刷）
-  if (!/1\.5 \* arr - 121\.5/.test(src)) bad.push('必须保留白锚压黑公式 1.5*a-121.5')
-  // ② 11-10 振铃事故：任何锐化都会在细线/字母周围造双影，禁止回潮
-  if (/ImageFilter\.UnsharpMask|\.sharpen\(|UnsharpMask\(/.test(src)) bad.push('禁止任何锐化（11-10 振铃/双影事故）')
-  // ③ 11-06 深墨卷白底化阈值会洗白浅灰刻度与顶点字母
-  if (/150\.0 \/ 35\.0|arr - 150\.0|arr - 225\.0/.test(src)) bad.push('禁止回退到白底化阈值方案')
-  // ④ 内容保留与形状判据
-  if (!/keep >= 0\.98/.test(src)) bad.push('必须保留 <220 灰度像素内容保留硬闸')
-  if (!/0\.95 <= gain <= 2\.2/.test(src)) bad.push('必须保留墨量增益范围')
-  if (!/corr > 0\.98/.test(src) || !/np\.corrcoef/.test(src)) bad.push('必须保留连续墨量相关校验')
+  if (!/const CROP_RENDER_QUALITY = 92\b/.test(src)) bad.push('4x 高清页渲染质量必须是整数 92')
+  if (/CROP_RENDER_QUALITY\s*=\s*0\.\d+/.test(src)) bad.push('禁止把 quality 写成 0~1 小数（整卷压糊的根因）')
+  if (!/quality: CROP_RENDER_QUALITY/.test(src)) bad.push('4x 渲染必须显式传 quality')
+  if (!/scale: CROP_RENDER_SCALE/.test(src)) bad.push('裁片必须走 4x 高清页，不得退回 2x')
   return bad
 }
 
-const ENHANCER = 'scripts/ops/enhance_paper_figures.py'
+const SERVICE = 'server/services/paperBankService.js'
+const REHI = 'scripts/ops/rehi_paper_figures.mjs'
 
-test('★ 高清化工具：禁锐化、白锚压黑、内容保留硬闸不得放宽', () => {
-  assert.deepEqual(enhanceGuardViolations(read(ENHANCER)), [])
+test('★ 4x 高清页渲染质量必须是 92（0~100 整数），禁止回退 0.92', () => {
+  assert.deepEqual(renderQualityViolations(read(SERVICE)), [])
 })
 
-test('反向自检：加回锐化 / 改回白底化 / 删内容闸，三种都判红', () => {
-  const src = read(ENHANCER)
-  const sharpened = src.replace(
-    '# ⛔ 这里不许加任何 sharpen：11-09 振铃事故见文件头',
-    '# ⛔ 这里不许加任何 sharpen：11-09 振铃事故见文件头\n    big = big.filter(ImageFilter.UnsharpMask(radius=1.1, percent=70, threshold=2))')
-  assert.notEqual(sharpened, src, '锐化替换点必须命中')
-  assert.ok(enhanceGuardViolations(sharpened).some(v => v.includes('锐化')), '加锐化必须判红')
+test('★ 存量卷重渲染工具必须按同一工序（4x + quality=92 + 按 bbox 重裁）', () => {
+  const s = read(REHI)
+  assert.match(s, /quality: 92/, '存量重渲染必须与生产同一质量口径')
+  assert.match(s, /scale: 4/, '必须是 4x')
+  assert.match(s, /cropQuestionImage/, '必须复用生产裁剪函数')
+  assert.match(s, /analyzeCropFigure/, '必须复用生产图形带判据')
+  assert.ok(!/UnsharpMask|\.sharpen\(|linear\(1\.5/.test(s), '不得做任何像素增强（按其他卷原样重裁）')
+})
 
-  const whitened = src.replace('1.5 * arr - 121.5', 'arr - 150.0')
-  assert.notEqual(whitened, src, '白底化替换点必须命中')
-  assert.ok(enhanceGuardViolations(whitened).length > 0, '改回白底化必须判红')
+test('反向自检：把 92 改回 0.92 或删掉 quality 传参，两种都判红', () => {
+  const src = read(SERVICE)
+  const broken = src.replace('const CROP_RENDER_QUALITY = 92', 'const CROP_RENDER_QUALITY = 0.92')
+  assert.notEqual(broken, src, '替换点必须命中')
+  assert.ok(renderQualityViolations(broken).length > 0, '写回小数质量必须判红')
 
-  const noKeep = src.replace('keep >= 0.98', 'True')
-  assert.ok(enhanceGuardViolations(noKeep).length > 0, '删掉内容保留闸必须判红')
+  const noParam = src.replace('quality: CROP_RENDER_QUALITY,', '')
+  assert.ok(renderQualityViolations(noParam).length > 0, '删掉显式传参必须判红')
 })

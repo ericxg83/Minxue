@@ -54,7 +54,14 @@ const RENDER_SCALE = 2
 // 1819px 打印像素有 2144px 源，够用）。maxEdge 必须同步抬高（默认 2048 会把 4x 压回 2.4x）。
 const CROP_RENDER_SCALE = 4
 const CROP_RENDER_MAX_EDGE = 4096
-const CROP_RENDER_QUALITY = 0.92 // canvas.toBuffer 的 jpeg 质量是 0~1（不是 sharp 的 0~100）
+// ⛔ 2026-11-10 松江一模「全卷配图模糊」根因修复：@napi-rs/canvas 的
+//    canvas.toBuffer('image/jpeg', quality) 用的是 **0~100 整数**，不是 0~1 小数。
+//    实测同一份松江 PDF 4x 渲染：quality=0.92 / 0.85 / 1 三者字节完全相同、均只有 84KB
+//    （被当成最低质量），quality=92 → 579KB；其他三套一模卷 11-03 存量重渲染页图
+//    为 432~558KB，正是 quality=92 的产物。11-03 记的「canvas 质量 0~1」结论是错的。
+//    ⚠ 别改成 0.92：会让新导入的每一份卷子从整页图到所有裁片全部压糊。
+//    sharp 的 .jpeg({quality:92}) 是另一套口径（0~100），两处都必须是整数。
+const CROP_RENDER_QUALITY = 92
 
 // 双模型复核失败页的串行补跑（2026-11-09 松江一模事故沉淀）。
 // 现象：6 页里 5 页被标「未复核」——校对链是**单步** Bailian，一次 429 就把整页判 skipped，
