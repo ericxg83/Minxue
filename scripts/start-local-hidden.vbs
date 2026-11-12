@@ -8,4 +8,7 @@
 ' 2026-10-28: MINXUE_AUTOSTART=1 tells the daemon this is the autostart chain
 ' (no external launcher), so it may spawn immediately on first tick instead of
 ' waiting out the 90s anti-double-spawn cooldown (logon-to-browser was ~12min).
-CreateObject("Wscript.Shell").Run "cmd /c set MINXUE_AUTOSTART=1&& cd /d D:\Minxue_App_V3 && node scripts\dev\keep_local_services.mjs --open", 0, False
+' 2026-11-12: removed --open per user request: do NOT auto-open the browser at logon.
+'             Services (:4000 + :3000) still autostart and stay alive; open the
+'             workbench manually at http://127.0.0.1:3000/workbench when needed.
+CreateObject("Wscript.Shell").Run "cmd /c set MINXUE_AUTOSTART=1&& cd /d D:\Minxue_App_V3 && node scripts\dev\keep_local_services.mjs", 0, False
