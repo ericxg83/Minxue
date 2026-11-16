@@ -472,3 +472,39 @@ test('⛔ 不带文字的双图并排（q26 三图版式）：不触发分栏，
   const meta = await sharp(r.band).metadata()
   assert.ok(meta.width >= 320, `三幅并排图必须整体保留，实宽 ${meta.width}`)
 })
+
+// ── 连通域主块兜底：文字与图形横向交错、竖直切线切不开（2026-11-16 七宝 q24 报障）──
+// q24（库里记为 25）：小问最后一行「…求 CP 的长；若不存在，请说明理由.」压到抛物线下方，
+// x 上与图形交错 ⇒ 任何竖直切线都同时切到字和线 ⇒ 只能按「像素归属」分。
+
+test('★ 文字压到图形下方（无贯穿空白列）⇒ 连通域只留图形，且图形完整', async () => {
+  const extra = [
+    glyphBlocks({ top: 20, chars: 9 }),              // x 20..280
+    glyphBlocks({ top: 62, chars: 9 }),
+    glyphBlocks({ top: 104, chars: 9 }),
+    '<rect x="250" y="60" width="130" height="150" fill="none" stroke="black" stroke-width="4"/>',
+    glyphBlocks({ top: 250, x: 250, chars: 4 }),      // 最后一行伸到图形正下方（x 250..380）
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 300, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const meta = await sharp(r.band).metadata()
+  assert.ok(meta.width <= 210, `配图不得含左侧题干，实宽 ${meta.width}（整幅 400）`)
+  assert.ok(meta.width >= 120, `图形 130px 宽必须完整，实宽 ${meta.width}`)
+  assert.ok(meta.height >= 160, `图形 150px 高必须完整，实高 ${meta.height}`)
+})
+
+test('⛔ 反向自检：两幅等大图形（多主体）⇒ 连通域必须放弃，不许砍成一张', async () => {
+  const extra = [
+    glyphBlocks({ top: 20, chars: 9 }),
+    glyphBlocks({ top: 62, chars: 9 }),
+    '<rect x="240" y="60" width="120" height="150" fill="none" stroke="black" stroke-width="4"/>',
+    '<rect x="240" y="230" width="120" height="150" fill="none" stroke="black" stroke-width="4"/>',
+    glyphBlocks({ top: 200, x: 20, chars: 9 }),       // 文字压在两图之间的高度带
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 420, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const meta = await sharp(r.band).metadata()
+  assert.ok(meta.height >= 300, `两幅图都必须保留（280px 跨度），实高 ${meta.height}`)
+})

@@ -31,10 +31,15 @@ test('解析页 2x 只喂 OCR，裁片/整页图必须走 4x 高清页', () => {
   // ⚠️ 2026-11-06 改为「一页只裁一次」：小问配图共享不再重复 cropQuestionImage，
   //   而是复用同一次高清裁片的像素判图 —— 所以只有 1 处调用，
   //   但**绝不允许**出现从 2x 解析页裁剪的调用。
-  assert.equal(
-    (src.match(/cropQuestionImage\(hiPage, /g) || []).length,
-    1,
-    '题目裁片必须从高清页裁，且一页只裁一次'
+  // 2026-11-16：新增「跨行图形并集补裁」——图纵向跨过多个小问时单行裁片会切断图形
+  // （七宝 q24 缺 M/C、q23 缺 F），必须按题组并集再裁一次。两处都走 hiPage。
+  assert.ok(
+    (src.match(/cropQuestionImage\(hiPage, /g) || []).length >= 1,
+    '题目裁片必须从高清页裁'
+  )
+  assert.ok(
+    /cropQuestionImage\(hiPage, union\)/.test(src),
+    '跨行补裁也必须从同一张高清页裁（不得另开 2x 通道）'
   )
   assert.equal(
     (src.match(/await cropQuestionImage\(pageBuffer/g) || []).length,
@@ -42,7 +47,7 @@ test('解析页 2x 只喂 OCR，裁片/整页图必须走 4x 高清页', () => {
     '绝不允许从 2x 解析页裁片（函数定义 cropQuestionImage(pageBuffer, box) 不算调用）'
   )
   assert.ok(/const fig = await analyzeCropFigure\(cropped\)/.test(src), '判图必须复用同一次高清裁片')
-  assert.ok(/if \(fig\.band\) figBands\.set\(i, fig\.band\)/.test(src), '图形带必须留底给小问共享复用')
+  assert.ok(/figBands\.set\(i, fig\.band\)/.test(src), '图形带必须留底给小问共享复用')
   assert.ok(/uploadImage\(hiPage, `paper-p\$\{pageNumber\}/.test(src), 'page_image_url 必须存高清页（供后续重裁）')
   assert.ok(/scale: CROP_RENDER_SCALE/.test(src), 'parsePaperResource 必须真的渲染 4x 页')
 })

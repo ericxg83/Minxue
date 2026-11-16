@@ -34,7 +34,7 @@ import {
   PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
 } from '../config/ai.js'
 import { measurePageQuestionBoxes } from './questionBoxMeasure.js'
-import { planSubrowFigureAssignments, analyzeCropFigure } from './paperFigureAssign.js'
+import { planSubrowFigureAssignments, analyzeCropFigure, inspectFigureTextRows } from './paperFigureAssign.js'
 import { stripPageRulingLines } from './pageRulingClean.js'
 import { extractClipFigure } from './clipFigureClean.js'
 import { detectClipSource, mergeClipSources } from './clipSourceDetect.js'
@@ -640,6 +640,8 @@ export async function cropQuestionImage(pageBuffer, box) {
 export async function assignPageFigures({ rows, hiPage, pageNumber, measured, logger = console }) {
   const figBands = new Map()   // 行下标 → 该行自己的干净图形带
   const figureUploads = new Map()  // 内容 md5 → 已上传 URL（同页同一份字节只传一次）
+  const cropSizes = new Map()  // 行下标 → 原裁片尺寸（判「图被裁断」用）
+  const bandSizes = new Map()  // 行下标 → 图形带尺寸
   for (let i = 0; i < rows.length; i++) {
     const box = measured?.boxes?.[String(i)]
     if (!box) continue
@@ -654,9 +656,15 @@ export async function assignPageFigures({ rows, hiPage, pageNumber, measured, lo
     //   ① 有图且能裁干净 → 用干净图形带；
     //   ② 有图但裁不干净（多图版式/图形与正文交错）→ 整张裁片兜底（宁可带文字，不可丢图）；
     //   ③ **没有图 → 不挂配图**（image_url 留空），页面只显示「看原卷」。
+    const cm = await sharp(cropped).metadata()
+    cropSizes.set(i, { width: cm.width, height: cm.height })
     const fig = await analyzeCropFigure(cropped)
     if (!fig.hasFigure) continue
-    if (fig.band) figBands.set(i, fig.band)
+    if (fig.band) {
+      figBands.set(i, fig.band)
+      const bm = await sharp(fig.band).metadata()
+      bandSizes.set(i, { width: bm.width, height: bm.height })
+    }
     const imgBuf = fig.band || cropped
     const kind = fig.band ? 'fig' : 'crop'
     try {
@@ -671,6 +679,72 @@ export async function assignPageFigures({ rows, hiPage, pageNumber, measured, lo
     } catch (e) {
       logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题配图上传失败: ${e.message}`)
     }
+  }
+
+  // ── 跨行图形的并集补裁（2026-11-16 报障：q24 配图只有上半截，M/C 和连线被切掉）──
+  // 切段以「题号行上沿」为界，图形纵向跨过多个小问时（七宝 q24：图从题干行一直到 (3) 行），
+  // 单行裁片只能拿到图形的一段 ⇒ 配图残缺。判据是「**某行的图形带用满了裁片高度**」——
+  // 这是「图还在往下长、被裁片切掉」的直接证据。此时用「同题号所有行的并集」重裁一次，
+  // 且要求结果干净（产物无成行文字）才采用；多图版式（各小问各一幅）会被连通域法
+  // 判成「多主体」而放弃，自动保持原逻辑。
+  try {
+    const groups = new Map()
+    for (let i = 0; i < rows.length; i++) {
+      const qn = String(rows[i].question_no ?? '')
+      if (!qn) continue
+      if (!groups.has(qn)) groups.set(qn, [])
+      groups.get(qn).push(i)
+    }
+    for (const idxs of groups.values()) {
+      if (idxs.length < 2) continue
+      const truncated = idxs.some(i => {
+        const c = cropSizes.get(i)
+        const b = bandSizes.get(i)
+        return c && b && c.height > 0 && b.height >= c.height * 0.88
+      })
+      if (!truncated) continue
+      const boxes = idxs.map(i => rows[i].bbox).filter(Boolean)
+      if (!boxes.length) continue
+      // 上/下扩展不要越过相邻题组的间隙中线（否则会裁进上一题的图注/文字）。
+      // 图被裁断的量可能超过 22 单位（q23 实测图从上一行底部就开始），所以取间隙一半、上限 60。
+      const gTop = Math.min(...boxes.map(b => b.y))
+      const gBottom = Math.max(...boxes.map(b => b.y + b.height))
+      let aboveGap = 120
+      let belowGap = 120
+      for (let i = 0; i < rows.length; i++) {
+        if (idxs.includes(i)) continue
+        const b = rows[i].bbox
+        if (!b) continue
+        if (b.y + b.height <= gTop) aboveGap = Math.min(aboveGap, gTop - (b.y + b.height))
+        if (b.y >= gBottom) belowGap = Math.min(belowGap, b.y - gBottom)
+      }
+      const padTop = Math.min(60, Math.max(22, Math.floor(aboveGap / 2)))
+      const padBottom = Math.min(60, Math.max(22, Math.floor(belowGap / 2)))
+      const yTop = Math.max(0, gTop - padTop)
+      const yBottom = Math.min(1000, gBottom + padBottom)
+      const xLeft = Math.min(...boxes.map(b => b.x))
+      const xRight = Math.max(...boxes.map(b => b.x + b.width))
+      const union = { x: xLeft, y: yTop, width: xRight - xLeft, height: yBottom - yTop }
+      const crop2 = await cropQuestionImage(hiPage, union)
+      if (!crop2) continue
+      const fig2 = await analyzeCropFigure(crop2)
+      if (!fig2.band) continue
+      if ((await inspectFigureTextRows(fig2.band)).textRowCount >= 1) continue
+      const m2 = await sharp(fig2.band).metadata()
+      for (const i of idxs) {
+        figBands.set(i, fig2.band)
+        bandSizes.set(i, { width: m2.width, height: m2.height })
+        try {
+          rows[i].image_url = await uploadFigureOnce(
+            fig2.band, `paper-p${pageNumber}-q${rows[i].question_no}-u${i}.jpg`, figureUploads)
+        } catch (e) {
+          logger.warn?.(`[paperBank] 跨行补裁上传失败 q${rows[i].question_no}: ${e.message}`)
+        }
+      }
+      logger.info?.(`[paperBank] 第 ${pageNumber} 页 q${rows[idxs[0]].question_no} 跨行图形并集补裁 -> ${m2.width}x${m2.height}`)
+    }
+  } catch (e) {
+    logger.warn?.(`[paperBank] 跨行图形并集补裁失败（不影响主流程）: ${e.message}`)
   }
 
   // ── 小问组配图共享（2026-11-02 建；2026-11-06 按嘉定一模 22 事故重写判据）──
