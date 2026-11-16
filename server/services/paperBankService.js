@@ -149,7 +149,14 @@ export function normalizeQuestionNo(raw) {
 export function normalizeOptions(options) {
   if (!Array.isArray(options)) return []
   return options
-    .map(o => String(o == null ? '' : o).replace(/^\s*[（(]?[A-Da-d][）)]?\s*[.、．:：]?\s*/, '').trim())
+    // ⛔ 2026-11-16 徐汇 q3/q5 事故：旧正则 `^[（(]?[A-Da-d][）)]?[.、．:：]?` 把
+    //    **以 a/b/c/d 开头的数学式子**当成选项标号删掉了 —— `a>0` 变 `>0`、
+    //    `a⃗ // c⃗` 变 `⃗ // c⃗`，选项语义直接废掉。
+    //    现在只认「明确是标号」的两种写法：带括号的 (A)/（A），或字母 + 分隔符 A. / A、 / A:。
+    .map(o => String(o == null ? '' : o)
+      .replace(/^\s*[（(]\s*[A-Da-d]\s*[）)]\s*[.、．:：]?\s*/, '')
+      .replace(/^\s*[A-Da-d]\s*[.、．:：]\s*/, '')
+      .trim())
     .filter(Boolean)
 }
 
