@@ -246,6 +246,41 @@ export function assignGlobalQuestionNumbers(rows) {
   return { filled, printedMax: printed.size ? Math.max(...printed) : 0, printedCount: printed.size }
 }
 
+/**
+ * 把 OCR 待核对清单的题号对齐到「真正落库」的题号（2026-11-16 闵行卷事故）。
+ *
+ * ⛔ crossCheckPageOcr 跑在 assignGlobalQuestionNumbers / dedupePaperRows / append 平移**之前**，
+ *    清单里记的是复核那一刻的题号。若这中间补了号（本卷 q6 是「题面上半被截断」的占位行，
+ *    把后面所有题整体顶了 1 号），清单就会指向另一道题：
+ *    老师点「待核对」看到 q6，卷面 q6 却是 q7 的内容 —— 索引全错，且旧锚点在正确行上找不到。
+ * 判据：复核条目携带稳定的 `__key`（页序:行序），落库完成后按最终题号重写；
+ *      该行被去重丢掉 ⇒ 条目一并丢弃（不能让老师去核一道根本不存在的题）。
+ */
+export function remapOcrReviewToWrittenRows(reviewList, rows, writeResult, append) {
+  if (!Array.isArray(reviewList) || !reviewList.length) return []
+  const byKey = new Map((Array.isArray(rows) ? rows : []).map(r => [r?.__key, r]))
+  let finalByKey
+  if (append) {
+    finalByKey = new Map((writeResult?.preparedKeys || []).map(x => [x.key, x]))
+  } else {
+    const kept = new Set(writeResult?.keptKeys || [])
+    finalByKey = new Map()
+    for (const key of kept) {
+      const r = byKey.get(key)
+      if (r) finalByKey.set(key, r)
+    }
+  }
+  return reviewList.filter((it) => {
+    if (!it || !it.__rowKey) return true // 老数据/人工条目没有 __key，保持原样
+    const final = finalByKey.get(it.__rowKey)
+    if (!final) return false
+    it.page_no = final.page_no ?? it.page_no
+    it.question_no = final.question_no ?? it.question_no
+    it.sub_no = final.sub_no ?? ''
+    return true
+  })
+}
+
 /** 文本相似度（字符二元组 Jaccard），用于判断「两行是不是同一道题被重复识别」。 */
 export function textSimilarity(a, b) {
   const norm = (s) => String(s || '').replace(/[\s\$\\{}^_]/g, '').replace(/[（]/g, '(').replace(/[）]/g, ')')
@@ -366,7 +401,8 @@ export async function replacePaperQuestions(resourceId, rows) {
       )
     }
   })
-  return { duplicated, renumbered, dropped, renumberedRows }
+  // ⛔ 给待核对清单对齐题号用（remapOcrReviewToWrittenRows）：去重后真正落库的行 id 清单。
+  return { duplicated, renumbered, dropped, renumberedRows, keptKeys: deduped.map(r => r.__key) }
 }
 
 // ── 单页 → 题目行 ──
@@ -468,7 +504,7 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
         reviewOnArbiterFail.push({
           page_no: pageNumber, question_no: row.question_no, sub_no: row.sub_no,
           field: d.field, ocr_text: d.ocr_text, suggested_text: d.printed_text,
-          arbiter_text: null,
+          arbiter_text: null, __rowKey: row.__key || null,
           reason: `终裁模型调用失败（${arbError}），未经独立抄录确认；${d.reason}`,
         })
       }
@@ -508,7 +544,7 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
         review.push({
           page_no: pageNumber, question_no: row.question_no, sub_no: row.sub_no,
           field: d.field, ocr_text: d.ocr_text, suggested_text: d.printed_text,
-          arbiter_text: t?.printed_text ?? null, reason: d.reason,
+          arbiter_text: t?.printed_text ?? null, __rowKey: row.__key || null, reason: d.reason,
         })
       }
     }
@@ -1086,6 +1122,10 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     dropped = [],
     renumberedRows = [],
   } = writeResult
+  // ⛔ 题号唯一化/去重/追加平移都发生在复核之后：清单里还是复核时的旧号。
+  //    不重写的话老师点开 q6 看到的其实是 q7 的内容（11-16 闵行卷实测整体错位 1 号）。
+  ocrReview.splice(0, ocrReview.length,
+    ...remapOcrReviewToWrittenRows(ocrReview, rows, writeResult, append))
   if (duplicated > 0) {
     // 明细必须写出来：旧版只说「N 行重复题号（多为答题卡页重复识别）」，
     // 恰恰是这句含糊的话把「真题目被吞掉」掩盖了 6 天。
@@ -1576,7 +1616,12 @@ export async function appendPaperQuestions(resourceId, rows) {
   })
   // ⛔ 返回真实插入行数：题号接续出错时这里会小于 prepared.length，
   //    前端「已入库 N 道题」按真实数报，不会把静默丢弃说成成功。
-  return { inserted, baseNo, lastNo: cursor }
+  // ⛔ 追加批次的题号会被整体平移；prepared 是浅拷贝，原 rows 没被改，
+  //    所以待核对清单只能靠 __key → 这里的新题号映射来对齐。
+  return {
+    inserted, baseNo, lastNo: cursor,
+    preparedKeys: prepared.map(r => ({ key: r.__key, page_no: r.page_no, question_no: r.question_no, sub_no: r.sub_no })),
+  }
 }
 
 /** 删单题（截图截错了 / OCR 多拆出一行时用）。题目行删除不影响卷和其它题。 */

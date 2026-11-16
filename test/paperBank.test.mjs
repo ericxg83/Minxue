@@ -454,6 +454,7 @@ test('★ 落库必须先按题号+小问去重（答题卡页重复识别会撞
   assert.match(s, /dedupePaperRows[\s\S]{0,1200}seen\.has\(key\)|seen\.get\(key\)/, '去重判据在 dedupePaperRows 内')
   assert.ok(/String\(r\.question_no \?\? ''\)/.test(s), '去重 key 必须字符串归一（question_no 可能 number 也可能 string）')
   // 重复行数与改号明细都必须返回给调用方（写 parseWarning 留痕，不静默吞）
-  assert.match(s, /return \{ duplicated, renumbered, dropped, renumberedRows \}/, '重复/改号明细必须回传')
+  // 2026-11-16：keptKeys 供待核对清单对齐最终题号（复核早于题号唯一化）
+  assert.match(s, /return \{ duplicated, renumbered, dropped, renumberedRows, keptKeys: deduped\.map\(r => r\.__key\) \}/, '重复/改号明细与落库行 key 必须回传')
   assert.match(s, /if \(duplicated > 0\)[\s\S]{0,300}appendParseWarning/, '重复行必须写进 parseWarnings')
 })

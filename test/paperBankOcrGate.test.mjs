@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { remapOcrReviewToWrittenRows } from '../server/services/paperBankService.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')
@@ -79,6 +80,13 @@ function checkService(src) {
   if (!/arbiterError: arbError/.test(s)) bad.push('终裁失败必须降级为待人工核对（skipped:false），不能整页判未复核')
   if (!/jsonb_build_object\('ocrReview', \$2::jsonb, 'ocrReviewSummary', \$3::jsonb\)/.test(s)) bad.push('复核结果未落到 resources.metadata')
   if (!/ocrReview: cross\.review/.test(s)) bad.push('单页复核结果未回传 parsePaperResource')
+  // 2026-11-16 闵行卷：复核早于题号唯一化，清单必须按落库题号重写，否则老师点开的是另一道题
+  if (!/remapOcrReviewToWrittenRows\(ocrReview, rows, writeResult, append\)/.test(s)) {
+    bad.push('落库后必须把待核对清单题号对齐到最终题号')
+  }
+  if ((s.match(/__rowKey: row\.__key/g) || []).length < 2) {
+    bad.push('复核条目必须携带稳定 __key（终裁失败 + 正常两条路径）')
+  }
   // ⛔ 闸是质量敏感路径：两条链必须 noBackup: true。
   //   否则供应商配额打爆时会静默轮换到备份弱视觉模型，弱模型做逐字挑错会自己编差异，
   //   比不校对更坏（2026-09-09 练习册答案页就是被静默降级搞错的）。
@@ -117,6 +125,37 @@ test('★ 前后端字段名对齐且页面有待核对入口', () => {
   assert.deepEqual(checkContract(read(ROUTES), read(VIEW)), [], ROUTES + ' / ' + VIEW)
 })
 
+test('★ 待核对清单题号必须跟落库题号走（补号整体错位 / 被去重行不留给老师）', () => {
+  // 模拟 11-16 闵行卷：复核时 q6 是 AB=√3，补号后变成 q7；q9 是重复行被丢
+  const rows = [
+    { __key: '2:0', page_no: 2, question_no: 6, sub_no: '' },   // 占位行（题面上半被截断）
+    { __key: '2:1', page_no: 2, question_no: 7, sub_no: '' },   // 复核时叫 6，补号后叫 7
+    { __key: '2:2', page_no: 2, question_no: 9, sub_no: '' },   // 被去重丢掉
+  ]
+  const review = [
+    { __rowKey: '2:1', page_no: 2, question_no: 6, sub_no: '', ocr_text: 'AB=√3' },
+    { __rowKey: '2:2', page_no: 2, question_no: 9, sub_no: '', ocr_text: '重复行' },
+    { page_no: 1, question_no: 2, sub_no: '', ocr_text: '老条目无 key' },
+  ]
+  const out = remapOcrReviewToWrittenRows(review, rows, { keptKeys: ['2:0', '2:1'] }, false)
+  assert.equal(out.length, 2, '被去重丢弃的行不能留在待核对清单里')
+  assert.equal(out[0].question_no, 7)
+  assert.equal(out[0].__rowKey, '2:1')
+  assert.equal(out[1].question_no, 2, '无 __key 的历史条目原样保留')
+})
+
+test('★ 追加批次按 preparedKeys 对齐平移后的题号，且不改原 rows', () => {
+  const rows = [{ __key: '7:0', page_no: 7, question_no: 3, sub_no: '' }]
+  const review = [{ __rowKey: '7:0', page_no: 7, question_no: 3, sub_no: '', ocr_text: 'EF:DF=5:8' }]
+  const writeResult = {
+    preparedKeys: [{ key: '7:0', page_no: 7, question_no: 28, sub_no: '' }],
+  }
+  const out = remapOcrReviewToWrittenRows(review, rows, writeResult, true)
+  assert.equal(out.length, 1)
+  assert.equal(out[0].question_no, 28, '追加批次的题号必须平移到最终号')
+  assert.equal(rows[0].question_no, 3, '不能反向改动原 rows')
+})
+
 test('反向自检：写坏的版本喂给同一检查函数必须判红', () => {
   const ai = read(AI)
   const svc = read(SERVICE)
@@ -149,6 +188,8 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
     '允许闸静默降级到弱模型必须判红')
   assert.ok(checkService(svc.replace('skipped: false, arbiterError: arbError', 'skipped: true')).length > 0,
     '终裁失败退回整页未复核（丢掉差异清单）必须判红')
+  assert.ok(checkService(svc.replace('...remapOcrReviewToWrittenRows(ocrReview, rows, writeResult, append)', '')).length > 0,
+    '删掉落库后题号重写必须判红')
 
   // 2026-11-07：树改版后页面里同时存在旧的 p.ocr_review（弹窗函数内）和
   // activePaper.ocr_review（详情面板），两处都写坏才能真正验证检查函数敏感。
