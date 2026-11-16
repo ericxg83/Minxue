@@ -961,9 +961,12 @@ export async function assignPageFigures({ rows, hiPage, pageNumber, measured, lo
  * 切段失败 → 题目照存，只是没有裁片图（image_url 为空）。
  */
 export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, pageNumber, logger = console, pdfPageText = null }) {
-  const imageDataURL = 'data:image/jpeg;base64,' + pageBuffer.toString('base64')
-  // 裁片/整页图一律走高清页（4x）；没给（拍照上传/高清渲染失败）就退回解析页。
+  // 裁片/整页图/OCR **统一**走高清页（4x）；没给（拍照上传/高清渲染失败）就退回解析页。
+  // ⛔ 2026-11-16 闵行/青浦事故推翻了「OCR 用 2x 就够」的旧假设：2x 整页图上模型系统性读错
+  //    （B→8、3/4→3/5、表格 10⁴→10²、△NGF→△ABC、Q(-3,1)→Q(-3,4)），一页 25 题里错了 8 处。
+  //    视觉模型内部会缩放，但**输入分辨率不够时缩放救不回来**；4x 的 token 成本换「读对」是值得的。
   const hiPage = cropPageBuffer || pageBuffer
+  const imageDataURL = 'data:image/jpeg;base64,' + hiPage.toString('base64')
 
   // 整页图先存 OSS（2026-11-16 青浦 p3 事故：原来是 OCR 成功后才上传，空页连页图都没有，
   // 事后既无法「重解析该页」也无法人工核对）。失败只 warn。
