@@ -319,11 +319,157 @@ export async function analyzeCropFigure(cropBuffer) {
   if (!base.band) return base
   // ── 产物级自检（2026-11-16 第三次报障）──
   // 「抠出来的图里还有没有成行的字」比任何区域判据都直接：直接量最终产物。
-  // 含字 ⇒ 走左右分栏重试（题干在左、图形在右的并排版式）；仍切不开就返回原结果。
+  // 含字 ⇒ 逐级重试：① 左右分栏（题干在左、图在右）② 连通域主块（文字与图交错、切不开）。
   const dirty = await measureTextRowsInBuffer(base.band)
   if (dirty.textRowCount < 1) return base
   const split = await trySplitColumns(cropBuffer)
-  return split || base
+  if (split) return split
+  const comp = await extractFigureByComponents(cropBuffer)
+  return comp || base
+}
+
+/**
+ * 连通域主块法（2026-11-16 第三次报障的第二级兜底）。
+ *
+ * ── 什么时候才用得上 ──
+ * 几何分栏要求「文字与图之间有一列贯穿空白」。真卷存在**文字和图在横向重叠**的版式
+ * （七宝文来 q24：最后一行小问「…求 CP 的长；若不存在，请说明理由.」右端压在抛物线
+ * 下方，x 上与图形交错），任何竖直切线都会同时切到字和线 ⇒ 只能按「像素归属」分。
+ *
+ * ── 为什么可靠 ──
+ * 印刷卷里几何图形是一整块连通墨迹（抛物线穿过坐标轴、对角线连边框），
+ * 而每个汉字是独立小块（实测 40×40、面积 300~700）。取面积最大的连通块作主块，
+ * 只有「距主块 ≤30px」的块才保留（顶点字母离图 8~20px，正文行离图远得多）。
+ * 保留块以外**一律涂白** ⇒ 与图形交错的文字也会消失，线条位置零改动
+ * （与截图链路 clipFigureClean 同一套连通域实现，2026-11-07 已验收）。
+ *
+ * ⛔ 三条纪律：
+ * 1. 不做生成式重绘；只涂白非图形像素。
+ * 2. 第二大块 ≥ 主块 30% ⇒ 判「多主体/多图版式」直接放弃（返回 null），
+ *    交给调用方保留原 band —— 杨浦 25(2) 的五幅图不能被这个方法砍成一张。
+ * 3. 保留块的包围盒过小（< 裁片 6% 面积）⇒ 放弃，宁可不给图。
+ */
+const COMP_MIN_AREA = 60
+const COMP_NEAR_PAD = 30
+const COMP_MAIN_MIN_AREA = 600
+
+async function extractFigureByComponents(cropBuffer) {
+  try {
+    const { data, info } = await sharp(cropBuffer).greyscale().raw().toBuffer({ resolveWithObject: true })
+    const width = Number(info.width) || 0
+    const height = Number(info.height) || 0
+    if (width < 80 || height < 80) return null
+    const { labels, comps } = labelStrokes(data, width, height, isInk)
+    if (!comps.length) return null
+    let main = comps[0]
+    let second = 0
+    for (let i = 1; i < comps.length; i++) {
+      const c = comps[i]
+      if (c.area > main.area) { second = main.area; main = c }
+      else if (c.area > second) second = c.area
+    }
+    if (main.area < COMP_MAIN_MIN_AREA) return null
+    if (second >= main.area * 0.3) return null
+
+    const nearMain = (c) => {
+      const x0 = Math.max(0, c.x0 - COMP_NEAR_PAD)
+      const x1 = Math.min(width - 1, c.x1 + COMP_NEAR_PAD)
+      const y0 = Math.max(0, c.y0 - COMP_NEAR_PAD)
+      const y1 = Math.min(height - 1, c.y1 + COMP_NEAR_PAD)
+      for (let y = y0; y <= y1; y++) {
+        const off = y * width
+        for (let x = x0; x <= x1; x++) if (labels[off + x] === main.id) return true
+      }
+      return false
+    }
+    const isGlyph = (c) => {
+      const w = c.x1 - c.x0 + 1
+      const h = c.y1 - c.y0 + 1
+      const ratio = w / h
+      return w >= GLYPH_W_MIN && w <= GLYPH_W_MAX && h >= GLYPH_H_MIN && h <= GLYPH_H_MAX &&
+        ratio >= GLYPH_RATIO_MIN && ratio <= GLYPH_RATIO_MAX && c.area / (w * h) >= GLYPH_INK_FRAC_MIN
+    }
+    const keep = new Set()
+    for (const c of comps) {
+      if (c.area < COMP_MIN_AREA) continue
+      if (c.id !== main.id && !nearMain(c)) continue
+      keep.add(c.id)
+    }
+    // 剔除「正文行的最后几个字」：它们离图足够近（≤30px）会被保留，
+    // 但**同一行带里还有被剔除的字块** ⇒ 说明它是正文的尾巴，不是顶点字母。
+    // 60px 是标定值：q24「…说明理由.」的「由」离图 10px、离「理」45px（剔除）；
+    // 徐汇 q16 图顶的「O」离文字行 90px（保留）。⛔ 放宽到 100px 会把顶点字母误删。
+    const rejectedGlyphs = comps.filter(c => c.area >= COMP_MIN_AREA && !keep.has(c.id) && isGlyph(c))
+    if (rejectedGlyphs.length) {
+      for (const c of comps) {
+        if (!keep.has(c.id) || c.id === main.id) continue
+        if (!isGlyph(c)) continue
+        const cy = (c.y0 + c.y1) / 2
+        const hasNeighbor = rejectedGlyphs.some(r => {
+          if (Math.abs((r.y0 + r.y1) / 2 - cy) > 14) return false
+          const dx = r.x0 > c.x1 ? r.x0 - c.x1 : (c.x0 > r.x1 ? c.x0 - r.x1 : 0)
+          return dx > 0 && dx <= 60
+        })
+        if (hasNeighbor) keep.delete(c.id)
+      }
+    }
+    let x0 = width
+    let y0 = height
+    let x1 = -1
+    let y1 = -1
+    for (const c of comps) {
+      if (!keep.has(c.id)) continue
+      if (c.x0 < x0) x0 = c.x0
+      if (c.y0 < y0) y0 = c.y0
+      if (c.x1 > x1) x1 = c.x1
+      if (c.y1 > y1) y1 = c.y1
+    }
+    if (x1 < x0 || y1 < y0) return null
+    const boxW = x1 - x0 + 1
+    const boxH = y1 - y0 + 1
+    if (boxW * boxH < width * height * 0.06) return null
+
+    // 白底化：只保留 keep 块（1px 膨胀保住抗锯齿边缘），其余纯白
+    const core = new Uint8Array(width * height)
+    for (let p = 0; p < width * height; p++) if (keep.has(labels[p])) core[p] = 1
+    const mask = new Uint8Array(core)
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (!core[y * width + x]) continue
+        for (let dy = -1; dy <= 1; dy++) {
+          const ny = y + dy
+          if (ny < 0 || ny >= height) continue
+          for (let dx = -1; dx <= 1; dx++) {
+            const nx = x + dx
+            if (nx < 0 || nx >= width) continue
+            mask[ny * width + nx] = 1
+          }
+        }
+      }
+    }
+    const rgb = Buffer.alloc(width * height * 3, 255)
+    for (let p = 0; p < width * height; p++) {
+      if (!mask[p]) continue
+      const v = data[p]
+      rgb[p * 3] = v
+      rgb[p * 3 + 1] = v
+      rgb[p * 3 + 2] = v
+    }
+    const pad = Math.max(6, Math.round(Math.min(boxW, boxH) * 0.03))
+    const left = Math.max(0, x0 - pad)
+    const top = Math.max(0, y0 - pad)
+    const w2 = Math.min(width, x1 + pad + 1) - left
+    const h2 = Math.min(height, y1 + pad + 1) - top
+    const band = await sharp(rgb, { raw: { width, height, channels: 3 } })
+      .extract({ left, top, width: w2, height: h2 })
+      .withMetadata({ icc: 'srgb' })
+      .jpeg({ quality: 92 })
+      .toBuffer()
+    return { band, hasFigure: true, reason: 'ok' }
+  } catch (e) {
+    console.warn('[paperFigureAssign] 连通域配图提取失败:', e.message)
+    return null
+  }
 }
 
 /**
