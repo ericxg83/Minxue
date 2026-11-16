@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makePdfWitness, normalizeForPdfMatch, pickDiffContext } from '../server/services/pdfWitness.js'
+import {
+  makePdfWitness, normalizeForPdfMatch, pickDiffContext, stripSourceLabels, isSourceLabelText,
+} from '../server/services/pdfWitness.js'
 
 // 以下三页文本层取自真实源文件：
 // 2026-2027 学年上海市闵行区七宝文来学校九年级（上）学情检测数学试卷（9月份）
@@ -60,4 +62,32 @@ test('反向自检：把归一化放水成「抹平 ≤」必须被抓到', () =
   // 如果谁把 ≤ 也归一成 <，下面这个「错误建议」就会被误判成 db，真相反过来
   assert.equal(flat.includes(normalizeForPdfMatch('当-3≤x<0时，y>0')), false,
     '≤ 归一化后不得与 < 相同，否则误报会被当成正确')
+})
+
+// ── 来源标签：2026-11-09 嘉定卷事故（标签被当成正文写进题干）────────────────
+const LABEL = '（2026·上海嘉定·一模）'
+
+test('★ 来源标签必须能从两个方向识别出来，绝不能当差异', () => {
+  assert.equal(stripSourceLabels(`3. 在线段AB上截取AP=AD.${LABEL}`), '3. 在线段AB上截取AP=AD.', '整串标签要被剥掉')
+  assert.equal(isSourceLabelText('2026·上海嘉定·一模'), true)
+  assert.equal(isSourceLabelText(LABEL), true)
+  assert.equal(isSourceLabelText('2026·'), true, '被词元切碎的年份片段也是标签')
+  assert.equal(isSourceLabelText('一模'), true)
+  assert.equal(isSourceLabelText('在线段AB'), false, '正文不许被误判成标签')
+  assert.equal(isSourceLabelText('PB'), false)
+})
+
+test('★ 混合件（文本层只有标签）：证人必须造不出来，否则会拿标签改正文', () => {
+  // 嘉定一模真实文本层：整页只有题号和来源标签，正文是图片
+  const partial = `一、选择题1. ${LABEL}2. ${LABEL}3. ${LABEL}`
+  assert.equal(makePdfWitness(partial, 600), null, '覆盖率不足 ⇒ 不许当证人')
+  assert.equal(makePdfWitness(partial, 0), null, '标签剥完为空 ⇒ 同样不许当证人')
+})
+
+test('反向自检：去掉覆盖面闸，标签页就会被当成真值', () => {
+  const partial = `1. ${LABEL}2. ${LABEL}`
+  const withoutGate = makePdfWitness(partial)
+  assert.equal(withoutGate, null, '剥掉标签后为空，仍然必须是 null')
+  // 如果谁把标签剥除去掉，下面这个判断会变成 'suggest' ⇒ 把正文改成标签
+  assert.notEqual(normalizeForPdfMatch(partial).includes('2026'), true, '归一化后不得残留标签')
 })

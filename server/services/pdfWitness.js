@@ -26,8 +26,34 @@ const PUNCT_MAP = {
 const SUP = '⁰¹²³⁴⁵⁶⁷⁸⁹'
 const SUB = '₀₁₂₃₄₅₆₇₈₉'
 
+/**
+ * 卷面上的「来源标签」：`（2026·上海嘉定·一模）`。
+ * 这类标签**印在卷面上**，但入库时被清洗掉了 ⇒ 逐字比对必然把它当成「差异」。
+ * 2026-11-09 嘉定卷就因此被自动改坏：dbPart「在线段AB」被替换成「2026·」、
+ * 「PB」被替换成「一模」，q20 题干里插进了「（2026·上海嘉定·一模）」。
+ * ⛔ 两侧都必须先剔除标签，别指望模型「看不见」它。
+ */
+const SOURCE_LABEL_RE = /[（(]?\s*(?:19|20)\d{2}\s*[·．.\-—]\s*[\u4e00-\u9fa5]{2,10}\s*[·．.\-—]\s*[\u4e00-\u9fa5]{1,6}\s*[）)]?/g
+
+export function stripSourceLabels(s) {
+  return String(s ?? '').replace(SOURCE_LABEL_RE, '')
+}
+
+/** 候选值本身就是来源标签（含被词元切碎的片段）⇒ 不是卷面正文，不许当差异。 */
+export function isSourceLabelText(s) {
+  const raw = String(s ?? '').replace(/\s+/g, '')
+  if (!raw) return false
+  const stripped = stripSourceLabels(raw).replace(/\s+/g, '')
+  if (stripped !== raw) return stripped.length === 0 || stripped.length <= 1
+  // 被 diffTokens 切碎的残片：'2026·' / '一模' / '海嘉定' 这类不可能独立出现在题面里的串
+  if (/^(?:19|20)\d{2}[·．.\-—]?$/.test(raw)) return true
+  if (/^[·．.\-—]?(?:一模|二模|三模|中考|高考|真题|模拟)$/.test(raw)) return true
+  if (/^[\u4e00-\u9fa5]{1,5}$/.test(raw) && /(一模|二模|三模)/.test(raw)) return true
+  return false
+}
+
 export function normalizeForPdfMatch(s) {
-  return String(s ?? '')
+  return stripSourceLabels(s)
     .replace(/[\s\u00a0\u3000]+/g, '')
     .replace(/[′’‘＇`´]/g, "'")
     .replace(/[，。：；（）｡？、！【】～]/g, ch => PUNCT_MAP[ch] || ch)
@@ -50,15 +76,22 @@ export function pickDiffContext(text, needle) {
 
 /**
  * 用一页 PDF 文本层造一个证人函数。
+ * @param {string} pageText   该页文本层
+ * @param {number} expectedChars 该页库内题目正文总字数（用于判断文本层是否只覆盖了标签）
+ *   ⛔ 混合件（松江/嘉定一模：文本层只有题号与来源标签，正文是图片）必须返回 null。
+ *      否则证人会拿标签去「证明」正文，把好文本改坏 —— 2026-11-09 嘉定卷事故。
  * @returns {null | (dbText:string, sugText:string, ctx?:{before:string,after:string}) => 'db'|'suggest'|'both'|'neither'}
  *   'db'      ⇒ 文本层只支持库里现值 ⇒ 差异是误报，应丢弃
  *   'suggest' ⇒ 文本层只支持候选值   ⇒ 可直接改字，不必再问模型
  *   'both'    ⇒ 两种写法卷面上都有 ⇒ 裁决不了（典型：ax vs x 这种子串差异），交模型
  *   'neither' ⇒ 都对不上（多为裁片跨行/公式被拆碎）⇒ 交模型或人工
  */
-export function makePdfWitness(pageText) {
+export function makePdfWitness(pageText, expectedChars = 0) {
   const flat = normalizeForPdfMatch(pageText)
   if (!flat) return null
+  // 剥掉标签后只剩「一、选择题1.2.3.」这种页眉 ⇒ 不是正文页，不许作证。
+  if (flat.length < 20) return null
+  if (expectedChars > 0 && flat.length < expectedChars * 0.5) return null
   return function witness(dbText, sugText, ctx) {
     const db = normalizeForPdfMatch(dbText)
     const sug = normalizeForPdfMatch(sugText)

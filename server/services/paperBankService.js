@@ -28,7 +28,7 @@ import { query, transaction } from '../config/neon.js'
 import { uploadImage } from './ossService.js'
 import { renderPdfToJpegs, extractPdfTextPages } from './pdfService.js'
 // 文本层「真值证人」：解析闸与零错字审计共用同一份实现（⛔ 不许各写一套归一化）
-import { makePdfWitness, pickDiffContext } from './pdfWitness.js'
+import { makePdfWitness, pickDiffContext, stripSourceLabels, isSourceLabelText } from './pdfWitness.js'
 import {
   buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN,
   PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
@@ -438,7 +438,12 @@ const OCR_TRANSCRIBE_SYSTEM = [
  * @returns {{rows:object[], review:object[], checked:number, corrected:number, skipped:boolean}}
  */
 export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger = console, pdfPageText = null }) {
-  const witness = makePdfWitness(pdfPageText)
+  // 覆盖面闸：混合件（一模卷：文本层只有题号 + 来源标签，正文是图片）传进来也不能当证人，
+  // 否则会拿标签去「证明」正文。makePdfWitness 内部按库内正文字数判断覆盖率。
+  const rowsChars = rows.reduce((n, r) => n
+    + String(r.content || '').length + String(r.parent_stem || '').length
+    + (Array.isArray(r.options) ? r.options.join('').length : 0), 0)
+  const witness = makePdfWitness(pdfPageText, rowsChars)
   const empty = { rows, review: [], checked: 0, corrected: 0, skipped: false, pdfResolved: 0 }
   if (!rows.length) return empty
   try {
@@ -554,6 +559,9 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
     }
     for (let j = 0; j < diffs.length; j++) {
       const d = diffs[j]
+      // ⛔ 卷面上的来源标签（`（2026·上海嘉定·一模）`）不是正文：入库时已清洗，比对必然「差异」。
+      //    2026-11-09 嘉定卷就是这样被自动改坏的（「在线段AB」→「2026·」、「PB」→「一模」）。
+      if (isSourceLabelText(d.printed_text) || isSourceLabelText(d.ocr_text)) continue
       const t = transcripts.get(j)
       const row = rows[d.idx]
       const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
@@ -1261,7 +1269,11 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   }
 
   // 文本层覆盖面：诚实记录这卷到底有没有被真值核过（mode: full / partial / absent）
-  const pdfFlatChars = pdfTextPages ? pdfTextPages.join('').replace(/\s/g, '').length : 0
+  // ⛔ 必须先剔除来源标签再量：一模卷的文本层只有「（2026·上海XX·一模）」，标签一算就
+  //    虚高，会把「只有标签」误判成「覆盖题面」（2026-11-09 嘉定卷据此改坏正文）。
+  const pdfFlatChars = pdfTextPages
+    ? pdfTextPages.map(t => stripSourceLabels(t)).join('').replace(/\s/g, '').length
+    : 0
   const dbTextChars = rows.reduce(
     (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
   const pdfTextLayerInfo = !pdfTextPages

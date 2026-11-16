@@ -29,7 +29,7 @@ import sharp from 'sharp'
 import { query } from '../config/neon.js'
 import { callVisionCompletion } from '../config/ai.js'
 import { extractPdfTextPages } from './pdfService.js'
-import { makePdfWitness } from './pdfWitness.js'
+import { makePdfWitness, stripSourceLabels, isSourceLabelText } from './pdfWitness.js'
 
 const TMP_DIR = fileURLToPath(new URL('../../.audit_tmp/', import.meta.url))
 
@@ -458,11 +458,14 @@ async function runPhase({ targets, phase, pageBuf, cache, noCache, saveCache, lo
     if (!dbNorm) continue
     const perChannel = []
     for (const r of ok) {
-      const modelNorm = normalizeMath(r.text)
+      // ⛔ 先剔除卷面上的来源标签（`（2026·上海嘉定·一模）`）：它印在卷面上但入库时已被清洗，
+      //    不剔除就会被词元对齐当成「差异」，把正文替换成标签（2026-11-09 嘉定卷 q20/q22 事故）。
+      const modelNorm = normalizeMath(stripSourceLabels(r.text))
       if (!modelNorm) continue
       for (const h of diffTokens(dbNorm, modelNorm)) {
         const dbPart = trimSensitive(h.dbPart)
         const modelPart = trimSensitive(h.modelPart)
+        if (isSourceLabelText(h.modelPart) || isSourceLabelText(modelPart)) continue
         const hasBoth = dbPart && modelPart
         const isMissing = dbPart && !modelPart && !h.modelPart
         if (!hasBoth && !isMissing) continue // 纯新增（裁片含邻题/模型多写）不算错
@@ -766,7 +769,7 @@ async function fetchPdfBuffer(url) {
  * @returns {Promise<null | {pageCount:number, forPage:(n:number)=>Function|null}>}
  *   任何一步失败都返回 null（扫描件 / 网络 / 无源文件）⇒ 审计退回纯视觉，行为不变。
  */
-async function loadPdfWitness(meta) {
+async function loadPdfWitness(meta, expectedByPage = null) {
   const sf = meta?.sourceFiles
   const urls = [
     ...(Array.isArray(sf?.questions) ? sf.questions : []),
@@ -778,10 +781,12 @@ async function loadPdfWitness(meta) {
     try {
       const pages = await extractPdfTextPages(await fetchPdfBuffer(url))
       if (!pages) continue
-      const fns = pages.map(t => makePdfWitness(t))
+      // 覆盖面：混合件（文本层只有题号/来源标签）必须造不出证人，否则会拿标签去改正文
+      const fns = pages.map((t, i) => makePdfWitness(t, expectedByPage?.get(i + 1) || 0))
       return {
         pageCount: pages.length,
-        chars: pages.join('').replace(/\s/g, '').length,
+        chars: pages.map(t => stripSourceLabels(t).replace(/\s/g, '')).join('').length,
+        witnessedPages: fns.filter(Boolean).length,
         forPage: (n) => fns[Number(n) - 1] || null,
       }
     } catch { /* 换下一份 */ }
@@ -827,8 +832,14 @@ async function runZeroTypoAuditInner({
   // 文本层证人（电子版 PDF）：下载失败 / 扫描件 ⇒ null，后续全部判空，行为与改动前一致。
   let pdfW = null
   try {
-    pdfW = await loadPdfWitness(prevMeta)
-    if (pdfW) logger2.log?.(`[zeroTypo] ${resourceName}: 检测到 PDF 文本层（${pdfW.pageCount} 页），差异以文本层为准`)
+    const expectedByPage = new Map()
+    for (const r of dbRows) {
+      const n = Number(r.page_no) || 0
+      const len = String(r.content || '').length + String(r.parent_stem || '').length
+      expectedByPage.set(n, (expectedByPage.get(n) || 0) + len)
+    }
+    pdfW = await loadPdfWitness(prevMeta, expectedByPage)
+    if (pdfW) logger2.log?.(`[zeroTypo] ${resourceName}: 检测到 PDF 文本层（${pdfW.pageCount} 页，${pdfW.witnessedPages} 页覆盖正文）`)
   } catch (e) {
     logger2.warn?.(`[zeroTypo] 文本层证人不可用（退回纯视觉）: ${String(e?.message || e).slice(0, 120)}`)
   }
@@ -964,11 +975,13 @@ async function runZeroTypoAuditInner({
   // 否则「已校」会被误读成「已用真值核过」。
   const dbTextChars = dbRows.reduce(
     (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
+  const coverageEnough = !!pdfW && pdfW.chars >= dbTextChars * 0.6
+    && pdfW.witnessedPages >= Math.max(1, pdfW.pageCount - 1)
   const pdfTextLayer = !pdfW
     ? { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
-    : pdfW.chars >= dbTextChars * 0.6
-      ? { mode: 'full', chars: pdfW.chars, note: '文本层覆盖题面，差异以文本层为准' }
-      : { mode: 'partial', chars: pdfW.chars, dbChars: dbTextChars, note: '文本层只覆盖少量标签，仍以视觉 OCR 为准' }
+    : coverageEnough
+      ? { mode: 'full', chars: pdfW.chars, pages: `${pdfW.witnessedPages}/${pdfW.pageCount}`, note: '文本层覆盖题面，差异以文本层为准' }
+      : { mode: 'partial', chars: pdfW.chars, dbChars: dbTextChars, pages: `${pdfW.witnessedPages}/${pdfW.pageCount}`, note: '文本层只覆盖少量标签，仍以视觉 OCR 为准' }
 
   const summary = {
     status, phase: null, reason,
