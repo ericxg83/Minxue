@@ -538,3 +538,53 @@ test('⛔ 反向自检：真题干行（sub_no 空、正文不含 (1)）仍不�
   assert.notEqual(plans[0].targetIdx, 0, '题干行不能被覆盖')
   assert.equal(plans[0].targetIdx, 1)
 })
+
+// ── 青绿色章节标题不得混进配图（2026-11-16 闵行/青浦/杨浦 q18 报障）──
+// 原卷「三、解答题」是 teal 大字（实测 RGB≈(32,160,160)），恰好落在图幅正下方、
+// 横向又在图幅内 ⇒ 旧的「横向包含」闸挡不住，被当成图注并进图形带。
+// 判据：图形是黑色，标题是青绿色 ⇒ 向下合并时用颜色排除。
+const tealBlocks = (top, n = 4) => {
+  const out = []
+  for (let i = 0; i < n; i++) {
+    out.push(`<rect x="${40 + i * 80}" y="${top}" width="55" height="42" fill="rgb(32,160,160)"/>`)
+  }
+  return out.join('')
+}
+
+/** 量成品里的青绿像素数 */
+const tealPixels = async (buf) => {
+  const { data, info } = await sharp(buf).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  let n = 0
+  for (let i = 0; i < data.length; i += info.channels) {
+    const R = data[i], G = data[i + 1], B = data[i + 2]
+    if (G > R + 12 && B > R + 10 && Math.abs(G - B) < 45 && 0.299 * R + 0.587 * G + 0.114 * B < 225) n++
+  }
+  return n
+}
+
+test('★ 图下方有青绿章节标题 ⇒ 配图只留黑色图形（标题必须切掉）', async () => {
+  const extra = [
+    '<rect x="60" y="40" width="280" height="180" fill="none" stroke="black" stroke-width="4"/>',
+    tealBlocks(245),  // 图形下方 25px 处一行 teal 大字
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 320, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const m = await sharp(r.band).metadata()
+  const teal = await tealPixels(r.band)
+  assert.equal(teal, 0, `配图不得含青绿标题，实测 ${teal} 像素`)
+  assert.ok(m.height >= 175 && m.height <= 235, `图形 180 高必须完整且不带标题，实高 ${m.height}`)
+})
+
+test('⛔ 反向自检：黑色图注（非青绿）仍要保留，不许被颜色闸误删', async () => {
+  const extra = [
+    '<rect x="60" y="40" width="280" height="180" fill="none" stroke="black" stroke-width="4"/>',
+    // 图注必须在图幅横向范围内（否则会被原有的「横向包含」闸挡掉，与颜色无关）
+    ...[0, 1, 2].map(i => `<rect x="${70 + i * 62}" y="245" width="50" height="42" fill="black"/>`),
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 320, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const m = await sharp(r.band).metadata()
+  assert.ok(m.height >= 250, `黑色图注应随图形保留，实高 ${m.height}`)
+})

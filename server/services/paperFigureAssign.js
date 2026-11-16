@@ -657,6 +657,38 @@ async function analyzeCropRegion(cropBuffer) {
     const height = Number(info.height) || 0
     if (width < 40 || height < 60) return { band: null, hasFigure: false, reason: 'too-small' }
 
+    // ── 彩色章节标题像素（2026-11-16 闵行/青浦 q18 报障）──
+    // 原卷的「三、解答题」是**青绿色大字**，几何图形/顶点字母/图注是黑色。
+    // 上一版只按灰度算墨迹，标题恰好落在图幅正下方、横向又在图幅内时，
+    // 会被「向下合并图注」当成图的一部分吞进来（旧注释以为标题总在图幅左侧）。
+    // 这里逐行量「青绿色 + 有一定饱和度」的像素，供合并闸使用。
+    let coloredPerRow = new Array(height).fill(0)
+    try {
+      const { data: rgb, info: rgbInfo } = await sharp(cropBuffer).removeAlpha().raw()
+        .toBuffer({ resolveWithObject: true })
+      const ch = Number(rgbInfo.channels) || 3
+      if (ch >= 3) {
+        coloredPerRow = new Array(height).fill(0)
+        for (let y = 0; y < height; y++) {
+          let cnt = 0
+          for (let x = 0; x < width; x++) {
+            const i = (y * width + x) * ch
+            const r = rgb[i], g = rgb[i + 1], b = rgb[i + 2]
+            const gray = 0.299 * r + 0.587 * g + 0.114 * b
+            // 青绿色大字（实测 RGB≈(32,160,160)）：G、B 都明显高于 R，且彼此接近。
+            // ⛔ 不能用 `g > b + 8` —— teal 的 G≈B，那样会漏掉绝大部分像素。
+            if (g > r + 12 && b > r + 10 && Math.abs(g - b) < 45 && gray < 225) cnt++
+          }
+          coloredPerRow[y] = cnt
+        }
+      }
+    } catch { /* 彩色通道读不到就退回纯灰度判据，不影响主流程 */ }
+    const coloredIn = (b) => {
+      let n = 0
+      for (let y = b.top; y <= b.bottom; y++) n += coloredPerRow[y]
+      return n
+    }
+
     // 抹白内容框的框线后再做剖面；⚠️ 只从**派生副本**抹白，最终仍从原图裁（不重编码、不掉色）
     let prof = data
     const frame = detectContentFrame(data, width, height)
@@ -779,6 +811,10 @@ async function analyzeCropRegion(cropBuffer) {
       if (b.top <= fig.bottom) continue
       if (b.top - figBottomInk - 1 > 40) break
       if ((b.bottom - b.top + 1) >= 120) break
+      // ⛔ 青绿色章节标题（「三、解答题」）：它恰好落在图幅正下方时横向包含闸挡不住，
+      //    必须单独用颜色排除。判据按「平均每行彩色像素数」，避免把图形里零星彩色误伤。
+      const bh = b.bottom - b.top + 1
+      if (coloredIn(b) >= bh * 3) break
       if (!withinFigure(bandRange(b))) break
       figBottomInk = b.bottom
     }
