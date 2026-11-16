@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { anchoredSlice } from './sourceLockKit.mjs'
+import { anchoredSlice, anchoredRange } from './sourceLockKit.mjs'
 
 import {
   deriveAutoTags,
@@ -457,4 +457,41 @@ test('★ 落库必须先按题号+小问去重（答题卡页重复识别会撞
   // 2026-11-16：keptKeys 供待核对清单对齐最终题号（复核早于题号唯一化）
   assert.match(s, /return \{ duplicated, renumbered, dropped, renumberedRows, keptKeys: deduped\.map\(r => r\.__key\) \}/, '重复/改号明细与落库行 key 必须回传')
   assert.match(s, /if \(duplicated > 0\)[\s\S]{0,300}appendParseWarning/, '重复行必须写进 parseWarnings')
+})
+
+// ─────────────────────────────────────────────────────────────
+// 默认排序口径（2026-11-16 负责人：「默认显示改为显示最新的资源（目前似乎是显示最早的试卷）」）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * 判定一条 ORDER BY 片段是否满足「最新导入的卷在前」。
+ * @returns {string[]} 违规列表，空数组 = 通过
+ */
+function checkDefaultPaperOrder(order) {
+  const bad = []
+  if (!/r\.created_at\s+DESC/.test(order)) bad.push('第一键必须是 r.created_at DESC（最新导入的卷排最前）')
+  // exam_date 全库绝大多数是 NULL：当第一键 + NULLS LAST ⇒ 等于没排，全部落到末尾按卷名排
+  if (/r\.exam_date/.test(order)) bad.push('不得用 r.exam_date 当默认排序键（NULL 率极高，等同未排序）')
+  if (!/rq\.question_no/.test(order)) bad.push('卷内必须仍按题号升序，否则一份卷的题会乱序')
+  return bad
+}
+
+test('★ 题目列表默认排序 = 最新导入的卷在前（created_at DESC），卷内题号仍升序', () => {
+  const s = stripComments(read(SERVICE))
+  const fails = []
+  const block = anchoredRange(s, 'const SORT_MAP = {', 'const orderBy = SORT_MAP', '默认排序锁', fails)
+  assert.deepEqual(fails, [], '锁的锚点必须存在，否则这条锁等于没查')
+  const m = block.match(/default:\s*'([^']*)'/)
+  assert.ok(m, 'SORT_MAP 里必须有一行 default')
+  assert.deepEqual(checkDefaultPaperOrder(m[1]), [],
+    `默认排序口径被改回去了：${m[1]}`)
+  // 与左侧题集树同一口径：树侧 PaperBankTree.papersIn 也是 created_at 倒序
+  const tree = stripComments(read('src/workbench/components/paperBank/PaperBankTree.vue'))
+  assert.match(tree, /localeCompare\(String\(a\.created_at/, '题集树必须仍按 created_at 倒序（与右侧默认排序同一口径）')
+  // 反向自检：2026-11-16 之前的旧口径喂给同一个检查必须判红
+  assert.notDeepEqual(
+    checkDefaultPaperOrder('r.exam_date NULLS LAST, r.name, rq.page_no NULLS LAST, rq.question_no NULLS LAST, rq.sub_no'),
+    [],
+    '旧口径（exam_date 升序）必须被判红——否则上面的检查是空转'
+  )
 })
