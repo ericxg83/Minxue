@@ -520,6 +520,37 @@ async function runPhase({ targets, phase, pageBuf, cache, noCache, saveCache, lo
 
 // ── 应用修正（只改两票以上、无分歧、且能唯一定位的那几处）────────────────
 
+const normForDup = (t) => normalizeMath(String(t || '')).replace(/\s+/g, '')
+
+/**
+ * 「替换片段是从别的小问串过来的」判据（纯函数，可测）。
+ *
+ * 事故（2026-11-16 徐汇 q24(2-2)）：卷面「(2) 将抛物线向上平移…① 如果 AD 恰好平分∠CAE…」，
+ * 审计给出的 plan 是 dbPart「移」→ modelPart「分∠CAE」（片段取自上一小问 ①），
+ * 落库后变成「将抛物线向上平分∠CAE」。⚠️ 这是**改错**，比不改更坏。
+ *
+ * 判据：极短锚点（≤2 字）却替换成 ≥3 字的长片段，且该长片段在本行之外也出现过。
+ * 长锚点的局部替换不拦（合法修正大多是长锚点），只拦这种「短锚点被塞进别处片段」的形态。
+ */
+export function isSerialModelPart({ dbPart, modelPart, otherRowText }) {
+  const dp = normForDup(dbPart)
+  const mp = normForDup(modelPart)
+  if (dp.length > 2 || mp.length < 3) return false
+  return String(otherRowText || '').includes(mp)
+}
+
+/**
+ * 修正结果与「该行完整期望文本」的偏差闸（纯函数，可测）。
+ * 长度差 >8 字，或占比 >12%（长文本）⇒ 判为片段错位，放弃这条修正（转人工）。
+ */
+export function isResultFarFromExpect(expect, next) {
+  const want = normForDup(expect)
+  const got = normForDup(next)
+  if (!want.length) return false
+  const lenDiff = Math.abs(want.length - got.length)
+  return lenDiff > 8 || (want.length > 40 && lenDiff / want.length > 0.12)
+}
+
 const locate = (text, dbPart, before, after) => {
   const norm = (s) => normalizeMath(s)
   const candidates = []
@@ -570,7 +601,20 @@ async function applyConfirmedFixes({ resourceId, dbRows, confirmed, logger }) {
 
   const plans = new Map() // `${rowId}|${field}` -> { rowId, field, beforeText, edits:[{at,len,rep}] }
   const manual = []
+  // 同卷其它行的文本（normalize 后）：用来识别「替换片段其实是从别的小问串过来的」。
+  // ⛔ 2026-11-16 徐汇 q24(2-2) 事故：dbPart「移」(1 字) 被替换成 modelPart「分∠CAE」，
+  //    而「平分∠CAE」正是同一题上一小问 ① 的内容 ⇒ 库里出现「将抛物线向上平分∠CAE」。
+  //    原卷卷面是「将抛物线向上平移」。这类串行必须拦在写库之前。
+  const otherRowText = (rowIds) => dbRows
+    .filter(x => !rowIds.includes(x.id))
+    .map(x => normForDup(x.content) + '|' + normForDup(x.parent_stem))
+    .join('|')
   for (const f of confirmed) {
+    // 高危形态：极短锚点（≤2 字）却替换成 ≥3 字的长片段，且该长片段在同卷别的行里出现过。
+    if (isSerialModelPart({ dbPart: f.dbPart, modelPart: f.modelPart, otherRowText: otherRowText(f.rowIds || []) })) {
+      manual.push({ ...f, reason: 'serial-model-part' })
+      continue
+    }
     let placed = false
     for (const r of dbRows.filter(x => f.rowIds.includes(x.id))) {
       const field = f.field === 'parent_stem' ? 'parent_stem' : 'content'
@@ -593,6 +637,17 @@ async function applyConfirmedFixes({ resourceId, dbRows, confirmed, logger }) {
     let next = plan.beforeText
     for (const e of edits) next = next.slice(0, e.at) + e.rep + next.slice(e.at + e.len)
     if (next === plan.beforeText) continue
+    // 结果闸：本地替换后必须与「该行的完整期望文本」长度相当，
+    // 差得离谱说明片段位置串了（徐汇事故里 expect 是「向上平移」而结果成了「向上平分∠CAE」，
+    // 长度差 3 字已在阈值内 ⇒ 真正的守门是上面的 serial-model-part；这里兜住更长的错位）。
+    const expectOfRow = confirmed
+      .flatMap(f => (f.rowIds || []).includes(plan.rowId) ? [f.expect] : [])
+      .filter(Boolean)
+      .sort((a, b) => String(b).length - String(a).length)[0]
+    if (expectOfRow && isResultFarFromExpect(expectOfRow, next)) {
+      logger.warn?.(`[zeroTypo] 行 ${String(plan.rowId).slice(0, 8)} 修正结果与期望文本偏差过大，跳过（转人工）`)
+      continue
+    }
     // 乐观锁：老师此刻正在改题就放弃，绝不覆盖人工编辑
     const upd = await query(
       `UPDATE resource_questions SET ${plan.field} = $2 WHERE id = $1 AND ${plan.field} = $3 RETURNING id`,
