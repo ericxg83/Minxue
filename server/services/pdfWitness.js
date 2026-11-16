@@ -75,6 +75,36 @@ export function pickDiffContext(text, needle) {
 }
 
 /**
+ * 文本层覆盖面判据 —— **唯一实现**。
+ * 解析闸（paperBankService）、零错字审计（zeroTypoAuditService）、存量回填脚本都走这里，
+ * ⛔ 不许各写一套阈值：一处判 full、一处判 partial，界面就会自相矛盾。
+ *
+ * @param {{chars?:number, dbChars?:number, pageCount?:number, witnessedPages?:number}} p
+ *   chars         文本层剥掉来源标签后的正文字数
+ *   dbChars       库里该卷题目正文字数（分母）
+ *   pageCount     文本层总页数；witnessedPages 其中真正够格作证的页数
+ * @returns {{mode:'full'|'partial'|'absent', chars?:number, dbChars?:number, pages?:string, note:string}}
+ *   full    ⇒ 差异以文件里的字为准
+ *   partial ⇒ 文本层只覆盖题号/标签、正文是图片（松江/嘉定一模）⇒ 仍是视觉 OCR 结果
+ *   absent  ⇒ 扫描件
+ */
+export function describePdfTextLayer({ chars = 0, dbChars = 0, pageCount = 0, witnessedPages = 0 } = {}) {
+  const c = Number(chars) || 0
+  if (!c) return { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
+  const db = Number(dbChars) || 0
+  const pagesTotal = Number(pageCount) || 0
+  const pageOk = !pagesTotal || Number(witnessedPages) >= Math.max(1, pagesTotal - 1)
+  const enough = (db > 0 ? c >= db * 0.6 : c >= 200) && pageOk
+  const pages = pagesTotal ? { pages: `${witnessedPages}/${pagesTotal}` } : {}
+  return enough
+    ? { mode: 'full', chars: c, ...pages, note: '文本层覆盖题面，差异以文本层为准' }
+    : {
+      mode: 'partial', chars: c, ...(db ? { dbChars: db } : {}), ...pages,
+      note: '文本层只覆盖少量标签（正文是图片），仍以视觉 OCR 为准',
+    }
+}
+
+/**
  * 用一页 PDF 文本层造一个证人函数。
  * @param {string} pageText   该页文本层
  * @param {number} expectedChars 该页库内题目正文总字数（用于判断文本层是否只覆盖了标签）

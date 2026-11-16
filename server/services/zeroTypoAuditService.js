@@ -29,7 +29,7 @@ import sharp from 'sharp'
 import { query } from '../config/neon.js'
 import { callVisionCompletion } from '../config/ai.js'
 import { extractPdfTextPages } from './pdfService.js'
-import { makePdfWitness, stripSourceLabels, isSourceLabelText } from './pdfWitness.js'
+import { makePdfWitness, stripSourceLabels, isSourceLabelText, describePdfTextLayer } from './pdfWitness.js'
 
 const TMP_DIR = fileURLToPath(new URL('../../.audit_tmp/', import.meta.url))
 
@@ -975,13 +975,14 @@ async function runZeroTypoAuditInner({
   // 否则「已校」会被误读成「已用真值核过」。
   const dbTextChars = dbRows.reduce(
     (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
-  const coverageEnough = !!pdfW && pdfW.chars >= dbTextChars * 0.6
-    && pdfW.witnessedPages >= Math.max(1, pdfW.pageCount - 1)
-  const pdfTextLayer = !pdfW
-    ? { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
-    : coverageEnough
-      ? { mode: 'full', chars: pdfW.chars, pages: `${pdfW.witnessedPages}/${pdfW.pageCount}`, note: '文本层覆盖题面，差异以文本层为准' }
-      : { mode: 'partial', chars: pdfW.chars, dbChars: dbTextChars, pages: `${pdfW.witnessedPages}/${pdfW.pageCount}`, note: '文本层只覆盖少量标签，仍以视觉 OCR 为准' }
+  // ⛔ 判据只有一处实现（pdfWitness.describePdfTextLayer）：解析闸/审计/存量回填共用，
+  //    否则同一卷会一处判 full、一处判 partial。
+  const pdfTextLayer = describePdfTextLayer({
+    chars: pdfW?.chars || 0,
+    dbChars: dbTextChars,
+    pageCount: pdfW?.pageCount || 0,
+    witnessedPages: pdfW?.witnessedPages || 0,
+  })
 
   const summary = {
     status, phase: null, reason,

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   makePdfWitness, normalizeForPdfMatch, pickDiffContext, stripSourceLabels, isSourceLabelText,
+  describePdfTextLayer,
 } from '../server/services/pdfWitness.js'
 
 // 以下三页文本层取自真实源文件：
@@ -90,4 +91,26 @@ test('反向自检：去掉覆盖面闸，标签页就会被当成真值', () =>
   assert.equal(withoutGate, null, '剥掉标签后为空，仍然必须是 null')
   // 如果谁把标签剥除去掉，下面这个判断会变成 'suggest' ⇒ 把正文改成标签
   assert.notEqual(normalizeForPdfMatch(partial).includes('2026'), true, '归一化后不得残留标签')
+})
+
+// ── 覆盖面凭据（唯一实现，解析闸 / 审计 / 存量回填共用）────────────────────────
+test('★ 覆盖面判据：full / partial / absent 三态不许混用', () => {
+  // 七宝文来卷实测：文本层 2246 字 / 库内 2528 字 ⇒ 覆盖题面
+  assert.equal(describePdfTextLayer({ chars: 2246, dbChars: 2528, pageCount: 5, witnessedPages: 5 }).mode, 'full')
+  // 松江一模实测：文本层 113 字 / 库内 3175 字（只有题号）⇒ 绝不许标 full
+  assert.equal(describePdfTextLayer({ chars: 113, dbChars: 3175, pageCount: 6, witnessedPages: 6 }).mode, 'partial')
+  assert.equal(describePdfTextLayer({ chars: 0, dbChars: 3175 }).mode, 'absent')
+})
+
+test('反向自检：把 60% 门槛放水成 10%，松江一模就会被标成「已用真值核过」', () => {
+  const partial = describePdfTextLayer({ chars: 113, dbChars: 3175 })
+  assert.equal(partial.mode, 'partial')
+  // 阈值一旦放水，113/3175 会被算成 full —— 界面上「已校」就变成谎言
+  assert.ok(113 < 3175 * 0.6, '实测字数必须真的低于门槛，这条锁才有意义')
+})
+
+test('反向自检：覆盖不足时不许缺 mode 字段（否则前端会当成扫描件或已核过）', () => {
+  const info = describePdfTextLayer({ chars: 50, dbChars: 3000, pageCount: 4, witnessedPages: 1 })
+  assert.equal(info.mode, 'partial', '页数覆盖不足也必须落 partial')
+  assert.ok(typeof info.note === 'string' && info.note.length > 0, '必须带可展示的说明，界面不能自己编')
 })

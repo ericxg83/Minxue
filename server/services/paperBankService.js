@@ -28,7 +28,7 @@ import { query, transaction } from '../config/neon.js'
 import { uploadImage } from './ossService.js'
 import { renderPdfToJpegs, extractPdfTextPages } from './pdfService.js'
 // 文本层「真值证人」：解析闸与零错字审计共用同一份实现（⛔ 不许各写一套归一化）
-import { makePdfWitness, pickDiffContext, stripSourceLabels, isSourceLabelText } from './pdfWitness.js'
+import { makePdfWitness, pickDiffContext, stripSourceLabels, isSourceLabelText, describePdfTextLayer } from './pdfWitness.js'
 import {
   buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN,
   PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
@@ -1343,18 +1343,15 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   }
 
   // 文本层覆盖面：诚实记录这卷到底有没有被真值核过（mode: full / partial / absent）
-  // ⛔ 必须先剔除来源标签再量：一模卷的文本层只有「（2026·上海XX·一模）」，标签一算就
+  // ⛔ 判据只有一处实现（pdfWitness.describePdfTextLayer），审计与存量回填共用。
+  // ⛔ 字数必须先剔除来源标签再量：一模卷的文本层只有「（2026·上海XX·一模）」，标签一算就
   //    虚高，会把「只有标签」误判成「覆盖题面」（2026-11-09 嘉定卷据此改坏正文）。
   const pdfFlatChars = pdfTextPages
     ? pdfTextPages.map(t => stripSourceLabels(t)).join('').replace(/\s/g, '').length
     : 0
   const dbTextChars = rows.reduce(
     (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
-  const pdfTextLayerInfo = !pdfTextPages
-    ? { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
-    : pdfFlatChars >= dbTextChars * 0.6
-      ? { mode: 'full', chars: pdfFlatChars, note: '文本层覆盖题面，差异以文本层为准' }
-      : { mode: 'partial', chars: pdfFlatChars, dbChars: dbTextChars, note: '文本层只覆盖少量标签（正文是图片），仍以视觉 OCR 为准' }
+  const pdfTextLayerInfo = describePdfTextLayer({ chars: pdfFlatChars, dbChars: dbTextChars })
 
   // 双模型复核结果落 metadata：一致处已自动改，剩下的是「待老师对照原卷核对」的清单。
   // 空数组也要写（表示已复核且无遗留）；复核失败的页单独记进 summary，界面会给提示。
