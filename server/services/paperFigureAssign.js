@@ -395,6 +395,14 @@ function measureTextRows(gray, width, height) {
   return { textRowCount, right }
 }
 
+/**
+ * 诊断入口：量一张成品配图里还有多少「成行文字」（存量审计 / 修复脚本用，与主链路同一判据）。
+ * @returns {Promise<{textRowCount:number, right:number}>} textRowCount >= 1 即「图里裹了字」
+ */
+export async function inspectFigureTextRows(buffer) {
+  return measureTextRowsInBuffer(buffer)
+}
+
 async function measureTextRowsInBuffer(buffer) {
   try {
     const { data, info } = await sharp(buffer).greyscale().raw().toBuffer({ resolveWithObject: true })
@@ -437,10 +445,13 @@ async function trySplitColumns(cropBuffer) {
     const off = y * width
     for (let x = 0; x < width; x++) if (isInk(data[off + x])) colInk[x]++
   }
+  // 「贯穿空白列」允许零星噪点：4x JPEG 的空白列常残留 1~2 个灰点，
+  // 严格 ===0 会让文字与图之间的空白整段消失（2026-11-16 徐汇 q16 实测 cuts 只剩页边距）。
+  const noiseMax = Math.max(1, Math.round(height * 0.004))
   const cuts = []
   let s = -1
   for (let x = 0; x <= width; x++) {
-    const empty = x < width && colInk[x] === 0
+    const empty = x < width && colInk[x] <= noiseMax
     if (empty && s < 0) s = x
     if (!empty && s >= 0) {
       if (x - s >= 8) cuts.push(x)
