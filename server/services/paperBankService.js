@@ -249,6 +249,144 @@ export function assignGlobalQuestionNumbers(rows) {
 }
 
 /**
+ * 跨页续行合并（2026-11-16 闵行七宝文来卷事故：原卷 25 题、系统 26 题）。
+ *
+ * ── 事故 ──
+ * 第 5 题在第 1 页装不下，「续图 + 选项 A~D」印到第 2 页顶部。那段内容**卷面没有题号**，
+ * OCR 把它当成一道新题（content 写成「题目文字在图片上方被截断，仅可见选项」），
+ * assignGlobalQuestionNumbers 给补成 6 ⇒ 原卷 6..25 全部变成 7..26，
+ * 题号与答案、与原卷页码全部错位一位。
+ *
+ * ── 判据（三条同时成立才合并，宁可漏合并也不误伤）──
+ * ① 是该页的**第一行**，且 `__printedNo === false`（卷面确实没印题号）；
+ * ② 该页不是第 1 页（第 1 页首行无号属于正常缺号，交给补号逻辑）；
+ * ③ 它是「选项块」或「占位描述块」：
+ *    - options ≥ 2，且**上一页最后一题没有选项**（正是跨页选择题的形态）；
+ *    - 或 content 命中 /截断|仅可见|图片上方/（图整段跨页时没有任何选项）。
+ *
+ * 合并动作：选项补给上一题（不覆盖已有）、把续行的页图 + bbox 记到
+ * `__continuationFigure`（供 fillContinuationFigures 裁跨页配图），该行从 rows 里摘掉。
+ *
+ * ⛔ 为什么必须放在 assignGlobalQuestionNumbers **之前**：补号只看「有没有印刷号」，
+ *    一旦先补号，这行就变成了「一道正常的题」，再也认不出是续页。
+ *
+ * @returns {{rows:Array, merged:Array<{page_no:number, question_no:any, intoKey:string, withOptions:boolean}>}}
+ */
+export function mergePageContinuationRows(rows) {
+  const list = Array.isArray(rows) ? rows : []
+  if (list.length < 2) return { rows: list, merged: [] }
+  const byPage = new Map()
+  for (const r of list) {
+    const p = Number(r?.page_no) || 1
+    if (!byPage.has(p)) byPage.set(p, [])
+    byPage.get(p).push(r)
+  }
+  const pageNos = [...byPage.keys()].sort((a, b) => a - b)
+  const dropped = new Set()
+  const merged = []
+  for (const p of pageNos) {
+    if (p <= Math.min(...pageNos)) continue   // 第一页没有「上一页」可并
+    const pageRows = byPage.get(p)
+    const head = pageRows[0]
+    if (!head) continue
+    if (!(head.__printedNo === false || !Number.isFinite(Number(head.question_no)))) continue
+    const opts = Array.isArray(head.options) ? head.options : []
+    const content = String(head.content || '')
+    const looksPlaceholder = /截断|仅可见|图片上方|上半部分/.test(content)
+    // 上一页最后一题（题号最大的整题行）
+    const prevPage = pageNos.filter(x => x < p).pop()
+    const prevRows = byPage.get(prevPage) || []
+    if (!prevRows.length) continue
+    const prev = prevRows.reduce((best, r) => {
+      const a = Number(r?.question_no)
+      const b = Number(best?.question_no)
+      if (!Number.isFinite(a)) return best
+      if (!Number.isFinite(b)) return r
+      return a >= b ? r : best
+    }, prevRows[0])
+    if (!prev) continue
+    const prevOpts = Array.isArray(prev.options) ? prev.options : []
+    const optBlock = opts.length >= 2 && prevOpts.length === 0
+    if (!optBlock && !looksPlaceholder) continue
+
+    if (optBlock) {
+      const seen = new Set(prevOpts.map(x => String(x)))
+      prev.options = prevOpts.concat(opts.filter(x => !seen.has(String(x))))
+    }
+    // 跨页配图：图在这块里，题在上一页
+    if (head.page_image_url && head.bbox) {
+      prev.__continuationFigure = {
+        pageImageUrl: head.page_image_url,
+        bbox: head.bbox,
+        page_no: head.page_no ?? p,
+      }
+    }
+    // 占位描述没有信息量，别让它顶替题干
+    dropped.add(head)
+    merged.push({
+      page_no: p,
+      question_no: head.question_no,
+      intoKey: prev.__key,
+      intoQuestionNo: prev.question_no,
+      withOptions: optBlock,
+      withFigure: !!prev.__continuationFigure,
+    })
+  }
+  if (!dropped.size) return { rows: list, merged: [], renumbered: 0 }
+  const kept = list.filter(r => !dropped.has(r))
+
+  // ── 被顶后的题号自动拉回（事故的第二半）──
+  // 只摘掉续行还不够：模型读到「页首续行」时往往把后续题号整体数大一位
+  // （本卷原 6..25 被读成 7..26）。判据是**上一页最后一题的号 +1 在剩下的号里不存在**
+  // （并入 q5 后，6 号在 {1..5,7..26} 里没有）⇒ 说明中间那一位被续行顶掉了 ⇒ 其后的号 -1。
+  // ⛔ 不能用「被摘掉那行的号」判：合并发生在补号之前，那行通常还没有号（null）。
+  // ⛔ 也不能只看「有洞就平移」：真卷存在跳号，必须洞紧邻上一页末题才动手。
+  let renumbered = 0
+  for (const m of merged) {
+    const into = Number(m.intoQuestionNo)
+    if (!Number.isFinite(into)) continue
+    const printedNow = new Set(
+      kept.filter(r => r.__printedNo && Number.isFinite(Number(r.question_no)))
+        .map(r => Number(r.question_no))
+    )
+    const hole = into + 1
+    if (printedNow.has(hole)) continue
+    const above = kept.filter(r => Number.isFinite(Number(r.question_no)) && Number(r.question_no) > hole)
+    if (!above.length) continue
+    for (const r of above) r.question_no = Number(r.question_no) - 1
+    renumbered += above.length
+  }
+  return { rows: kept, merged, renumbered }
+}
+
+/**
+ * 给「跨页续行」的上一题补配图：图在被摘掉的那一页上，按记录的 bbox 现裁现传。
+ * 只在该行自己没有配图时执行（不覆盖已有的干净裁片）。
+ */
+async function fillContinuationFigures(rows, logger = console) {
+  for (const r of Array.isArray(rows) ? rows : []) {
+    const extra = r?.__continuationFigure
+    if (!extra) continue
+    if (r.image_url) continue
+    try {
+      const resp = await fetch(extra.pageImageUrl)
+      if (!resp.ok) throw new Error('HTTP ' + resp.status)
+      const pageBuf = Buffer.from(await resp.arrayBuffer())
+      const crop = await cropQuestionImage(pageBuf, extra.bbox)
+      if (!crop) continue
+      const fig = await analyzeCropFigure(crop)
+      if (!fig.hasFigure) continue
+      const buf = fig.band || crop
+      const url = await uploadImage(buf, `paper-p${extra.page_no}-q${r.question_no ?? 'n'}-cont.jpg`, 'paper-bank')
+      if (url) r.image_url = url
+      logger.log?.(`[paperBank] q${r.question_no} 跨页配图已补（来自第 ${extra.page_no} 页）`)
+    } catch (e) {
+      logger.warn?.(`[paperBank] q${r.question_no} 跨页配图补裁失败: ${e.message}`)
+    }
+  }
+}
+
+/**
  * 把 OCR 待核对清单的题号对齐到「真正落库」的题号（2026-11-16 闵行卷事故）。
  *
  * ⛔ crossCheckPageOcr 跑在 assignGlobalQuestionNumbers / dedupePaperRows / append 平移**之前**，
@@ -1239,6 +1377,27 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
       `第 ${r.pageNumber} 页双模型复核失败（题目照存、未复核）：${String(r.ocrError || 'unknown').slice(0, 160)}`
     )
   }
+  // ── 跨页续行合并（2026-11-16 闵行卷「25 题变 26 题」事故）──
+  // ⛔ 必须早于补号：补号之后这行就成了「一道正常的题」，认不出是续页。
+  const contInfo = mergePageContinuationRows(rows)
+  if (contInfo.merged.length) {
+    rows = contInfo.rows
+    for (const m of contInfo.merged) {
+      await appendParseWarning(
+        resourceId,
+        `第 ${m.page_no} 页页首的续页内容（原题号 ${m.question_no ?? '无'}）已并入上一题` +
+        `${m.intoQuestionNo ?? ''}（${m.withOptions ? '补选项' : ''}${m.withOptions && m.withFigure ? '+' : ''}${m.withFigure ? '补配图' : ''}）`
+      )
+      logger.log?.(`[paperBank] 跨页续行并入 q${m.intoQuestionNo}: p${m.page_no} 页首块`)
+    }
+    if (contInfo.renumbered) {
+      await appendParseWarning(
+        resourceId,
+        `跨页续行占用了题号，其后 ${contInfo.renumbered} 行题号已整体前移一位（请核对题号）`
+      )
+    }
+  }
+
   // ── 全卷题号唯一化（2026-11-06 漏题事故）──
   // 必须在 deriveAutoTags / 落库之前：缺号行要拿到全卷唯一的题号，
   // 否则跨页撞号会在 replacePaperQuestions 里被当成「重复题」处理。
@@ -1250,6 +1409,7 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     )
   }
   rows = deriveAutoTags(rows)
+  await fillContinuationFigures(rows, logger)
 
   if (!rows.length) {
     throw new Error('整份卷子没有识别出任何题目（可能是扫描质量过低，或页面不是题目页）')
