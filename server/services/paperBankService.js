@@ -1596,8 +1596,14 @@ export async function searchPaperQuestions(f = {}) {
 
   // 排序（2026-11-09 P0-2）：前端可选，默认按卷+题号。
   // 合法值白名单，防注入 —— 不在白名单里的直接落回默认。
+  // ⛔ 2026-11-16 负责人：「默认显示改为显示最新的资源（目前似乎是显示最早的试卷）」。
+  //    病根就在第一键 r.exam_date 升序 —— 一进题库，最上面是最早那场考试的卷。
+  //    改为 created_at DESC，与左侧题集树 PaperBankTree.papersIn 的排序同一个口径
+  //    （注意别改成 exam_date 倒序：库里大多数卷 exam_date 为 NULL，会全部落进 NULLS LAST）；
+  //    卷内仍按页/题号升序，一份卷的题保持连续成块，卷内题号不乱。
+  //    r.id 兜底：同一批导入的卷 created_at 可能撞到同一毫秒，少了它两卷的题会交错插花。
   const SORT_MAP = {
-    default: 'r.exam_date NULLS LAST, r.name, rq.page_no NULLS LAST, rq.question_no NULLS LAST, rq.sub_no',
+    default: 'r.created_at DESC NULLS LAST, r.id, rq.page_no NULLS LAST, rq.question_no NULLS LAST, rq.sub_no',
     question_no: 'rq.question_no NULLS LAST, rq.sub_no, r.name',
     difficulty_asc: 'rq.difficulty NULLS LAST, rq.question_no NULLS LAST',
     difficulty_desc: 'rq.difficulty DESC NULLS LAST, rq.question_no NULLS LAST',
