@@ -398,3 +398,77 @@ test('⛔ 图形本身就是矩形（框内无正文）⇒ 绝不剥框，整幅
   assert.ok(meta.height >= 260, `矩形图形必须完整，带高 ${meta.height} 应≈286`)
   assert.ok(meta.width >= 260, `矩形图形必须完整，带宽 ${meta.width} 应≈286`)
 })
+
+// ── 左右并排：题干在左、图形在右（2026-11-16 闵行七宝文来卷 q2/q13 第三次报障）──
+// 几何判据（isTextBand：带高 <120px 且跨度 ≥50%）假设「文字在上、图在下」；
+// 并排版式里文字行与图形在同一 y 区间交错 ⇒ 行剖面把它们连成一条大带 ⇒
+// 「高度 <120」整条失效 ⇒ 整块（题干 + 图）被当成图形带，配图就是题干重影。
+// 现判据：字块连通域 + 成行（≥6 个、行内按 80px 间隙分簇）+ 空列分栏双向验证。
+
+/** 一行「实心字块」：宽 20 高 28 间距 30 ⇒ 连通域落在字窗口（18~70 × 26~56）、墨密度 1.0 */
+const glyphBlocks = ({ top, x = 20, chars = 8, w = 20, h = 28, pitch = 30 }) => {
+  const out = []
+  for (let i = 0; i < chars; i++) {
+    out.push(`<rect x="${x + i * pitch}" y="${top}" width="${w}" height="${h}" fill="black"/>`)
+  }
+  return out.join('')
+}
+
+test('★ 题干在左 / 图形在右：配图必须只留右侧图形（不得裹题干两行）', async () => {
+  const extra = [
+    glyphBlocks({ top: 20 }),          // 第一行 8 个字（x 20..250）
+    glyphBlocks({ top: 62 }),
+    glyphBlocks({ top: 104, chars: 6 }),
+    '<rect x="300" y="60" width="90" height="160" fill="none" stroke="black" stroke-width="3"/>',
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 300, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.equal(r.hasFigure, true)
+  assert.ok(r.band, '右侧有图，必须给配图')
+  const meta = await sharp(r.band).metadata()
+  assert.ok(meta.width <= 140, `配图不得包含左侧题干，实宽 ${meta.width}（整幅 400）`)
+  assert.ok(meta.width >= 80, `图形本身 90px 宽必须完整，实宽 ${meta.width}`)
+  assert.ok(meta.height >= 150, `图形高 160 必须完整，实高 ${meta.height}`)
+})
+
+test('⛔ 反向自检：上下堆叠版式行为不变（文字在上、图在下）', async () => {
+  const extra = [
+    glyphBlocks({ top: 20 }),          // 文字行
+    glyphBlocks({ top: 62 }),
+    '<rect x="120" y="140" width="160" height="140" fill="none" stroke="black" stroke-width="3"/>',
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 320, extra })
+  const band = await extractFigureBandFromCrop(crop)
+  assert.ok(band, '应抠出图形带')
+  const meta = await sharp(band).metadata()
+  assert.ok(meta.height <= 165, `文字行必须切掉，带高 ${meta.height}（图形 140 + 标注余量）`)
+  assert.ok(meta.height >= 130, `图形 140 高必须完整，带高 ${meta.height}`)
+})
+
+test('⛔ 分栏不得切进图形内部：文字 + 两幅并排图（中间有空白列）⇒ 两幅都要保留', async () => {
+  const extra = [
+    glyphBlocks({ top: 20 }),
+    glyphBlocks({ top: 62 }),
+    '<rect x="270" y="80" width="55" height="150" fill="none" stroke="black" stroke-width="3"/>',
+    '<rect x="345" y="80" width="45" height="150" fill="none" stroke="black" stroke-width="3"/>',
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 300, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const meta = await sharp(r.band).metadata()
+  // 两幅图合并宽 ≈ 120（270..390）；只取右幅会掉到 ~60
+  assert.ok(meta.width >= 110, `两幅并排图都必须保留，实宽 ${meta.width}（只取一幅约 60）`)
+})
+
+test('⛔ 不带文字的双图并排（q26 三图版式）：不触发分栏，整块保留', async () => {
+  const extra = [
+    '<rect x="40" y="60" width="100" height="150" fill="none" stroke="black" stroke-width="3"/>',
+    '<rect x="180" y="60" width="100" height="150" fill="none" stroke="black" stroke-width="3"/>',
+    '<rect x="320" y="60" width="60" height="150" fill="none" stroke="black" stroke-width="3"/>',
+  ].join('')
+  const crop = await makeCrop([], { w: 400, h: 300, extra })
+  const r = await analyzeCropFigure(crop)
+  assert.ok(r.band, '应给出配图')
+  const meta = await sharp(r.band).metadata()
+  assert.ok(meta.width >= 320, `三幅并排图必须整体保留，实宽 ${meta.width}`)
+})

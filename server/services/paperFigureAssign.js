@@ -30,9 +30,22 @@
  * 两个消费方（同一实现，禁止各写一套）：
  *   ① paperBankService.parsePageToQuestions —— 新卷解析的裁片后置步；
  *   ② 存量修复脚本 —— 对已入册的卷子补图（按同一判据重跑即可）。
+ *
+ * ── 2026-11-16 第三次报障：「配图不干净，不是纯图片」──
+ * 方案：闵行七宝文来 2026-2027 九上学情检测（33 题 / 5 页）PDF 导入后 q2/q13 的配图
+ * 仍是「题干两行 + 抛物线」。前两次（11-03 绝对宽度 → 相对宽度、11-06 并集后二次削文字带）
+ * 修的都是「文字在上、图形在下」的堆叠版式；这一份是**题干在左、图形在右**的并排版式：
+ * 文字行与图形在同一 y 区间交错 ⇒ 行剖面把它们连成一条 341~519px 的大带 ⇒
+ * `isTextBand` 的「高度 <120px」前置条件整条失效 ⇒ 含 83 段文字墨迹的大块被判成图形带。
+ * 修法不再动几何阈值，改成两道**直接**判据（见 analyzeCropFigure / countTextRows）：
+ *   ① 产物级自检：抠出来的图里还有没有「成行文字」（段数 + 字高）；
+ *   ② 有字 ⇒ 左右分栏重试（双向验证：左块必须无图、右块必须无字）。
+ * ⛔ 教训：只要判据还在「猜形状」（高度/跨度/百分比），换个版式就会再犯一次。
+ *    要判「这里是不是字」，就用量文字的方法量它。
  */
 
 import sharp from 'sharp'
+import { labelStrokes } from './clipFigureClean.js'
 
 /** 「带图行」的最小归一化高度（0-1000 页高）。一行文字 ≈ 15-30；图形块实测 106-356。 */
 export const FIG_MIN_NORM_H = 60
@@ -45,6 +58,38 @@ export const FIG_MIN_BAND_H = 50
 
 /** 墨迹阈值：灰度 < 200 记为墨点。与裁片/图形带全链路同口径。 */
 const INK = 200
+
+// ── 「成行文字」判据（2026-11-16 第三次报障：题干在左 / 图形在右的并排版式）──
+// 一行中文正文实测 24~63 段短墨迹；图形描边一行只有 2~4 段（与 detectContentFrame 同口径）。
+const TEXT_ROW_SEG_MIN = 12
+/**
+ * 「字块」的尺寸窗口（4x 裁片实测）：汉字约 40~50px 见方，窄字/数字 18~30px，
+ * 上下标更小。窗口取宽 18~70、高 26~56，既容纳整字也挡住图形线段（长条）与噪点。
+ */
+const GLYPH_W_MIN = 18
+const GLYPH_W_MAX = 70
+const GLYPH_H_MIN = 26
+const GLYPH_H_MAX = 56
+const GLYPH_AREA_MIN = 80
+/**
+ * 字块的墨密度下限（墨像素 / bbox 面积）。汉字实测 0.2~0.45；
+ * 灰印刷的斜线/边框在 JPEG 下常断成 30~60px 的碎块，bbox 尺寸落在字窗口里，
+ * 但墨只占 5%~9% —— 这条把它们挡在「字」之外（2026-11-16 q17 实测）。
+ */
+const GLYPH_INK_FRAC_MIN = 0.12
+/** 字块的宽高比窗口：汉字接近 1，数字/字母 0.35~1.2；长条碎线会被这条和上面那条一起挡掉。 */
+const GLYPH_RATIO_MIN = 0.3
+const GLYPH_RATIO_MAX = 3.2
+/** 同一行字的纵向中心允许偏差（4x 字高 40 时基线抖动实测 <8px）。 */
+const GLYPH_ROW_BAND = 14
+/** 一行至少这么多字才算「正文行」：正文一行 20~50 字，图形里的顶点字母/刻度一行只有 1~3 个。 */
+const GLYPH_TEXT_ROW_MIN = 6
+/**
+ * 行内「换内容块」的横向间隙：正文字距 8~25px、标点后空格 <40px；
+ * 题干与图形顶点字母之间实测 100px+（2026-11-16 q17：顶点 D 与题干同一行带，
+ * 直接把 right 拉到图形右缘 1873 ⇒ 分栏下界越过了所有候选）。
+ */
+const GLYPH_CLUSTER_GAP = 80
 
 const isInk = (v) => v < INK
 
@@ -270,6 +315,174 @@ export async function extractFigureBandFromCrop(cropBuffer) {
  *   但那里确实有五幅图：整张裁片兜底是**对**的，绝不能因为 band=null 就当纯文字删掉。
  */
 export async function analyzeCropFigure(cropBuffer) {
+  const base = await analyzeCropRegion(cropBuffer)
+  if (!base.band) return base
+  // ── 产物级自检（2026-11-16 第三次报障）──
+  // 「抠出来的图里还有没有成行的字」比任何区域判据都直接：直接量最终产物。
+  // 含字 ⇒ 走左右分栏重试（题干在左、图形在右的并排版式）；仍切不开就返回原结果。
+  const dirty = await measureTextRowsInBuffer(base.band)
+  if (dirty.textRowCount < 1) return base
+  const split = await trySplitColumns(cropBuffer)
+  return split || base
+}
+
+/**
+ * 裁片里「成行文字」的行数（产物级判据，2026-11-16）。
+ *
+ * ── 为什么要单独一个文字判据 ──
+ * 几何判据（`isTextBand`：带高 <120px 且跨度 ≥ 本裁片最宽带 50%）隐含假设
+ * 「文字在上、图形在下」。真卷还有「题干在左、图形在右」的并排版式
+ * （2026-11-16 闵行七宝文来卷 q2/q13）：文字行与图形在同一 y 区间交错 ⇒
+ * 行剖面把它们连成一条 341~519px 的大带，「高度 <120」整条失效 ⇒
+ * 整块（文字 + 图形）被判成图形带，配图就是「题干重影 + 图」。
+ *
+ * 两个判据都来自仓内已验证的结论：
+ * - 一行中文正文 = 很多段短墨迹（`detectContentFrame` 实测 24~63 段、最长 14~30px；
+ *   图形描边一行只有 2~4 段）⇒ 段数 ≥ 12 才算文字行候选；
+ * - 文字有字高（4x 裁片 ≈ 40px），而水平虚线/点划线只有 3~5px 厚
+ *   ⇒ 一条墨迹簇在纵向连续延伸 ≥ 20px 才算字。
+ * ⛔ 不要退回「高度阈值」：120/140/160 都只是把界线挪给另一种版式。
+ */
+function measureTextRows(gray, width, height) {
+  const { comps } = labelStrokes(gray, width, height, isInk)
+  const glyphs = []
+  for (const c of comps) {
+    const w = c.x1 - c.x0 + 1
+    const h = c.y1 - c.y0 + 1
+    if (w < GLYPH_W_MIN || w > GLYPH_W_MAX) continue
+    if (h < GLYPH_H_MIN || h > GLYPH_H_MAX) continue
+    if (c.area < GLYPH_AREA_MIN) continue
+    if (c.area / (w * h) < GLYPH_INK_FRAC_MIN) continue
+    const ratio = w / h
+    if (ratio < GLYPH_RATIO_MIN || ratio > GLYPH_RATIO_MAX) continue
+    glyphs.push({ x1: c.x1, cy: (c.y0 + c.y1) / 2 })
+  }
+  glyphs.sort((a, b) => a.cy - b.cy)
+  const rows = []
+  for (const g of glyphs) {
+    let row = null
+    for (const r of rows) {
+      if (Math.abs(r.cy - g.cy) <= GLYPH_ROW_BAND) { row = r; break }
+    }
+    if (row) {
+      row.items.push(g)
+      row.cy = (row.cy * (row.items.length - 1) + g.cy) / row.items.length
+    } else {
+      rows.push({ cy: g.cy, items: [g] })
+    }
+  }
+  let textRowCount = 0
+  let right = -1
+  for (const r of rows) {
+    if (r.items.length < GLYPH_TEXT_ROW_MIN) continue
+    // 行内按横向间隙再分簇：只认「字最多的那一簇」的右界。
+    // ⛔ 取整行 max(x1) 会把图形里的顶点字母算进正文（q17 实测）。
+    r.items.sort((a, b) => a.x1 - b.x1)
+    const clusters = []
+    let cur = [r.items[0]]
+    for (let i = 1; i < r.items.length; i++) {
+      if (r.items[i].x1 - cur[cur.length - 1].x1 >= GLYPH_CLUSTER_GAP) { clusters.push(cur); cur = [r.items[i]] }
+      else cur.push(r.items[i])
+    }
+    clusters.push(cur)
+    let best = clusters[0]
+    for (const c of clusters) if (c.length > best.length) best = c
+    if (best.length < GLYPH_TEXT_ROW_MIN) continue
+    textRowCount++
+    const br = best[best.length - 1].x1
+    if (br > right) right = br
+  }
+  return { textRowCount, right }
+}
+
+async function measureTextRowsInBuffer(buffer) {
+  try {
+    const { data, info } = await sharp(buffer).greyscale().raw().toBuffer({ resolveWithObject: true })
+    return measureTextRows(data, info.width, info.height)
+  } catch {
+    return { textRowCount: 0, right: -1 }
+  }
+}
+
+async function subCrop(cropBuffer, left, top, width, height) {
+  try {
+    return await sharp(cropBuffer)
+      .extract({ left, top, width, height })
+      .withMetadata({ icc: 'srgb' })
+      .jpeg({ quality: 92 })
+      .toBuffer()
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 左右分栏重试：题干在左、图形在右时，把左侧文字块整体切掉再抠图。
+ *
+ * 候选分界 = 贯穿全高的空白列（文字与图之间必然有一列没墨）。
+ * 逐候选做**双向验证**，两个方向都过才采用（单侧判据都会砍图或留字）：
+ * - 左块必须「没有图」（`hasFigure=false`）：挡住「切在图形内部」——图内部有空白列时，
+ *   左块会含图形左半 ⇒ 判有图 ⇒ 拒，不会把一幅图切成两半；
+ * - 右块必须能出干净带且**产物里不含成行文字**：挡住「切在文字中间」——右块还留着
+ *   半个题干时照样 dirty ⇒ 拒。
+ * 全部候选都不满足 ⇒ 返回 null，调用方保留原结果（宁可带文字也不砍图）。
+ */
+async function trySplitColumns(cropBuffer) {
+  const { data, info } = await sharp(cropBuffer).greyscale().raw().toBuffer({ resolveWithObject: true })
+  const width = Number(info.width) || 0
+  const height = Number(info.height) || 0
+  if (width < 200 || height < 60) return null
+  const colInk = new Int32Array(width)
+  for (let y = 0; y < height; y++) {
+    const off = y * width
+    for (let x = 0; x < width; x++) if (isInk(data[off + x])) colInk[x]++
+  }
+  const cuts = []
+  let s = -1
+  for (let x = 0; x <= width; x++) {
+    const empty = x < width && colInk[x] === 0
+    if (empty && s < 0) s = x
+    if (!empty && s >= 0) {
+      if (x - s >= 8) cuts.push(x)
+      s = -1
+    }
+  }
+  // 分界不能落在文字里：先用「文字行」量出文字的横向右界，候选必须越过它。
+  // ⛔ 只靠「右块无字」验证会被「切剩两三个字」骗过（3 个字一行不足 12 段，判不出文字行，
+  //    2026-11-16 q2 实测残留「图象，那」）—— 所以这里必须有下界，两道判据一起用。
+  const textRows = measureTextRows(data, width, height)
+  const minLeft = Math.max(Math.round(width * 0.15), textRows.right - 8)
+  // 右块最小宽度：真卷图形区实测 ≥480px；小图形（合成用例 90px）也要能过，
+  // 所以取「60px 或 6% 幅宽」的下限，而不是固定 120（2026-11-16 用例⑤实测被卡）。
+  const minRight = Math.max(60, Math.round(width * 0.06))
+  const maxLeft = Math.round(width * 0.88)
+  // 候选从右往左试：紧贴图形的那条空白列才是真分界（文字的右界由字块估出，可能偏左；
+  // 偏左的分界会把两三个字的残片留在图里，而残片不成行、验证挡不住 —— 2026-11-16 q2 实测）。
+  // 「切进图形内部」由左块「有图」验证兜住，所以从右试不会砍图。
+  const tries = cuts.filter(c => c >= minLeft && c <= maxLeft && width - c >= minRight).slice(-8).reverse()
+  if (process.env.FIG_ASSIGN_DEBUG) {
+    console.log('[figAssign] width=' + width + ' textRows=' + textRows.rows + ' textRight=' + textRows.right
+      + ' cuts=' + cuts.slice(0, 20).join(',') + ' tries=' + tries.join(','))
+  }
+  for (const cut of tries) {
+    const leftBuf = await subCrop(cropBuffer, 0, 0, cut, height)
+    if (!leftBuf) continue
+    const left = await analyzeCropRegion(leftBuf)
+    if (left.hasFigure) continue
+    if (left.reason !== 'no-figure-band' && left.reason !== 'no-ink') continue
+    const rightW = width - cut
+    const rightBuf = await subCrop(cropBuffer, cut, 0, rightW, height)
+    if (!rightBuf) continue
+    const right = await analyzeCropRegion(rightBuf)
+    if (!right.band) continue
+    if ((await measureTextRowsInBuffer(right.band)).textRowCount >= 1) continue
+    return { band: right.band, hasFigure: true, reason: 'ok' }
+  }
+  return null
+}
+
+/** 整幅（不做分栏）的图形带判定 —— 原 analyzeCropFigure 的全部逻辑。 */
+async function analyzeCropRegion(cropBuffer) {
   let sawFigure = false
   try {
     const { data, info } = await sharp(cropBuffer).greyscale().raw().toBuffer({ resolveWithObject: true })
