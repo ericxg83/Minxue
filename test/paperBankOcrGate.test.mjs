@@ -69,11 +69,28 @@ function checkService(src) {
   const bad = []
   const s = stripComments(src)
   if (!/export async function crossCheckPageOcr\(/.test(s)) bad.push('缺少 crossCheckPageOcr')
-  if (!/await crossCheckPageOcr\(\{ imageDataURL, rows, pageNumber, logger \}\)/.test(s)) bad.push('主 OCR 之后没有调用双模型复核')
+  if (!/await crossCheckPageOcr\(\{ imageDataURL, rows, pageNumber, logger, pdfPageText \}\)/.test(s)) {
+    bad.push('主 OCR 之后没有调用双模型复核（且必须把 PDF 文本层证人一起传进去）')
+  }
   // 终裁不得看到候选答案：userText 只带 ask（不含 printed_text）
   if (!/userText: '待抄录位置：\\n' \+ JSON\.stringify\(ask\)/.test(s)) bad.push('终裁输入必须只有待抄录位置，不能带候选 printed_text')
   if (!/norm\(t\.printed_text\) === norm\(d\.printed_text\)/.test(s)) bad.push('两份抄本一致才允许自动改')
-  if (!/if \(!hit\) continue/.test(s)) bad.push('锚点不在原文时必须跳过（禁止整段覆盖）')
+  if (!/if \(hitText == null \|\| !String\(hitText\)\.includes\(d\.ocr_text\)\) continue/.test(s)) {
+    bad.push('锚点不在原文时必须跳过（禁止整段覆盖）')
+  }
+  // ── 2026-11-16 负责人报障「为什么让我核对？试卷要无错」──────────────────
+  // 事故：源 PDF 带文本层（真值就在文件里），闸却把**正确**的
+  //   「当-3<x<0时，y>0」报成「应为 ≤」写进待核对 —— 老师照建议改就把对的改错。
+  if (!/pdfPageText = null/.test(s)) bad.push('crossCheckPageOcr 必须接收 PDF 文本层（真值证人）')
+  if (!/if \(w === 'db'\) \{ pdfResolved \+= 1; continue \}/.test(s)) {
+    bad.push('文本层证实现值正确时必须丢弃差异，绝不能挂成待核对')
+  }
+  if (!/arbiterConfirmsDb/.test(s)) {
+    bad.push('终裁独立抄回现值时必须丢弃差异（否则正确的不等式会被要求改成 ≤）')
+  }
+  if (!/if \(w === 'suggest'\) \{ applyFix\(row, d\); corrected \+= 1; pdfResolved \+= 1; continue \}/.test(s)) {
+    bad.push('文本层证实候选正确时必须直接改字，不再问模型')
+  }
   if (!/skipped: true/.test(s)) bad.push('复核失败必须只降级、不阻塞解析')
   // 2026-11-09 松江 p6 事故：终裁 Gemini 502 时旧逻辑整页判「未复核」，
   // 连第一步已经查出的差异清单一并丢掉。终裁失败只允许降级成「待人工核对」。
@@ -188,7 +205,7 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
   assert.ok(checkService(svc.replace("userText: '待抄录位置：\\n' + JSON.stringify(ask)", "userText: JSON.stringify(diffs)")).length > 0)
   assert.ok(checkService(svc.replace('norm(t.printed_text) === norm(d.printed_text)', 'true')).length > 0,
     '绕过一致性判据必须判红')
-  assert.ok(checkService(svc.replace('await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger })', 'const cross = { review: [], checked: 0, corrected: 0, skipped: false }')).length > 0)
+  assert.ok(checkService(svc.replace('await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger, pdfPageText })', 'const cross = { review: [], checked: 0, corrected: 0, skipped: false }')).length > 0)
   assert.ok(checkService(svc.replace(/noBackup: true/g, 'noBackup: false')).length > 0,
     '允许闸静默降级到弱模型必须判红')
   assert.ok(checkService(svc.replace('skipped: false, arbiterError: arbError', 'skipped: true')).length > 0,

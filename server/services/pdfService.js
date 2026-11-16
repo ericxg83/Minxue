@@ -83,6 +83,37 @@ export const extractPdfText = async (fileBuffer, timeoutMs = 30000) => {
   }
 }
 
+// 按页抽取文字版 PDF 的文本层（一次返回每页纯文本，供试卷题库做「真值证人」）。
+// ⛔ 与 extractPdfText 的区别：这里**按页返回**，因为试卷题库按页解析、按页比对，
+//    页号必须能对上 db 的 page_no；合并成全文会丢掉分页边界。
+// 返回 null 表示这份 PDF 没有文本层（扫描件）⇒ 调用方必须退回纯视觉流程，不得当成空字符串。
+export const extractPdfTextPages = async (fileBuffer, timeoutMs = 30000) => {
+  const pdfjs = await loadPdfjs()
+  const doc = await withTimeout(
+    pdfjs.getDocument({ data: new Uint8Array(fileBuffer), useSystemFonts: true, ...CMAP_OPTS }).promise,
+    timeoutMs,
+    `PDF document loading (>${Math.round(timeoutMs / 1000)}s)`
+  )
+  try {
+    const pages = []
+    let totalChars = 0
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i)
+      const content = await page.getTextContent()
+      const text = content.items.map(it => (typeof it.str === 'string' ? it.str : '')).join('')
+      totalChars += text.replace(/\s/g, '').length
+      pages.push(text)
+      page.cleanup()
+    }
+    // 扫描件常见：能拿到 canvas 但 textContent 只有零星页码/页眉。
+    // 阈值按「每页 40 个非空白字符」判，低于它一律视为无文本层。
+    if (totalChars < pages.length * 40) return null
+    return pages
+  } finally {
+    await doc.destroy()
+  }
+}
+
 // 只读取 PDF 总页数（分批解析前先探明规模）。
 // 注意 new Uint8Array(fileBuffer) 是拷贝：pdfjs 会 transfer/detach 传入的 buffer，
 // 传拷贝保证同一 fileBuffer 可被后续每批的 getDocument 重复使用。

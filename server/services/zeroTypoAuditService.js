@@ -28,6 +28,8 @@ import { fileURLToPath } from 'url'
 import sharp from 'sharp'
 import { query } from '../config/neon.js'
 import { callVisionCompletion } from '../config/ai.js'
+import { extractPdfTextPages } from './pdfService.js'
+import { makePdfWitness } from './pdfWitness.js'
 
 const TMP_DIR = fileURLToPath(new URL('../../.audit_tmp/', import.meta.url))
 
@@ -625,6 +627,24 @@ function anchorAlive(item, row) {
 }
 
 /**
+ * 条目是否**已经被采纳**：审计/解析闸改完库之后，旧条目必须一起消失。
+ * 事故（2026-11-16 七宝文来）：q19 两条「ABC → A′B′C」审计早已自动改库成功，
+ *   清单里却还挂着；老师点开看到「库中 ABC」—— 而库里早就没有这个值了。
+ * ⛔ 只对 ≥2 字的候选生效：单字符（x / E / 5）在整段题面里必然到处出现，
+ *   拿它判「已采纳」会把真问题误清（q25 的 ax→x 就是这种短串）。
+ */
+function alreadyApplied(item, row) {
+  if (!row) return false
+  const sug = String(item.suggested_text || '')
+  if (sug.length < 2 || sug.startsWith('（')) return false
+  const field = item.field || 'content'
+  const cur = field === 'options' ? (row.options || []) : (row[field] ?? '')
+  const text = Array.isArray(cur) ? cur.join('\n') : String(cur)
+  const norm = (s) => String(s || '').replace(/[′’‘＇`´]/g, "'").replace(/\s+/g, '')
+  return norm(text).includes(norm(sug))
+}
+
+/**
  * 待核对清单只留「锚点还在库里」的条目：
  * 审计已改掉的那几处，页面级闸留下的旧条目必须一起消失（否则会永远挂着早已修好的告警）。
  * 同时把审计自己仍存疑的条目并进来（同一处只留一条，按 page|题号|小问|字段|库里文本 去重）。
@@ -636,7 +656,12 @@ async function reconcileReviewList({ resourceId, auditItems, logger }) {
   const dbRows = await loadQuestionRows(resourceId)
   const index = new Map(dbRows.map(r => [`${r.page_no}|${r.question_no}|${r.sub_no || ''}`, r]))
 
-  const kept = prev.filter(it => anchorAlive(it, index.get(`${it.page_no}|${it.question_no}|${it.sub_no || ''}`)))
+  const kept = prev.filter(it => {
+    const row = index.get(`${it.page_no}|${it.question_no}|${it.sub_no || ''}`)
+    if (!anchorAlive(it, row)) return false
+    if (alreadyApplied(it, row)) return false // 候选已进库 ⇒ 这条已处理完，不该再让老师核对
+    return true
+  })
   const seen = new Set(kept.map(reviewKey))
   const added = []
   for (const it of auditItems) {
@@ -721,6 +746,45 @@ function makeSaver(resourceId, phase, cache, noCache) {
   }
 }
 
+// ── 文本层证人：电子版 PDF 的字是真值，不该让模型去猜 ────────────────────
+// 事故（2026-11-16 七宝文来）：审计三轮读图把「ax」读成「x」、「△ABC」读成「△A′B′C」，
+//   同厂两票又不满足跨厂商准入 ⇒ 全部推给老师核对；而真错「△AB'C」反而漏了。
+//   PDF 文本层一行命中就能判死，零成本零误差。
+async function fetchPdfBuffer(url) {
+  const name = String(url).split('/').pop().replace(/[^\w.-]/g, '').slice(-48) || 'src.pdf'
+  const cacheFile = `${TMP_DIR}pdf_${name}`
+  try { return fs.readFileSync(cacheFile) } catch { /* 未缓存 */ }
+  const resp = await fetch(url)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  const buf = Buffer.from(await resp.arrayBuffer())
+  try { fs.mkdirSync(TMP_DIR, { recursive: true }); fs.writeFileSync(cacheFile, buf) } catch { /* 缓存失败不影响 */ }
+  return buf
+}
+
+/**
+ * 从 resources.metadata.sourceFiles 找源 PDF，抽文本层。
+ * @returns {Promise<null | {pageCount:number, forPage:(n:number)=>Function|null}>}
+ *   任何一步失败都返回 null（扫描件 / 网络 / 无源文件）⇒ 审计退回纯视觉，行为不变。
+ */
+async function loadPdfWitness(meta) {
+  const sf = meta?.sourceFiles
+  const urls = [
+    ...(Array.isArray(sf?.questions) ? sf.questions : []),
+    ...(Array.isArray(sf?.answers) ? sf.answers : []),
+  ]
+    .map(x => (typeof x === 'string' ? x : x?.url))
+    .filter(u => typeof u === 'string' && /\.pdf(\?|$)/i.test(u))
+  for (const url of urls) {
+    try {
+      const pages = await extractPdfTextPages(await fetchPdfBuffer(url))
+      if (!pages) continue
+      const fns = pages.map(t => makePdfWitness(t))
+      return { pageCount: pages.length, forPage: (n) => fns[Number(n) - 1] || null }
+    } catch { /* 换下一份 */ }
+  }
+  return null
+}
+
 /**
  * 对一份卷子跑零错字审计（可被路由/CLI 直接调用）。
  * @returns {Promise<object>} 审计摘要
@@ -756,6 +820,25 @@ async function runZeroTypoAuditInner({
   const pageBuf = new Map()
   const logger2 = logger
 
+  // 文本层证人（电子版 PDF）：下载失败 / 扫描件 ⇒ null，后续全部判空，行为与改动前一致。
+  let pdfW = null
+  try {
+    pdfW = await loadPdfWitness(prevMeta)
+    if (pdfW) logger2.log?.(`[zeroTypo] ${resourceName}: 检测到 PDF 文本层（${pdfW.pageCount} 页），差异以文本层为准`)
+  } catch (e) {
+    logger2.warn?.(`[zeroTypo] 文本层证人不可用（退回纯视觉）: ${String(e?.message || e).slice(0, 120)}`)
+  }
+  const verdictCache = new Map()
+  /** 'db' = 卷面只支持库里现值；'suggest' = 卷面只支持候选；null = 判不了/无文本层 */
+  const verdictOf = (f) => {
+    if (!pdfW || !f) return null
+    if (verdictCache.has(f)) return verdictCache.get(f)
+    const w = pdfW.forPage(f.page)
+    const v = w ? w(f.dbPart, f.modelPart, { before: f.before, after: f.after }) : null
+    verdictCache.set(f, v)
+    return v
+  }
+
   // ① 第一轮盲抄
   let targets = buildTargets(dbRows, pages)
   const cache1 = loadCache(resourceId, 't1', noCache)
@@ -767,12 +850,17 @@ async function runZeroTypoAuditInner({
   // 自动改库的准入：两票一致 + **跨厂商** + 总通道≥2 + 通道间无分歧。
   // ⛔ 同厂两档（qwen-flash / qwen-max）同时读错是有相关性的，不能当成两个独立证人；
   //    它们的一致只足以「提醒人看」，不足以自动改卷面。
+  // ✅ 唯一例外：PDF 文本层（独立于所有模型的第 0 号证人）。它说候选对 ⇒ 同厂一致也够；
+  //    它说现值对 ⇒ 差异是误报，连「待核对」都不该进（事故：ax 被读成 x 挂了两天）。
   const isMultiVote = (f) => !f.isMissing && f.votes.length >= 2 && f.totalChannels >= 2 && !f.conflictParts?.length
   const isCrossVendor = (f) => isMultiVote(f) && f.vendorVotes.length >= 2
 
   const multi = t1.items.filter(isCrossVendor)
-  const confirmed = apply ? multi : []
-  const suspect1 = t1.items.filter(f => !confirmed.includes(f) && !f.isMissing && f.votes.length >= 1)
+  const pdfConfirmed = t1.items.filter(f =>
+    !f.isMissing && !f.conflictParts?.length && verdictOf(f) === 'suggest')
+  const confirmed = apply ? [...new Set([...multi, ...pdfConfirmed])] : []
+  const suspect1 = t1.items.filter(f =>
+    !confirmed.includes(f) && !f.isMissing && f.votes.length >= 1 && verdictOf(f) !== 'db')
 
   let fixed = 0
   let manual = []
@@ -803,7 +891,20 @@ async function runZeroTypoAuditInner({
     })
     // 闭环残余：只要是「两票一致 / 无分歧」就算没清零，不管是不是同厂商 ——
     // 同厂商两票说明这两档都这么读，虽然没有第二家确认也绝不能当「已校」放过。
-    residual = t2.items.filter(isMultiVote)
+    // 但文本层有最终否决权：'db' ⇒ 改后的库值就是卷面的字，放过；'suggest' ⇒ 库里还错，直接改。
+    const t2Multi = t2.items.filter(isMultiVote)
+    const t2PdfFix = apply ? t2Multi.filter(f => verdictOf(f) === 'suggest') : []
+    if (t2PdfFix.length) {
+      const r2 = await applyConfirmedFixes({ resourceId, dbRows, confirmed: t2PdfFix, logger: logger2 })
+      fixed += r2.applied
+      manual = [...manual, ...r2.manual]
+      if (r2.applied) dbRows = await loadQuestionRows(resourceId)
+      logger2.log?.(`[zeroTypo] 第②轮按文本层改库 ${r2.applied}/${t2PdfFix.length} 处`)
+    }
+    residual = t2Multi.filter(f => {
+      const v = verdictOf(f)
+      return v !== 'db' && v !== 'suggest'
+    })
 
     // 数字缺口：≥2 个通道都说「库里某个数在卷面上没有」才进待核对（单通道多半是裁片边界）
     const byTarget = new Map()

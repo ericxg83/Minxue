@@ -26,7 +26,9 @@ import sharp from 'sharp'
 import crypto from 'crypto'
 import { query, transaction } from '../config/neon.js'
 import { uploadImage } from './ossService.js'
-import { renderPdfToJpegs } from './pdfService.js'
+import { renderPdfToJpegs, extractPdfTextPages } from './pdfService.js'
+// 文本层「真值证人」：解析闸与零错字审计共用同一份实现（⛔ 不许各写一套归一化）
+import { makePdfWitness, pickDiffContext } from './pdfWitness.js'
 import {
   buildOCRPrompt, callVisionCompletion, GENERAL_OCR_VENDOR_CHAIN,
   PAPER_BANK_OCR_VERIFY_CHAIN, PAPER_BANK_OCR_ARBITER_CHAIN,
@@ -435,8 +437,9 @@ const OCR_TRANSCRIBE_SYSTEM = [
  * 对一页主 OCR 结果做双模型交叉校验。
  * @returns {{rows:object[], review:object[], checked:number, corrected:number, skipped:boolean}}
  */
-export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger = console }) {
-  const empty = { rows, review: [], checked: 0, corrected: 0, skipped: false }
+export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger = console, pdfPageText = null }) {
+  const witness = makePdfWitness(pdfPageText)
+  const empty = { rows, review: [], checked: 0, corrected: 0, skipped: false, pdfResolved: 0 }
   if (!rows.length) return empty
   try {
     const snapshot = rows.map((r, i) => ({
@@ -494,13 +497,30 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
         `[paperBank] 第 ${pageNumber} 页终裁模型调用失败（差异转人工核对、不自动改字）: ${arbError}`
       )
       const reviewOnArbiterFail = []
+      let fixedOnArbiterFail = 0
       for (const d of diffs) {
         const row = rows[d.idx]
         const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
-        const hit = Array.isArray(cur)
-          ? cur.some(x => String(x).includes(d.ocr_text))
-          : String(cur).includes(d.ocr_text)
-        if (!hit) continue
+        const hitText = Array.isArray(cur) ? cur.find(x => String(x).includes(d.ocr_text)) : String(cur)
+        if (hitText == null || !String(hitText).includes(d.ocr_text)) continue
+        // 终裁挂了不等于没有证人：文本层能裁决的照文本层办（它比模型更权威）
+        const w = witness
+          ? witness(d.ocr_text, d.printed_text, pickDiffContext(String(hitText), d.ocr_text))
+          : null
+        if (w === 'db') continue
+        if (w === 'suggest') {
+          if (Array.isArray(cur)) {
+            let done = false
+            row.options = cur.map(x => {
+              if (!done && x.includes(d.ocr_text)) { done = true; return x.replace(d.ocr_text, d.printed_text) }
+              return x
+            })
+          } else {
+            row[d.field] = String(cur).replace(d.ocr_text, d.printed_text)
+          }
+          fixedOnArbiterFail += 1
+          continue
+        }
         reviewOnArbiterFail.push({
           page_no: pageNumber, question_no: row.question_no, sub_no: row.sub_no,
           field: d.field, ocr_text: d.ocr_text, suggested_text: d.printed_text,
@@ -509,8 +529,8 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
         })
       }
       return {
-        rows, review: reviewOnArbiterFail, checked: rows.length, corrected: 0,
-        skipped: false, arbiterError: arbError,
+        rows, review: reviewOnArbiterFail, checked: rows.length, corrected: fixedOnArbiterFail,
+        skipped: false, arbiterError: arbError, pdfResolved: fixedOnArbiterFail,
       }
     }
     const transcripts = new Map(
@@ -519,26 +539,43 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
     const norm = (s) => String(s ?? '').replace(/\s+/g, '')
     const review = []
     let corrected = 0
+    let pdfResolved = 0
+    const applyFix = (row, d) => {
+      const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
+      if (Array.isArray(cur)) {
+        let done = false
+        row.options = cur.map(x => {
+          if (!done && x.includes(d.ocr_text)) { done = true; return x.replace(d.ocr_text, d.printed_text) }
+          return x
+        })
+      } else {
+        row[d.field] = String(cur).replace(d.ocr_text, d.printed_text)
+      }
+    }
     for (let j = 0; j < diffs.length; j++) {
       const d = diffs[j]
       const t = transcripts.get(j)
-      const agree = t && !t.uncertain && norm(t.printed_text) === norm(d.printed_text)
       const row = rows[d.idx]
       const cur = d.field === 'options' ? (row.options || []) : (row[d.field] ?? '')
-      const hit = Array.isArray(cur)
-        ? cur.some(x => String(x).includes(d.ocr_text))
-        : String(cur).includes(d.ocr_text)
-      if (!hit) continue // 锚点不在库里文本中 ⇒ 宁可不改，也不整段覆盖
+      const hitText = Array.isArray(cur) ? cur.find(x => String(x).includes(d.ocr_text)) : String(cur)
+      if (hitText == null || !String(hitText).includes(d.ocr_text)) continue // 锚点不在库里文本中 ⇒ 宁可不改，也不整段覆盖
+
+      // ① 文本层裁决最权威，先于任何模型判断
+      const w = witness
+        ? witness(d.ocr_text, d.printed_text, pickDiffContext(String(hitText), d.ocr_text))
+        : null
+      if (w === 'db') { pdfResolved += 1; continue } // 卷面只支持现值 ⇒ 误报，丢弃
+      if (w === 'suggest') { applyFix(row, d); corrected += 1; pdfResolved += 1; continue }
+
+      // ② 终裁独立抄回的就是**现值** ⇒ 现值已被确认，不是「待核对」。
+      //    事故（2026-11-16）：终裁把「当-3<x<0时，y>0」原样抄回，却仍生成
+      //    suggested=「≤」的条目 ⇒ 老师被要求核对一个不存在的问题，照建议改还会改错。
+      const arbiterConfirmsDb = t && !t.uncertain && norm(t.printed_text) === norm(d.ocr_text)
+      if (arbiterConfirmsDb) { pdfResolved += 1; continue }
+
+      const agree = t && !t.uncertain && norm(t.printed_text) === norm(d.printed_text)
       if (agree) {
-        if (Array.isArray(cur)) {
-          let done = false
-          row.options = cur.map(x => {
-            if (!done && x.includes(d.ocr_text)) { done = true; return x.replace(d.ocr_text, d.printed_text) }
-            return x
-          })
-        } else {
-          row[d.field] = String(cur).replace(d.ocr_text, d.printed_text)
-        }
+        applyFix(row, d)
         corrected += 1
       } else {
         review.push({
@@ -548,7 +585,7 @@ export async function crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger
         })
       }
     }
-    return { rows, review, checked: rows.length, corrected, skipped: false }
+    return { rows, review, checked: rows.length, corrected, skipped: false, pdfResolved }
   } catch (e) {
     logger.warn?.(`[paperBank] 第 ${pageNumber} 页双模型复核失败（题目照存、标记未复核）: ${e.message}`)
     return { rows, review: [], checked: 0, corrected: 0, skipped: true, error: String(e?.message || e).slice(0, 200) }
@@ -585,12 +622,109 @@ export async function cropQuestionImage(pageBuffer, box) {
   }
 }
 
+
+/**
+ * 一页的配图：逐行裁片 → 抠干净图形带 → 上传 → 小问组共享。
+ *
+ * 2026-11-16 从 parsePageToQuestions 抽出（行为零变化）：存量修复脚本必须走
+ * **同一条链路**，否则「新卷修好、老卷还脏」——历史上就是这么反复的。
+ */
+export async function assignPageFigures({ rows, hiPage, pageNumber, measured, logger = console }) {
+  const figBands = new Map()   // 行下标 → 该行自己的干净图形带
+  const figureUploads = new Map()  // 内容 md5 → 已上传 URL（同页同一份字节只传一次）
+  for (let i = 0; i < rows.length; i++) {
+    const box = measured?.boxes?.[String(i)]
+    if (!box) continue
+    rows[i].bbox = box
+    const cropped = await cropQuestionImage(hiPage, box)
+    if (!cropped) continue
+    // ── 配图只承载「图形」（2026-11-06）──
+    // 负责人报障两例：徐汇一模 20 的三个小问各贴同一张表格图、嘉定一模 22(2) 贴的
+    // 是它自己那段正文。两者都是「把裁片当配图」的必然结果：裁片是**整行区域**，
+    // 纯文字行裁出来就是题干的重影，老师看到的是同一段字被贴了两遍。
+    // 现在的判据：先判这片区域**有没有图**（analyzeCropFigure），
+    //   ① 有图且能裁干净 → 用干净图形带；
+    //   ② 有图但裁不干净（多图版式/图形与正文交错）→ 整张裁片兜底（宁可带文字，不可丢图）；
+    //   ③ **没有图 → 不挂配图**（image_url 留空），页面只显示「看原卷」。
+    const fig = await analyzeCropFigure(cropped)
+    if (!fig.hasFigure) continue
+    if (fig.band) figBands.set(i, fig.band)
+    const imgBuf = fig.band || cropped
+    const kind = fig.band ? 'fig' : 'crop'
+    try {
+      // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
+      //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
+      //      同页多道缺号题的裁片会互相覆盖，最后所有行都指向同一张图；
+      //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
+      //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
+      //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
+      rows[i].image_url = await uploadFigureOnce(
+        imgBuf, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}-${kind}.jpg`, figureUploads)
+    } catch (e) {
+      logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题配图上传失败: ${e.message}`)
+    }
+  }
+
+  // ── 小问组配图共享（2026-11-02 建；2026-11-06 按嘉定一模 22 事故重写判据）──
+  // 切段以「题号行上沿」为界：「题干→小问→图块在最后」版式的图会整段落进
+  // 最后一个下问的切段，其余小问只切到自己的一行文字条（显示为细线 = 没图，
+  // 徐汇一模 25(1)(2) 实测）。组内把图补给文字条行；失败只降级为「维持现状」。
+  //
+  // ⛔ 2026-11-06 事故（嘉定一模 22）：旧实现用 bbox 高度猜「谁是带图行」，
+  //   抠不出干净图形带就**整张源裁片兜底**。(2) 的切段高 200（三行正文 + 一条
+  //   EF 线段）被猜成带图行 ⇒ 兜底成 (2) 的正文 ⇒ 补给 (1)：(1)(2) 都拿着 (2)
+  //   的正文，(1) 真正要的图（题干材料框里的作图）彻底消失。
+  // 新判据是**正证据**（详见 paperFigureAssign 文件头）：
+  //   ① 先逐行实测「能不能抠出图形带」，抠得出来的才算图源；
+  //   ② 图源优先整题行（题干图才是「如图」那张），其次组内最高的小问；
+  //   ③ target 只收自己无图 + 一行文字条的行，高裁片绝不覆盖；
+  //   ④ 抠不出图 ⇒ 不共享、不兜底。
+  try {
+    // figBands 已在上面的裁片循环里算好（一行只判一次图，不重复解码）
+    // withFigure：所有「有图」的行（含抠不干净挂整张的），这些行绝不能被共享覆盖
+    const withFigure = new Set()
+    rows.forEach((r, i) => { if (r.image_url) withFigure.add(i) })
+    const figPlans = planSubrowFigureAssignments(rows, figBands, { withFigure })
+    const sourceDone = new Set()
+    for (const pl of figPlans) {
+      const src = rows[pl.sourceIdx]
+      const tgt = rows[pl.targetIdx]
+      const figBuf = figBands.get(pl.sourceIdx)
+      if (!figBuf) continue
+      // source 行也换成同一张干净图形带（避免该页图带小问文字 + 高裁片）
+      if (!sourceDone.has(pl.sourceIdx)) {
+        sourceDone.add(pl.sourceIdx)
+        try {
+          src.image_url = await uploadFigureOnce(
+            figBuf,
+            `paper-p${pageNumber}-q${src.question_no}-s${src.sub_no || 'x'}-figsrc.jpg`,
+            figureUploads
+          )
+        } catch (e) {
+          logger.warn?.(`[paperBank] 小问配图共享(source)上传失败 q${src.question_no}(${src.sub_no}): ${e.message}`)
+        }
+      }
+      try {
+        tgt.image_url = await uploadFigureOnce(
+          figBuf,
+          `paper-p${pageNumber}-q${tgt.question_no}-s${tgt.sub_no || 'x'}-fig.jpg`,
+          figureUploads
+        )
+      } catch (e) {
+        logger.warn?.(`[paperBank] 小问配图共享上传失败 q${tgt.question_no}(${tgt.sub_no}): ${e.message}`)
+      }
+    }
+  } catch (e) {
+    logger.warn?.(`[paperBank] 小问配图共享失败（不影响主流程）: ${e.message}`)
+  }
+}
+
 /**
  * 解析一页：整页 OCR → 按题切段 → 裁片 → 返回该页的题目行（尚未落库）。
  * 任一子步骤失败都**只降级、不中断**：OCR 失败 → 该页 0 题（记 warning）；
  * 切段失败 → 题目照存，只是没有裁片图（image_url 为空）。
  */
-export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, pageNumber, logger = console }) {
+export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, pageNumber, logger = console, pdfPageText = null }) {
   const imageDataURL = 'data:image/jpeg;base64,' + pageBuffer.toString('base64')
   // 裁片/整页图一律走高清页（4x）；没给（拍照上传/高清渲染失败）就退回解析页。
   const hiPage = cropPageBuffer || pageBuffer
@@ -668,7 +802,7 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
 
   // ⭐ 一模卷零错字闸（2026-11-06）：主 OCR 之后，两个不同供应商的强模型再独立看同一页。
   // 两处抄本一致 ⇒ 自动修正；不一致 / 看不清 ⇒ 只标记待人工核对；调用失败 ⇒ 题目照存、标记未复核。
-  const cross = await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger })
+  const cross = await crossCheckPageOcr({ imageDataURL, rows, pageNumber, logger, pdfPageText })
 
   // 按题切段 → 裁片。切段失败不阻塞落库。
   try {
@@ -687,93 +821,7 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     } else {
       // 裁片缓冲按行留底：下面的「小问组配图共享」要用同一份像素判图，
       // 不再重复 cropQuestionImage（4x 图重复裁一次就是一次多余的 sharp 解码）。
-      const figBands = new Map()   // 行下标 → 该行自己的干净图形带
-      const figureUploads = new Map()  // 内容 md5 → 已上传 URL（同页同一份字节只传一次）
-      for (let i = 0; i < rows.length; i++) {
-        const box = measured?.boxes?.[String(i)]
-        if (!box) continue
-        rows[i].bbox = box
-        const cropped = await cropQuestionImage(hiPage, box)
-        if (!cropped) continue
-        // ── 配图只承载「图形」（2026-11-06）──
-        // 负责人报障两例：徐汇一模 20 的三个小问各贴同一张表格图、嘉定一模 22(2) 贴的
-        // 是它自己那段正文。两者都是「把裁片当配图」的必然结果：裁片是**整行区域**，
-        // 纯文字行裁出来就是题干的重影，老师看到的是同一段字被贴了两遍。
-        // 现在的判据：先判这片区域**有没有图**（analyzeCropFigure），
-        //   ① 有图且能裁干净 → 用干净图形带；
-        //   ② 有图但裁不干净（多图版式/图形与正文交错）→ 整张裁片兜底（宁可带文字，不可丢图）；
-        //   ③ **没有图 → 不挂配图**（image_url 留空），页面只显示「看原卷」。
-        const fig = await analyzeCropFigure(cropped)
-        if (!fig.hasFigure) continue
-        if (fig.band) figBands.set(i, fig.band)
-        const imgBuf = fig.band || cropped
-        const kind = fig.band ? 'fig' : 'crop'
-        try {
-          // ⛔ 文件名必须**逐行唯一**（2026-11-06）：
-          //   ① 题号可能为 null（模型没给号，等全卷补号）⇒ 原来是 `-qnull.jpg`，
-          //      同页多道缺号题的裁片会互相覆盖，最后所有行都指向同一张图；
-          //   ② 同一道题的多个小问 question_no 相同 ⇒ 原来只用题号命名，
-          //      后一个裁片覆盖前一个，第 (1) 问显示的是 (2) 问的图。
-          //   行下标 i 天然唯一，拼进去一次性解决两种覆盖。
-          rows[i].image_url = await uploadFigureOnce(
-            imgBuf, `paper-p${pageNumber}-q${rows[i].question_no ?? 'n'}-r${i}-${kind}.jpg`, figureUploads)
-        } catch (e) {
-          logger.warn?.(`[paperBank] 第 ${pageNumber} 页第 ${rows[i].question_no} 题配图上传失败: ${e.message}`)
-        }
-      }
-
-      // ── 小问组配图共享（2026-11-02 建；2026-11-06 按嘉定一模 22 事故重写判据）──
-      // 切段以「题号行上沿」为界：「题干→小问→图块在最后」版式的图会整段落进
-      // 最后一个下问的切段，其余小问只切到自己的一行文字条（显示为细线 = 没图，
-      // 徐汇一模 25(1)(2) 实测）。组内把图补给文字条行；失败只降级为「维持现状」。
-      //
-      // ⛔ 2026-11-06 事故（嘉定一模 22）：旧实现用 bbox 高度猜「谁是带图行」，
-      //   抠不出干净图形带就**整张源裁片兜底**。(2) 的切段高 200（三行正文 + 一条
-      //   EF 线段）被猜成带图行 ⇒ 兜底成 (2) 的正文 ⇒ 补给 (1)：(1)(2) 都拿着 (2)
-      //   的正文，(1) 真正要的图（题干材料框里的作图）彻底消失。
-      // 新判据是**正证据**（详见 paperFigureAssign 文件头）：
-      //   ① 先逐行实测「能不能抠出图形带」，抠得出来的才算图源；
-      //   ② 图源优先整题行（题干图才是「如图」那张），其次组内最高的小问；
-      //   ③ target 只收自己无图 + 一行文字条的行，高裁片绝不覆盖；
-      //   ④ 抠不出图 ⇒ 不共享、不兜底。
-      try {
-        // figBands 已在上面的裁片循环里算好（一行只判一次图，不重复解码）
-        // withFigure：所有「有图」的行（含抠不干净挂整张的），这些行绝不能被共享覆盖
-        const withFigure = new Set()
-        rows.forEach((r, i) => { if (r.image_url) withFigure.add(i) })
-        const figPlans = planSubrowFigureAssignments(rows, figBands, { withFigure })
-        const sourceDone = new Set()
-        for (const pl of figPlans) {
-          const src = rows[pl.sourceIdx]
-          const tgt = rows[pl.targetIdx]
-          const figBuf = figBands.get(pl.sourceIdx)
-          if (!figBuf) continue
-          // source 行也换成同一张干净图形带（避免该页图带小问文字 + 高裁片）
-          if (!sourceDone.has(pl.sourceIdx)) {
-            sourceDone.add(pl.sourceIdx)
-            try {
-              src.image_url = await uploadFigureOnce(
-                figBuf,
-                `paper-p${pageNumber}-q${src.question_no}-s${src.sub_no || 'x'}-figsrc.jpg`,
-                figureUploads
-              )
-            } catch (e) {
-              logger.warn?.(`[paperBank] 小问配图共享(source)上传失败 q${src.question_no}(${src.sub_no}): ${e.message}`)
-            }
-          }
-          try {
-            tgt.image_url = await uploadFigureOnce(
-              figBuf,
-              `paper-p${pageNumber}-q${tgt.question_no}-s${tgt.sub_no || 'x'}-fig.jpg`,
-              figureUploads
-            )
-          } catch (e) {
-            logger.warn?.(`[paperBank] 小问配图共享上传失败 q${tgt.question_no}(${tgt.sub_no}): ${e.message}`)
-          }
-        }
-      } catch (e) {
-        logger.warn?.(`[paperBank] 小问配图共享失败（不影响主流程）: ${e.message}`)
-      }
+      await assignPageFigures({ rows, hiPage, pageNumber, measured, logger })
     }
   } catch (e) {
     logger.warn?.(`[paperBank] 第 ${pageNumber} 页切段异常（题目照存、无裁片）: ${e.message}`)
@@ -960,11 +1008,23 @@ async function resetParseAudit(resourceId) {
 export async function parsePaperResource({ resourceId, fileBuffer, mimeType, images, append = false, logger = console }) {
   let pages = []
   let hiPages = null // 4x 高清页：只喂裁片/整页图，不喂 OCR（2026-11-03「要高清」）
+  // 文本层（电子版 PDF 的字是真值）：按页取，作为 OCR 差异的裁决证人。
+  // ⛔ 扫描件拿不到文本层 ⇒ null，全流程退回纯视觉，行为与改动前完全一致。
+  let pdfTextPages = null
   if (Array.isArray(images) && images.length) {
     pages = images.slice(0, PAPER_MAX_PAGES)
   } else if (fileBuffer) {
     const isPdf = mimeType === 'application/pdf' || /\.pdf$/i.test(String(mimeType || ''))
     if (isPdf) {
+      try {
+        pdfTextPages = await extractPdfTextPages(fileBuffer)
+        if (pdfTextPages) {
+          logger.log?.(`[paperBank] 检测到 PDF 文本层（${pdfTextPages.length} 页）→ 用它裁决 OCR 差异`)
+        }
+      } catch (e) {
+        pdfTextPages = null // 抽取失败只降级，绝不阻塞解析
+        logger.warn?.(`[paperBank] PDF 文本层抽取失败（退回纯视觉）: ${e.message}`)
+      }
       const rendered = await renderPdfToJpegs(fileBuffer, { scale: RENDER_SCALE, maxPages: PAPER_MAX_PAGES })
       pages = (rendered?.images || []).slice(0, PAPER_MAX_PAGES)
       if (rendered?.totalPages > pages.length) {
@@ -1014,6 +1074,7 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
         cropPageBuffer: hiPages?.[idx] || null,
         pageNumber,
         logger,
+        pdfPageText: pdfTextPages?.[idx] ?? null,
       })
       return r
     } catch (e) {
@@ -1064,6 +1125,7 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
           + Buffer.from(await resp.arrayBuffer()).toString('base64')
         const again = await crossCheckPageOcr({
           imageDataURL, rows: r.rows || [], pageNumber: r.pageNumber, logger,
+          pdfPageText: pdfTextPages?.[r.pageNumber - basePage - 1] ?? null,
         })
         if (again.skipped) {
           r.ocrError = again.error || r.ocrError
