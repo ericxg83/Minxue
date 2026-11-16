@@ -284,6 +284,7 @@ export function mergePageContinuationRows(rows) {
   const pageNos = [...byPage.keys()].sort((a, b) => a - b)
   const dropped = new Set()
   const merged = []
+  const suspects = []
   for (const p of pageNos) {
     if (p <= Math.min(...pageNos)) continue   // 第一页没有「上一页」可并
     const pageRows = byPage.get(p)
@@ -307,7 +308,22 @@ export function mergePageContinuationRows(rows) {
     if (!prev) continue
     const prevOpts = Array.isArray(prev.options) ? prev.options : []
     const optBlock = opts.length >= 2 && prevOpts.length === 0
-    if (!optBlock && !looksPlaceholder) continue
+    if (!optBlock && !looksPlaceholder) {
+      // ③ 第三类：页首是「上一题的小问组」（题干在上一页、小问在本页首，卷面没印题号）。
+      // 形态是「上一页末题只有一行短题干、没有小问，本页首行紧接着是它的 (1)」。
+      // ⛔ 这一类**不自动合并**：合并要改它整组的题号，误判会把真题目吞掉（比多一题更坏）。
+      //    但要告警——闵行一模就是这么多出 1 题的（23 题题干 p5 + (1)(2)(3) p6）。
+      const prevGroup = list.filter(r => r.page_no === prevPage && Number(r.question_no) === Number(prev.question_no))
+      const prevHasSub = prevGroup.some(r => r.sub_no)
+      const prevShort = String(prev.content || '').length <= 60
+      if (!prevHasSub && prevShort) {
+        suspects.push({
+          page_no: p, question_no: head.question_no, intoQuestionNo: prev.question_no,
+          hint: '页首小问疑似上一题的续页',
+        })
+      }
+      continue
+    }
 
     if (optBlock) {
       const seen = new Set(prevOpts.map(x => String(x)))
@@ -332,7 +348,7 @@ export function mergePageContinuationRows(rows) {
       withFigure: !!prev.__continuationFigure,
     })
   }
-  if (!dropped.size) return { rows: list, merged: [], renumbered: 0 }
+  if (!dropped.size) return { rows: list, merged: [], renumbered: 0, suspects }
   const kept = list.filter(r => !dropped.has(r))
 
   // ── 被顶后的题号自动拉回（事故的第二半）──
@@ -356,7 +372,7 @@ export function mergePageContinuationRows(rows) {
     for (const r of above) r.question_no = Number(r.question_no) - 1
     renumbered += above.length
   }
-  return { rows: kept, merged, renumbered }
+  return { rows: kept, merged, renumbered, suspects }
 }
 
 /**
@@ -949,7 +965,16 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
   // 裁片/整页图一律走高清页（4x）；没给（拍照上传/高清渲染失败）就退回解析页。
   const hiPage = cropPageBuffer || pageBuffer
 
-  const { content } = await callVisionCompletion({
+  // 整页图先存 OSS（2026-11-16 青浦 p3 事故：原来是 OCR 成功后才上传，空页连页图都没有，
+  // 事后既无法「重解析该页」也无法人工核对）。失败只 warn。
+  let pageImageUrl = null
+  try {
+    pageImageUrl = await uploadImage(hiPage, `paper-p${pageNumber}.jpg`, 'paper-bank')
+  } catch (e) {
+    logger.warn?.(`[paperBank] 第 ${pageNumber} 页整页图上传失败: ${e.message}`)
+  }
+
+  const ocrPage = () => callVisionCompletion({
     imageDataURL,
     systemPrompt: buildOCRPrompt(),
     // 2026-11-06 嘉定一模 23(2) 事故：卷面「BC·CF = AC·DF」被 OCR 成「BC·CF = AC² - DE²」，
@@ -970,21 +995,24 @@ export async function parsePageToQuestions({ pageBuffer, cropPageBuffer = null, 
     vendorChain: GENERAL_OCR_VENDOR_CHAIN,
   })
 
-  const obj = parseJsonLoose(content)
-  const rawList = Array.isArray(obj?.questions) ? obj.questions : []
+  // ⛔ 空结果不可信 ⇒ 必须重试一次（2026-11-16 青浦 p3：同一页补跑三次分别返回 2 题 / 2 题 / 空，
+  //   一次空就把整页题丢掉 ⇒ 25 题的卷子只剩 23 题）。
+  let content = (await ocrPage())?.content
+  let obj = parseJsonLoose(content)
+  let rawList = Array.isArray(obj?.questions) ? obj.questions : []
   if (!rawList.length) {
-    logger.warn?.(`[paperBank] 第 ${pageNumber} 页未识别出题目（模型返回不可解析或为空）`)
-    return { rows: [], pageTitle: obj?.page_title || null, sectionTitle: obj?.section_title || null }
+    logger.warn?.(`[paperBank] 第 ${pageNumber} 页 OCR 返回空/不可解析，重试一次`)
+    content = (await ocrPage())?.content
+    obj = parseJsonLoose(content)
+    rawList = Array.isArray(obj?.questions) ? obj.questions : []
   }
-
-  // 整页图存 OSS：裁片可重做（换算法/补配图）而不必让老师重传卷子。
-  // 路径段用 'paper-bank' 而不是 null：题库素材没有学生归属，
-  // 传 null 会生成 `images/null/...` 这种脏路径。
-  let pageImageUrl = null
-  try {
-    pageImageUrl = await uploadImage(hiPage, `paper-p${pageNumber}.jpg`, 'paper-bank')
-  } catch (e) {
-    logger.warn?.(`[paperBank] 第 ${pageNumber} 页整页图上传失败: ${e.message}`)
+  if (!rawList.length) {
+    logger.warn?.(`[paperBank] 第 ${pageNumber} 页两次都未识别出题目`)
+    // 交给调用方写 parse_warning（本函数拿不到 resourceId）—— 空页必须让老师看得见，不能只留日志。
+    return {
+      rows: [], emptyPage: true, pageImageUrl,
+      pageTitle: obj?.page_title || null, sectionTitle: obj?.section_title || null,
+    }
   }
 
   // 题号：**这里只记录卷面印刷的题号**，缺号（null）留给 parsePaperResource 在全卷范围内补。
@@ -1315,6 +1343,14 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
   let ocrSkippedPages = 0
   for (const r of pageResults) {
     if (!r || r.__error || r.failed) continue
+    if (r.emptyPage) {
+      // 空页必须让老师看得见：青浦 p3 事故就是只留了一行日志，界面显示「23 题」却没人知道少了两题。
+      await appendParseWarning(
+        resourceId,
+        `第 ${r.pageNumber} 页未识别出题目（模型两次都返回空），该页需重新解析`
+      )
+      continue
+    }
     rows = rows.concat(r.rows || [])
     if (r.pageTitle) pageTitles.push(r.pageTitle)
     if (Array.isArray(r.ocrReview)) ocrReview.push(...r.ocrReview)
@@ -1389,6 +1425,12 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
         `${m.intoQuestionNo ?? ''}（${m.withOptions ? '补选项' : ''}${m.withOptions && m.withFigure ? '+' : ''}${m.withFigure ? '补配图' : ''}）`
       )
       logger.log?.(`[paperBank] 跨页续行并入 q${m.intoQuestionNo}: p${m.page_no} 页首块`)
+    }
+    for (const sp of (contInfo.suspects || [])) {
+      await appendParseWarning(
+        resourceId,
+        `第 ${sp.page_no} 页首行疑似是第 ${sp.intoQuestionNo} 题的小问续页（卷面未印题号），题号可能多算 1，请核对`
+      )
     }
     if (contInfo.renumbered) {
       await appendParseWarning(
