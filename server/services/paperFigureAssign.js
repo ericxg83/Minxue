@@ -242,12 +242,22 @@ export function planSubrowFigureAssignments(rows, figureIdx, opts = {}) {
     return /如图|图中|图\s*\d/.test(c)
   }
 
+  // 「真正的题干行」：sub_no 为空 **且** 正文不是第 (1) 问。
+  // 真卷里第 (1) 问经常被 OCR 记成整题行（2026-11-16 七宝 q25：「【特例感知】(1) 如图1…」、
+  // q24：「(1) 求a、c的值；」），旧判据「sub_no 为空 = 题干行」把它当题干 ⇒ 永不被补图
+  // （实测 q25 的第 (1) 问一直空着配图，而 (2)(3) 有）。题干行不被覆盖的本意是防
+  // 11-06 事故（拿别人的正文当图），而 source 早已改成「实测能抠出干净图形带」的正证据制。
+  const isStemRow = (i) => {
+    if (list[i].sub_no) return false
+    return !/[(（]\s*1\s*[)）]/.test(String((list[i] && list[i].content) || ''))
+  }
+
   const plans = []
   for (const idxs of groups.values()) {
     if (idxs.length < 2) continue
 
     // 图源：整题行（有图）> 组内最高的小问（有图）
-    let srcIdx = idxs.find(i => !list[i].sub_no && fig.has(i))
+    let srcIdx = idxs.find(i => isStemRow(i) && fig.has(i))
     if (srcIdx === undefined) {
       for (const i of idxs) {
         if (!fig.has(i)) continue
@@ -258,7 +268,7 @@ export function planSubrowFigureAssignments(rows, figureIdx, opts = {}) {
 
     for (const i of idxs) {
       if (i === srcIdx) continue
-      if (!list[i].sub_no) continue        // 题干行永不被小问的图覆盖
+      if (isStemRow(i)) continue           // 真·题干行永不被小问的图覆盖（含 (1) 的整题行不算）
       if (withFig.has(i)) continue         // 自己已经有图（干净图带或整张兜底），不覆盖
       // 高裁片自成一题，覆盖会毁掉它自己的内容；唯一例外是它正文自己写着「如图」
       // （杨浦 24(1) 实测：两行字但第一个字就是「如图1」）。

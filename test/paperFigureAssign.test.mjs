@@ -508,3 +508,33 @@ test('⛔ 反向自检：两幅等大图形（多主体）⇒ 连通域必须放
   const meta = await sharp(r.band).metadata()
   assert.ok(meta.height >= 300, `两幅图都必须保留（280px 跨度），实高 ${meta.height}`)
 })
+
+// ── 第(1)问被记成「整题行」时的补图（2026-11-16 七宝 q25 实测）──
+// 页面上 (1)(2)(3) 三个小问，OCR 把第 (1) 问记成 sub_no 为空的整题行
+// （content「【特例感知】(1) 如图1…」）⇒ 旧的「sub_no 空 = 题干行」判据让它永远没有配图，
+// 而 (2)(3) 都拿到了三图并排那张。题干行不被覆盖的本意是防 11-06「拿别人正文当图」。
+
+test('★ 第(1)问被记成整题行（sub_no 空 + 正文含 (1)）⇒ 必须补图', () => {
+  const rows = [
+    { ...row('a', 25, '', 73), content: '【特例感知】(1) 如图1，若点P恰好落在边AD上，求证：△BCE∽△CDP；' },
+    { ...row('b', 25, '2', 22), content: '【变式求异】(2) 如图2，若点E是CD的中点…' },
+    { ...row('c', 25, '3', 195), content: '【化归探究】(3) 如图3，若CE=3DE…' },
+  ]
+  // 不传 withFigure 时 (2) 也是文字条 ⇒ (1)(2) 都补；关���是 (1) 必须在里面
+  const plans = planSubrowFigureAssignments(rows, new Set([2]))
+  const targets = plans.map(p => p.targetIdx).sort()
+  assert.deepEqual(targets, [0, 1])
+  for (const p of plans) assert.equal(p.sourceIdx, 2)
+})
+
+test('⛔ 反向自检：真题干行（sub_no 空、正文不含 (1)）仍不得被小问的图覆盖', () => {
+  const rows = [
+    { ...row('a', 25, '', 245), content: '(12分) 如图，在抛物线 y=ax²+2ax+c (a>0) 与x轴交于A(-3,0)…' },
+    { ...row('b', 25, '2', 22), content: '(2) 证明：△AMC为直角三角形；' },
+    { ...row('c', 25, '3', 195), content: '(3) 如果点P是线段AC上的一个动点…' },
+  ]
+  const plans = planSubrowFigureAssignments(rows, new Set([2]))
+  assert.equal(plans.length, 1)
+  assert.notEqual(plans[0].targetIdx, 0, '题干行不能被覆盖')
+  assert.equal(plans[0].targetIdx, 1)
+})
