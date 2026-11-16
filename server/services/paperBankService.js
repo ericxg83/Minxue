@@ -1260,6 +1260,16 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
     ).catch(() => {})
   }
 
+  // 文本层覆盖面：诚实记录这卷到底有没有被真值核过（mode: full / partial / absent）
+  const pdfFlatChars = pdfTextPages ? pdfTextPages.join('').replace(/\s/g, '').length : 0
+  const dbTextChars = rows.reduce(
+    (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
+  const pdfTextLayerInfo = !pdfTextPages
+    ? { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
+    : pdfFlatChars >= dbTextChars * 0.6
+      ? { mode: 'full', chars: pdfFlatChars, note: '文本层覆盖题面，差异以文本层为准' }
+      : { mode: 'partial', chars: pdfFlatChars, dbChars: dbTextChars, note: '文本层只覆盖少量标签（正文是图片），仍以视觉 OCR 为准' }
+
   // 双模型复核结果落 metadata：一致处已自动改，剩下的是「待老师对照原卷核对」的清单。
   // 空数组也要写（表示已复核且无遗留）；复核失败的页单独记进 summary，界面会给提示。
   // ⛔ 追加批次必须把本批清单并进已有清单：直接覆盖会把前几批的待核对项冲掉。
@@ -1285,6 +1295,10 @@ export async function parsePaperResource({ resourceId, fileBuffer, mimeType, ima
         skippedPages: ocrSkippedPages, reviewCount: ocrReview.length,
         // 补跑痕迹（2026-11-09）：失败过几页、救回几页，避免「skippedPages 变小」无从解释
         retriedPages: ocrRetried, retrySucceeded: ocrRetrySucceeded,
+        // PDF 文本层覆盖面：只有够覆盖题面的才算「用真值核过」。
+        // 松江一模那种「文本层只有题号、正文是图片」的混合件，字符数远少于题面，
+        // 必须如实标 partial —— 否则「已校」会被误读成「已用真值核过」。
+        pdfTextLayer: pdfTextLayerInfo,
         at: new Date().toISOString(),
       }),
     ]

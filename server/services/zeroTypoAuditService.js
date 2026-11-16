@@ -779,7 +779,11 @@ async function loadPdfWitness(meta) {
       const pages = await extractPdfTextPages(await fetchPdfBuffer(url))
       if (!pages) continue
       const fns = pages.map(t => makePdfWitness(t))
-      return { pageCount: pages.length, forPage: (n) => fns[Number(n) - 1] || null }
+      return {
+        pageCount: pages.length,
+        chars: pages.join('').replace(/\s/g, '').length,
+        forPage: (n) => fns[Number(n) - 1] || null,
+      }
     } catch { /* 换下一份 */ }
   }
   return null
@@ -955,9 +959,21 @@ async function runZeroTypoAuditInner({
   const clean = !residual.length && !numericReview.length && !manual.length && reviewCount === 0
   const status = !verify ? 'checked' : (!clean ? 'needs_review' : (fullCoverage ? 'passed' : 'checked'))
 
+  // 文本层覆盖面：诚实记录「这卷到底有没有用文件里的字核过」。
+  // 松江一模那种「文本层只有题号、正文是图片」的混合件远低于 60%，必须标 partial，
+  // 否则「已校」会被误读成「已用真值核过」。
+  const dbTextChars = dbRows.reduce(
+    (n, r) => n + String(r.content || '').length + String(r.parent_stem || '').length, 0)
+  const pdfTextLayer = !pdfW
+    ? { mode: 'absent', note: '无文本层（扫描件），全程视觉 OCR' }
+    : pdfW.chars >= dbTextChars * 0.6
+      ? { mode: 'full', chars: pdfW.chars, note: '文本层覆盖题面，差异以文本层为准' }
+      : { mode: 'partial', chars: pdfW.chars, dbChars: dbTextChars, note: '文本层只覆盖少量标签，仍以视觉 OCR 为准' }
+
   const summary = {
     status, phase: null, reason,
     finishedAt: new Date().toISOString(),
+    pdfTextLayer,
     targets: t1.stats.targets,
     channelCalls: calls,
     channelOk: okCount,
