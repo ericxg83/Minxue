@@ -110,6 +110,11 @@ function checkContract(routesSrc, viewSrc) {
   if (!/questionSourceUrl\(\{ resource_id: reviewDialog\.paper\?\.id, page_no: it\.page_no \}\)/.test(v)) {
     bad.push('待核对项必须能按页码打开原卷')
   }
+  // 2026-11-16：审计还在跑时不能只显示「N 处待核对」（v-else-if 会把「校验中」吞掉），
+  // 否则老师把首轮差异当成终局结论反复追问「PDF 很清楚为什么还有 N 处」。
+  if (!/zeroTypoBadge\(activePaper\)\?\.kind === 'busy'[\s\S]{0,500}\(activePaper\.ocr_review \|\| \[\]\)\.length/.test(v)) {
+    bad.push('零错字校验中必须先于待核对徽标显示，避免首轮差异被当成终局')
+  }
   return bad
 }
 
@@ -198,4 +203,6 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
     .replace(/\bactivePaper\.ocr_review\b/g, 'activePaper.ocrReview')
   assert.ok(checkContract(routes, renamedView).length > 0, '字段名不一致必须判红')
   assert.ok(checkContract(routes.replace('ocr_review:', 'ocrReview:'), view).length > 0, '后端改名必须判红')
+  assert.ok(checkContract(routes, view.replace("zeroTypoBadge(activePaper)?.kind === 'busy'", "zeroTypoBadge(activePaper)?.kind === 'passed'")).length > 0,
+    '把校验中提示换成终局状态必须判红')
 })

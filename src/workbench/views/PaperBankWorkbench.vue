@@ -78,11 +78,20 @@
                 title="选择要打开的答案原件"
                 @click="openSourceFiles(activePaper, 'answers')"
               >答案册 {{ activePaper.answer_files.length }} 份 ↗</button>
+              <!-- 审计进行中时首轮差异清单还在变：先把「校验中」摆出来，
+                   否则 v-else-if 会让老师只看到「N 处待核对」，误以为已经是终局（11-16 报障）。 -->
+              <span
+                v-if="zeroTypoBadge(activePaper)?.kind === 'busy'"
+                class="pb-audit-state is-busy"
+                :title="zeroTypoBadge(activePaper).title"
+              >⟳ 零错字校验中（下方差异待复核后更新）</span>
               <button
                 v-if="(activePaper.ocr_review || []).length"
                 type="button"
                 class="pb-review-badge"
-                :title="`双模型复核：${activePaper.ocr_review.length} 处读法不一致，待对照原卷核对`"
+                :title="zeroTypoBadge(activePaper)?.kind === 'busy'
+                  ? `首轮双模型复核的 ${activePaper.ocr_review.length} 处读法不一致；零错字审计仍在跑，清单会自动更新`
+                  : `双模型复核：${activePaper.ocr_review.length} 处读法不一致，待对照原卷核对`"
                 @click="openOcrReview(activePaper)"
               >⚠ {{ activePaper.ocr_review.length }} 处待核对</button>
               <span
