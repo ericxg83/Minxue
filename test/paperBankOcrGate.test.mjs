@@ -132,6 +132,10 @@ function checkContract(routesSrc, viewSrc) {
   if (!/zeroTypoBadge\(activePaper\)\?\.kind === 'busy'[\s\S]{0,500}\(activePaper\.ocr_review \|\| \[\]\)\.length/.test(v)) {
     bad.push('零错字校验中必须先于待核对徽标显示，避免首轮差异被当成终局')
   }
+  // 2026-11-16 产品铁律（零错字 / 无错版）：凭据必须说清「有没有用文件里的字核过」。
+  // ⛔ 文本层只覆盖题号（partial）与扫描件（absent）都不能被读成「已用真值核过」。
+  if (!r.includes('pdf_text_layer:')) bad.push('后端 papers 接口须返回 pdf_text_layer（覆盖面凭据）')
+  if (!/pdf_text_layer\?\.mode/.test(v)) bad.push('前端必须读 pdf_text_layer.mode 标注凭据来源')
   return bad
 }
 
@@ -220,6 +224,10 @@ test('反向自检：写坏的版本喂给同一检查函数必须判红', () =>
     .replace(/\bactivePaper\.ocr_review\b/g, 'activePaper.ocrReview')
   assert.ok(checkContract(routes, renamedView).length > 0, '字段名不一致必须判红')
   assert.ok(checkContract(routes.replace('ocr_review:', 'ocrReview:'), view).length > 0, '后端改名必须判红')
+  assert.ok(checkContract(routes.replace('pdf_text_layer:', 'pdfTextLayer:'), view).length > 0,
+    '覆盖面凭据漏传必须判红（否则 partial 会被当成已用真值核过）')
+  assert.ok(checkContract(routes, view.replace(/pdf_text_layer\?\.mode/g, 'pdfFull')) .length > 0,
+    '前端不读覆盖面凭据必须判红')
   assert.ok(checkContract(routes, view.replace("zeroTypoBadge(activePaper)?.kind === 'busy'", "zeroTypoBadge(activePaper)?.kind === 'passed'")).length > 0,
     '把校验中提示换成终局状态必须判红')
 })

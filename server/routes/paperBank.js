@@ -122,6 +122,10 @@ const withSourceFiles = (r) => {
     // 零错字审计状态（2026-11-09）：解析完自动跑三厂商盲抄，字段名与前端 zero_typo 逐字对齐。
     // status: queued / running / passed / needs_review / checked / failed
     zero_typo: meta.zeroTypoAudit && typeof meta.zeroTypoAudit === 'object' ? meta.zeroTypoAudit : null,
+    // PDF 文本层覆盖面（2026-11-16 产品铁律：零错字 / 无错版）。
+    // mode: full（题面有字面真值）/ partial（只覆盖题号，正文是图片）/ absent（扫描件）。
+    // ⛔ 必须透出：partial 不等于「已用真值核过」，界面要能说清凭据是什么。
+    pdf_text_layer: meta.pdfTextLayer && typeof meta.pdfTextLayer === 'object' ? meta.pdfTextLayer : null,
     // 落库后逐页题号清点（2026-11-06）：卷面有、库里没有 = 漏题；库里多出 = 串号。
     // 字段名与前端逐字对齐：coverage_audit（原始明细）/ coverage_summary（列表徽标只读这个）。
     coverage_audit: meta.coverageAudit && typeof meta.coverageAudit === 'object' ? meta.coverageAudit : null,

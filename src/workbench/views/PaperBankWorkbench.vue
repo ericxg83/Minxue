@@ -1216,10 +1216,18 @@ const zeroTypoBadge = (p) => {
   }
   if (z.status === 'passed') {
     const at = z.finishedAt ? new Date(z.finishedAt).toLocaleString('zh-CN') : ''
+    // 凭据要说清来源（2026-11-16 铁律）：文本层覆盖题面 ⇒ 逐字对的是文件里的字；
+    // 只有题号 ⇒ 仍是视觉盲抄，「已校」不能读成「已用字面真值核过」。
+    const tl = p.pdf_text_layer?.mode
+    const how = tl === 'full'
+      ? '差异以 PDF 文本层（文件里的字）为准'
+      : tl === 'partial'
+        ? '该卷 PDF 文本层只覆盖题号（正文是图片），本次是视觉盲抄结果，未用字面真值核过'
+        : '该卷是扫描件，无文本层，本次是视觉盲抄结果'
     return {
       kind: 'ok',
       text: '✓ 零错字已校',
-      title: `三模型 ${z.rounds || 2} 轮盲抄、共 ${z.channelCalls || 0} 次读图，待核对 0 处${at ? `（${at}）` : ''}`,
+      title: `三模型 ${z.rounds || 2} 轮盲抄、共 ${z.channelCalls || 0} 次读图，待核对 0 处${at ? `（${at}）` : ''}；${how}`,
     }
   }
   if (z.status === 'failed') {
