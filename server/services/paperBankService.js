@@ -38,6 +38,8 @@ import { planSubrowFigureAssignments, analyzeCropFigure, inspectFigureTextRows }
 import { stripPageRulingLines } from './pageRulingClean.js'
 import { extractClipFigure } from './clipFigureClean.js'
 import { detectClipSource, mergeClipSources } from './clipSourceDetect.js'
+// 截图 = 好题（2026-11-17）：落库后自动进好题甄选。⛔ 甄选的写入只走 curatedQuestionService。
+import { addCuratedRefsBulk } from './curatedQuestionService.js'
 
 // 分批 OCR 并发上限。与练习册答案页 OCR 同口径（OCR_PAGE_CONCURRENCY 默认 3）：
 // 瞬时并发打满会触发供应商限流（2026-09-09 全本错位事故的成因之一）。
@@ -1792,6 +1794,12 @@ export async function searchPaperQuestions(f = {}) {
   const add = (sql, val) => { params.push(val); where.push(sql.replace('?', `$${params.length}`)) }
 
   if (Array.isArray(f.resourceIds) && f.resourceIds.length) add('rq.resource_id = ANY(?::uuid[])', f.resourceIds)
+  else {
+    // ⛔ 截图收件箱不是试卷（2026-11-17 迁到好题甄选）：不传 resourceIds 的「全库题列表」
+    //    必须把它排除，否则截图题会从「全部题集」这个视图漏回试卷题库。
+    //    显式按 id 查（组卷/甄选回看）仍然取得到 —— 只挡默认列表，不挡按 id 取数。
+    add(`COALESCE(r.metadata->>'kind', '') <> ?`, CLIP_INBOX_KIND)
+  }
   if (Array.isArray(f.questionNos) && f.questionNos.length) add('rq.question_no = ANY(?::int[])', f.questionNos)
   if (Array.isArray(f.questionTypes) && f.questionTypes.length) add('rq.question_type = ANY(?::text[])', f.questionTypes)
   if (Array.isArray(f.difficulties) && f.difficulties.length) add('rq.difficulty = ANY(?::int[])', f.difficulties)
@@ -1935,6 +1943,58 @@ export const CLIP_MAX_IMAGES = Number(process.env.PAPER_CLIP_MAX_IMAGES || 12)
 // 截图是单题小图，并发 2 足够（与主链路同一口径：绝不瞬时打满供应商额度）
 const CLIP_CONCURRENCY = 2
 
+// ── 截图收件箱（2026-11-17 负责人裁决：截图入口从试卷题库迁到好题甄选）──
+//
+// 负责人口径：「我如果是手工截图的，那一定是我认为的好题，其实不需要进试卷题库；
+//              试卷题库更多的是完整的一张 PDF 导入，用于题库补充。」
+//
+// ⛔ 与 2026-11-07 被否决的「截图题库」卷的区别（别把这两件事混成一件事）：
+//    旧模型是**老师可见的第三个分类**，与「青浦一模」并排出现在树里，把录入渠道当题目类别；
+//    这里是一个**老师完全看不见的系统收件箱**，只在 /papers 列表被过滤掉，
+//    存在理由只有一个：resource_questions 必须挂 resources 行，而截图产出的正是这种行。
+//    ⇒ 判定标准：老师在任何界面上能否感知到「卷」这个概念。感知不到 = 收件箱，感知到 = 旧模型复活。
+//
+// 同理，「缺 paperId 就自动建卷」这条禁令仍然有效 —— 收件箱不是兜底，是**显式解析**：
+// getClipInboxResourceId() 只认 metadata.kind='clip-inbox' 的那一行，找不到才建这一个，
+// 且建完立刻写标记。绝不会按卷名猜、也不会给每批截新建一个。
+export const CLIP_INBOX_KIND = 'clip-inbox'
+export const CLIP_INBOX_NAME = '截图收题'
+
+/**
+ * 取（或首次创建）截图收件箱卷 id。
+ * 单用户单线程场景，用 metadata 唯一标记 + 取最早一条保证幂等。
+ */
+export async function getClipInboxResourceId() {
+  const { rows } = await query(
+    `SELECT id FROM resources
+      WHERE resource_type = 'exam' AND metadata->>'kind' = $1
+      ORDER BY created_at ASC LIMIT 1`,
+    [CLIP_INBOX_KIND]
+  )
+  if (rows.length) return rows[0].id
+  const { rows: created } = await query(
+    `INSERT INTO resources (resource_type, name, subject, status, answer_status, metadata)
+     VALUES ('exam', $2, '数学', 'draft', 'none', jsonb_build_object('kind', $1::text))
+     RETURNING id`,
+    [CLIP_INBOX_KIND, CLIP_INBOX_NAME]
+  )
+  return created[0].id
+}
+
+/**
+ * 给刚插入的截图题补「已甄选」引用（2026-11-17）。
+ *
+ * 产品口径：手工截图 = 老师认定的好题 ⇒ 收进来就**自动**是好题，不用再点一次星标。
+ * ⛔ 写入实现只在 curatedQuestionService.addCuratedRefsBulk（同一件事一个实现），
+ *    这里只负责把「刚插入的行 id」递过去，不自己拼 INSERT。
+ */
+async function ensureCuratedRefs(resourceQuestionIds) {
+  const ids = (Array.isArray(resourceQuestionIds) ? resourceQuestionIds : []).filter(Boolean)
+  if (!ids.length) return 0
+  const { added } = await addCuratedRefsBulk({ sourceType: 'resource_question', sourceIds: ids })
+  return added
+}
+
 /**
  * 往某个卷**追加**题目（不删已有行）。
  * 题号接续：本批每一行整体平移到「现有最大题号」之后；同一页同一个原题号算同一道题（小问组共享新题号）。
@@ -1960,6 +2020,9 @@ export async function appendPaperQuestions(resourceId, rows) {
   })
 
   let inserted = 0
+  // 2026-11-17：顺手收下真实插入行的 id —— 截图链路要靠它写「已甄选」引用。
+  // ON CONFLICT DO NOTHING 命中的行不会 RETURNING，所以这里天然只含真正新增的题。
+  const insertedIds = []
   await transaction(async (client) => {
     for (const r of prepared) {
       const res = await client.query(
@@ -1968,7 +2031,8 @@ export async function appendPaperQuestions(resourceId, rows) {
             question_type, answer, answer_source, analysis, difficulty, tags,
             page_no, bbox, image_url, page_image_url)
          VALUES ($1, NULL, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12::text[], $13, $14::jsonb, $15, $16)
-         ON CONFLICT (resource_id, unit_id, question_no, sub_no) DO NOTHING`,
+         ON CONFLICT (resource_id, unit_id, question_no, sub_no) DO NOTHING
+         RETURNING id`,
         [
           resourceId,
           r.question_no ?? null,
@@ -1989,6 +2053,7 @@ export async function appendPaperQuestions(resourceId, rows) {
         ]
       )
       inserted += res.rowCount || 0
+      for (const row of res.rows || []) if (row?.id) insertedIds.push(row.id)
     }
   })
   // ⛔ 返回真实插入行数：题号接续出错时这里会小于 prepared.length，
@@ -1996,7 +2061,7 @@ export async function appendPaperQuestions(resourceId, rows) {
   // ⛔ 追加批次的题号会被整体平移；prepared 是浅拷贝，原 rows 没被改，
   //    所以待核对清单只能靠 __key → 这里的新题号映射来对齐。
   return {
-    inserted, baseNo, lastNo: cursor,
+    inserted, baseNo, lastNo: cursor, insertedIds,
     preparedKeys: prepared.map(r => ({ key: r.__key, page_no: r.page_no, question_no: r.question_no, sub_no: r.sub_no })),
   }
 }
@@ -2266,19 +2331,19 @@ export async function restoreQuestionPlacements(items = []) {
 }
 
 /**
- * 把一批截图解析成题目，追加进老师选中的题集。
+ * 把一批截图解析成题目，写进**截图收件箱**并自动标记为好题（2026-11-17 迁移后）。
  *
  * 与主链路唯一的分歧在「落库」和「清点」两步，识别/切段/裁片/双模型复核完全同一套零件：
  * parsePageToQuestions 是逐页识别的唯一实现，这里绝不另写一份 OCR。
  *
  * 兜底：OCR 一个字都没读出来的截图**也要存**——老师要的是「把这道题留下来」，
- * 文字识别是加分项。此时补一行只有图、题干待补的题，老师在界面上手填即可。
+ * 文字识别是加分项。此时补一行只有图、题干待补的题，老师在甄选列表里手填即可。
  */
 export async function parseClipImages({ images, sources = [], notes = [], resourceId, logger = console }) {
   if (!Array.isArray(images) || !images.length) throw new Error('没有收到截图')
-  // ⛔ 2026-11-07：截图不再是独立的一类题库，必须落进老师选中的题集。
-  //    目标缺失一律抛错，绝不回退到「自动建一个截图题库卷」——那正是被否掉的旧模型。
-  if (!resourceId) throw new Error('没有指定目标题集，请先选择或新建一个题集')
+  // ⛔ 2026-11-17 迁移后，resourceId 由路由解析成「截图收件箱」（见 getClipInboxResourceId），
+  //    这里仍保留硬判：拿不到容器就绝不能猜一个卷往里写。
+  if (!resourceId) throw new Error('没有解析到截图收件箱，请重试或检查题库配置')
   const batch = images.slice(0, CLIP_MAX_IMAGES)
   const sourceList = (Array.isArray(sources) ? sources : [sources]).slice(0, batch.length)
   const noteList = (Array.isArray(notes) ? notes : [notes]).slice(0, batch.length)
@@ -2380,7 +2445,12 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
 
   // 本批内先补号保证每行有唯一题号，再由 appendPaperQuestions 整体平移到已有题号之后
   assignGlobalQuestionNumbers(rows)
-  const { inserted, lastNo } = await appendPaperQuestions(resourceId, rows)
+  const { inserted, lastNo, insertedIds } = await appendPaperQuestions(resourceId, rows)
+
+  // 2026-11-17 迁移：手工截图 = 老师认定的好题 ⇒ 落库即写「已甄选」引用，
+  // 老师不用再回列表点一次星标。只加引用行，不复制题干/答案/配图。
+  const curatedAdded = await ensureCuratedRefs(insertedIds)
+    .catch(e => { logger.warn?.(`[paperBank] 截图写甄选引用失败: ${e?.message || e}`); return 0 })
 
   await setPaperParseStatus(resourceId, { status: 'done', donePages: batch.length })
   await query(
@@ -2434,5 +2504,7 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
   return {
     resourceId, inserted, lastNo, basePage, pages: batch.length, emptyPages: emptyIdx.length,
     autoSources: mergedSources.autoFilled,
+    // 这一批里有多少道「同时进了好题甄选」（正常等于 inserted；为 0 说明引用写入失败，前端要如实报）
+    curatedAdded,
   }
 }

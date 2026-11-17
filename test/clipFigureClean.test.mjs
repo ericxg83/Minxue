@@ -30,6 +30,8 @@ const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')
 const SERVICE = 'server/services/paperBankService.js'
 const ROUTES = 'server/routes/paperBank.js'
 const VIEW = 'src/workbench/views/PaperBankWorkbench.vue'
+// 2026-11-17：截图收题弹窗迁到好题甄选，弹窗级断言改读新页面
+const CURATED = 'src/workbench/views/CuratedQuestionsWorkbench.vue'
 const API = 'src/services/apiService.js'
 
 const stripComments = (s) => String(s)
@@ -129,6 +131,7 @@ for (const darkBoard of [true, false]) {
 
 const serviceSrc = read(SERVICE)
 const viewSrc = read(VIEW)
+const curatedSrc = read(CURATED)
 const routesSrc = read(ROUTES)
 const apiSrc = read(API)
 
@@ -164,9 +167,9 @@ test('来源：后端按 page_no 存/读 clipSources，字段名 clip_source 逐
 test('来源：上传时按图片顺序带上来源，改来源走同一条 API，URL 只认 http(s)', () => {
   assert.match(apiSrc, /fd\.append\('sources', JSON\.stringify\(sources\)\)/)
   assert.match(apiSrc, /updatePaperClipSource = \(id, source, note = ''\)/)
-  assert.match(viewSrc, /uploadPaperClips\(/)
-  assert.match(viewSrc, /clipFiles\.value\.map\(f => f\.source \|\| ''\)/)
-  assert.match(viewSrc, /updatePaperClipSource\(q\.id, val, note\)/)
+  assert.match(curatedSrc, /uploadPaperClips\(/, '截图上传入口在好题甄选')
+  assert.match(curatedSrc, /clipFiles\.value\.map\(f => f\.source \|\| ''\)/)
+  assert.match(viewSrc, /updatePaperClipSource\(q\.id, val, note\)/, '题目行改来源仍在试卷题库（历史截图题也在这里改）')
   assert.match(viewSrc, /import \{ isSourceUrl, sourceHref \} from '\.\.\/utils\/clipSource\.js'/,
     'URL 判据与跳转口径统一收敛到 workbench/utils，页面不另写一套')
   assert.ok(!/const isSourceUrl = \(s\) =>/.test(viewSrc))

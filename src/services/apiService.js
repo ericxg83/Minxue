@@ -1230,21 +1230,27 @@ export const getPaperBankStatistics = async (resourceIds) => {
 }
 
 /**
- * 截图加题（2026-11-06 加，11-07 改模型）：图片进**老师选中的题集**，不再有固定「截图题库」卷。
- * 与服务端后台解析同款：请求立即返回，前端轮询该题集状态。
- * 返回值里 beforeCount 是解析前的题数快照，用来算「这一批入了多少题」。
+ * 截图收题（2026-11-06 加，11-07 改模型，11-17 迁到好题甄选）。
+ * 服务端后台解析同款：请求立即返回，解析结果轮询 getPaperClipStatus 取。
+ * ⛔ 目标容器（paperId）现在**不用传**：后端解析成系统收件箱，落库即自动进好题甄选。
+ *    传了仍然写进指定题集（保留脚本/手工调用能力）。
  */
 export const uploadPaperClips = async (files, sources = [], paperId = '', notes = []) => {
   const fd = new FormData()
   for (const f of files) fd.append('files', f)
-  // ⛔ 目标题集是必填参数：后端缺 paperId 会 400，绝不回退到自动建卷。
-  fd.append('paperId', paperId)
+  if (paperId) fd.append('paperId', paperId)
   // 来源与 files 按下标对齐；一个 JSON 字段避免 multer 把同名文本字段合并成数组。
   // sources = 链接/文字，notes = 视频时间点或备注（如「12:35 讲到辅助线」）。
   fd.append('sources', JSON.stringify(sources))
   fd.append('notes', JSON.stringify(notes))
   return apiRequest('/paper-bank/clips', { method: 'POST', body: fd }, 1)
 }
+
+/**
+ * 截图识别进度（2026-11-17）。返回 { running, result }：
+ * result 是最近一批的 { status:'done'|'failed', inserted, curatedAdded, emptyPages, message }。
+ */
+export const getPaperClipStatus = () => apiRequest('/paper-bank/clips/status')
 
 // 改截图来源：链接 + 时间点/备注两项，按截图页码存在卷上，同页拆出的多题共享。
 export const updatePaperClipSource = (id, source, note = '') =>

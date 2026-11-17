@@ -27,6 +27,8 @@ import {
   updatePaperQuestion,
   // 截图加题（2026-11-06 加，11-07 改为「写进指定题集」）：同一批零件的第二条落库路径，见下方 /clips
   parseClipImages,
+  getClipInboxResourceId,
+  CLIP_INBOX_KIND,
   deletePaperQuestion,
   movePaperQuestions,
   restoreQuestionPlacements,
@@ -302,7 +304,11 @@ router.get('/papers', async (req, res) => {
                   AND ra.answer_status IN ('teacher_verified','official_verified')) AS answer_count
          FROM resources r
         WHERE r.resource_type = 'exam'
-        ORDER BY r.created_at DESC`
+          -- 截图收件箱（2026-11-17 迁到好题甄选）不是题集，不在试卷题库露出。
+          -- ⛔ 这是本文件唯一的过滤点：别处读具体 id 仍能取到它，收件箱里仍有数据。
+          AND COALESCE(r.metadata->>'kind', '') <> $1
+        ORDER BY r.created_at DESC`,
+      [CLIP_INBOX_KIND]
     )
     res.json({ success: true, papers: rows.map(withSourceFiles) })
   } catch (e) {
@@ -563,17 +569,22 @@ router.post('/papers/:id/zero-typo-audit', async (req, res) => {
   }
 })
 
-// ── 截图加题（2026-11-06 加，2026-11-07 改模型）──
+// ── 截图加题（2026-11-06 加，11-07 改模型，11-17 迁到好题甄选）──
 //
-// 场景：老师看视频/网课看到一道好题，截图加进**自己选中的题集**。
-// ⛔ 已废弃：所有截图统一进固定「截图题库」卷（metadata.origin='screenshot'）——
-//    那等于把「录入渠道」当成「题目类别」，与 PDF 卷并列。负责人 2026-11-07 否决。
-// 现行：paperId 必填且必须是现存 exam 题集；PDF 与截图都是往题集里加题的动作。
+// 场景：老师看视频/网课看到一道好题，截图就想收进**好题甄选**。
+// ⛔ 已废弃：① 所有截图统一进固定「截图题库」卷（metadata.origin='screenshot'）——
+//    那等于把「录入渠道」当成「题目类别」。负责人 2026-11-07 否决。
+//    ② 让老师先建题集、再选题集（11-07 起的模型）—— 负责人 2026-11-17 裁决：
+//    「手工截图的一定是我认为的好题，不需要进试卷题库；试卷题库只做整卷 PDF 补充。」
+// 现行：落进**系统收件箱**（metadata.kind='clip-inbox'，老师侧不可见，见 /papers 过滤），
+//    落库即自动写 curated_questions 引用 ⇒ 直接出现在好题甄选里。
 // 识别链路与「上传并解析」完全同一套零件（parsePageToQuestions），只有落库方式不同。
 //
 // ⛔ 进程内串行 + 409：识别在后台跑，这期间再提交会被挡住。
 //    不做排队 —— 老师连点两次时排队会把同一批图收两遍，重复题比报错难收拾得多。
 let clipJob = null
+// 最近一次的结果（跨请求读，给甄选页轮询用）。进程重启丢失即可，不落库。
+let lastClipResult = null
 
 // multer 的「文件数超限」抛在中间件层，不会进路由的 try/catch ⇒ 单独包一层给人话。
 const clipUpload = (req, res, next) => {
@@ -587,6 +598,18 @@ const clipUpload = (req, res, next) => {
     next()
   })
 }
+
+/**
+ * 截图识别的后台进度（2026-11-17）。
+ * 甄选页没有试卷列表可轮询，所以这里直接报「还在跑 / 上一批入了多少题」。
+ */
+router.get('/clips/status', (req, res) => {
+  res.json({
+    success: true,
+    running: !!clipJob,
+    result: lastClipResult,
+  })
+})
 
 router.post('/clips', clipUpload, async (req, res) => {
   try {
@@ -606,17 +629,20 @@ router.post('/clips', clipUpload, async (req, res) => {
       return res.status(400).json({ error: '图片太大', message: '单张截图请控制在 20MB 以内' })
     }
 
-    // ⛔ 目标题集必须显式指定且真实存在：截图没有专属容器，静默建卷就是旧模型复活。
-    const targetId = String(req.body?.paperId || '').trim()
-    if (!targetId) {
-      return res.status(400).json({ error: '没有指定题集', message: '先选一个题集，再把截图加进去' })
-    }
-    const { rows: target } = await query(
-      `SELECT id FROM resources WHERE id = $1 AND resource_type = 'exam'`,
-      [targetId]
-    )
-    if (!target.length) {
-      return res.status(404).json({ error: '题集不存在', message: '这个题集可能已被删除，刷新页面重新选一个' })
+    // 2026-11-17 迁移：paperId 变为可选。
+    // 不传 = 走系统收件箱（好题甄选的正常路径）；传了 = 仍写进指定题集（保留手工/脚本调用能力）。
+    const explicitId = String(req.body?.paperId || '').trim()
+    let targetId = explicitId
+    if (explicitId) {
+      const { rows: target } = await query(
+        `SELECT id FROM resources WHERE id = $1 AND resource_type = 'exam'`,
+        [explicitId]
+      )
+      if (!target.length) {
+        return res.status(404).json({ error: '题集不存在', message: '这个题集可能已被删除，刷新页面重试' })
+      }
+    } else {
+      targetId = await getClipInboxResourceId()
     }
 
     // ⛔ 只认进程内的 clipJob，不认库里的 parsing 状态：
@@ -625,11 +651,11 @@ router.post('/clips', clipUpload, async (req, res) => {
     if (clipJob) {
       return res.status(409).json({
         error: '上一批截图还在识别',
-        message: '等这一批识别完再贴下一批（识别完卷名旁边会显示题数）',
+        message: '等这一批识别完再贴下一批（识别期间会在页面上转圈）',
       })
     }
 
-    // 解析前的题数快照：前端用它算「这一批入了多少题」
+    // 解析前的题数快照
     const { rows: cnt } = await query(
       `SELECT COUNT(*)::int AS n FROM resource_questions WHERE resource_id = $1`,
       [targetId]
@@ -646,7 +672,6 @@ router.post('/clips', clipUpload, async (req, res) => {
 
     // 来源（2026-11-07）：前端把「每张截图一个值」的数组 JSON 塞进一个表单字段，
     // 与 files 按下标对齐。sources = 链接/文字，notes = 视频时间点或备注。
-    // 填错/解析失败不影响收题，只是不带来源。
     const asArray = (raw) => {
       const v = Array.isArray(raw) ? raw[0] : raw
       if (!v) return []
@@ -655,15 +680,33 @@ router.post('/clips', clipUpload, async (req, res) => {
     const clipSources = asArray(req.body?.sources)
     const clipNotes = asArray(req.body?.notes)
 
-    clipJob = parseClipImages({
+    clipJob = { startedAt: new Date().toISOString(), resourceId: targetId, accepted: files.length }
+    lastClipResult = null
+    parseClipImages({
       images: files.map(f => f.buffer),
       sources: clipSources,
       notes: clipNotes,
       resourceId: targetId,
     })
-      .then(r => console.log(`[paperBank] 截图入库完成 ${r.resourceId}: +${r.inserted} 题（含 ${r.emptyPages} 张仅存图）`))
+      .then((r) => {
+        console.log(`[paperBank] 截图入库完成 ${r.resourceId}: +${r.inserted} 题（含 ${r.emptyPages} 张仅存图），入甄选 +${r.curatedAdded}`)
+        lastClipResult = {
+          status: 'done',
+          inserted: r.inserted,
+          curatedAdded: r.curatedAdded,
+          emptyPages: r.emptyPages,
+          accepted: files.length,
+          finishedAt: new Date().toISOString(),
+        }
+      })
       .catch(async (e) => {
         console.error('[paperBank] 截图入库失败:', e)
+        lastClipResult = {
+          status: 'failed',
+          message: String(e?.message || e).slice(0, 300),
+          accepted: files.length,
+          finishedAt: new Date().toISOString(),
+        }
         await setPaperParseStatus(targetId, { status: 'failed' }).catch(() => {})
         await query(
           `UPDATE resources SET metadata = COALESCE(metadata, '{}'::jsonb)

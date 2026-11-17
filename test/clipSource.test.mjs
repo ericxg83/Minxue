@@ -24,6 +24,9 @@ const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')
 const SERVICE = 'server/services/paperBankService.js'
 const ROUTES = 'server/routes/paperBank.js'
 const VIEW = 'src/workbench/views/PaperBankWorkbench.vue'
+// 2026-11-17：截图收题弹窗从试卷题库迁到好题甄选。
+// 弹窗级断言（选中文件带来源/时间点）跟着去新页面；题目行级的来源编辑仍留在试卷题库。
+const CURATED = 'src/workbench/views/CuratedQuestionsWorkbench.vue'
 const API = 'src/services/apiService.js'
 const UTILS = 'src/workbench/utils/clipSource.js'
 
@@ -80,6 +83,7 @@ test('跳转：已有定位参数 / 普通网页 / 非 http(s) / 无时间点 �
 const serviceSrc = read(SERVICE)
 const routesSrc = read(ROUTES)
 const viewSrc = read(VIEW)
+const curatedSrc = read(CURATED)
 const apiSrc = read(API)
 const utilsSrc = read(UTILS)
 
@@ -92,7 +96,7 @@ test('字段名：clip_source_note / clipNotes / notes 前后端逐字对齐', (
   assert.match(routesSrc, /hasNote/, '旧调用只带 source 时不得把已存的时间点清空')
   assert.match(apiSrc, /fd\.append\('notes', JSON\.stringify\(notes\)\)/)
   assert.match(apiSrc, /updatePaperClipSource = \(id, source, note = ''\)/)
-  assert.match(viewSrc, /clipFiles\.value\.map\(f => f\.note \|\| ''\)/)
+  assert.match(curatedSrc, /clipFiles\.value\.map\(f => f\.note \|\| ''\)/, '上传时必须把每张图的时间点按顺序带下去')
   assert.match(viewSrc, /q\.clip_source_note/)
   assert.match(viewSrc, /updatePaperClipSource\(q\.id, val, note\)/)
 })
@@ -106,9 +110,9 @@ test('口径收敛：URL 判据与跳转只在 workbench/utils 一份，页面�
   assert.match(viewSrc, /v-if="isSourceUrl\(q\.clip_source\)"/)
 })
 
-test('交互：上传弹窗每项两个输入框，题目行编辑态也是两个', () => {
-  assert.match(viewSrc, /v-model="f\.note"/)
-  assert.match(viewSrc, /v-model="f\.source"/)
+test('交互：收题弹窗每项两个输入框，题目行编辑态也是两个', () => {
+  assert.match(curatedSrc, /v-model="f\.note"/, '截图收题弹窗（好题甄选）必须有时间点输入框')
+  assert.match(curatedSrc, /v-model="f\.source"/, '截图收题弹窗（好题甄选）必须有来源输入框')
   assert.match(viewSrc, /v-model="sourceDraftUrl"/)
   assert.match(viewSrc, /v-model="sourceDraftNote"/)
   assert.match(viewSrc, /!q\.clip_source && !q\.clip_source_note && sourceEditingId !== q\.id/,

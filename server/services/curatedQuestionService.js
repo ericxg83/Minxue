@@ -24,6 +24,14 @@ const SOURCE = {
   RESOURCE: 'resource_question',
 }
 
+/**
+ * 截图来源的题集标记（2026-11-17），与 paperBankService.CLIP_INBOX_KIND 同一口径：
+ *   clip-inbox  = 迁移后的系统收件箱（老师不可见）
+ *   clip-legacy = 迁移前手工截图攒的专题夹（仍可见，只是甄选里标成「截图」）
+ * ⚠️ 改这里必须同步改 paperBankService 的常量，两处不一致会让徽标时对时错。
+ */
+const CLIP_KINDS = new Set(['clip-inbox', 'clip-legacy'])
+
 /** 收藏。重复收藏返回 existed:true，不覆盖老师已改的标签。 */
 export async function addCuratedQuestion({ sourceType, sourceId, tags }) {
   if (![SOURCE.QUESTION, SOURCE.RESOURCE].includes(sourceType)) {
@@ -53,6 +61,28 @@ export async function addCuratedQuestion({ sourceType, sourceId, tags }) {
     [sourceType, sourceId]
   )
   return { ...kept.rows[0], existed: true, autoTags }
+}
+
+/**
+ * 批量写入引用（2026-11-17）。给「截图收题」这类**批量落库**链路用。
+ *
+ * ⛔ 为什么不是循环调 addCuratedQuestion：那条路每题要做 3 次查询（存在性 + 自动打标），
+ *    一批 12 张截图就是 36 次往返，而且自动打标在这里必然返回空（截图题刚落库，还没标签/难度）。
+ *    ⇒ 一次 INSERT … SELECT 完成，规则仍只在本模块里。
+ * ⛔ 仍然只写一列引用：不复制题干/选项/答案/配图，不回写任何题目表。
+ * ⛔ 不打标：截图进来先不分分类，事后由老师在列表里打（负责人 2026-11-17 定）。
+ */
+export async function addCuratedRefsBulk({ sourceType, sourceIds }) {
+  if (![SOURCE.QUESTION, SOURCE.RESOURCE].includes(sourceType)) throw new Error('无效的来源类型')
+  const ids = Array.from(new Set((Array.isArray(sourceIds) ? sourceIds : []).filter(Boolean)))
+  if (!ids.length) return { added: 0 }
+  const { rowCount } = await query(
+    `INSERT INTO curated_questions (source_type, source_id)
+     SELECT $1, x FROM UNNEST($2::uuid[]) AS x
+     ON CONFLICT (source_type, source_id) DO NOTHING`,
+    [sourceType, ids]
+  )
+  return { added: rowCount || 0 }
 }
 
 /** 取消收藏。按 (来源,题目ID) 精确删，不碰原题目。 */
@@ -123,7 +153,11 @@ const RESOURCE_READ = `
   SELECT cq.id AS curated_id, cq.source_type, cq.source_id, cq.tags, cq.note, cq.chapter_ids, cq.created_at,
          rq.content, rq.parent_stem, rq.options, rq.question_type, rq.answer, rq.analysis,
          rq.difficulty, rq.image_url, rq.page_image_url,
-         r.name AS resource_name, r.subject
+         r.metadata->>'kind' AS resource_kind,
+         -- 截图收件箱（2026-11-17）：卷名对老师没有意义，显示成「截图」。
+         -- clip-legacy（迁移前手工截图攒的专题夹）保留专题名 —— 那是老师自己起的分类，有信息量。
+         CASE WHEN r.metadata->>'kind' = 'clip-inbox' THEN '截图' ELSE r.name END AS resource_name,
+         r.subject
     FROM curated_questions cq
     JOIN resource_questions rq ON rq.id = cq.source_id
     LEFT JOIN resources r ON r.id = rq.resource_id
@@ -242,6 +276,11 @@ function normalizeRow(r, sourceType) {
       ? (r.geometry_image_url || r.image_url || '')
       : (r.image_url || ''),
     resourceName: r.resource_name || '',
+    // 来源细分（2026-11-17）：截图来的题在界面上显示「截图」而不是「试卷题」，
+    // 否则老师会以为自己在一个卷子里勾题。只做展示，不影响 source_type 的存储语义。
+    //   clip-inbox  = 迁移后新收的截图（收件箱，卷名对老师无意义）
+    //   clip-legacy = 迁移前手工截图攒的专题夹（保留专题名做上下文）
+    origin: !isQuestion && CLIP_KINDS.has(r.resource_kind) ? 'clip' : '',
   }
 }
 

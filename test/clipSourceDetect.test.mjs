@@ -21,6 +21,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (rel) => readFileSync(resolve(ROOT, rel), 'utf8')
 const SERVICE = 'server/services/paperBankService.js'
 const VIEW = 'src/workbench/views/PaperBankWorkbench.vue'
+// 2026-11-17：截图收题弹窗迁到好题甄选，弹窗文案断言改读新页面
+const CURATED = 'src/workbench/views/CuratedQuestionsWorkbench.vue'
 const DETECT = 'server/services/clipSourceDetect.js'
 
 // ── ① 正常识别 ────────────────────────────────────────────────────────────
@@ -112,6 +114,7 @@ test('合并：没有识别结果时原样返回，不清空不串位', () => {
 
 const serviceSrc = read(SERVICE)
 const viewSrc = read(VIEW)
+const curatedSrc = read(CURATED)
 const detectSrc = read(DETECT)
 
 test('接通：只在手填有空缺时调视觉，识别结果经唯一合并实现回填', () => {
@@ -123,5 +126,6 @@ test('接通：只在手填有空缺时调视觉，识别结果经唯一合并�
   assert.match(serviceSrc, /mergedSources\.notes\.forEach/)
   assert.match(serviceSrc, /autoSources: mergedSources\.autoFilled/)
   assert.match(detectSrc, /PAPER_CLIP_AUTO_SOURCE/, '要有整条关闭的额度开关')
-  assert.match(viewSrc, /系统会自动读出网址和时间卡点填好/, '上传弹窗要告诉老师可以不用手填')
+  assert.match(curatedSrc, /系统会自动读出网址和时间卡点填好/, '收题弹窗要告诉老师可以不用手填')
+  assert.ok(!/uploadPaperClips/.test(viewSrc), '试卷题库不得再有截图上传入口')
 })
