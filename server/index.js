@@ -73,6 +73,7 @@ import { migratePaperBankQuestions } from './migrations/063_paper_bank_questions
 import { migrateSimilarQuestionGroups } from './migrations/064_similar_question_groups.js'
 import { migrateQuestionOptionImages } from './migrations/065_add_question_option_images.js'
 import { migratePaperBankFolders } from './migrations/066_paper_bank_folders.js'
+import { migrateCuratedQuestions } from './migrations/067_curated_questions.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -141,6 +142,7 @@ import dashboardRouter from './routes/dashboard.js'
 import quotaRouter from './routes/quota.js'
 import weekendHandoutRouter from './routes/weekendHandout.js'
 import teachingMarksRouter from './routes/teachingMarks.js'
+import curatedQuestionsRouter from './routes/curatedQuestions.js'
 import { runErrorDiagnosis } from './services/diagnosisService.js'
 import { cleanupStudentData } from './services/dataCleanupService.js'
 import { getStudentMastery } from './services/knowledgeMasteryService.js'
@@ -5452,6 +5454,8 @@ app.use('/api/resources', resourcesRouter)
 // ⛔ 与 /api/resources 的「试卷答案库」共用 resources(type='exam') 行，但写的是
 //    resource_questions（题目）而非 resource_answers（答案），两条链互不干扰。
 app.use('/api/paper-bank', paperBankRouter)
+// 好题甄选（2026-11-17）：跨来源收藏（错题+试卷题），只存引用+标签
+app.use('/api/curated-questions', curatedQuestionsRouter)
 app.use('/api/teaching', teachingRouter)
 app.use('/api/variants', variantsRouter)
 // r137（负责人裁决）：「我的讲义」/「班级备课」属伪需求，
@@ -5586,7 +5590,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migratePaperBankQuestions', migratePaperBankQuestions],
         ['migrateSimilarQuestionGroups', migrateSimilarQuestionGroups],
         ['migrateQuestionOptionImages', migrateQuestionOptionImages],
-        ['migratePaperBankFolders', migratePaperBankFolders]
+        ['migratePaperBankFolders', migratePaperBankFolders],
+        ['migrateCuratedQuestions', migrateCuratedQuestions]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)
