@@ -66,13 +66,17 @@ export async function removeCuratedQuestion({ sourceType, sourceId }) {
   return { removed: rowCount > 0 }
 }
 
-/** 更新标签（老师手动增删）。只改 tags 和 note，不碰 source。 */
-export async function updateCuratedQuestion(id, { tags, note }) {
+/** 更新标签/备注/章节（老师手动增删）。只改 tags/note/chapter_ids，不碰 source。 */
+export async function updateCuratedQuestion(id, { tags, note, chapterIds }) {
   const sets = []
   const params = [id]
   if (Array.isArray(tags)) {
     params.push(normalizeTags(tags))
     sets.push(`tags = $${params.length}::text[]`)
+  }
+  if (Array.isArray(chapterIds)) {
+    params.push(normalizeTags(chapterIds))
+    sets.push(`chapter_ids = $${params.length}::text[]`)
   }
   if (typeof note === 'string') {
     params.push(note.slice(0, 500))
@@ -81,10 +85,24 @@ export async function updateCuratedQuestion(id, { tags, note }) {
   if (!sets.length) return null
   const { rows } = await query(
     `UPDATE curated_questions SET ${sets.join(', ')} WHERE id = $1
-     RETURNING id, source_type, source_id, tags, note, created_at`,
+     RETURNING id, source_type, source_id, tags, note, chapter_ids, created_at`,
     params
   )
   return rows[0] || null
+}
+
+/** 批量写入章节（AI 归类后调用）。按 curated id 精确更新，只写 chapter_ids。 */
+export async function setCuratedChapters(updates) {
+  let applied = 0
+  for (const u of (Array.isArray(updates) ? updates : [])) {
+    if (!u?.id || !Array.isArray(u.chapterIds)) continue
+    await query(
+      'UPDATE curated_questions SET chapter_ids = $2::text[] WHERE id = $1',
+      [u.id, normalizeTags(u.chapterIds)]
+    )
+    applied++
+  }
+  return { applied }
 }
 
 /**
@@ -92,7 +110,7 @@ export async function updateCuratedQuestion(id, { tags, note }) {
  * 源题被删的记录自动跳过（LEFT JOIN + 过滤），不留幽灵条目。
  */
 const QUESTION_READ = `
-  SELECT cq.id AS curated_id, cq.source_type, cq.source_id, cq.tags, cq.note, cq.created_at,
+  SELECT cq.id AS curated_id, cq.source_type, cq.source_id, cq.tags, cq.note, cq.chapter_ids, cq.created_at,
          q.content, q.parent_stem, q.options, q.question_type, q.answer, q.analysis,
          q.difficulty, q.subject, q.geometry_image_url, q.image_url,
          r.name AS resource_name
@@ -102,7 +120,7 @@ const QUESTION_READ = `
    WHERE cq.source_type = 'question'
 `
 const RESOURCE_READ = `
-  SELECT cq.id AS curated_id, cq.source_type, cq.source_id, cq.tags, cq.note, cq.created_at,
+  SELECT cq.id AS curated_id, cq.source_type, cq.source_id, cq.tags, cq.note, cq.chapter_ids, cq.created_at,
          rq.content, rq.parent_stem, rq.options, rq.question_type, rq.answer, rq.analysis,
          rq.difficulty, rq.image_url, rq.page_image_url,
          r.name AS resource_name, r.subject
@@ -128,6 +146,10 @@ export async function listCuratedQuestions(filters = {}) {
   // 标签筛选：命中任一即保留（数组包含语义）
   if (Array.isArray(filters.tags) && filters.tags.length) {
     list = list.filter(item => filters.tags.some(t => item.tags.includes(t)))
+  }
+  // 章节筛选：命中任一章节即保留（一题可挂多章）
+  if (Array.isArray(filters.chapterIds) && filters.chapterIds.length) {
+    list = list.filter(item => filters.chapterIds.some(cid => item.chapterIds.includes(cid)))
   }
   // 关键词：题干 / 公共题干
   if (filters.keyword) {
@@ -202,6 +224,7 @@ function normalizeRow(r, sourceType) {
     sourceType,
     sourceId: r.source_id,
     tags: r.tags || [],
+    chapterIds: r.chapter_ids || [],
     note: r.note || '',
     createdAt: r.created_at,
     content: r.content || '',

@@ -74,6 +74,7 @@ import { migrateSimilarQuestionGroups } from './migrations/064_similar_question_
 import { migrateQuestionOptionImages } from './migrations/065_add_question_option_images.js'
 import { migratePaperBankFolders } from './migrations/066_paper_bank_folders.js'
 import { migrateCuratedQuestions } from './migrations/067_curated_questions.js'
+import { migrateCuratedChapterIds } from './migrations/068_curated_chapter_ids.js'
 import { scheduleNightParse, scheduleWeeklyDiagnosis } from './services/nightParseService.js'
 import { scheduleWeeklyMissingFigureCheck } from './services/missingFigureMonitorService.js'
 
@@ -5591,7 +5592,8 @@ if (process.argv[1] === __filename || process.argv[1]?.endsWith('server/index.js
         ['migrateSimilarQuestionGroups', migrateSimilarQuestionGroups],
         ['migrateQuestionOptionImages', migrateQuestionOptionImages],
         ['migratePaperBankFolders', migratePaperBankFolders],
-        ['migrateCuratedQuestions', migrateCuratedQuestions]
+        ['migrateCuratedQuestions', migrateCuratedQuestions],
+        ['migrateCuratedChapterIds', migrateCuratedChapterIds]
       ])
     } catch (err) {
       console.error('数据库迁移失败:', err.message)

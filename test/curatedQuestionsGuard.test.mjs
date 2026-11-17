@@ -82,3 +82,34 @@ test('路由提供收藏/取消/列表/状态查询四接口', () => {
   // 状态查询走批量，避免 N+1
   assert.match(ROUTE, /sourceIds = ANY\(\$2::uuid\[\]\)|getCuratedStatus/)
 })
+
+// ── 章节维度（2026-11-17）──────────────────────────────────────────
+test('章节字段是数组且只存教材目录节点id引用，不复制章节名', () => {
+  const MIG = read('server/migrations/068_curated_chapter_ids.js')
+  assert.match(MIG, /chapter_ids TEXT\[\]/)
+  assert.match(MIG, /ADD COLUMN IF NOT EXISTS/)
+  // 不得有章节名副本列
+  assert.ok(!/chapter_name TEXT/.test(MIG), '不得存章节名副本')
+  // service 返回 chapterIds 且按命中任一筛选
+  assert.match(SERVICE, /chapterIds: r\.chapter_ids \|\| \[\]/)
+  assert.match(SERVICE, /filters\.chapterIds\.some/)
+})
+
+test('AI章节归类只挂目录内真实id，且有关键词硬门槛防广撒网', () => {
+  const TAG = read('server/services/chapterTaggingService.js')
+  // 只从静态教材目录取候选
+  assert.match(TAG, /from '\.\.\/config\/textbookCatalog\.js'/)
+  assert.match(TAG, /export function buildChapterCandidates/)
+  // 编造id被丢弃
+  assert.match(TAG, /valid\.has\(id\)/)
+  // 高频误挂章节有关键词硬门槛（二次函数/锐角三角比等）
+  assert.match(TAG, /CHAPTER_KEYWORD_GATE/)
+  assert.match(TAG, /applyKeywordGate/)
+})
+
+test('AI章节路由只写chapter_ids，不碰题目表', () => {
+  assert.match(ROUTE, /router\.post\('\/auto-chapter'/)
+  assert.match(ROUTE, /setCuratedChapters\(updates\)/)
+  // force 重挂能力
+  assert.match(ROUTE, /force === true/)
+})

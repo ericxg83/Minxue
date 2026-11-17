@@ -11,18 +11,22 @@ import {
   updateCuratedQuestion,
   listCuratedQuestions,
   getCuratedStatus,
+  setCuratedChapters,
 } from '../services/curatedQuestionService.js'
+import { tagQuestionChapters } from '../services/chapterTaggingService.js'
 
 const router = Router()
 
 // 列表：GET /api/curated-questions?sourceType=&tags=易错,高难&keyword=&sort=
 router.get('/', async (req, res) => {
   try {
-    const { sourceType, tags, keyword, sort } = req.query || {}
-    const tagArr = typeof tags === 'string' && tags.trim()
-      ? tags.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+    const { sourceType, tags, chapters, keyword, sort } = req.query || {}
+    const splitList = (v) => typeof v === 'string' && v.trim()
+      ? v.split(/[,，]/).map(s => s.trim()).filter(Boolean)
       : []
-    const data = await listCuratedQuestions({ sourceType, tags: tagArr, keyword, sort })
+    const data = await listCuratedQuestions({
+      sourceType, tags: splitList(tags), chapterIds: splitList(chapters), keyword, sort,
+    })
     res.json(data)
   } catch (e) {
     res.status(500).json({ error: '获取好题甄选列表失败', message: e.message })
@@ -63,7 +67,33 @@ router.delete('/', async (req, res) => {
   }
 })
 
-// 改标签/备注：PUT /:id  {tags?, note?}
+// AI 批量挂教材章节：POST /auto-chapter  {grade?:'初三'|'初二', ids?:string[]}
+// 不传 ids = 给所有还没章节的甄选题挂。逐条调用，单条失败留空不影响整批。
+router.post('/auto-chapter', async (req, res) => {
+  try {
+    const grade = String(req.body?.grade || '初三')
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter(Boolean) : null
+    const force = req.body?.force === true   // 重新挂已有章节的题（改了判据后重跑）
+    const data = await listCuratedQuestions({})
+    const targets = data.items.filter(it =>
+      (force || !it.chapterIds?.length) && (!ids || ids.includes(it.id))
+    )
+    const updates = []
+    const failures = []
+    // 串行调用，避免瞬时并发打爆供应商额度（与 OCR 同口径）
+    for (const it of targets) {
+      const r = await tagQuestionChapters(it, grade)
+      if (r.error) failures.push({ id: it.id, error: r.error })
+      else if (r.chapterIds.length) updates.push({ id: it.id, chapterIds: r.chapterIds })
+    }
+    const result = await setCuratedChapters(updates)
+    res.json({ success: true, scanned: targets.length, ...result, failures })
+  } catch (e) {
+    res.status(500).json({ error: 'AI 挂章节失败', message: e.message })
+  }
+})
+
+// 改标签/备注/章节：PUT /:id  {tags?, note?, chapterIds?}
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params
