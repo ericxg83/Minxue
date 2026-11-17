@@ -212,10 +212,12 @@ function normalizeRow(r, sourceType) {
     analysis: r.analysis || '',
     difficulty: r.difficulty == null ? null : Number(r.difficulty),
     subject: r.subject || '数学',
-    // 配图走原表 URL，不复制图片本身
+    // 配图走原表 URL，不复制图片本身。
+    // ⛔ 必须用裁片 image_url（白底、已去背景），不能用 page_image_url（整页截图，
+    //    含黑底/人像/板书重影）—— 试卷题库 paperBankService.js:2303 事故同源。
     imageUrl: isQuestion
       ? (r.geometry_image_url || r.image_url || '')
-      : (r.page_image_url || r.image_url || ''),
+      : (r.image_url || ''),
     resourceName: r.resource_name || '',
   }
 }
