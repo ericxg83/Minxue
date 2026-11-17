@@ -7,11 +7,27 @@
         description="错题和试卷题里的好题都收在这里，按标签筛选、勾选后导出 PDF 讲义"
       >
         <template #actions>
+          <ActionButton variant="secondary" :loading="tagging" @click="runAutoTagging" title="用 AI 按教材目录给还没章节的题自动挂章节">
+            <el-icon><MagicStick /></el-icon>AI 挂章节
+          </ActionButton>
           <ActionButton variant="primary" :disabled="!selectedIds.length || exporting" @click="exportPdf">
             <el-icon><Download /></el-icon>导出 PDF{{ selectedIds.length ? `（${selectedIds.length}）` : '' }}
           </ActionButton>
         </template>
       </PageHeader>
+
+      <!-- 章节筛选（静态教材目录树，命中任一即显示；一道综合题可挂多章） -->
+      <div class="curated-chapter-bar">
+        <span class="chapter-label">教材章节</span>
+        <el-tree-select
+          v-model="activeChapters" :data="chapterTree" multiple check-strictly
+          :props="{ label: 'label', children: 'children', value: 'value' }"
+          node-key="value" placeholder="按章节筛选（可多选，命中任一）" clearable
+          style="width: 420px" :max-tag-count="2"
+        />
+        <span v-if="activeChapters.length" class="chapter-hint">已选 {{ activeChapters.length }} 章</span>
+        <span class="chapter-hint">综合题可挂多章，讲哪章都能捞到</span>
+      </div>
 
       <!-- 标签筛选条 -->
       <div class="curated-toolbar">
@@ -68,6 +84,23 @@
                   <span v-if="item.difficulty" class="diff">难度 {{ item.difficulty }}</span>
                   <span class="date">{{ formatDate(item.createdAt) }}</span>
                 </div>
+                <!-- 章节标签（一题可多章）：点章签的 × 移除；+ 章节从教材树里选 -->
+                <div class="curated-item__chapters">
+                  <button
+                    v-for="cid in (item.chapterIds || [])" :key="cid" type="button"
+                    class="chapter-chip" :title="`移除章节：${chapterNameOf(cid)}`"
+                    @click="removeChapter(item, cid)"
+                  >{{ chapterNameOf(cid) }} ×</button>
+                  <el-dropdown trigger="click" @command="c => addChapter(item, c)">
+                    <button type="button" class="chapter-chip is-add">+ 章节</button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item v-for="n in chapterFlat" :key="n.value" :command="n.value">{{ n.label }}</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <span v-if="!(item.chapterIds || []).length" class="chapter-empty">未挂章节</span>
+                </div>
                 <!-- 题干/选项/答案一律走 MathRender（与试卷题库同口径）：
                      ⛔ 裸 {{ content }} 会把 \frac、上下标、∠ 显示成 LaTeX 源码 —— 老师看到的就是「未处理状态」。
                      MathRender auto-detect 自动识别行内/块级公式，与试卷题库 pb-row__stem 完全同款。 -->
@@ -117,9 +150,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download } from '@element-plus/icons-vue'
+import { Download, MagicStick } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '../components/ui/PageHeader.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -128,7 +161,8 @@ import EmptyState from '../components/ui/EmptyState.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import MathRender from '../components/MathRender.vue'
 import { bodyText } from '../utils/paperRowDisplay.js'
-import { listCuratedQuestions, removeCuratedQuestion, updateCuratedQuestion } from '../../services/apiService'
+import { listCuratedQuestions, removeCuratedQuestion, updateCuratedQuestion, autoTagCuratedChapters } from '../../services/apiService'
+import { apiRequest } from '../../services/apiService'
 
 const router = useRouter()
 const RECOMMENDED_TAGS = ['易错', '高难', '典型', '好素材']
@@ -142,6 +176,33 @@ const sourceType = ref('')
 const keyword = ref('')
 const sort = ref('newest')
 const selectedIds = ref([])
+const tagging = ref(false)
+// 教材章节（复用周末课件的静态目录树，命中任一筛选）
+const chapterTree = ref([])
+const chapterFlat = ref([])
+const chapterNameMap = ref({})
+const activeChapters = ref([])
+const CHAPTER_GRADE = '初三'
+
+async function loadChapterTree() {
+  try {
+    const res = await apiRequest(`/weekend-ppt/chapters?grade=${encodeURIComponent(CHAPTER_GRADE)}`)
+    chapterTree.value = Array.isArray(res?.tree) ? res.tree : []
+    const flat = []
+    const map = {}
+    const walk = (nodes) => (nodes || []).forEach(n => {
+      flat.push({ value: n.value, label: n.label })
+      map[n.value] = n.label
+      if (n.children?.length) walk(n.children)
+    })
+    walk(chapterTree.value)
+    chapterFlat.value = flat
+    chapterNameMap.value = map
+  } catch (e) {
+    console.error('[好题甄选] 章节树加载失败:', e?.message || e)
+  }
+}
+const chapterNameOf = cid => chapterNameMap.value[cid] || cid
 
 const allTags = computed(() => {
   const set = new Set([...RECOMMENDED_TAGS, ...tagStats.value.map(s => s.tag)])
@@ -166,7 +227,7 @@ const filteredList = computed(() => {
 async function load() {
   loading.value = true
   try {
-    const data = await listCuratedQuestions({ tags: activeTags.value, sort: sort.value })
+    const data = await listCuratedQuestions({ tags: activeTags.value, chapterIds: activeChapters.value, sort: sort.value })
     list.value = Array.isArray(data?.items) ? data.items : []
     tagStats.value = Array.isArray(data?.tagStats) ? data.tagStats : []
     // 清掉已不存在的勾选
@@ -212,6 +273,38 @@ async function removeTag(item, tag) {
   } catch (e) { ElMessage.error('移除标签失败：' + (e?.message || e)) }
 }
 
+async function addChapter(item, cid) {
+  if ((item.chapterIds || []).includes(cid)) return
+  const chapterIds = [...(item.chapterIds || []), cid]
+  try {
+    await updateCuratedQuestion(item.id, { chapterIds })
+    item.chapterIds = chapterIds
+    ElMessage.success('已加章节：' + chapterNameOf(cid))
+  } catch (e) { ElMessage.error('加章节失败：' + (e?.message || e)) }
+}
+
+async function removeChapter(item, cid) {
+  const chapterIds = (item.chapterIds || []).filter(c => c !== cid)
+  try {
+    await updateCuratedQuestion(item.id, { chapterIds })
+    item.chapterIds = chapterIds
+  } catch (e) { ElMessage.error('移除章节失败：' + (e?.message || e)) }
+}
+
+async function runAutoTagging() {
+  tagging.value = true
+  try {
+    const res = await autoTagCuratedChapters(CHAPTER_GRADE, false)
+    const n = res?.applied || 0
+    ElMessage.success(n ? `AI 已给 ${n} 道题挂上章节` : '没有需要挂章节的题（都已有章节）')
+    await load()
+  } catch (e) {
+    ElMessage.error('AI 挂章节失败：' + (e?.message || e))
+  } finally {
+    tagging.value = false
+  }
+}
+
 async function unstar(item) {
   try {
     await ElMessageBox.confirm('从好题甄选移除这道题？原题不受影响。', '取消甄选', { type: 'warning' })
@@ -236,7 +329,12 @@ function formatDate(v) {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 
-onMounted(load)
+watch(activeChapters, () => load(), { deep: true })
+
+onMounted(async () => {
+  await loadChapterTree()
+  await load()
+})
 </script>
 
 <style scoped>
@@ -246,6 +344,9 @@ onMounted(load)
   background: var(--wb-bg-card, #fff); border: 1px solid var(--wb-border, #ebeef5);
   border-radius: var(--wb-radius-panel, 10px);
 }
+.curated-chapter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; background: var(--wb-bg-card, #fff); border: 1px solid var(--wb-border, #ebeef5); border-radius: var(--wb-radius-panel, 10px); }
+.chapter-label { font-size: 12px; color: var(--wb-text-secondary, #606266); font-weight: 500; }
+.chapter-hint { font-size: 11px; color: var(--wb-text-muted, #909399); }
 .tag-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .tag-filter__label { font-size: 12px; color: var(--wb-text-muted, #909399); margin-right: 2px; }
 .toolbar-right { display: flex; align-items: center; gap: 8px; }
@@ -279,6 +380,11 @@ onMounted(load)
 .curated-item__answer { margin-top: 6px; font-size: 12px; color: var(--wb-text-secondary, #606266); }
 .curated-item__answer .answer-label { margin-right: 6px; color: var(--wb-text-tertiary, #909399); }
 .curated-item__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
+.curated-item__chapters { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 6px; }
+.chapter-chip { padding: 2px 8px; font-size: 11px; color: #534AB7; background: #EEEDFE; border: 1px solid transparent; border-radius: 999px; cursor: pointer; }
+.chapter-chip:hover { border-color: #534AB7; }
+.chapter-chip.is-add { color: #534AB7; background: transparent; border: 1px dashed #534AB7; }
+.chapter-empty { font-size: 11px; color: var(--wb-text-muted, #909399); }
 .curated-item__del { padding: 2px 6px; color: #c0c4cc; background: transparent; border: 0; cursor: pointer; }
 .curated-item__del:hover { color: #f56c6c; }
 </style>

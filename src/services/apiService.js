@@ -1556,6 +1556,7 @@ export const listCuratedQuestions = (filters = {}) => {
   const qs = new URLSearchParams()
   if (filters.sourceType) qs.set('sourceType', filters.sourceType)
   if (Array.isArray(filters.tags) && filters.tags.length) qs.set('tags', filters.tags.join(','))
+  if (Array.isArray(filters.chapterIds) && filters.chapterIds.length) qs.set('chapters', filters.chapterIds.join(','))
   if (filters.keyword) qs.set('keyword', filters.keyword)
   if (filters.sort) qs.set('sort', filters.sort)
   const suffix = qs.toString() ? `?${qs.toString()}` : ''
@@ -1580,4 +1581,11 @@ export const updateCuratedQuestion = (id, patch) =>
   apiRequest(`/curated-questions/${id}`, {
     method: 'PUT',
     body: JSON.stringify(patch),
+  })
+
+/** AI 批量给甄选题挂教材章节（综合题可挂多章）。force=true 重挂已有章节的题。 */
+export const autoTagCuratedChapters = (grade = '初三', force = false, ids = null) =>
+  apiRequest('/curated-questions/auto-chapter', {
+    method: 'POST',
+    body: JSON.stringify({ grade, force, ...(ids ? { ids } : {}) }),
   })
