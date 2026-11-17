@@ -68,11 +68,28 @@
                   <span v-if="item.difficulty" class="diff">难度 {{ item.difficulty }}</span>
                   <span class="date">{{ formatDate(item.createdAt) }}</span>
                 </div>
-                <div class="curated-item__stem">
-                  <template v-if="item.parentStem">{{ item.parentStem }} </template>{{ item.content }}
+                <!-- 题干/选项/答案一律走 MathRender（与试卷题库同口径）：
+                     ⛔ 裸 {{ content }} 会把 \frac、上下标、∠ 显示成 LaTeX 源码 —— 老师看到的就是「未处理状态」。
+                     MathRender auto-detect 自动识别行内/块级公式，与试卷题库 pb-row__stem 完全同款。 -->
+                <div v-if="item.parentStem" class="curated-item__stem">
+                  <MathRender :content="item.parentStem" auto-detect />
                 </div>
+                <div v-if="curatedBodyText(item)" class="curated-item__stem">
+                  <MathRender :content="curatedBodyText(item)" auto-detect />
+                </div>
+                <!-- 配图用裁片（后端已改为 image_url 优先），白底大图，不用小缩略图 -->
+                <img
+                  v-if="item.imageUrl" class="curated-item__figure"
+                  :src="item.imageUrl" alt="原题图" loading="lazy"
+                />
                 <div v-if="item.options && item.options.length" class="curated-item__options">
-                  <span v-for="(o, i) in item.options" :key="i">{{ 'ABCD'[i] }}. {{ o }}</span>
+                  <span v-for="(o, i) in item.options" :key="i">
+                    {{ 'ABCD'[i] }}.<MathRender :content="String(o)" auto-detect tag="span" force-inline />
+                  </span>
+                </div>
+                <div v-if="item.answer" class="curated-item__answer">
+                  <span class="answer-label">参考答案</span>
+                  <MathRender :content="item.answer" auto-detect tag="span" force-inline />
                 </div>
                 <div class="curated-item__tags">
                   <button
@@ -89,9 +106,6 @@
                     </template>
                   </el-dropdown>
                 </div>
-              </div>
-              <div v-if="item.imageUrl" class="curated-item__thumb">
-                <img :src="item.imageUrl" alt="题图" loading="lazy" />
               </div>
               <button type="button" class="curated-item__del" title="取消甄选" @click="unstar(item)">✕</button>
             </article>
@@ -112,6 +126,8 @@ import ContentCard from '../components/ui/ContentCard.vue'
 import ActionButton from '../components/ui/ActionButton.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
 import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
+import MathRender from '../components/MathRender.vue'
+import { bodyText } from '../utils/paperRowDisplay.js'
 import { listCuratedQuestions, removeCuratedQuestion, updateCuratedQuestion } from '../../services/apiService'
 
 const router = useRouter()
@@ -131,6 +147,9 @@ const allTags = computed(() => {
   const set = new Set([...RECOMMENDED_TAGS, ...tagStats.value.map(s => s.tag)])
   return [...set]
 })
+// 复用试卷题库 bodyText 判据（content 与 parent_stem 逐字相同时不重复显示题干）；
+// 甄选题是驼峰字段，这里做一次形状映射，不复制判据本身。
+const curatedBodyText = item => bodyText({ content: item?.content, parent_stem: item?.parentStem })
 const summaryText = computed(() => `共 ${list.value.length} 道甄选题${selectedIds.value.length ? ` · 已勾选 ${selectedIds.value.length} 道` : ''}`)
 
 // 客户端再筛一层关键词/来源，标签与排序走后端（后端也支持，双保险且即时）
@@ -255,10 +274,11 @@ onMounted(load)
 .res-name, .diff { color: var(--wb-text-secondary, #606266); }
 .date { margin-left: auto; }
 .curated-item__stem { font-size: 13px; line-height: 1.6; color: var(--wb-text-primary, #303133); }
+.curated-item__figure { display: block; max-width: 340px; max-height: 240px; object-fit: contain; border: 1px solid #e5e3dc; border-radius: 6px; margin: 8px 0 2px; background: #fff; }
 .curated-item__options { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 12px; color: var(--wb-text-secondary, #606266); }
+.curated-item__answer { margin-top: 6px; font-size: 12px; color: var(--wb-text-secondary, #606266); }
+.curated-item__answer .answer-label { margin-right: 6px; color: var(--wb-text-tertiary, #909399); }
 .curated-item__tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 8px; }
-.curated-item__thumb { width: 92px; height: 68px; flex: 0 0 auto; overflow: hidden; border-radius: 6px; background: #f5f7fa; }
-.curated-item__thumb img { width: 100%; height: 100%; object-fit: cover; }
 .curated-item__del { padding: 2px 6px; color: #c0c4cc; background: transparent; border: 0; cursor: pointer; }
 .curated-item__del:hover { color: #f56c6c; }
 </style>
