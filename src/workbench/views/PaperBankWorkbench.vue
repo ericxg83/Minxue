@@ -355,6 +355,10 @@
                   <span class="pb-row__type">{{ typeLabel(q.question_type) }}</span>
                   <span v-if="q.difficulty" class="pb-row__diff">{{ stars(q.difficulty) }}</span>
                   <span v-for="t in (q.tags || [])" :key="t" class="pb-tag">{{ t }}</span>
+                  <CurateStar
+                    sourceType="resource_question" :sourceId="q.id" :curated="isCurated(q.id)"
+                    @change="e => markCurateLocal(e.sourceId, e.curated, curateMap[e.sourceId]?.tags)"
+                  />
                   <!-- 归属（2026-11-08）：题集名就是这道题的「文件夹」，点它就能换 ——
                        收题点错题集时不用删了重收（重收要再识别一次，白丢已校对的题干）。 -->
                   <button
@@ -833,6 +837,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Plus, UploadFilled, Search, Tickets, Camera } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PageHeader from '../components/ui/PageHeader.vue'
@@ -843,6 +848,8 @@ import WorkbenchInput from '../components/ui/WorkbenchInput.vue'
 import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
 import WorkbenchDialog from '../components/ui/WorkbenchDialog.vue'
 import MathRender from '../components/MathRender.vue'
+import CurateStar from '../components/common/CurateStar.vue'
+import { useCuratedStatus } from '../composables/useCuratedStatus.js'
 import PaperBankTree from '../components/paperBank/PaperBankTree.vue'
 import MoveQuestionPicker from '../components/paperBank/MoveQuestionPicker.vue'
 import {
@@ -868,6 +875,7 @@ import { buildComposePaperBody, buildComposePaperCSS } from '../../utils/compose
 import { buildLectureBody, buildLectureCSS, LECTURE_PAGE_MM, LECTURE_PAGE_PX } from '../../utils/lecturePdf'
 import {
   addBasketItem,
+  createBasketItem,
   removeBasketItem,
   setBasketItemScore,
   isInBasket,
@@ -877,6 +885,7 @@ import {
   composePaperFilename,
 } from '../../utils/paperBasket'
 import { renderCustomBodyToHTML, exportServerPDF, paintPreviewIntoIframe } from '../../utils/serverPdfExporter'
+import { curatedItemToBasketInput } from '../utils/curatedExport.js'
 import { showStem, bodyText, showFigure } from '../utils/paperRowDisplay.js'
 import { isSourceUrl, sourceHref } from '../utils/clipSource.js'
 
@@ -884,6 +893,8 @@ const PAGE_SIZE = 200
 
 const papers = ref([])
 const questions = ref([])
+// 好题甄选：批量查收藏状态（试卷题来源）
+const { statusMap: curateMap, loadStatus: loadCurateStatus, isCurated: isCurated, markLocal: markCurateLocal } = useCuratedStatus('resource_question')
 const loading = ref(false)
 const creating = ref(false)
 const uploading = ref(false)
@@ -1320,6 +1331,7 @@ const loadQuestions = async () => {
     questions.value = []
     truncated.value = false
     loading.value = false
+    loadCurateStatus([]).catch(() => {})
     return
   }
   loading.value = true
@@ -1328,6 +1340,8 @@ const loadQuestions = async () => {
     truncated.value = rows.length > limit.value
     const list = truncated.value ? rows.slice(0, limit.value) : rows
     questions.value = list
+    // 好题甄选状态：一批查一次（不阻塞题目渲染）
+    loadCurateStatus(list.map(q => q.id)).catch(() => {})
     // 标签候选从当前结果里收（题库的标签是自由文本，没有字典表）
     const set = new Set(tagOptions.value)
     for (const q of list) for (const t of (q.tags || [])) set.add(t)
@@ -1425,6 +1439,31 @@ const onRemove = (id) => { basket.value = removeBasketItem(basket.value, id) }
 // moveBasketItem 仍留在 paperBasket.js（有回归锁），需要时再接 UI。
 // 改分统一走卷面上点「4 分」→ beginScoreEdit → setBasketItemScore。
 const clearBasket = () => { basket.value = [] }
+
+// 好题甄选 → 组卷（P1）：把甄选页带过来的题灌入试题篮。
+// 甄选题来自 questions / resource_questions 两个表，字段已由甄选后端归一化，
+// 这里只把驼峰字段映射回 createBasketItem 期望的蛇形字段，不碰题干/答案本身。
+const curateRoute = useRoute()
+const curateRouter = useRouter()
+function consumeCuratedExport() {
+  if (curateRoute.query.from !== 'curated') return
+  let items = []
+  try {
+    const raw = sessionStorage.getItem('curated_export_items')
+    items = raw ? JSON.parse(raw) : []
+  } catch { items = [] }
+  sessionStorage.removeItem('curated_export_items')
+  // 用 router.replace 清掉 query，避免刷新/返回时重复灌入
+  curateRouter.replace({ path: '/paper-bank', query: {} }).catch(() => {})
+  if (!Array.isArray(items) || !items.length) {
+    ElMessage.warning('没有从好题甄选带过来的题')
+    return
+  }
+  const mapped = items.map(it => createBasketItem(curatedItemToBasketInput(it)))
+  basket.value = mapped
+  composeTitle.value = '好题甄选 · 组卷'
+  ElMessage.success(`已从好题甄选导入 ${mapped.length} 道题，选好版式即可导出 PDF`)
+}
 
 const defaultTitle = () => {
   const ids = new Set(basket.value.map(it => it.resource_id))
@@ -2533,6 +2572,9 @@ onMounted(async () => {
   try {
     await loadPapers()
     await loadQuestions()
+    // 好题甄选 → 组卷：消费从甄选页带过来的题，灌入试题篮，复用现有卷面/导出。
+    // ⛔ 题目内容已在甄选页按原表取回（只引用不复制），这里只做形状归一化。
+    consumeCuratedExport()
     if (!composeTitle.value.trim()) composeTitle.value = '组卷练习'
     if (anyParsing() || anyAuditing()) startPolling()
   } finally {

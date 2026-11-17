@@ -75,7 +75,7 @@
         <ContentCard class="type-inspector" title="题目详情" :description="activeKpQuestion ? (activeKpQuestion.kps||[]).map(k=>k.name).join(' · ') || '关联考点' : '选一道题看完整题干、答案和谁错过'" flush>
           <EmptyState v-if="!activeKpQuestion" :icon="Reading" title="选一道题" description="左边点任意题目，这里显示完整题干、答案与错过的学生。" compact />
           <article v-else class="type-detail">
-            <div class="detail-heading"><div><div class="knowledge-label">{{ activeKpQuestion.subject || '数学' }} · {{ activeKpQuestion.difficulty ? `难度 ${activeKpQuestion.difficulty}` : '难度未判定' }}</div><h2>{{ activeKpQuestion.wrongCount ? `${activeKpQuestion.wrongCount} 次错 · ${activeKpQuestion.studentCount} 人` : '暂无错次' }}</h2></div></div>
+            <div class="detail-heading"><div><div class="knowledge-label">{{ activeKpQuestion.subject || '数学' }} · {{ activeKpQuestion.difficulty ? `难度 ${activeKpQuestion.difficulty}` : '难度未判定' }}</div><h2>{{ activeKpQuestion.wrongCount ? `${activeKpQuestion.wrongCount} 次错 · ${activeKpQuestion.studentCount} 人` : '暂无错次' }}</h2></div><CurateStar sourceType="question" :sourceId="activeKpQuestion.questionId" :curated="isCurated(activeKpQuestion.questionId)" @change="e => markCurateLocal(e.sourceId, e.curated, curateMap[e.sourceId]?.tags)" /></div>
             <section class="detail-section"><h3>题干</h3><p class="kp-content">{{ activeKpQuestion.content || '题目内容不可用' }}</p></section>
             <section class="detail-section" v-if="activeKpQuestion.options"><h3>选项</h3><p class="kp-content">{{ formatOptions(activeKpQuestion.options) }}</p></section>
             <section class="detail-section" v-if="activeKpQuestion.answer"><h3>参考答案</h3><p class="kp-content">{{ activeKpQuestion.answer }}</p></section>
@@ -213,6 +213,8 @@ import VChart from 'vue-echarts'
 import {apiRequest,getKnowledgeTree} from '../../services/apiService'
 use([GraphChart,TooltipComponent,CanvasRenderer])
 import ActionButton from '../components/ui/ActionButton.vue'; import ContentCard from '../components/ui/ContentCard.vue'; import EmptyState from '../components/ui/EmptyState.vue'; import FilterBar from '../components/ui/FilterBar.vue'; import PageHeader from '../components/ui/PageHeader.vue'; import WorkbenchInput from '../components/ui/WorkbenchInput.vue'; import WorkbenchSelect from '../components/ui/WorkbenchSelect.vue'
+import CurateStar from '../components/common/CurateStar.vue'; import {useCuratedStatus} from '../composables/useCuratedStatus.js'
+const {statusMap:curateMap,loadStatus:loadCurateStatus,isCurated:isCurated,markLocal:markCurateLocal}=useCuratedStatus('question')
 
 const route=useRoute(), router=useRouter()
 // r218：activeMode 四值（graph/recommended/library/knowledge）→ activeLine 两值 + subMode 两值。
@@ -277,7 +279,7 @@ async function loadSummary(){const data=await apiRequest('/teaching-question-typ
 async function loadKpRank(){kpRankLoading.value=true;try{const data=await apiRequest(`/teaching-question-types/kp-ranking?days=${kpDays.value}`);kpRank.value=data.nodes||[];kpStats.value=data.stats||{}}catch(error){console.warn('考点排序加载失败',error.message||error)}finally{kpRankLoading.value=false}}
 async function loadKpWorkbench(){await Promise.all([loadKpQuestions(),loadKpTypes()])}
 async function loadKpTypes(){if(!selectedKpId.value){types.value=[];return}try{const p=new URLSearchParams();p.set('kpId',selectedKpId.value);const data=await apiRequest(`/teaching-question-types?${p}`);types.value=data.types||[]}catch(error){console.warn('考点考法加载失败',error.message||error)}}
-async function loadKpQuestions(){if(!selectedKpId.value){kpQuestions.value=[];kpScope.value=null;return}kpLoading.value=true;kpActiveId.value=null;try{const p=new URLSearchParams({kpId:selectedKpId.value,includeChildren:'1',onlyWrong:onlyWrong.value?'1':'0',limit:String(kpLimit.value)});const data=await apiRequest(`/teaching-question-types/kp-questions?${p}`);kpQuestions.value=data.questions||[];kpScope.value=data.scope||null;if(kpQuestions.value.length)kpActiveId.value=kpQuestions.value[0].questionId}catch(error){ElMessage.error(error.message||'加载考点题目失败')}finally{kpLoading.value=false;loadCooccur()}}
+async function loadKpQuestions(){if(!selectedKpId.value){kpQuestions.value=[];kpScope.value=null;return}kpLoading.value=true;kpActiveId.value=null;try{const p=new URLSearchParams({kpId:selectedKpId.value,includeChildren:'1',onlyWrong:onlyWrong.value?'1':'0',limit:String(kpLimit.value)});const data=await apiRequest(`/teaching-question-types/kp-questions?${p}`);kpQuestions.value=data.questions||[];kpScope.value=data.scope||null;if(kpQuestions.value.length)kpActiveId.value=kpQuestions.value[0].questionId;loadCurateStatus(kpQuestions.value.map(q=>q.questionId)).catch(()=>{})}catch(error){ElMessage.error(error.message||'加载考点题目失败')}finally{kpLoading.value=false;loadCooccur()}}
 // 后端 limit 上限 300（kp-questions: Math.min(..., 300)），到顶就别再假装能加载更多
 function expandLimit(){if(kpLimit.value>=300){ElMessage.info('单次最多显示 300 道。可以缩小考点范围，或勾「只看有人错过的题」');return}kpLimit.value=Math.min(kpLimit.value*2,300);loadKpQuestions()}
 function sendKpToWeekend(){if(!selectedKpId.value)return ElMessage.warning('先选一个考点');router.push({path:'/weekend-ppt',query:{kpIds:selectedKpId.value}})}

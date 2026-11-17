@@ -320,6 +320,7 @@
                     ⚠ 缺小问 {{ q.missingSubs.join('/') }}
                   </span>
                   <span v-if="!q.hasAnswer" class="item-no-answer">答案暂缺</span>
+                  <CurateStar sourceType="question" :sourceId="curateIdOf(q)" :curated="isCurated(curateIdOf(q))" @change="e => markCurateLocal(e.sourceId, e.curated, curateMap[e.sourceId]?.tags)" />
                   <button
                     class="item-edit-btn"
                     :class="{ 'item-edit-btn--off': !canEdit(q) }"
@@ -431,6 +432,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { MagicStick, Reading, Search, WarningFilled } from '@element-plus/icons-vue'
 import { apiRequest, updateQuestion } from '../../services/apiService'
+import CurateStar from '../components/common/CurateStar.vue'
+import { useCuratedStatus } from '../composables/useCuratedStatus.js'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -710,6 +713,15 @@ watch(() => route.query?.groupBy, () => {
 const sectionSlides = computed(() => (handout.value?.slides || []).filter(s => s.kind === 'section'))
 const questionSlides = computed(() => (handout.value?.slides || []).filter(s => s.kind === 'question'))
 const questionCount = computed(() => questionSlides.value.length)
+// 好题甄选：课件题来自 questions 表，题单一变就批量查收藏状态
+const { statusMap: curateMap, loadStatus: loadCurateStatus, isCurated: isCurated, markLocal: markCurateLocal } = useCuratedStatus('question')
+function curateIdOf(q) {
+  const subs = (q?.subParts || []).filter(s => s.questionId)
+  return subs[0]?.questionId || q?.wholeQuestionId || q?.questionId || ''
+}
+watch(questionSlides, (slides) => {
+  loadCurateStatus((slides || []).map(curateIdOf)).catch(() => {})
+}, { immediate: true })
 const selectedCount = computed(() => selected.value.size)
 const previewMeta = computed(() => {
   if (!handout.value) return ''

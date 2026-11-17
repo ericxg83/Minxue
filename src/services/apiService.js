@@ -1549,3 +1549,35 @@ export const getQuestionAssets = async (questionId, type = null) => {
   const data = await apiRequest(`/questions/${questionId}/assets${qs}`)
   return data?.assets || []
 }
+
+// ── 好题甄选（2026-11-17）────────────────────────────────────────
+// 只读写 curated_questions（引用+标签），题目内容由后端实时 JOIN 原表取回。
+export const listCuratedQuestions = (filters = {}) => {
+  const qs = new URLSearchParams()
+  if (filters.sourceType) qs.set('sourceType', filters.sourceType)
+  if (Array.isArray(filters.tags) && filters.tags.length) qs.set('tags', filters.tags.join(','))
+  if (filters.keyword) qs.set('keyword', filters.keyword)
+  if (filters.sort) qs.set('sort', filters.sort)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest(`/curated-questions${suffix}`)
+}
+export const queryCuratedStatus = (sourceType, sourceIds) =>
+  apiRequest('/curated-questions/status/query', {
+    method: 'POST',
+    body: JSON.stringify({ sourceType, sourceIds }),
+  })
+export const addCuratedQuestion = (sourceType, sourceId, tags) =>
+  apiRequest('/curated-questions', {
+    method: 'POST',
+    body: JSON.stringify({ sourceType, sourceId, tags }),
+  })
+export const removeCuratedQuestion = (sourceType, sourceId) =>
+  apiRequest('/curated-questions', {
+    method: 'DELETE',
+    body: JSON.stringify({ sourceType, sourceId }),
+  })
+export const updateCuratedQuestion = (id, patch) =>
+  apiRequest(`/curated-questions/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(patch),
+  })

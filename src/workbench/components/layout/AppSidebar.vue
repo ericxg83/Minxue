@@ -36,7 +36,7 @@
 
 <script setup>
 import { useRoute, useRouter } from 'vue-router'
-import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, MoreFilled, Notebook, Reading, User } from '@element-plus/icons-vue'
+import { Collection, DataAnalysis, DocumentChecked, Files, Grid, HomeFilled, MoreFilled, Notebook, Reading, Star, User } from '@element-plus/icons-vue'
 import { useNotificationStore } from '../../stores/notificationStore'
 
 const route = useRoute()
@@ -69,7 +69,9 @@ const navGroups = [
       // 试卷题库写 resource_questions 与批改答案分家，是幸存的活功能。
       { label: '试卷题库', path: '/paper-bank', icon: Grid },
       { label: '我的考法库', path: '/question-bank', icon: Collection },
-      { label: '周末班课件', path: '/weekend-ppt', icon: Files }
+      { label: '周末班课件', path: '/weekend-ppt', icon: Files },
+      // 好题甄选（2026-11-17）：跨来源收藏的好题，按标签筛选后导出 PDF 讲义（教学资源域）
+      { label: '好题甄选', path: '/curated', icon: Star }
     ]
   }
 ]

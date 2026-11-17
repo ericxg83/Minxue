@@ -93,6 +93,13 @@ const routes = [
     meta: { requiresPC: true }
   },
   {
+    // 好题甄选（2026-11-17）：跨来源收藏（错题+试卷题）→ 按标签筛选 → 导出 PDF
+    path: '/curated',
+    name: 'CuratedQuestions',
+    component: () => import('../views/CuratedQuestionsWorkbench.vue'),
+    meta: { requiresPC: true }
+  },
+  {
     path: '/weekly-report',
     name: 'WeeklyReport',
     component: () => import('../views/WeeklyReportWorkbench.vue'),

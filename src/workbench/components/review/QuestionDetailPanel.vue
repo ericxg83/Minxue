@@ -31,6 +31,7 @@
                这样在途恢复、答案库直查、降级提示整套能力原样保留，
                下方结论横幅也仍常驻，跨页回来看得到重算结果。 -->
           <template v-if="!editing">
+            <CurateStar sourceType="question" :sourceId="q.id" :curated="isCurated(q.id)" @change="e => markCurateLocal(e.sourceId, e.curated, curateMap[e.sourceId]?.tags)" />
             <el-button size="small" plain @click="handleEnterEdit">
               <el-icon><EditPen /></el-icon> 编辑
             </el-button>
@@ -653,11 +654,19 @@ import QuestionEditForm from './QuestionEditForm.vue'
 import AnswerRecognizeDialog from './AnswerRecognizeDialog.vue'
 import QuestionRecognizeDialog from './QuestionRecognizeDialog.vue'
 import OriginalPaperSource from './OriginalPaperSource.vue'
+import CurateStar from '../common/CurateStar.vue'
+import { useCuratedStatus } from '../../composables/useCuratedStatus.js'
 // 解析入口（题干行小按钮 + 弹窗看完整解析），与 OriginalPaperSource 同构
 import AnalysisSource from './AnalysisSource.vue'
 
 const store = useReviewStore()
 const q = computed(() => store.currentReviewQuestion)
+// 好题甄选：复核的题目来自 questions 表，切题时查该题收藏状态
+const { statusMap: curateMap, loadStatus: loadCurateStatus, isCurated: isCurated, markLocal: markCurateLocal } = useCuratedStatus('question')
+watch(() => q.value?.id, (id) => {
+  if (id) loadCurateStatus([id]).catch(() => {})
+  else loadCurateStatus([]).catch(() => {})
+}, { immediate: true })
 
 // [P0-1 完成引导 2026-09-27] 完成态出口 → ReviewWorkspace 转发给 ReviewTopBar 的
 // handleComplete / goNextTask（错题门禁弹窗与换卷状态都留在顶栏，不复制业务逻辑）。
