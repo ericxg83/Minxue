@@ -22,7 +22,7 @@ import { dirname, resolve } from 'node:path'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  parseFigureBox, labelStrokes, pickFigureComponents, renderCleanFigure,
+  parseFigureBox, labelStrokes, pickFigureComponents, renderCleanFigure, detectDistractors,
 } from '../server/services/clipFigureClean.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -90,6 +90,46 @@ test('主块过滤：保留图形主块与相邻顶点字母块，丢弃贴边�
   assert.equal(pickFigureComponents([{ id: 1, area: 200000, x0: 10, y0: 10, x1: 500, y1: 500 }], 600, 600), null)
 })
 
+// ── ②b 框内干扰文字 / 播放器 UI / 笔画碎片剔除（2026-11-18 报障）──────────
+// 事故：视觉模型把几何图连同「贴图的题干残行 + 底部 y=... 公式 + 播放器按钮」一起框入，
+// 这些块落在主块外扩 10% 内，旧的空间过滤全保留 ⇒ 净化"成功"但配图带字。
+// 判据必须做到：实心 UI 块、贴边成行字、孤立细长笔画碎片一律剔；顶点字母（近方形、
+// 面积 >100、同行 <3 个、不贴边）必须保住。
+test('干扰剔除：实心播放器块、贴边成行题干、孤立碎片全剔，顶点字母保留', () => {
+  const W = 600, H = 600
+  const comps = [
+    { id: 1, area: 9000, x0: 200, y0: 100, x1: 500, y1: 450 },   // 图形主块（线框，密度 0.08）
+    { id: 2, area: 150, x0: 210, y0: 465, x1: 228, y1: 487 },    // 顶点字母（近方形，图中间）
+    { id: 3, area: 150, x0: 470, y0: 465, x1: 488, y1: 487 },    // 第二个顶点字母（同行仅 2 个）
+    { id: 10, area: 6000, x0: 420, y0: 555, x1: 590, y1: 590 },  // 播放器按钮（密度 0.97）
+    // 底部公式行：y=560~580 贴底，≥3 个字形块成行
+    { id: 20, area: 180, x0: 60, y0: 560, x1: 80, y1: 582 },
+    { id: 21, area: 180, x0: 90, y0: 560, x1: 110, y1: 582 },
+    { id: 22, area: 180, x0: 120, y0: 560, x1: 140, y1: 582 },
+    // 顶部题干残行：y=0~20 贴顶
+    { id: 30, area: 170, x0: 60, y0: 2, x1: 80, y1: 24 },
+    { id: 31, area: 170, x0: 90, y0: 2, x1: 110, y1: 24 },
+    { id: 32, area: 170, x0: 120, y0: 2, x1: 140, y1: 24 },
+    // 孤立笔画碎片：极细的 `|`、`—`
+    { id: 40, area: 26, x0: 18, y0: 13, x1: 18, y1: 38 },
+    { id: 41, area: 28, x0: 458, y0: 547, x1: 471, y1: 548 },
+    { id: 42, area: 45, x0: 476, y0: 332, x1: 481, y1: 346 },    // 孤立数字 `3`，ratio=0.36
+  ]
+  const { solidIds, textIds } = detectDistractors(comps, W, H)
+  for (const id of [10, 20, 21, 22, 30, 31, 32, 40, 41, 42]) {
+    assert.ok(solidIds.has(id) || textIds.has(id), `块 ${id} 应被判为干扰`)
+  }
+  for (const id of [1, 2, 3]) {
+    assert.ok(!solidIds.has(id) && !textIds.has(id), `块 ${id}（图形/顶点字母）不得被误剔`)
+  }
+  // 集成进主块选择：实心按钮面积虽大，也不许取代真图形当主块
+  const picked = pickFigureComponents(comps, W, H)
+  assert.ok(picked)
+  assert.deepEqual(picked.main.id, 1)
+  assert.ok(picked.keep.some(c => c.id === 2) && picked.keep.some(c => c.id === 3))
+  assert.ok(!picked.keep.some(c => c.id === 10))
+})
+
 // ── ③ 白底化 + 笔迹掩膜 ───────────────────────────────────────────────────
 
 /** 造一张 600×600 的深底板书：矩形线框（主块）+ 字母块 + 贴边人像块 */
@@ -145,7 +185,8 @@ test('截图入库接了配图净化，且撤掉整张截图兜底', () => {
   const code = stripComments(serviceSrc)
   assert.ok(!hasWholeScreenshotFallback(serviceSrc), '⛔ 不许再用整张截图顶 image_url')
   assert.match(code, /extractClipFigure\(buf,\s*\{ logger \}\)/)
-  assert.match(code, /row\.image_url = r\.figureUrl/)
+  assert.match(code, /row\.image_url = r\.figureUrl \|\| null/,
+    '⛔ 截图链路必须 fail-closed：净化失败清空主链路脏裁片，绝不挂带题干/UI 的图')
   assert.match(code, /page_image_url: url/, 'OCR 全空时原截图仍要留档')
   assert.match(code, /image_url: pageResults\[idx\]\?\.figureUrl \|\| url/)
   assert.match(viewSrc, /q\.image_url \|\| q\.page_image_url/, '提不出配图时原截图仍要能点开')

@@ -2401,7 +2401,11 @@ export async function parseClipImages({ images, sources = [], notes = [], resour
   for (const r of pageResults) {
     if (!Array.isArray(r?.rows) || !r.rows.length) continue
     // 一张截图拆出的多行（小问组）共用同一张干净配图；页面侧 showFigure 按 URL 只显示一次。
-    if (r.figureUrl) for (const row of r.rows) row.image_url = r.figureUrl
+    // 2026-11-18：⛔ 截图链路必须 fail-closed —— 净化失败就清空主链路裁片。
+    // 主链路 parsePageToQuestions 的裁片是「白底印刷卷」口径，深底网课截图上会把题干、
+    // 播放器 UI 一起裁进来（本次报障的脏配图正是它）。截图只认 clipFigureClean 的白底
+    // 净化产物，提不出就不挂 image_url；原截图仍在 page_image_url，老师可点开回看。
+    for (const row of r.rows) row.image_url = r.figureUrl || null
     rows = rows.concat(r.rows)
   }
 

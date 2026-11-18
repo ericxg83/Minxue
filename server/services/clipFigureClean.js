@@ -26,6 +26,13 @@
  *      高清化已定过这个口径）。11-03 负责人也明确「试卷题库不需要矢量，要高清裁片」。
  *   2. 任何一步不达标就返回 null（**不挂配图**），绝不退回整张截图。
  *      原截图仍留在 page_image_url，老师点「看原截图」能看到；宁可不给图，不给脏图。
+ *
+ * ── 2026-11-18 补：框内干扰文字 / 播放器 UI ──
+ * 负责人再次报障「配图有干扰文字，不纯净」。实测这次视觉模型把图形连同**贴着图的题干
+ * 残行、底部 y=... 公式、播放器按钮**一起框了进来；这些块全落在主块外扩 10% 内，
+ * 单靠空间过滤挡不住 ⇒ 净化"成功"但成品带字。故在第 ③ 步增加形态过滤
+ * （detectDistractors）：实心块（播放器按钮）+ 贴边成行字形块（题干/公式）一律剔除；
+ * 顶点字母同行 <3 个、不贴图幅边缘，天然保留。
  */
 
 import sharp from 'sharp'
@@ -135,6 +142,63 @@ export function labelStrokes(gray, width, height, isStroke) {
 }
 
 /**
+ * 找出「贴着图形的干扰块」：播放器 UI 实心块 + 贴着图幅上下边缘的成行文字（2026-11-18）。
+ *
+ * 背景：视觉模型框选是「贴紧几何图形」，但截图里题干最后一行、底部公式
+ * （如 `y = -x² + 2x + 3`）常常紧贴图形上下边缘，被一并框进来；播放器进度条/按钮是
+ * 实心矩形，也常被算进主块附近。这两类块都落在主块外扩 10% 内，空间过滤挡不住，
+ * 必须由**形态**判据剔除：
+ *   ① 实心块：墨密度 ≥ 0.85 且面积 ≥ 200 —— 播放器按钮/进度条（几何线条密度仅 ~0.03）；
+ *   ② 成行字形块：同一水平带 ≥ 3 个、尺寸落在字窗口内、且贴着图幅上/下 8%/15%
+ *      —— 题干残行与底部公式。顶点字母（同行仅 1~2 个、位于图中间）不会被误杀。
+ *
+ * @returns {{solidIds:Set<number>, textIds:Set<number>}}
+ */
+export function detectDistractors(comps, width, height) {
+  const solidIds = new Set()
+  const glyphs = []
+  for (const c of comps) {
+    const w = c.x1 - c.x0 + 1
+    const h = c.y1 - c.y0 + 1
+    if (w <= 0 || h <= 0) continue
+    const density = c.area / (w * h)
+    if (density >= 0.85 && c.area >= 200) { solidIds.add(c.id); continue }
+    if (w >= 3 && w <= 34 && h >= 6 && h <= 34 && c.area >= MIN_COMPONENT_AREA) glyphs.push(c)
+  }
+  // 按纵向中心聚类成行（容差 12px，实测题干残行基线抖动 <6px）
+  const rows = []
+  for (const g of glyphs) {
+    const cy = (g.y0 + g.y1) / 2
+    let row = rows.find(r => Math.abs(r.cy - cy) <= 12)
+    if (!row) { row = { cy, items: [] }; rows.push(row) }
+    row.items.push(g)
+    row.cy = row.items.reduce((s, x) => s + (x.y0 + x.y1) / 2, 0) / row.items.length
+  }
+  const textIds = new Set()
+  for (const r of rows) {
+    if (r.items.length < 3) continue
+    const top = Math.min(...r.items.map(c => c.y0))
+    const bottom = Math.max(...r.items.map(c => c.y1))
+    if (top <= height * 0.08 || bottom >= height * 0.85) {
+      for (const c of r.items) textIds.add(c.id)
+    }
+  }
+  // ③ 孤立笔画碎片：公式被框边裁断后剩下的 `+`、`——`、`1 0` 等。
+  //    顶点字母是 17~19×22 的近方形块（面积 135~228），与细长碎片形态差异极大，
+  //    用「面积 <100 且长宽比极端 / 贴图幅顶底边」精确剔除，不会误杀顶点字母。
+  for (const c of comps) {
+    if (c.area >= 100 || solidIds.has(c.id)) continue
+    const w = c.x1 - c.x0 + 1
+    const h = c.y1 - c.y0 + 1
+    const ratio = w / h
+    if (ratio >= 3 || ratio <= 0.5 || c.y0 <= height * 0.015 || c.y1 >= height * 0.985) {
+      textIds.add(c.id)
+    }
+  }
+  return { solidIds, textIds }
+}
+
+/**
  * 从连通块里挑出「属于这幅图」的块（纯函数）。
  *
  * 主块 = 面积最大的那块（几何线条彼此相连，天然是一整块；顶点字母是各自独立的小块）。
@@ -147,8 +211,13 @@ export function labelStrokes(gray, width, height, isStroke) {
 export function pickFigureComponents(comps, width, height) {
   if (!comps?.length) return null
   const total = width * height
-  let main = comps[0]
-  for (const c of comps) if (c.area > main.area) main = c
+  // 2026-11-18：先剔形态干扰，再做空间过滤与选主块。顺序很重要——实心 UI 块面积
+  // 可能比图形还大，若让它当主块会直接毁掉整幅图 ⇒ 主块只在非实心块里选。
+  const { solidIds, textIds } = detectDistractors(comps, width, height)
+  const candidates = comps.filter(c => !solidIds.has(c.id))
+  if (!candidates.length) return null
+  let main = candidates[0]
+  for (const c of candidates) if (c.area > main.area) main = c
   const frac = main.area / total
   if (frac < MIN_MAIN_FRAC || frac > MAX_MAIN_FRAC) return null
   if (main.x1 - main.x0 + 1 < 40 || main.y1 - main.y0 + 1 < 40) return null
@@ -156,6 +225,7 @@ export function pickFigureComponents(comps, width, height) {
   const m = Math.max(40, Math.round(Math.max(width, height) * 0.10))
   const reg = { x0: main.x0 - m, y0: main.y0 - m, x1: main.x1 + m, y1: main.y1 + m }
   const keep = comps.filter(c => c.area >= MIN_COMPONENT_AREA &&
+    !solidIds.has(c.id) && !textIds.has(c.id) &&
     !(c.x1 < reg.x0 || c.x0 > reg.x1 || c.y1 < reg.y0 || c.y0 > reg.y1))
   if (!keep.length) return null
   return {
