@@ -116,21 +116,34 @@ export async function getErrorTypes() {
 }
 
 export function buildErrorAnalysisPrompt(errorTypeList, subject = null) {
-  return `你是一位 K12 错因诊断助手。给定一道学生已作答但答错的题（不是空题，学生确实写了答案），从给定的错误原因列表中选择最匹配的 1 个，并简述理由。只返回 JSON，不要输出任何额外说明。
+  return `你是一位 K12 错因诊断助手。给定一道学生已作答但答错的题（不是空题，学生确实写了答案），请先定位学生从哪一步开始偏离，再判断错因类别，最后给出一句能指导老师下一步怎么讲的判语。只返回 JSON，不要输出任何额外说明。
 ${subject ? `学科：${subject}\n` : ''}
-可选错误原因（必须从中选择，不得自创）：${errorTypeList.join('、')}
+可选错误原因（error_type 必须从中选择，不得自创）：${errorTypeList.join('、')}
+
+按以下顺序思考，不要跳步：
+1. error_step：学生从哪一步开始出错的？必须引用学生的具体写法（如「移项时把 -3 写成 +3」「把 a²-b² 当成 (a-b)²」）。
+   只能依据「学生答案」里真实出现的内容判断。若学生只交了最终答案、看不出过程，error_step 必须写「证据不足」——
+   禁止编造步骤，禁止用题目难度或常见错误反推，禁止拿「正确答案」的解析当学生的过程。
+2. error_type：基于上一步的定位，从上面的列表里选最匹配的 1 个。
+3. misconception：这件事反映的具体错误认知，一句话（如「认为移项不变号」）。没有明确认知偏差就给空串。
+4. missing_prereq：修正这个错误需要回补的前置知识，一句话。没有就给空串。
+5. reason：给老师看的一句话判语，不超过 60 字，必须同时说清「错在哪一步」和「归哪一类」；
+   不要复述题目，不要写「学生做错了」「理解不到位」这类无法指导教学的空话。
 
 返回格式：
 {
+  "error_step": "移项时把 -3 写成 +3",
   "error_type": "计算错误",
-  "reason": "一句话说明错因",
+  "misconception": "认为移项不变号",
+  "missing_prereq": "一元一次方程移项法则",
+  "reason": "移项时未变号（-3 写成 +3），属计算错误；需补移项法则",
   "confidence": 0.9
 }
 
 要求：
 1. error_type 必须严格来自上面的列表。
-2. 无法确定错因时 confidence 给 0.4 以下。
-3. reason 用中文，不超过 40 字。`
+2. error_step 为「证据不足」时，reason 里必须写明「证据不足」，且 confidence 不得高于 0.5。
+3. reason 用中文，不超过 60 字。`
 }
 
 /**
@@ -187,10 +200,26 @@ export async function analyzeErrorWithLLM({ content, studentAnswer, correctAnswe
     if (!Number.isFinite(confidence)) confidence = 0.5
     confidence = Math.max(0, Math.min(1, confidence))
 
+    // 三段式诊断的中间产物（2026-11-22 T0）：
+    // 模型被要求先定位「从哪一步错」再判类别，这些字段**不落库**。
+    // 原因：error_reason 是展示字段，它的消费方里有 englishAnalyzer.classifyEnglishErrorType()
+    // 会把 errorType + errorReason 拼成正则 haystack（含 /the\b/、/复数/ 这类超宽模式），
+    // 塞结构化前缀会污染英语错因归类。T1 加列后才正式入库。
+    // 现在只用于 runErrorDiagnosis 的日志与人工抽检。
+    const errorStep = String(result.error_step || '').trim().slice(0, 120)
+    const misconception = String(result.misconception || '').trim().slice(0, 60)
+    const missingPrereq = String(result.missing_prereq || '').trim().slice(0, 60)
+
+    // 硬口径：证据不足不许给高置信。prompt 已要求，这里再兜一层，防模型不听话。
+    if (errorStep === '证据不足' && confidence > 0.5) confidence = 0.5
+
     return {
       errorType,
       reason: String(result.reason || '').trim().slice(0, 80),
-      confidence
+      confidence,
+      errorStep,
+      misconception,
+      missingPrereq
     }
   } catch (error) {
     const isNetworkError = !error.response || error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
@@ -297,7 +326,11 @@ export async function runErrorDiagnosis({ limit = 20, trigger = 'manual' } = {})
       [result.errorType, result.reason, result.confidence, w.id]
     )
     updated++
-    console.log(`  [Diagnosis] ✅ [${i + 1}/${rows.length}] ${String(w.id).slice(0, 8)}: ${result.errorType} (${result.confidence})`)
+    // 三段式抽检线索：本地启发式没有这两项（只处理高把握场景），缺省不打印避免日志噪音。
+    // 老师若反馈「错因还是太笼统」，先看这里的『步骤』是否真的引用了学生写法。
+    const stepNote = result.errorStep ? `｜步骤：${result.errorStep}` : ''
+    const miscNote = result.misconception ? `｜迷思：${result.misconception}` : ''
+    console.log(`  [Diagnosis] ✅ [${i + 1}/${rows.length}] ${String(w.id).slice(0, 8)}: ${result.errorType} (${result.confidence})${stepNote}${miscNote}`)
 
     if (i < rows.length - 1) {
       await new Promise(r => setTimeout(r, 1200))

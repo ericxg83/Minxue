@@ -3,6 +3,7 @@
 // -> high-confidence fake wrongs (reference answer itself is wrong).
 // Only extracts from choice-type rows (A-D letter) to stay objective.
 import '../loadEnv.js'
+import fs from 'fs'
 import { getPool } from '../config/neon.js'
 
 const pool = getPool()

@@ -43,7 +43,14 @@ export function normalizeWrongItems(list = []) {
       questionId,
       stem: stem.length > MAX_STEM ? `${stem.slice(0, MAX_STEM)}…` : stem || '（题干缺失）',
       subject: wq?.subject || q.subject || '',
-      errorType: String(wq?.error_type || q.error_type || '').trim(),
+      // 2026-11-22：只认错题行自己的字段。`questions` 表没有 error_type 列
+      // （information_schema 实测），旧写法 `|| q.error_type` 是永远取不到的死兜底。
+      errorType: String(wq?.error_type || '').trim(),
+      // 空题（is_blank=true）的 error_type 被复用成展示标签「未作答」（neonService 写入，
+      // 实测 498 条全部 is_blank=true）。它不是错因 —— 统计侧（weeklyReport、
+      // teachingSuggestions）早已用 `is_blank IS NOT TRUE` 排除，这里给组卷预筛补同一道闸，
+      // 防止有人手工构造 `{kind:'error-cause', errorType:'未作答'}` 组出一整卷空题。
+      isBlank: wq?.is_blank === true,
       errorCount: wq?.error_count || q?.wrong_count || 1,
       lifecycle: wq?.lifecycle_status || ''
     })
@@ -55,7 +62,7 @@ export function normalizeWrongItems(list = []) {
 export function inScope(item, scope) {
   if (!item) return false
   const kind = scope?.kind
-  if (kind === 'error-cause') return !!scope.errorType && item.errorType === scope.errorType
+  if (kind === 'error-cause') return !!scope.errorType && !item.isBlank && item.errorType === scope.errorType
   if (kind === 'repeat') return item.errorCount >= 2
   if (kind === 'basic') return item.lifecycle === LIFECYCLE_STATUS.REVIEW_1 || item.lifecycle === LIFECYCLE_STATUS.REVIEW_2
   // weak-point（定向重练）：题单由后端按考点**含子考点**算好，前端只认 id 归属，
