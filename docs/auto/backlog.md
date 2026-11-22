@@ -5228,3 +5228,29 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   - `src/components/WrongQuestionDetailModal.jsx`（M，6+/4-：引入 helper 并替换 3 处 `q.tags_source`/`q.full_image_url` 用法）
 - **只读验证**：`node --test test/wrongQuestionDetailFields.test.mjs` → 7/7 全绿；`pruneDeadDeclarations --check --only src server/utils server/config server/routes` 本 lane 可删 0 条。
 - **处置建议（待负责人或下一接管轮）**：这是已完成的正确 A 级修复，四道闸（npm test / lint / 隔离构建+冒烟）需补跑后提交。本巡检因锁被占仅做只读核查与交接，未提交、未改动。
+
+## 2026-11-22 负责人派单 · 错因体系升级（**已批准立项，开发部接此单**）
+
+- **派单原话**：「好，接受你的建议，然后帮我去布置下去吧，让产品部去开发」（2026-11-22 09:54）。
+- **任务书全文（必读，含全部基线数字与禁止事项）**：`docs/auto/reports/2026-11-22-错因体系升级-任务书.md`
+- **来历**：OmniEdu（北大 OpenDCAI 开源教育模型 4B/9B/27B）价值评审的落地结论。
+  评审判断：**不接模型本体**（主力已是 `Qwen3.5-122B-A10B`，且 OmniEdu 未为「零错字逐字 OCR + 坐标」训练过），
+  只搬它的三处训练范式 —— 一调用一任务 / 诊断三段式 / 错因三层。
+- **已核实的问题（只读探针，不是推断）**：`wrong_questions` 2104 条，`error_type` 覆盖 98.6%，
+  但「计算错误 752 + 未作答 498 + 概念不理解 395」= **78.2%** 是万能筐，对「下一步讲什么」无指导价值。
+- **T0 三项（A 级，可直接开工，零 Schema 变更、零模型替换）**：
+  1. `server/services/diagnosisService.js:118` `buildErrorAnalysisPrompt` 改三段式：
+     先出 `error_step`（学生从哪一步偏离）→ 再判 `error_type`（**仍受 10 类词表约束，绝不放宽**）→
+     再给 `misconception` / `missing_prereq`；证据不足必须写「证据不足」，**禁止编造出错步骤**。
+     落库仍用现有 `error_reason`（text 无上限，已实测），格式 `【步骤】…｜【迷思】…｜【补】…｜【判】…`。
+  2. 统计层剔除「未作答」：`src/utils/weeklyReportGenerator.js:268` 附近 + `retryPaperScope.js` 的 `error-cause` 预筛，
+     一律排除 `is_blank === true`。**⛔ 不许改 `neonService.js:486` 的写入逻辑**（498 条 `error_type='未作答'`
+     是故意的移动端展示标签，不是 bug，实测 498/498 `is_blank=true`、`error_reason IS NULL`、11 月仍在新增）。
+  3. 删 `retryPaperScope.js:46` 的 `q.error_type` 死兜底（`questions` 表无此列，探针实测）。
+- **T0 回归锁（与代码同批提交）**：`test/errorDiagnosisPrompt.test.mjs`、`test/errorTypeStatsExcludeBlank.test.mjs`。
+- **🚫 不许顺手做的事**：重跑存量 2074 条错因（增量铁律）；改 10 类错因词表；动 `error_types` 表；
+  换批改/OCR 主力模型；常驻部署 27B；做教学支架/对话式辅导（单用户系统，学生不用 App，无消费者）。
+- **T1（需负责人逐条点头）**：`wrong_questions` 加 `error_step` / `misconception` / `missing_kp_id` 三列。
+  属 Schema 变更 + 错题生命周期，按硬禁区只能提案。前置：T0 上线满 2 周并抽 50 条人工确认「可教学」。
+- **T2（一次性，不立项）**：租卡跑 OmniEdu-27B 在本地 200 道错题上做诊断横评，结论只允许「值得进 T1」或「不值得」。
+- **本次派单未修改任何业务代码、未动数据库**；只读探针 3 个（`server/_diag_*_1122.mjs`，gitignore 已排除）。
