@@ -5254,3 +5254,26 @@ r221 管「字段在不在」，本轮管「口径窄到看不见**已经点开�
   属 Schema 变更 + 错题生命周期，按硬禁区只能提案。前置：T0 上线满 2 周并抽 50 条人工确认「可教学」。
 - **T2（一次性，不立项）**：租卡跑 OmniEdu-27B 在本地 200 道错题上做诊断横评，结论只允许「值得进 T1」或「不值得」。
 - **本次派单未修改任何业务代码、未动数据库**；只读探针 3 个（`server/_diag_*_1122.mjs`，gitignore 已排除）。
+
+### r390 执行报告（2026-11-22 10:00–10:20，commit `2a142b4`）
+
+- **触发**：负责人 09:59 原话「现在就去干」⇒ 本会话直接执行，不等 10:12 定时接单（automation `eabf7242` 已暂停）。
+- **改了什么**：
+  1. `server/services/diagnosisService.js` — `buildErrorAnalysisPrompt` 改三段式（`error_step` → `error_type` → `misconception`/`missing_prereq`），
+     证据不足必须认输且 confidence 代码侧钳到 0.5；三段中间产物**不落库**、只进日志（原因见任务书 §2 T0-1 更正）。
+  2. `src/workbench/components/diagnosis/retryPaperScope.js` — 删 `q.error_type` 死兜底；候选题补 `isBlank`；`error-cause` 预筛加 `!isBlank`。
+  3. `src/workbench/views/WrongBookCenterRedesign.vue` — 删同型死兜底（`getQuestion(item).error_type/error_reason`）。
+  4. `server/scripts/audit-answer-conflict-narrow-20261104.mjs` — 补 `import fs`（既有 lint error，脚本一跑就崩）。
+  5. 新增回归锁 `test/errorDiagnosisPrompt.test.mjs`(6 例) + `test/retryPaperScopeBlank.test.mjs`(5 例)。
+- **验证**（真实 3 条样本，非构造）：旧「学生算出 3，正确应为 6，属计算环节失误」→ 新「化简 3(2-√3)/√3 时约分出错；需补分母有理化」；
+  第二条从「计算错误」**改判「概念不理解」**并定位到「把 a²-b² 当成 (a-b)²」；只有最终答案那条老实回「证据不足」。
+  四道闸：**3221/3221 单测全绿**（原 3210 + 新增 11）｜lint **0 error**（修完那处后从 1 归零）｜隔离构建成功｜冒烟 **8/8 + 零外联**。
+- **⚠️ 派单里 T0-2 的前提被证伪**：`weeklyReport.js:372` 与 `teachingSuggestionsService.js:117` **本来就已带**
+  `AND (wq.is_blank IS NOT TRUE)`，错题清单也没有按错因筛选的入口 ⇒ 「周报把未作答当错因」是我没查 SQL 时的错误推断，已纠正。
+- **新发现（未修，留下一轮）**：
+  1. `server/config/ai.js:529` `HuihuiyunGemini` 只有 `vlModels` 没有 `textModel`，但文本兜底链会走到它 ⇒
+     实测 `400 ... model is required`，每次错因回填白等 3–8s 重试。
+  2. `analyzeErrorLocally` 的「单位错误」分支把 `correct_answer` 里的解析全文灌进 `error_reason`（实测一条 300 字），
+     建议加长度上限（>40 字直接交 LLM）。
+- **运维**：重启后端时守护 `keep_local_services.mjs`（pid 10444）**40 秒内没拉起**，手动从项目根起才恢复；
+  在 `server/` 子目录起会让 `/api/health` 的 `disk.path` 变成 `D:\Minxue_App_V3\server`（已验证踩到）。
