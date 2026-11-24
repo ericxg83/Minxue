@@ -171,6 +171,16 @@ test('★ PDF 样式表必须带 .md-table（否则页面有表格、印出来�
   assert.deepEqual(fails, [])
 })
 
+test('★ PDF 字体栈必须把 MinxueCJK 排在 sans-serif 前（否则下载 PDF 中文全变方框）', () => {
+  const src = read('src/utils/pdfGenerator.js')
+  const start = src.indexOf('export function buildPaperCSS(')
+  const seg = src.slice(start, start + 8000)
+  const m = seg.match(/font-family:([^;]+);/)
+  assert.ok(m, 'buildPaperCSS 必须有 font-family')
+  assert.ok(m[1].includes("'MinxueCJK'"), '字体栈必须包含服务端注入的 MinxueCJK')
+  assert.ok(/'MinxueCJK'\s*,\s*sans-serif/.test(m[1]), 'MinxueCJK 必须紧挨 sans-serif 之前（最后兜底字形）')
+})
+
 test('★ 页面走 MathRender → renderContent，PDF 走 buildPaperBody → renderContent（同一条口径）', () => {
   const mr = read('src/workbench/components/MathRender.vue')
   assert.ok(/from '\.\.\/\.\.\/utils\/mathText'/.test(mr), 'MathRender 必须复用 utils/mathText')

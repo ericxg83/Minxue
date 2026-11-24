@@ -176,8 +176,10 @@ export function applyQRToContainer(container, qrContent) {
 export function buildPaperCSS(scope = '') {
   const s = scope ? `${scope} ` : ''
   const root = scope || 'body'
+  // ⛔ MinxueCJK 必须排在字体栈最后：服务端 renderFontFace.js 注入的同名 @font-face
+  // 是 Chromium 里唯一可用的中文字形；缺了它导出的 PDF 中文会全部变方框。
   return `${scope ? `${scope} *` : '*'} {margin:0;padding:0;box-sizing:border-box}
-${root}{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun',sans-serif;color:#1a1a1a}
+${root}{font-family:'Microsoft YaHei','PingFang SC','Noto Sans SC','SimSun','MinxueCJK',sans-serif;color:#1a1a1a}
 ${s}.page{width:794px;height:auto;overflow:visible;padding:24px 36px;position:relative}
 ${s}.head-area{min-height:100px;padding-right:170px}
 ${s}.title{font-size:20px;font-weight:bold;margin-bottom:4px;letter-spacing:1px}
