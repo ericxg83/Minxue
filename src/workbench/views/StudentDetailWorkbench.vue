@@ -127,10 +127,10 @@
                 <strong>{{ exam.name }}</strong>
                 <small>{{ formatDate(exam.created_at) }} · 共 {{ exam.total_count || exam.question_ids.length }} 题</small>
               </div>
-              <StatusTag :tone="exam.status === 'graded' ? 'success' : 'warning'">
-                {{ exam.status === 'graded' ? '已批改' : '待批改' }}
-              </StatusTag>
-              <span v-if="exam.status === 'graded'" class="retry-count">{{ exam.correct_count }} 对 / {{ exam.wrong_count }} 错</span>
+              <!-- 三态与批改中心同源（getRetryPaperStateMeta）：等学生交卷 / AI 批改中 / 待确认 / 已确认。
+                   旧版只认 exam.status==='graded'，会把「AI 批完等老师确认」的卷标成已批改。 -->
+              <StatusTag :tone="examMeta(exam).tone">{{ examMeta(exam).statusLabel }}</StatusTag>
+              <span v-if="examMeta(exam).showsScore" class="retry-count">{{ exam.correct_count }} 对 / {{ exam.wrong_count }} 错</span>
             </div>
           </div>
           <EmptyState v-else title="还没有重练卷" description="在下方错题清单里勾选题目，点「生成重练卷」就能出第一份；或在学习诊断点「发重练卷」看全部发卷方式" />
@@ -217,7 +217,7 @@ import { Aim, ArrowLeft, ArrowRight, Loading, Refresh, User, WarningFilled } fro
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getStudentById, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, getKnowledgeMastery, updateStudent, getStudentWeakness, createGeneratedExam, getRetryQuestionIdsByKp, expandQuestionIdsForPaper } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
-import { isRetryPaperTask } from '../utils/retryPaperState'
+import { RETRY_PAPER_STATE, isRetryPaperTask, resolveRetryPaperState, isReviewed, hasAnswerSheet, getRetryPaperStateMeta } from '../utils/retryPaperState'
 import { buildExamBaseName, buildExamNameWithSeq, countSameBaseToday } from '../../domain/examNaming'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
@@ -258,8 +258,36 @@ const editRules = {
 const pendingWrongCount = computed(() => wrongQuestions.value.filter(item => item.lifecycle_status !== 'mastered').length)
 const masteredWrongCount = computed(() => wrongQuestions.value.filter(item => item.lifecycle_status === 'mastered').length)
 const repeatWrongCount = computed(() => wrongQuestions.value.filter(item => (item.error_count || 0) >= 2).length)
-const pendingExams = computed(() => exams.value.filter(e => e.status !== 'graded').length)
-const gradedExams = computed(() => exams.value.filter(e => e.status === 'graded').length)
+// ── 重练卷状态口径（2026-11-26 负责人要求改口径）──
+// 旧实现按 exam.status==='graded' 二值判断，而 2026-09-17 起「结算」提前到 AI 批完时：
+//   status='graded' 只代表「结果已出」，不代表老师确认过；
+//   答卷 task 还是 done 的卷仍会出现在批改中心「待人工复核」队列里。
+// 于是本页说「已批改」，批改中心却还挂着同两份卷等确认 —— 两个页面各说各话。
+// 现在与批改中心/移动端共用唯一口径 resolveRetryPaperState：
+//   待批改 = 已出结果但老师还没确认（PENDING_REVIEW / PENDING_CONFIRM）+ 还在跑 + 识别异常
+//   已批改 = 老师已确认（答卷 task 已 reviewed）
+const examPagesByExam = computed(() => {
+  const map = {}
+  for (const t of tasks.value) {
+    const gid = t.generated_exam_id
+    if (!gid) continue
+    ;(map[gid] = map[gid] || []).push(t)
+  }
+  return map
+})
+const examReviewState = (exam) => resolveRetryPaperState(exam, examPagesByExam.value[exam.id] || [])
+/** 列表行状态：直接复用批改中心/复核台的状态文案，不在这里另造一套说法 */
+const examMeta = (exam) => {
+  const state = examReviewState(exam)
+  const meta = getRetryPaperStateMeta(state)
+  return {
+    ...meta,
+    // 分数只在该卷真的出了结果时给：等待作答 / AI 批改中显示数字会是原作业的旧判定
+    showsScore: hasAnswerSheet(state) && state !== RETRY_PAPER_STATE.GRADING && state !== RETRY_PAPER_STATE.FAILED
+  }
+}
+const pendingExams = computed(() => exams.value.filter(e => !isReviewed(examReviewState(e))).length)
+const gradedExams = computed(() => exams.value.filter(e => isReviewed(examReviewState(e))).length)
 const recentTasks = computed(() => tasks.value.slice(0, 5))
 const recentExams = computed(() => exams.value.slice(0, 5))
 const masteredKpCount = computed(() => weakness.value.filter(w => w.mastery >= 80).length)
@@ -301,7 +329,8 @@ const kpiItems = computed(() => {
     {
       key: 'retryProgress',
       value: `${gradedExams.value}/${exams.value.length}`,
-      label: '重练完成',
+      // 「重练完成」容易被读成「学生做完了」；这里数的是**老师已确认**的卷数。
+      label: '重练已复核',
       tone: exams.value.length && gradedExams.value === exams.value.length ? 'success' : 'default',
       actionLabel: '看重练',
       actionIcon: ArrowRight,
@@ -330,8 +359,9 @@ const nextAction = computed(() => {
     }
   }
   if (pendingExams.value > 0) {
+    // 口径同上：待批改 = 等老师确认的卷，包含「AI 已出结果但还没人点确认」的那批。
     return {
-      text: `有 ${pendingExams.value} 份重练卷待批改，先批完才能反馈掌握度。`,
+      text: `有 ${pendingExams.value} 份重练卷待处理，批完才能反馈掌握度。`,
       evidence: `已批改 ${gradedExams.value} 份 · 累计 ${exams.value.length} 份`,
       to: '/grade',
       cta: '去批改'
