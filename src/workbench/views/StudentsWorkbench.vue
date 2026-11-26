@@ -58,7 +58,7 @@
           <strong>读不到学生列表</strong>
           <span>{{ loadError }}</span>
           <div class="error-state__actions">
-            <ActionButton @click="loadStudents">重新加载</ActionButton>
+            <ActionButton @click="loadStudents({ force: true })">重新加载</ActionButton>
           </div>
         </div>
 
@@ -151,9 +151,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { MoreFilled, Search, User, WarningFilled } from '@element-plus/icons-vue'
 import { useRoute, useRouter } from 'vue-router'
-import { createStudent, getStudents, getTasksByStudent, getWrongQuestionsByStudent, getGeneratedExamsByStudent, updateStudent, getStudentPendingCounts } from '../../services/apiService'
+import { createStudent, getStudents, updateStudent, getStudentPendingCounts } from '../../services/apiService'
 import { humanizeError } from '../utils/humanizeError'
-import { isRetryPaperTask } from '../utils/retryPaperState'
 import ActionButton from '../components/ui/ActionButton.vue'
 import ContentCard from '../components/ui/ContentCard.vue'
 import EmptyState from '../components/ui/EmptyState.vue'
@@ -183,9 +182,16 @@ const createRules = {
 }
 
 const enrichedStudents = computed(() => students.value.map(student => {
-  const wrongCount = student.wrongCount || 0
-  const retryCount = student.retryCount || 0
-  const taskCount = student.taskCount || 0
+  // 三个数字全部来自 GET /api/students 的聚合列（服务端一次预聚合好）：
+  //   task_count          作业记录份数（已排除重练卷答卷行）
+  //   total_error_count   错题总条数  ─┐ 二者相减 = 未掌握错题
+  //   mastered_count      已掌握条数  ─┘
+  //   pending_retry_count 待重练份数
+  // ⛔ 不要再退回「每个学生打 3 个接口」：那版实现会并发 3N 次请求，
+  //    且 getWrongQuestionsByStudent 会顺带拉整卷题目正文，20 人规模下首屏要等好几秒。
+  const wrongCount = Number(student.total_error_count || 0) - Number(student.mastered_count || 0)
+  const retryCount = Number(student.pending_retry_count || 0)
+  const taskCount = Number(student.task_count || 0)
   const paused = student.enrollment_status === 'paused'
   const hasRisk = !paused && (wrongCount > 0 || retryCount > 0)
   return {
@@ -364,30 +370,32 @@ const submitCreateStudent = async () => {
   }
 }
 
-const loadStudents = async () => {
+// force=true：跳过本机缓存直接回源。错误态的「重新加载」按钮必须走这条，
+// 否则点下去读的还是同一份缓存 —— 正是本轮在治的「点了没反应」。
+const loadStudents = async ({ force = false } = {}) => {
   loading.value = true
   loadError.value = ''
   try {
-    const result = await getStudents(false)
+    // 本机缓存只当**首屏占位**（切页不白屏），拿到后必须再回源校准一次：
+    // STUDENTS 的 TTL 是 1 小时，而这一列的三个数（作业记录 / 未掌握错题 / 待重练）
+    // 是刚批完卷就会变的 —— 直接吃缓存会让老师批完卷进列表，看到的还是旧数字，
+    // 与批改中心的待复核数对不上（同一类「首页 1 份 / 批改中心 7 份」的问题）。
+    // 回源只有一次 /api/students 请求（服务端另有 5 分钟聚合缓存），不是原来的 3N 次。
+    const result = await getStudents(!force)
     const list = result.data || result || []
     const base = Array.isArray(list) ? list : []
-    students.value = await Promise.all(base.map(async student => {
-      const [tasks, wrongQuestions, exams] = await Promise.all([
-        getTasksByStudent(student.id).catch(() => []),
-        getWrongQuestionsByStudent(student.id).catch(() => []),
-        getGeneratedExamsByStudent(student.id).catch(() => [])
-      ])
-      const wrongList = Array.isArray(wrongQuestions) ? wrongQuestions : []
-      const examList = Array.isArray(exams) ? exams : []
-      return {
-        ...student,
-        // 重练卷答卷不算「作业记录」：同一行右侧的「待重练」列已按 generated_exams
-        // 单独统计，计入这里会重复计数（2026-09-24）。判据同源 isRetryPaperTask。
-        taskCount: Array.isArray(tasks) ? tasks.filter(t => !isRetryPaperTask(t)).length : 0,
-        wrongCount: wrongList.filter(item => item.lifecycle_status !== 'mastered').length,
-        retryCount: examList.filter(item => !['graded', 'completed'].includes(item.status)).length
+    students.value = base
+    // 占位数据先交出去再后台校准，否则转圈会一直盖到回源结束
+    loading.value = false
+    if (!force && result.fromCache) {
+      try {
+        const fresh = await getStudents(false)
+        const freshList = fresh.data || fresh || []
+        if (Array.isArray(freshList) && freshList.length) students.value = freshList
+      } catch {
+        /* 校准失败就留着缓存那份，不必打扰老师 */
       }
-    }))
+    }
   } catch (error) {
     students.value = []
     loadError.value = humanizeError(error?.message, { entity: '学生列表' })
@@ -403,7 +411,7 @@ watch(() => route.query, q => {
   if (nextFilter !== activeFilter.value) activeFilter.value = nextFilter
 })
 
-onMounted(loadStudents)
+onMounted(() => loadStudents())
 </script>
 
 <style scoped>

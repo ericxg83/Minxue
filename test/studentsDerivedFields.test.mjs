@@ -74,11 +74,57 @@ test('学生列表：wrong_questions 必须预聚合一次，不得退回 6×N �
 })
 
 test('学生列表：预聚合 LEFT JOIN 不得产生笛卡尔积（join 键必须唯一）', () => {
-  // 子查询按 student_id 分组 ⇒ 每个学生最多一行；join 键写错会放大行数。
-  const joinMatch = SQL.match(/ON\s+w\.student_id\s*=\s*s\.id/)
-  assert.ok(joinMatch, '预聚合 LEFT JOIN 的 join 键不是 student_id = s.id')
-  const groupByCount = (SQL.match(/GROUP BY\s+student_id/g) || []).length
-  assert.equal(groupByCount, 1, '预聚合子查询的 GROUP BY 必须且只能一处')
+  // 每个预聚合子查询按 student_id 分组 ⇒ 每个学生最多一行；join 键写错会放大行数。
+  // 2026-11-26：学生列表去掉 3N 次前端请求后，新增 tasks 预聚合（别名 t）与
+  // generated_exams 预聚合（别名 r）——
+  // 断言从「只允许 w 一个 join」改为「每个别名都必须按 student_id 与 s.id 对齐」，
+  // GROUP BY 数量则由别名数推导，再加 join 不需要改这里的魔数。
+  const joinAliases = [...SQL.matchAll(/LEFT JOIN \(/g)].length > 0
+    ? [...SQL.matchAll(/\)\s*(\w+)\s+ON\s*\1\.student_id\s*=\s*s\.id/g)].map(m => m[1])
+    : []
+  assert.ok(joinAliases.includes('w'), 'wrong_questions 预聚合的 join 键不是 student_id = s.id')
+  assert.ok(joinAliases.includes('t'), 'tasks 预聚合的 join 键不是 student_id = s.id')
+  assert.ok(joinAliases.includes('r'), 'generated_exams 预聚合的 join 键不是 student_id = s.id')
+  assert.equal(joinAliases.length, (SQL.match(/LEFT JOIN \(/g) || []).length,
+    '存在未按 student_id = s.id 对齐的 LEFT JOIN（会放大行数）')
+  assert.equal(new Set(joinAliases).size, joinAliases.length, '预聚合别名重复（同一别名两次 join 会互相覆盖）')
+  // 允许带表别名前缀（generated_exams 侧要写 GROUP BY e.student_id，
+  // 因为它内部还有 tasks 的 LATERAL 子查询）。
+  const groupByCount = (SQL.match(/GROUP BY\s+(?:\w+\.)?student_id/g) || []).length
+  assert.equal(groupByCount, joinAliases.length, `${joinAliases.length} 个预聚合子查询各自必须且只能有一个 GROUP BY student_id`)
+})
+
+test('学生列表：待重练必须按「卷」计数，且与 resolveRetryPaperState 同构', () => {
+  // pending_retry_count 的两种错法都出过事，这里一起锁：
+  //  ① 从 tasks 数答卷行 ⇒ 同一份卷重交两次算两份，且「已布置、学生还没交卷」
+  //     的卷在 tasks 里没有行，会整份漏掉（老师明明发了卷，列表显示 0 份待重练）。
+  //  ② EXISTS(reviewed 行) ⇒ 老师确认完、学生又重交一份时判成「已完成」，
+  //     而唯一口径 resolveRetryPaperState 取的是**最新一次**答卷，判成还要复核。
+  // 只截 generated_exams 那一段预聚合子查询（别名 r），避免误抓 tasks 段。
+  const rEnd = SQL.indexOf(') r ON r.student_id = s.id')
+  assert.notEqual(rEnd, -1, '缺少 generated_exams 预聚合子查询（别名 r）')
+  const rStart = SQL.lastIndexOf('LEFT JOIN (', rEnd)
+  const retrySql = SQL.slice(rStart, rEnd)
+  assert.match(retrySql, /FROM \$\{TABLES\.GENERATED_EXAMS\}/, 'pending_retry_count 必须来自 generated_exams（按卷数）')
+  assert.match(retrySql, /GROUP BY\s+(?:\w+\.)?student_id/, 'generated_exams 预聚合缺 GROUP BY student_id')
+  assert.doesNotMatch(retrySql, /COUNT\(\*\) FILTER \(WHERE generated_exam_id IS NOT NULL/,
+    '待重练又退回从 tasks 数答卷行（重交重复计数 + 漏掉未交卷的卷）')
+  // 「最新一份答卷」必须显式排序取第一条。写 EXISTS/任意一份 会在
+  // 「老师确认完、学生又重交」这串场景判反（已用 PGLite 19.0 实跑取证：
+  // EXISTS 版=2、本实现=3，正确值是 3：e1 未交卷 + e2 最新 done + e4 重交）。
+  assert.match(retrySql, /ORDER BY (?:rt\.)created_at DESC\s+LIMIT 1/,
+    '待重练必须取该卷**最新一次**答卷的状态（与 sortPages 取最后一个一致），不能 EXISTS 任意一份')
+  assert.match(retrySql, /IS DISTINCT FROM 'reviewed'/, '待重练的判据必须是「最新答卷不是 reviewed」')
+  assert.doesNotMatch(retrySql, /NOT EXISTS/, '待重练不得用 EXISTS 任意一份 reviewed 答卷（重交后会判反）')
+})
+
+test('学生列表：SQL 文本级语法自检（本仓无 PG 解析器，靠这几条兜住明显写坏）', () => {
+  // 单测连不上数据库 ⇒ SQL 语法错误只能这样拦：
+  //   ① SELECT 列表尾随逗号（`x AS task_count, FROM`）—— 上一轮就这么写坏过，
+  //      接口 500、学生列表整页报错，而 3200+ 条用例全绿。
+  assert.doesNotMatch(SQL, /,\s*FROM\b/s, 'SELECT 列表结尾多逗号（SQL 语法错误，/api/students 必 500）')
+  //   ② FROM 子句后直接接逗号 / 结尾逗号接右括号
+  assert.doesNotMatch(SQL, /,\s*\)/s, '子查询列表结尾多逗号（SQL 语法错误）')
 })
 
 test('学生列表：仍保留 5 分钟缓存（改写不得顺手去掉缓存）', () => {

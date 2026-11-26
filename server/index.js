@@ -1836,6 +1836,22 @@ app.get('/api/students', async (req, res) => {
     // 两版返回体逐行逐列完全一致；mastered_count 顺带去掉了包裹列的 COALESCE
     // （COALESCE(lifecycle_status,'new')='mastered' 与 lifecycle_status='mastered' 等价：
     //   NULL→'new' 永远 ≠ 'mastered'），去掉后才能走索引。
+    // 2026-11-26 追加（学生列表 N+1 收口）：学生在 PC 列表页真正要看的三个数
+    //   task_count          作业记录份数（排除重练卷答卷行，口径 = isRetryPaperTask）
+    //   pending_retry_count 待重练份数 —— **按卷数，绝不按答卷行数**：
+    //     判据与唯一口径 resolveRetryPaperState/isReviewed **逐字同构**：取该卷
+    //     **最新一次**答卷（created_at 最大、未软删），它不是 reviewed 就仍待老师处理
+    //     —— 含已布置等交卷（一份答卷都没有）、批改中、识别异常、待复核、待确认；
+    //     最新那份已 reviewed ⇒ 不再计入。与学生档案页「待批改」同一把尺，不会出现
+    //     「档案页还有 2 份、列表写 0 份」的分叉。
+    //     ⛔ 不要退回从 tasks 数答卷行：① 同一份卷重交两次被数成两份；
+    //        ②「已布置、学生还没交卷」的卷在 tasks 里没有行，会整份漏掉。
+    //     ⛔ 也不要写成 EXISTS(reviewed 行)：老师确认完学生又重交一份时，JS 口径按
+    //        最新那份判「还要复核」，EXISTS 会判成「已完成」—— 正好判反。
+    // 原先由前端对每个学生各打 3 个接口再自行统计 —— 20 人 = 60 次请求，且
+    // getWrongQuestionsByStudent 会顺带拉整卷题目正文，首屏要等数秒。
+    // 这里改成预聚合 LEFT JOIN，与既有 wrong_questions 的写法同型；
+    // 字段**纯增量**，老调用方读不到也不受影响。
     const { rows } = await query(
       `SELECT s.id, s.name, s.grade, s.avatar, s.enrollment_status, s.paused_at, s.created_at,
               (SELECT MAX(t.created_at) FROM ${TABLES.TASKS} t WHERE t.student_id = s.id AND t.deleted_at IS NULL) AS last_task_at,
@@ -1843,7 +1859,9 @@ app.get('/api/students', async (req, res) => {
               COALESCE(w.total_error_count, 0) AS total_error_count,
               COALESCE(w.recent_wrong_count, 0) AS recent_wrong_count,
               COALESCE(w.practice_count, 0) AS practice_count,
-              COALESCE(w.mastered_count, 0) AS mastered_count
+              COALESCE(w.mastered_count, 0) AS mastered_count,
+              COALESCE(t.task_count, 0) AS task_count,
+              COALESCE(r.pending_retry_count, 0) AS pending_retry_count
        FROM ${TABLES.STUDENTS} s
        LEFT JOIN (
          SELECT student_id,
@@ -1855,6 +1873,32 @@ app.get('/api/students', async (req, res) => {
            FROM ${TABLES.WRONG_QUESTIONS}
           GROUP BY student_id
        ) w ON w.student_id = s.id
+       LEFT JOIN (
+         SELECT student_id,
+                COUNT(*) FILTER (WHERE generated_exam_id IS NULL AND task_type IS DISTINCT FROM 'wrong_retry')::int AS task_count
+           FROM ${TABLES.TASKS}
+          WHERE deleted_at IS NULL
+          GROUP BY student_id
+       ) t ON t.student_id = s.id
+       LEFT JOIN (
+         -- 每卷取**最新一次**答卷的状态（LEFT JOIN LATERAL ... ORDER BY created_at DESC LIMIT 1），
+         -- 与唯一口径 resolveRetryPaperState/sortPages「取最后一份」逐字对应。
+         -- 没有答卷 ⇒ latest_status 为 NULL ⇒ 仍计入（已布置、等学生交卷）。
+         -- 注：FILTER 内写相关标量子查询在 PG 上同样可跑（PGLite 19.0 实测），选 LATERAL 只为了
+         --     表达与前端同源，不是为了绕语法限制。
+         SELECT e.student_id,
+                COUNT(*) FILTER (WHERE latest_status IS DISTINCT FROM 'reviewed')::int AS pending_retry_count
+           FROM ${TABLES.GENERATED_EXAMS} e
+           LEFT JOIN LATERAL (
+             SELECT rt.status AS latest_status
+               FROM ${TABLES.TASKS} rt
+              WHERE rt.generated_exam_id = e.id
+                AND rt.deleted_at IS NULL
+              ORDER BY rt.created_at DESC
+              LIMIT 1
+           ) latest ON TRUE
+          GROUP BY e.student_id
+        ) r ON r.student_id = s.id
        ORDER BY s.created_at DESC`
     )
     const data = { success: true, students: rows }
