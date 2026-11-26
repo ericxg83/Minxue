@@ -46,16 +46,18 @@ function FailedCard({ onRetry, onDismiss }) {
   return <div className='rounded-2xl border px-4 py-3.5' style={{ background: 'var(--warning-soft)', borderColor: 'rgba(217,119,6,.25)' }}>
     <div className='flex items-start gap-3'>
       <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl' style={{ background: 'rgba(217,119,6,.14)', color: 'var(--warning)' }}><AlertCircle size={18} aria-hidden='true' /></span>
-      <div className='min-w-0 flex-1'><p className='text-[14px] font-medium' style={{ color: 'var(--text)' }}>有 1 份历史作业未能批改完成</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-secondary)' }}>可以重新提交再试一次，或先忽略这份</p></div>
+      <div className='min-w-0 flex-1'><p className='text-[14px] font-medium' style={{ color: 'var(--text)' }}>有 1 份历史作业未能批改完成</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-secondary)' }}>可以重新提交再试一次，或去作业列表处理</p></div>
     </div>
     <div className='mt-3 flex gap-2'>
       <button type='button' onClick={onRetry} className='flex-1 rounded-xl py-2 text-[13px] font-semibold text-white transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'var(--warning)' }}>重新提交</button>
-      <button type='button' onClick={onDismiss} className='rounded-xl px-4 py-2 text-[13px] font-medium transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'rgba(0,0,0,.04)', color: 'var(--text-secondary)' }}>忽略</button>
+      {/* 原文案「忽略」实际打开删除确认框（删任务=删数据），已改为「去处理」：
+         跳到作业列表，那里才有「重新处理 / 删除」两个明确出口。 */}
+      <button type='button' onClick={onDismiss} className='rounded-xl px-4 py-2 text-[13px] font-medium transition-transform active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]' style={{ background: 'rgba(0,0,0,.04)', color: 'var(--text-secondary)' }}>去处理</button>
     </div>
   </div>
 }
 
-export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onStartPriorityRetry, onRetryTask, onDismissTask }) {
+export default function HomeDashboardV2({ currentStudent, tasks, isInitializing, pendingWrongCount = 0, onStartUpload, onOpenTasks, onOpenReview, onStartPriorityRetry, onRetryTask }) {
   const list = (Array.isArray(tasks) ? tasks : []).filter((task) => task.student_id === currentStudent?.id).sort((left, right) => new Date(right.created_at || 0) - new Date(left.created_at || 0))
   const failedTask = list.find(failed)
   const activeTask = list.find(processing)
@@ -77,7 +79,9 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
   if (!isInitializing && latest) {
     // 文案与成色统一走 domain（错/空/待复核四态），避免首页与通知页两套判据
     const r = buildLatestTaskReminder(latest)
-    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: r.tone === 'all-correct' ? 'success' : 'neutral', title: r.title, detail: r.detail, onClick: onOpenTasks })
+    // 已批改的卷直接开结果页：此前只跳作业列表，老师还得在几十行里再找一次同一条。
+    // 没有 onOpenReview（旧调用方）时退回作业列表，行为不变。
+    reminders.push({ key: 'latest', icon: <FileCheck2 size={18} />, tone: r.tone === 'all-correct' ? 'success' : 'neutral', title: r.title, detail: r.detail, onClick: () => (onOpenReview ? onOpenReview(latest) : onOpenTasks()) })
   }
   if (!isInitializing && pendingWrongCount > 0) reminders.push({ key: 'priorityRetry', icon: <Wand2 size={18} />, tone: 'neutral', title: `重点重练 · ${pendingWrongCount} 道错题待巩固`, detail: 'AI 挑选最需要巩固的错题，一键生成重练卷', onClick: onStartPriorityRetry })
 
@@ -94,7 +98,7 @@ export default function HomeDashboardV2({ currentStudent, tasks, isInitializing,
       <MobileSectionHeading title='待处理' description={isInitializing ? '正在同步最新记录' : undefined} action='查看作业' onAction={onOpenTasks} />
       <div className='flex flex-col gap-2.5'>
         {isInitializing && <ReminderCard icon={<Clock3 size={18} />} tone='info' title='正在同步学习记录' detail='稍后会显示最新状态' onClick={onOpenTasks} />}
-        {!isInitializing && shouldShowFailed && <FailedCard onRetry={() => onRetryTask?.(failedTask.id)} onDismiss={() => onDismissTask?.(failedTask.id)} />}
+        {!isInitializing && shouldShowFailed && <FailedCard onRetry={() => onRetryTask?.(failedTask.id)} onDismiss={() => onOpenTasks()} />}
         {reminders.map((r) => <ReminderCard key={r.key} icon={r.icon} tone={r.tone} title={r.title} detail={r.detail} onClick={r.onClick} />)}
         {empty && <div className='rounded-2xl border border-dashed px-4 py-5 text-center' style={{ borderColor: 'var(--border-light)' }}><p className='text-[13px] font-medium' style={{ color: 'var(--text-secondary)' }}>今天还没有待处理的作业</p><p className='mt-0.5 text-[12px]' style={{ color: 'var(--text-tertiary)' }}>上传一份作业，就从这里开始</p></div>}
       </div>

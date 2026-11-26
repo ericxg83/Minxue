@@ -947,9 +947,9 @@ export default function App() {
                 pendingWrongCount={dailyRetryQuestions.length}
                 onStartUpload={() => openStaging('homework')}
                 onOpenTasks={() => { setCurrentPage('tasks'); clearSelection() }}
+                onOpenReview={(task) => { setReviewTask(task); setShowExamReview(true) }}
                 onStartPriorityRetry={handleStartPriorityRetry}
                 onRetryTask={handleRetryTask}
-                onDismissTask={(taskId) => { setDeleteTarget({ type: 'task', id: taskId }); setShowDeleteConfirm(true) }}
               />
             )}
 
