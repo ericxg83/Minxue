@@ -294,10 +294,9 @@ const greeting = computed(() => {
 // ⛔ 不要退回 summary.pendingReview —— 那是**未读通知数**，老师点一次通知铃铛
 //    （App.jsx#handleOpenNotifications → markNotificationsRead）就全部标已读、数字塌缩到 0，
 //    于是首页显示 1 份、点进批改中心却是 7 份（2026-10-09 事故）。
-// 老接口/老缓存缺 pendingReviewPapers 时才退回未读数（宁可少报，也不能让卡片空着）。
-const pendingCount = computed(
-  () => notiStore.summary.pendingReviewPapers ?? notiStore.summary.pendingReview ?? 0
-)
+// ⛔ 缺失时只认 0，不得退回 pendingReview（未读通知数）—— 两者语义不同，
+//    退回会让「首页 1 份 / 批改中心 7 份」的事故重新出现（DESIGN.md §8 同款禁令）。
+const pendingCount = computed(() => notiStore.summary.pendingReviewPapers ?? 0)
 // r275（提案 r249-①/②）：failedTasks 口径改为**真失败总数**（不限已读）——
 // 旧口径只数未读，老师点一次铃铛「识别异常」就塌缩到 0，而那些作业永远批不成、还躺在那。
 // 「没看的新作业」归「待确认」（pendingReview），铃铛总数是 pendingReview + failedUnread。

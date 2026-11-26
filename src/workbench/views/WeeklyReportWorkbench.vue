@@ -358,7 +358,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 // r141：图标随「按年级」视图与知识点下钻抽屉一并精简。
 // 只留模板里真正还在用的两个：ArrowRight（学生行右箭头）、WarningFilled（加载失败空态）。
@@ -403,6 +403,7 @@ import isoWeek from 'dayjs/plugin/isoWeek'
 dayjs.extend(isoWeek)
 
 const router = useRouter()
+const route = useRoute()
 
 // ── State ──
 const selectedStudentId = ref('')
@@ -525,6 +526,13 @@ watch(selectedStudentId, (id) => {
 onMounted(async () => {
   await loadStudents()
   await loadSummary()
+  // 单生入口（学生档案「学习诊断」/ 首页下钻）带 ?studentId=
+  // 历史实现不读该参数，点进来永远停在全班概览，老师还要在下拉里再选一次人。
+  const requestedStudentId = String(route.query.studentId || '')
+  if (requestedStudentId && studentList.value.some(s => String(s.id) === requestedStudentId)) {
+    selectedStudentId.value = requestedStudentId
+    await handleStudentChange(requestedStudentId)
+  }
 })
 
 // ── Methods ──
