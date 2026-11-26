@@ -126,6 +126,10 @@
               <el-dropdown-item command="toggle-auto-advance">
                 {{ store.autoAdvanceEnabled ? '✓ ' : '' }}判定后自动跳下一题
               </el-dropdown-item>
+              <!-- [2026-11-26 负责人拍板] 完成复核后自动接下一份（默认开，落 localStorage） -->
+              <el-dropdown-item command="toggle-auto-next">
+                {{ store.autoNextPaperEnabled ? '✓ ' : '' }}完成复核后自动接下一份
+              </el-dropdown-item>
               <!-- [B2-3 快捷键速查] 与 ? 键打开同一浮层 -->
               <el-dropdown-item command="shortcuts" divided>快捷键速查（?）</el-dropdown-item>
               <!-- [P0-4 撤销诚实化] 文案必须如实：只回退本页显示，不反向写库。
@@ -269,10 +273,13 @@ import { WRONG_BOOK_SKIP_REASONS } from '../../../utils/reviewDecision'
 import { RETRY_PAPER_STATE } from '../../utils/retryPaperState'
 import { checkQuestionCompleteness } from '../../../utils/questionCompleteness.js'
 import { WRONG_GATE_CODE_LABELS } from '../../../domain/wrongGateTier.js'
+import { useNotificationStore } from '../../stores/notificationStore'
 
 const store = useReviewStore()
 const route = useRoute()
 const router = useRouter()
+// 完成复核后先刷一次待复核摘要，避免侧栏徽标等 45s 轮询才归零
+const noti = useNotificationStore()
 
 // 「改批改方式」：上传时选错批改方式的纠正入口（练习册 / 答案库 / 日常作业 互转）。
 // 2026-09-22 产品拍板开放（P1「一键转日常批改重批」）：
@@ -496,11 +503,19 @@ const completeDisabledReason = computed(() => {
 const handleMoreCommand = (cmd) => {
   if (cmd === 'undo') handleUndoLast()
   else if (cmd === 'toggle-auto-advance') {
-    // [P0-1 判定即过] 会话级开关（默认开）：判定落库后自动跳下一未确认题，出问题可即时关闭退回手动模式
-    store.autoAdvanceEnabled = !store.autoAdvanceEnabled
+    // [P0-1 判定即过] 开关（默认开）：判定落库后自动跳下一未确认题，出问题可即时关闭退回手动模式。
+    // 必须走 setter —— 直接改 ref 不会落 localStorage，刷新后又变回「开」。
+    store.setAutoAdvance(!store.autoAdvanceEnabled)
     ElMessage.info(store.autoAdvanceEnabled
       ? '已开启：判定后自动跳到下一道待确认题'
       : '已关闭：判定后停留当前题，用「下一题」或 → 手动前进')
+  }
+  else if (cmd === 'toggle-auto-next') {
+    // [2026-11-26] 完成复核后自动接下一份：关掉后回到「停在原卷，手点下一份」
+    store.setAutoNextPaper(!store.autoNextPaperEnabled)
+    ElMessage.info(store.autoNextPaperEnabled
+      ? '已开启：完成复核后自动接下一份待复核试卷'
+      : '已关闭：完成复核后停在当前卷，用「▶ 下一份」或 T 手动前进')
   }
   else if (cmd === 'convert') openConvertRoute()
   else if (cmd === 'retry') handleRetryTask()
@@ -544,7 +559,7 @@ const onTaskChange = async (taskId) => {
 const taskNavLoading = ref(false)
 
 const goNextTask = async () => {
-  if (taskNavLoading.value) return
+  if (taskNavLoading.value) return false
   taskNavLoading.value = true
   try {
     const result = await store.goNextTaskGlobal()
@@ -559,6 +574,7 @@ const goNextTask = async () => {
     } else {
       ElMessage.info('已处理完所有待复核试卷')
     }
+    return result
   } finally {
     taskNavLoading.value = false
   }
@@ -603,6 +619,18 @@ const doComplete = async () => {
     ElMessage.success('试卷复核完成，已保存')
     // 完成后的提示要如实：全局队列确实搜尽过才说"都处理完成"，否则告诉老师
     // 可以去下一份续接其他学生的卷（2026-10-14 起下一份不限制学生）。
+    // [2026-11-26 负责人拍板] 默认自动接下一份：复核完这份就打开下一份待复核卷，
+    // 不必再点一次「▶ 下一份」。找不到下一份时给明确结论（全部处理完 / 就是最后一份），
+    // 不能静默停在原卷让老师以为按钮又失灵了。开关在「⋯ 更多」，关掉即回到旧行为。
+    if (store.autoNextPaperEnabled) {
+      // 先刷一次待复核数（侧栏徽标 / 首页 KPI），再自动接下一份 —— 否则会被 45s 轮询
+      // 拖成「页面已经归零、徽标还是旧值」。
+      noti.fetchSummary()
+      const moveOn = await goNextTask()
+      // goNextTask 已经用中文说明了「已全部处理完 / 就是最后一份」，这里直接收尾，
+      // 不能再补一句会打架的文案（也避免 goNextTask 占位正在跑时重复弹提示）。
+      if (moveOn !== false) return
+    }
     const tip = store.pendingTasks.length > 0
       ? '点「下一份」继续处理'
       : store.globalQueueExhausted

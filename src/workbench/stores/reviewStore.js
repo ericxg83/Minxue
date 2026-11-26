@@ -19,6 +19,7 @@ import { splitWrongGateList, classifyWrongGateItem, WRONG_GATE_AUTO_SKIP_REASON,
 // 闸1（L0 卷级自动完成）判据唯一口径（2026-09-23 三层分流）：
 //   L0 已判出 → 自动复核；L1 系统侧缺口 → 先补再判，不拦老师；L2 真判不出 → 留人工。
 import { resolvePaperAutoComplete } from '../../domain/paperReviewDecision.js'
+import { readAutoAdvance, readAutoNextPaper, writeAutoAdvance, writeAutoNextPaper } from '../utils/reviewPrefs'
 // 重练卷排卷与卷面编号的唯一口径（与服务端 worker.js 判题侧同源）。
 // 批改页题目列表必须按【卷面顺序】排列，否则老师看到的第 N 题 ≠ 学生卷面第 N 题。
 import { buildRetryPaperOrder } from '../../utils/retryPaperOrder'
@@ -172,7 +173,23 @@ export const useReviewStore = defineStore('review', () => {
 
   // ── [P0-1 判定即过 2026-09-27] 判定后自动前进的会话级开关（默认开）──
   // 关闭后判定只落库，不自动跳题、不自动完成复核（退回手动模式，作为即时回滚开关）。
-  const autoAdvanceEnabled = ref(true)
+  // [2026-11-26] 落 localStorage：此前是裸 ref(true)，老师为某卷特殊关掉后一刷新又变回「开」，
+  // 设置像没生效一样（判据本身不变，只是起点读本机上次选择）。
+  const autoAdvanceEnabled = ref(readAutoAdvance())
+  const setAutoAdvance = (enabled) => {
+    autoAdvanceEnabled.value = Boolean(enabled)
+    writeAutoAdvance(autoAdvanceEnabled.value)
+  }
+
+  // ── [2026-11-26 负责人拍板] 完成复核后自动接下一份（默认开）──
+  // 之前「完成复核」后必须再点「▶ 下一份」，一天十几份卷就多十几次操作。
+  // 与 autoAdvanceEnabled 同型：老师可随时在顶栏「⋯ 更多」关掉，且都落 localStorage，
+  // 关掉后刷新仍保持关闭，不会像没生效。
+  const autoNextPaperEnabled = ref(readAutoNextPaper())
+  const setAutoNextPaper = (enabled) => {
+    autoNextPaperEnabled.value = Boolean(enabled)
+    writeAutoNextPaper(autoNextPaperEnabled.value)
+  }
 
   // ── [B2-7 已删除留痕] 本次会话对当前卷执行「删除本题」的次数 ──
   // 只读标注用（左栏「已删除 N」），不做业务判断；换卷清零，历史会话的删除不计入。
@@ -2195,6 +2212,10 @@ export const useReviewStore = defineStore('review', () => {
     prevQuestion,
     advanceToNextUnconfirmed,
     autoAdvanceEnabled,
+    setAutoAdvance,
+    // [2026-11-26] 完成复核后自动接下一份（默认开，落 localStorage）
+    autoNextPaperEnabled,
+    setAutoNextPaper,
     jumpToQuestion,
     jumpToFirstUnconfirmed,
     navFilter,
