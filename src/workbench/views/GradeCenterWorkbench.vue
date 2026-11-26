@@ -85,6 +85,7 @@
 
       <section id="grade-main" class="workspace-grid" aria-label="批改任务工作区">
         <ContentCard class="task-queue" title="任务列表" description="按优先级排列，整行点击查看，进度用 Enter 打开" flush>
+          <template #default>
           <div v-if="loading" class="loading-state" role="status" aria-live="polite">
             <el-icon class="is-loading"><Loading /></el-icon>
             <strong>正在同步 AI 批改任务</strong>
@@ -101,7 +102,7 @@
           </div>
           <ul v-else-if="visibleTasks.length" class="task-list">
             <li
-              v-for="task in visibleTasks"
+              v-for="task in displayedTasks"
               v-memo="[
                 task.workflowStatus,
                 task.wrongCount,
@@ -172,6 +173,15 @@
               <ActionButton @click="clearFilters">清除筛选</ActionButton>
             </template>
           </EmptyState>
+          <!-- 分批渲染：任务列表动辄上百条，整表渲染 + 子像素滚动会卡；
+               保留「加载更多」而不是无限滚动，老师能判断还剩多少。 -->
+          <div v-if="visibleTasks.length > displayedTasks.length" class="task-more">
+            <ActionButton variant="ghost" @click="showMoreTasks">
+              再显示 {{ Math.min(TASK_PAGE_SIZE, visibleTasks.length - displayedTasks.length) }} 条
+              <span class="task-more__rest">（还剩 {{ visibleTasks.length - displayedTasks.length }} 条）</span>
+            </ActionButton>
+          </div>
+          </template>
         </ContentCard>
 
         <ContentCard class="task-inspector" title="任务摘要" description="确认任务状态后进入批改工作区" flush>
@@ -424,6 +434,22 @@ const visibleTasks = computed(() => allTasks.value.filter(item => {
   const sourceMatches = sourceFilter.value === 'all' || item.source === sourceFilter.value
   return sourceMatches && matchesStatusFilter(item)
 }))
+
+// ── 分批渲染 ──
+// 任务量按「20 名学生 × 每周若干份」累积，整表一次性渲染会让筛选切换明显发顿。
+// 只做渲染层截断：计数仍按 visibleTasks 全量算（tab 数字不会因分批而变小）。
+const TASK_PAGE_SIZE = 50
+const taskRenderLimit = ref(TASK_PAGE_SIZE)
+const displayedTasks = computed(() => visibleTasks.value.slice(0, taskRenderLimit.value))
+const showMoreTasks = () => { taskRenderLimit.value += TASK_PAGE_SIZE }
+// 换筛选 / 换学生时回到第一屏，避免「切到别的学生还停在 500 条」。
+watch([sourceFilter, statusFilter, studentId], () => { taskRenderLimit.value = TASK_PAGE_SIZE })
+// loading 结束时把列表滚回顶部：之前翻到底再刷新/切筛选，会停在空白区。
+watch(loading, (isLoading, wasLoading) => {
+  if (wasLoading && !isLoading) {
+    nextTick(() => document.querySelector('.task-list')?.scrollTo({ top: 0 }))
+  }
+})
 
 // 计数口径：在当前「状态」筛选下统计各来源的任务数，与下方列表完全一致；
 // 「全部」tab 的数字 = 两个来源之和 = 当前状态下列表总行数。
@@ -1057,7 +1083,7 @@ onMounted(loadData)
   padding: 8px 12px;
   background: var(--wb-primary);
   color: var(--wb-text-inverse);
-  font-radius: var(--wb-radius-sm);
+  border-radius: var(--wb-radius-sm);
   text-decoration: none;
   transition: top var(--wb-motion-fast) var(--wb-motion-ease);
 }
@@ -1143,8 +1169,11 @@ onMounted(loadData)
   padding: 0;
   list-style: none;
   height: 100%;
-  max-height: 610px;
+  /* 高度交给右栏等高 + 页面滚动：硬写 610px 会让 20 名学生几十份卷只能看到十来行，
+     且窗口变高后下方留下大片空白。60vh 保底，再由父容器 height:100% 撑满。 */
+  max-height: max(610px, 60vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .task-item {
   display: grid;
@@ -1161,6 +1190,20 @@ onMounted(loadData)
 }
 .task-item:last-child { border-bottom: 0; }
 .task-item:hover { background: var(--wb-bg-elevated); }
+
+/* 分批渲染的「加载更多」：贴着列表底部，不抢任务行的视觉权重 */
+.task-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--wb-space-3) var(--wb-space-4);
+  border-top: 1px solid var(--wb-border-light);
+  background: var(--wb-bg-card);
+}
+.task-more__rest {
+  margin-left: var(--wb-space-1);
+  color: var(--wb-text-tertiary);
+  font-weight: var(--wb-fw-regular);
+}
 .task-item.active {
   background: var(--wb-primary-mist);
   box-shadow: inset 3px 0 var(--wb-primary);

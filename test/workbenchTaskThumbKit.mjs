@@ -39,7 +39,9 @@ export function collectTaskThumbFailures(src) {
   const fails = []
 
   // —— ①~④：任务行模板内部 ——
-  const row = anchoredRange(src, 'v-for="task in visibleTasks"', '</li>', '任务行模板', fails)
+  // 2026-11-26：列表改为分批渲染（visibleTasks 计数不动，渲染取 displayedTasks 前 N 条），
+  // 锚点随之更新；判据本身（缩略图/懒加载/兜底/不拉多页）一字未改。
+  const row = anchoredRange(src, 'v-for="task in displayedTasks"', '</li>', '任务行模板', fails)
   if (row !== null) {
     if (!row.includes('class="task-lead__thumb"')) {
       fails.push('任务行缺少试卷小图元素（.task-lead__thumb）')
